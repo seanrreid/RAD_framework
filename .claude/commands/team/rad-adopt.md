@@ -146,6 +146,15 @@ Save to: `.agents/plans/[kebab-case-feature-name].md`
 Derive the feature name from the issue title or description — keep it short
 and descriptive.
 
+### Step 6b: Lint the plan
+
+```bash
+scripts/lint-plan.sh .agents/plans/[feature-name].md
+```
+
+Fix any errors before committing. For adopted plans, `lint-plan.sh` also
+verifies `## Issue Gaps` is non-empty. Warnings should be reviewed but do not block.
+
 ### Step 7: Commit and open plan PR
 
 ```bash

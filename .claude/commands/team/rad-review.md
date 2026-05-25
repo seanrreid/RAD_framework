@@ -39,18 +39,12 @@ git diff main...HEAD --name-only
 
 ### Step 2: Scope check
 
-Verify every changed file is listed in the plan's "Files in Scope":
-
-```
-Scope Check:
-✓ frontend/src/features/habits/api.ts — in scope
-✓ frontend/src/features/calendar/CalendarDay.tsx — in scope
-✗ backend/app/models.py — NOT in plan scope
-
-Out-of-scope changes require architect approval before this PR can merge.
+```bash
+scripts/check-scope.sh "$PLAN" deliver/[feature] main
 ```
 
-If any out-of-scope files are changed, flag as HIGH priority.
+The script outputs each changed file as in-scope or out-of-scope. Include its
+full output in the review report. Any out-of-scope files are HIGH priority.
 
 ### Step 3: Plan fidelity check
 
@@ -69,10 +63,14 @@ Review each changed file against `CLAUDE.md` conventions:
 
 ### Step 5: Test coverage check
 
-For each item in the plan's "Tests to Write":
-- [ ] Was it written?
-- [ ] Does it test behavior, not implementation?
-- [ ] Does it include the error/edge path, not just the happy path?
+```bash
+scripts/check-tests.sh "$PLAN"
+```
+
+Include the script output in the review report. Missing test files are HIGH
+priority. For present test files, also verify:
+- [ ] Tests behavior, not implementation
+- [ ] Includes error/edge paths, not just the happy path
 
 ### Step 6: Output the review
 

@@ -156,6 +156,20 @@ Tests:
 [list of tests written]"
 ```
 
+### Step 6b: Scope and test verification
+
+Run deterministic checks before opening the PR:
+
+```bash
+scripts/check-scope.sh .agents/plans/[feature].md deliver/[feature] main
+scripts/check-tests.sh .agents/plans/[feature].md
+```
+
+If `check-scope.sh` fails, stop and surface the out-of-scope files to the
+architect — do not open the PR until resolved.
+
+If `check-tests.sh` fails, write the missing test files before proceeding.
+
 ### Step 7: Open code review PR
 
 ```bash

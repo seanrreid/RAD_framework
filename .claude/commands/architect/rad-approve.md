@@ -29,17 +29,11 @@ grep -rl "^Status: pending-review" .agents/plans/ 2>/dev/null \
 
 ### Step 1: Verify architect role
 
-Read `CLAUDE.md` and confirm the current user is listed under `architect:` in
-Role Assignments. If not:
-
-```
-✗ Permission denied: /rad-approve is architect-only.
-
-Your role in this project does not have approval rights.
-Contact the architect to review and approve this plan.
+```bash
+scripts/check-role.sh architect
 ```
 
-Stop. Do not proceed.
+If the script exits non-zero, stop. Do not proceed.
 
 ### Step 2: Locate and read the plan file
 
@@ -63,6 +57,21 @@ If the plan's current Status is `in-progress`, `complete`, or `approved`, stop:
 ```
 ✗ Cannot approve: plan status is already [status].
 ```
+
+Run the plan linter before showing the review summary:
+
+```bash
+scripts/lint-plan.sh "$PLAN_FILE"
+```
+
+If the linter reports errors, display them and stop:
+
+```
+✗ Plan has lint errors — ask the author to fix them before requesting approval.
+[linter output]
+```
+
+Warnings are shown to the architect as context but do not block approval.
 
 ### Step 3: Display review summary
 

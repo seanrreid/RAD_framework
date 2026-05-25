@@ -104,6 +104,14 @@ Depends on: Wave 1 complete
 
 Save to: `.agents/plans/[kebab-case-feature-name].md`
 
+### Step 4b: Lint the plan
+
+```bash
+scripts/lint-plan.sh .agents/plans/[feature-name].md
+```
+
+Fix any errors before committing. Warnings should be reviewed but do not block.
+
 ### Step 5: Commit and open plan PR
 
 ```bash
