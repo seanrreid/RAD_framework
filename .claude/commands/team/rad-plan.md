@@ -149,8 +149,9 @@ PR:           [url]
 Waves:        [N]
 Tasks:        [total]
 
-Waiting for architect review.
-Run /rad-deliver .agents/plans/[feature-name].md once the PR is merged.
+Waiting for architect approval.
+The architect will run /rad-approve [feature-name] to unblock execution.
+Run /rad-deliver .agents/plans/[feature-name].md once approved.
 ```
 
 ---
@@ -162,6 +163,6 @@ Run /rad-deliver .agents/plans/[feature-name].md once the PR is merged.
 - Do not write any code in this phase
 - Cap research at 10 tool calls — split the plan if more is needed
 - Every plan must have at least 2 non-goals
-- Do not run `/rad-deliver` yourself — wait for the PR to be merged
+- Do not run `/rad-deliver` yourself — wait for the architect to run `/rad-approve`
 - If out-of-scope dependencies exist, flag them clearly — do not attempt to
   work around them by reading files directly

@@ -77,7 +77,7 @@
 
 - Never commit secrets, tokens, or credentials
 - Never assume a library exists — only use packages in the package file
-- Never execute /rad-deliver without a plan file whose branch is merged to main
+- Never execute /rad-deliver without a plan file with Status: approved on main (set by /rad-approve)
 -
 
 ---
@@ -149,11 +149,12 @@ Plan PRs require:
 ## Workflow
 
 ```
-Architect:  /rad-design → defines .claude/agents/ boundaries
-Team:       /rad-plan   → plan PR (Gate 1)
-Architect:  PR review   → merge = approval
-Team:       /rad-deliver → wave execution (Gate 2 code PR)
-Architect:  PR review   → merge to main
+Architect:  /rad-design   → defines .claude/agents/ boundaries
+Team:       /rad-plan     → plan branch + optional PR for visibility (Gate 1)
+Team:       /rad-adopt    → same as /rad-plan but sourced from a pre-existing issue
+Architect:  /rad-approve  → reviews plan, commits approval to main
+Team:       /rad-deliver  → wave execution (Gate 2 code PR)
+Architect:  PR review     → merge to main
 ```
 
 See `docs/daily-workflow.md` for the full guide.

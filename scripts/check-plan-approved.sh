@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 # check-plan-approved.sh
-# Checks whether a plan branch has been merged to the default branch.
+# Checks whether a plan is approved for execution.
+#
+# Primary check: plan file on main has Status: approved (set by /rad-approve).
+# Fallback check: plan branch merged to base (legacy PR-merge gate).
+#
 # Usage: scripts/check-plan-approved.sh plan/feature-name [base-branch]
 #
 # Exit codes:
-#   0 = approved (branch merged)
-#   1 = not approved (branch not merged or PR open)
-#   2 = cannot determine (platform unavailable, falls back to local check)
+#   0 = approved
+#   1 = not approved (pending, rejected, or needs-revision)
+#   2 = cannot determine
 
 set -euo pipefail
 
@@ -17,27 +21,63 @@ BASE_BRANCH="${2:-main}"
 
 [[ -z "$PLAN_BRANCH" ]] && { echo "ERROR: plan branch name required"; exit 1; }
 
-PLATFORM=$("$SCRIPT_DIR/detect-platform.sh" --quiet)
+FEATURE=$(basename "$PLAN_BRANCH")
+PLAN_FILE=".agents/plans/$FEATURE.md"
+
+# ── Primary check: Status field in plan file on base branch ──────────────────
+
+check_file_status() {
+  local status
+
+  # Try reading from the base branch first, then working tree
+  status=$(git show "origin/$BASE_BRANCH:$PLAN_FILE" 2>/dev/null \
+    | grep "^Status:" | head -1 | awk '{print $2}' || true)
+
+  if [[ -z "$status" ]]; then
+    status=$(grep "^Status:" "$PLAN_FILE" 2>/dev/null | head -1 | awk '{print $2}' || true)
+  fi
+
+  case "$status" in
+    approved)
+      echo "approved"
+      exit 0
+      ;;
+    rejected)
+      echo "rejected — plan was rejected by architect. Revise and resubmit."
+      exit 1
+      ;;
+    needs-revision)
+      echo "needs-revision — architect requested changes. Check plan file for feedback."
+      exit 1
+      ;;
+    pending-review|"")
+      # Fall through to legacy branch-merge check
+      return 1
+      ;;
+    *)
+      echo "unknown status: $status"
+      exit 2
+      ;;
+  esac
+}
+
+# ── Fallback check: branch merged to base (legacy PR-merge gate) ──────────────
 
 check_local() {
-  # Fallback: check if branch exists locally and is merged into base
   git fetch origin "$BASE_BRANCH" 2>/dev/null || true
 
   if git branch -r --merged "origin/$BASE_BRANCH" 2>/dev/null | grep -q "origin/$PLAN_BRANCH"; then
-    echo "approved"
+    echo "approved (branch merged)"
     exit 0
   fi
 
-  # Branch still exists remotely = not merged
   if git ls-remote --heads origin "$PLAN_BRANCH" | grep -q "$PLAN_BRANCH"; then
-    echo "pending"
+    echo "pending — plan branch exists but is not yet approved"
     exit 1
   fi
 
-  # Branch gone and not in merged list — assume merged (deleted after merge)
-  # Check if the plan file exists on base branch as confirmation
-  if git show "origin/$BASE_BRANCH:.agents/plans/$(basename "$PLAN_BRANCH").md" &>/dev/null; then
-    echo "approved"
+  if git show "origin/$BASE_BRANCH:$PLAN_FILE" &>/dev/null; then
+    echo "approved (branch deleted after merge)"
     exit 0
   fi
 
@@ -62,11 +102,11 @@ check_github() {
 
   case "$state" in
     MERGED)
-      echo "approved"
+      echo "approved (PR merged)"
       exit 0
       ;;
     OPEN|DRAFT)
-      echo "pending — PR is open but not yet merged"
+      echo "pending — PR is open but not yet approved"
       echo "PR: $(gh pr list --head "$PLAN_BRANCH" --json url --jq '.[0].url' 2>/dev/null || echo 'unknown')"
       exit 1
       ;;
@@ -97,11 +137,11 @@ check_gitlab() {
 
   case "$state" in
     merged)
-      echo "approved"
+      echo "approved (MR merged)"
       exit 0
       ;;
     opened|locked)
-      echo "pending — MR is open but not yet merged"
+      echo "pending — MR is open but not yet approved"
       exit 1
       ;;
     closed)
@@ -114,6 +154,14 @@ check_gitlab() {
   esac
 }
 
+# ── Main ──────────────────────────────────────────────────────────────────────
+
+PLATFORM=$("$SCRIPT_DIR/detect-platform.sh" --quiet)
+
+# Always try file-status check first — it works regardless of platform
+check_file_status || true
+
+# Fall back to branch-merge check
 case "$PLATFORM" in
   github)  check_github ;;
   gitlab)  check_gitlab ;;

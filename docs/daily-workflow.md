@@ -51,7 +51,25 @@ This will:
 3. Commit the plan to `plan/[feature-name]`
 4. Open a draft PR with the plan as a reviewable checklist
 
-Then wait. Do not run `/rad-deliver` until the architect merges the plan PR.
+Then wait. Do not run `/rad-deliver` until the architect runs `/rad-approve`.
+
+---
+
+## Adopting a pre-existing issue (developer, designer, or architect)
+
+For work that existed before RAD was introduced:
+
+```
+/rad-adopt #42
+/rad-adopt https://github.com/org/repo/issues/42
+/rad-adopt "Fix login timeout not resetting on user activity"
+```
+
+This fetches the issue context (or uses your description), researches the
+codebase, and generates a wave-structured plan — same format as `/rad-plan`.
+An `## Issue Gaps` section captures assumptions made where the issue was vague.
+
+The plan goes through `/rad-approve` before execution, same as any other plan.
 
 **What makes a good plan PR:**
 - File references are real (architect will check)
