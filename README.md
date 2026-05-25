@@ -16,21 +16,24 @@ ARCHITECT                          TEAM
 /rad-design                        /rad-plan [feature]
   Interview + generate               Research within agent boundaries
   .claude/agents/ hierarchy          Generate plan file
-                                     Commit to plan/[feature] branch
-                                     Open draft PR automatically
+                                     Optional: open draft PR for visibility
 
-                    ── PR Review ──
-                    Architect reviews plan PR
-                    Comments, requests changes
-                    Merge = approval
+                                   /rad-adopt [issue or description]
+                                     Same as /rad-plan, sourced from
+                                     a pre-existing issue or description
+
+                    ── Gate 1 ──
+                    /rad-approve (architect)
+                    Reviews plan, commits Status: approved to main
+                    No branch merge required
 
                                    /rad-deliver [plan-file]
-                                     Checks plan is approved (merged)
+                                     Checks plan has Status: approved
                                      Wave execution in fresh contexts
                                      Atomic commit per step
                                      Execution log appended per step
 
-                    ── PR Review ──
+                    ── Gate 2 ──
                     Architect reviews code PR
                     Standard code review
                     Merge to main
@@ -38,13 +41,13 @@ ARCHITECT                          TEAM
 
 ---
 
-## Two Gates, Two PRs
+## Two Gates
 
-**Gate 1 — Plan PR** (`plan/[feature]` → `main`)
+**Gate 1 — Plan approval** (architect runs `/rad-approve`)
 - One file: `.agents/plans/[feature].md`
 - Architect reviews the *approach* before code is written
-- Merge = approval to execute
-- Blocked: `/rad-deliver` will not run on an unmerged plan
+- `/rad-approve` commits `Status: approved` to the plan file on `main` — no branch merge required
+- Blocked: `/rad-deliver` checks for `Status: approved` in the plan file
 
 **Gate 2 — Code PR** (`deliver/[feature]` → `main`)
 - All implementation changes
@@ -57,9 +60,9 @@ ARCHITECT                          TEAM
 
 | Role | Commands | Access |
 |------|----------|--------|
-| Architect | All commands + `/rad-design` | Defines agent boundaries, approves plans, merges PRs |
-| Developer | `/rad-plan`, `/rad-deliver`, `/rad-review` | Plans and executes within boundaries |
-| Designer | `/rad-plan`, `/rad-deliver` | UI-scoped planning and execution only |
+| Architect | All commands + `/rad-design`, `/rad-approve` | Defines agent boundaries, approves plans, merges PRs |
+| Developer | `/rad-plan`, `/rad-adopt`, `/rad-deliver`, `/rad-review`, `/accessibility-review`, `/quality-review` | Plans and executes within boundaries |
+| Designer | `/rad-plan`, `/rad-adopt`, `/rad-deliver` | UI-scoped planning and execution only |
 | All roles | `/rad-status`, `/rad-insights` | Team dashboard and review pattern analysis |
 
 Install architect commands from `.claude/commands/architect/` to `~/.claude/commands/`.
@@ -131,21 +134,37 @@ your-project/
 │   ├── agents/                       ← auto-discovered by Claude Code
 │   │   ├── orchestrator.md
 │   │   ├── [domain]-orchestrator.md
-│   │   └── [tool-name].md
+│   │   ├── [tool-name].md
+│   │   ├── accessibility-reviewer.md ← built-in reviewer (invoked by /rad-review)
+│   │   └── quality-reviewer.md       ← built-in reviewer (invoked by /rad-review)
 │   └── commands/
-│       ├── rad-plan.md               → /rad-plan  (team)
-│       ├── rad-deliver.md            → /rad-deliver (team)
-│       ├── rad-review.md             → /rad-review (team)
-│       └── rad-status.md             → /rad-status (shared)
+│       ├── architect/
+│       │   ├── rad-approve.md        → /rad-approve (architect)
+│       │   └── rad-design.md         → /rad-design  (architect)
+│       ├── team/
+│       │   ├── rad-plan.md           → /rad-plan    (team)
+│       │   ├── rad-adopt.md          → /rad-adopt   (team)
+│       │   ├── rad-deliver.md        → /rad-deliver (team)
+│       │   ├── rad-review.md         → /rad-review  (team)
+│       │   ├── accessibility-review.md → /accessibility-review (team)
+│       │   └── quality-review.md     → /quality-review (team)
+│       └── shared/
+│           ├── rad-status.md         → /rad-status  (shared)
+│           └── rad-insights.md       → /rad-insights (shared)
 ├── .agents/
-│   ├── plans/                        ← plan artifacts (Gate 1 PRs)
+│   ├── plans/                        ← plan artifacts (Gate 1)
 │   ├── logs/                         ← execution logs per plan
 │   ├── findings.jsonl                ← append-only review findings log (written by /rad-review)
 │   └── findings/README.md            ← findings log schema and query reference
 └── scripts/
     ├── detect-platform.sh            ← detects git platform from remote
     ├── open-pr.sh                    ← platform-agnostic PR creation
-    └── check-plan-approved.sh        ← checks if plan branch is merged
+    ├── check-plan-approved.sh        ← checks Status: approved or branch merge
+    ├── check-role.sh                 ← validates contributor role vs. command
+    ├── check-scope.sh                ← validates file changes against agent scope
+    ├── check-tests.sh                ← checks for test coverage in deliver output
+    ├── lint-plan.sh                  ← validates plan file structure
+    └── rad-status.sh                 ← powers /rad-status dashboard
 ```
 
 ---
