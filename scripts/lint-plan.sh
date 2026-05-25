@@ -49,7 +49,7 @@ fi
 
 # ── Required sections ─────────────────────────────────────────────────────────
 
-REQUIRED_SECTIONS=("Context" "Agent Scope" "Files in Scope" "Wave Plan" "Tests to Write" "Non-Goals" "Risks")
+REQUIRED_SECTIONS=("Context" "Agent Scope" "Files in Scope" "Execution Notes" "Wave Plan" "Tests to Write" "Non-Goals" "Risks")
 for section in "${REQUIRED_SECTIONS[@]}"; do
   has_section "$section" || ERRORS+=("Missing required section: ## $section")
 done
@@ -116,6 +116,29 @@ if has_section "Files in Scope"; then
     awk '/^## Files in Scope/{found=1; next} /^## /{found=0} found && /^\|/' "$PLAN_FILE" \
       | grep -v "^| *File\|^|[-| ]*$" \
       | awk -F'|' '{print $2}'
+  )
+fi
+
+# ── Execution Notes — Do Not Touch vs Files in Scope conflict ────────────────
+
+if has_section "Execution Notes" && has_section "Files in Scope"; then
+  while IFS= read -r dnt_path; do
+    dnt_path=$(echo "$dnt_path" | sed 's/^-[[:space:]]*//' | tr -d '[:space:]')
+    [[ -z "$dnt_path" || "$dnt_path" == "None" ]] && continue
+
+    while IFS= read -r scope_path; do
+      scope_path=$(echo "$scope_path" | tr -d '[:space:]')
+      [[ -z "$scope_path" || "$scope_path" == "[path]" || "$scope_path" == "File" ]] && continue
+
+      if [[ "$scope_path" == "$dnt_path" || "$scope_path" == "$dnt_path/"* ]]; then
+        ERRORS+=("Conflict: '$dnt_path' is listed in both Do Not Touch and Files in Scope")
+      fi
+    done < <(
+      awk '/^## Files in Scope/{found=1; next} /^## /{found=0} found && /^\|/' "$PLAN_FILE" \
+        | grep -v "^| *File\|^|[-| ]*$" | awk -F'|' '{print $2}'
+    )
+  done < <(
+    awk '/^### Do Not Touch/{found=1; next} /^### /{found=0} found && /^- /' "$PLAN_FILE"
   )
 fi
 

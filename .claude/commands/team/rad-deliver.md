@@ -85,6 +85,14 @@ Wave [N]: [parallel | sequential] — [task count] tasks
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
+**Before the first wave, read `## Execution Notes`:**
+
+- Load every file listed under `### Key Files` as baseline context
+- Note every file listed under `### Do Not Touch` — treat these as hard stops
+  equivalent to out-of-scope files; stop and surface to architect if a task
+  requires touching them
+- Note any `### Reminders` — apply them throughout execution
+
 **For each task in the wave:**
 
 1. Load only the files listed for this task — no speculative reads

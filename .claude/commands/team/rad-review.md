@@ -53,13 +53,27 @@ For each task in the plan, verify the implementation matches the description:
 - Does it do what the task described — no more, no less?
 - Were non-goals respected?
 
-### Step 4: Convention check
+### Step 4: Quality review
 
-Review each changed file against `CLAUDE.md` conventions:
-- Naming patterns
-- Type annotations / docstrings / comments per convention
-- Import patterns
-- Prohibited patterns ("What Claude Must Never Do")
+Spawn the `quality-reviewer` agent on the changed files:
+
+```
+Use the quality-reviewer agent on all files changed since branching from main.
+```
+
+Include the agent's full output in the review report. Promote any HIGH findings
+to blocking issues in the summary.
+
+### Step 4b: Accessibility review
+
+Spawn the `accessibility-reviewer` agent on changed frontend files:
+
+```
+Use the accessibility-reviewer agent on all files changed since branching from main.
+```
+
+Include the agent's full output. HIGH findings are blocking; MEDIUM findings
+should be addressed before merge.
 
 ### Step 5: Test coverage check
 

@@ -106,6 +106,22 @@ PR: [will be filled after PR creation]
 |------|-------|--------|
 | [path] | [range] | [what changes] |
 
+## Execution Notes
+
+### Do Not Touch
+<!-- Files that must not be modified during execution.
+     Add shared infrastructure, auth modules, anything that would break other in-flight work. -->
+- None
+
+### Key Files
+<!-- Files Claude should load before starting — no line numbers needed.
+     List files that carry context essential to executing this plan correctly. -->
+- [file path] — [why it matters]
+
+### Reminders
+<!-- Execution-time cautions: ordering constraints, side effects, environment requirements. -->
+- None
+
 ## Wave Plan
 
 ### Wave 1 — [parallel | sequential]
