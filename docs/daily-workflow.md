@@ -1,0 +1,168 @@
+# Daily Workflow
+
+How the team uses RAD day-to-day. The full loop for any feature:
+
+```
+Architect:  /rad-design        ← once per project (or after major changes)
+
+Developer:  /rad-plan [feature]    ← opens plan PR
+Architect:  [reviews plan PR]      ← Gate 1: approach approval
+Architect:  [merges plan PR]       ← unlocks execution
+
+Developer:  /rad-deliver [plan]    ← wave execution, opens code PR
+Developer:  /rad-review            ← self-review before requesting architect review
+Architect:  [reviews code PR]      ← Gate 2: implementation approval
+Architect:  [merges code PR]       ← feature ships
+```
+
+---
+
+## Starting a new project
+
+**Architect only:**
+
+```
+/rad-design
+```
+
+This runs the rpi-design interview, generates `.claude/agents/` files with
+role-annotated information boundaries, and produces the Agent Scope Map for
+`CLAUDE.md`. Do this before the team starts any planning.
+
+Then install the agents into the project:
+
+```bash
+cp -r .claude/agents/ /path/to/project/.claude/agents/
+```
+
+Commit the agent files. They are the architecture — they belong in version control.
+
+---
+
+## Planning a feature (developer or designer)
+
+```
+/rad-plan Add skeleton loading to the habit list
+```
+
+This will:
+1. Research using your role's available agents
+2. Generate a wave-structured plan
+3. Commit the plan to `plan/[feature-name]`
+4. Open a draft PR with the plan as a reviewable checklist
+
+Then wait. Do not run `/rad-deliver` until the architect merges the plan PR.
+
+**What makes a good plan PR:**
+- File references are real (architect will check)
+- Steps are specific enough to execute without interpretation
+- Wave structure is correct — independent tasks in the same wave
+- Non-goals are listed — they prevent scope creep during execution
+- Out-of-scope dependencies are flagged, not worked around
+
+---
+
+## Reviewing a plan PR (architect)
+
+This is Gate 1. You're approving the *approach*, not the code.
+
+Check:
+- [ ] File references exist and are in the right domain
+- [ ] Steps are specific enough — vague steps produce vague code
+- [ ] Wave structure makes sense — nothing parallelized that has a dependency
+- [ ] All changes are within the contributor's agent scope
+- [ ] Non-goals are realistic — they prevent the right things
+- [ ] Out-of-scope dependencies are acknowledged
+
+If something is wrong: request changes on the PR. The contributor updates
+the plan file, pushes, and you re-review. Merge when satisfied.
+
+**Merging the plan PR = approval to execute.** This is the gate.
+
+---
+
+## Executing the plan (developer or designer)
+
+```
+/rad-deliver .agents/plans/add-skeleton-loading.md
+```
+
+This checks the plan branch is merged, creates a `deliver/[feature]` branch,
+and executes the plan wave by wave. Each task gets its own commit. Each completed
+step is logged in `.agents/logs/`.
+
+**During execution:**
+- Between waves, output is shown — review it before the next wave starts
+- If a task fails, stop and fix before continuing — don't push through
+- If context is getting noisy after many corrections, stop — start a new
+  Claude Code session and re-run `/rad-deliver` with the same plan file.
+  It will resume from where the log shows completion.
+
+---
+
+## Self-review before requesting architect review (developer)
+
+```
+/rad-review
+```
+
+Run this after `/rad-deliver` completes. It checks:
+- All changed files were in the plan's scope
+- Implementation matches the plan
+- Conventions from `CLAUDE.md` are followed
+- All tests from the plan were written
+
+Fix any HIGH priority issues before requesting architect review.
+MEDIUM and LOW issues can be noted but don't block the PR.
+
+---
+
+## Reviewing the code PR (architect)
+
+This is Gate 2. You're reviewing the *implementation*.
+
+Standard code review, plus RAD-specific checks:
+- [ ] Self-review was run (check for `/rad-review` output in PR comments)
+- [ ] All changes are within the plan's declared scope
+- [ ] Execution log looks clean — no surprise retries or failures
+- [ ] Tests are present and test behavior, not implementation
+
+Merge when satisfied. The feature ships.
+
+---
+
+## When things go wrong
+
+**Plan PR gets change requests:**
+The contributor updates `.agents/plans/[feature].md` directly, pushes to
+the plan branch, and the PR updates automatically.
+
+**A task fails during /rad-deliver:**
+Do not retry more than twice. On the third failure, stop. Leave a comment on
+the plan PR describing the failure. The architect decides whether to update
+the plan or take over the blocked task.
+
+**Out-of-scope dependency discovered mid-execution:**
+Stop execution. Comment on the deliver PR describing the dependency. The
+architect either expands the plan or handles the dependency separately.
+
+**Context gets noisy during execution:**
+Start a new Claude Code session. Run `/rad-deliver .agents/plans/[feature].md`
+again. The command checks the execution log and resumes from the last
+successfully committed step.
+
+---
+
+## /rad-status — the team dashboard
+
+```
+/rad-status
+```
+
+Run this at the start of any session to see:
+- Which plans are pending architect review
+- Which plans are approved and ready to execute
+- Which deliver PRs are open
+- Recent execution history
+
+Useful for the architect to see team progress without asking.
