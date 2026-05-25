@@ -60,6 +60,7 @@ ARCHITECT                          TEAM
 | Architect | All commands + `/rad-design` | Defines agent boundaries, approves plans, merges PRs |
 | Developer | `/rad-plan`, `/rad-deliver`, `/rad-review` | Plans and executes within boundaries |
 | Designer | `/rad-plan`, `/rad-deliver` | UI-scoped planning and execution only |
+| All roles | `/rad-status`, `/rad-insights` | Team dashboard and review pattern analysis |
 
 Install architect commands from `.claude/commands/architect/` to `~/.claude/commands/`.
 Install team commands from `.claude/commands/team/` to the project's `.claude/commands/`.
@@ -138,7 +139,9 @@ your-project/
 │       └── rad-status.md             → /rad-status (shared)
 ├── .agents/
 │   ├── plans/                        ← plan artifacts (Gate 1 PRs)
-│   └── logs/                         ← execution logs per plan
+│   ├── logs/                         ← execution logs per plan
+│   ├── findings.jsonl                ← append-only review findings log (written by /rad-review)
+│   └── findings/README.md            ← findings log schema and query reference
 └── scripts/
     ├── detect-platform.sh            ← detects git platform from remote
     ├── open-pr.sh                    ← platform-agnostic PR creation
@@ -161,6 +164,7 @@ your-project/
 | `docs/apply-to-existing.md` | Applying RAD to an existing project with no prior rpi (2–3 weeks) |
 | `docs/12-factor-agents.md` | How RAD maps to 12-Factor Agent principles |
 | `docs/maintaining-claude-md.md` | Keeping CLAUDE.md accurate over time |
+| `.agents/findings/README.md` | Findings log schema, record types, and jq query reference |
 
 ---
 

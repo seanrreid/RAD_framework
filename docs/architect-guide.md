@@ -12,7 +12,9 @@ You have everything the team has, plus:
 | Command | Install location | Purpose |
 |---------|-----------------|---------|
 | `/rad-design` | `~/.claude/commands/` | Generate agent architecture |
+| `/rad-approve` | `~/.claude/commands/` | Review and approve plan PRs |
 | All team commands | Project `.claude/commands/` | Plan, deliver, review, status |
+| `/rad-insights` | Shared (project + global) | Review pattern analysis across cycles |
 
 Install architect commands to your global Claude Code config:
 ```bash
@@ -145,6 +147,29 @@ Standard code review, plus check:
 
 If something is wrong that `/rad-review` should have caught, it means the
 self-review step was skipped — note this in your review and remind the contributor.
+
+---
+
+## Monitoring review quality over time
+
+```
+/rad-insights
+```
+
+Every `/rad-review` run appends structured findings to `.agents/findings.jsonl`.
+`/rad-insights` reads that log and surfaces patterns across all cycles:
+
+- **Recurring categories** — security, error-handling, accessibility issues that
+  keep appearing suggest systemic gaps (missing team knowledge, missing linting rules,
+  a component library that needs better defaults)
+- **Hotspot files** — files that attract findings across multiple cycles often
+  signal technical debt or unclear ownership
+- **Trajectory** — HIGH findings per cycle trending down means the team is
+  improving; trending up means something changed (new contributor, new domain,
+  new framework)
+
+Run this monthly or after any stretch of rapid delivery. The output gives you
+a concrete agenda for retros and 1:1s — rooted in actual review data, not anecdote.
 
 ---
 

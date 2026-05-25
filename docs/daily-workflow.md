@@ -184,3 +184,31 @@ Run this at the start of any session to see:
 - Recent execution history
 
 Useful for the architect to see team progress without asking.
+
+---
+
+## /rad-insights — review pattern analysis
+
+```
+/rad-insights
+```
+
+Reads the accumulated findings from every `/rad-review` run and surfaces
+patterns across cycles:
+- Which finding categories keep recurring (security, error-handling, accessibility)
+- Which files attract the most findings
+- Whether HIGH findings per cycle are trending up or down over time
+- What to address systematically vs. what was a one-off
+
+Optionally filter to a recent window:
+
+```
+/rad-insights --since 2026-04-01
+```
+
+Run this periodically — monthly is a reasonable cadence, or after a stretch of
+fast-paced delivery. Useful for both the architect (spotting architectural debt)
+and developers (seeing where to invest in skill improvement).
+
+Findings accumulate automatically as long as `/rad-review` is run on each
+deliver branch. No separate setup required.

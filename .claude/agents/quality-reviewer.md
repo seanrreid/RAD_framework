@@ -148,6 +148,35 @@ If no issues are found at any priority, output:
 ✓ Quality review passed — no issues found in [N] file(s).
 ```
 
+### Step 8: Output structured findings block
+
+After the markdown report, always output a `rad-findings` block for the insights log.
+One object per finding in the `findings` array. If there are no findings, output an empty array.
+
+Valid `category` values: `security`, `error-handling`, `null-safety`, `input-validation`,
+`code-clarity`, `naming`, `convention`, `async`, `react`, `database`, `testing`
+
+````rad-findings
+{
+  "reviewer": "quality-reviewer",
+  "findings": [
+    {
+      "priority": "HIGH",
+      "category": "security",
+      "file": "src/auth/token.ts",
+      "line": 42,
+      "issue": "Hardcoded API key in token refresh function"
+    }
+  ],
+  "summary": {
+    "high": 1,
+    "medium": 0,
+    "low": 0,
+    "status": "NEEDS_ATTENTION"
+  }
+}
+````
+
 ## Rules
 
 - Never edit, create, or delete files

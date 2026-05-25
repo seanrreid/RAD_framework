@@ -124,6 +124,35 @@ Blocking issues: [N]
 [If not ready:] Fix [N] blocking issues, then re-run /rad-review
 ```
 
+### Step 7: Persist findings to insights log
+
+Extract the `rad-findings` JSON blocks from the quality-reviewer and accessibility-reviewer
+outputs. Combine with cycle metadata and append to `.agents/findings.jsonl`.
+
+Get cycle metadata:
+
+```bash
+FEATURE=$(git branch --show-current | sed 's/deliver\///')
+DATE=$(date +%Y-%m-%d)
+CYCLE_ID="${FEATURE}-${DATE}"
+```
+
+For each finding in each reviewer's `rad-findings` block, append one line to
+`.agents/findings.jsonl`. Findings from quality-reviewer omit the `wcag` field;
+findings from accessibility-reviewer include it.
+
+```json
+{"type":"finding","cycle_id":"[CYCLE_ID]","feature":"[FEATURE]","date":"[DATE]","reviewer":"[reviewer]","priority":"[priority]","category":"[category]","file":"[file]","line":[line or null],"issue":"[issue]","wcag":"[wcag or null]"}
+```
+
+Then append one cycle summary record:
+
+```json
+{"type":"cycle","cycle_id":"[CYCLE_ID]","feature":"[FEATURE]","date":"[DATE]","outcome":"[READY_FOR_ARCHITECT_REVIEW | NEEDS_FIXES_FIRST]","high":[total HIGH across all reviewers],"medium":[total MEDIUM],"low":[total LOW]}
+```
+
+Append — never overwrite. Create the file if it does not exist.
+
 ---
 
 ## Rules

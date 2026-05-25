@@ -164,6 +164,38 @@ If no issues are found:
 ✓ Accessibility review passed — no WCAG 2.1 AA violations found in [N] file(s).
 ```
 
+### Step 7: Output structured findings block
+
+After the markdown report, always output a `rad-findings` block for the insights log.
+One object per finding in the `findings` array. If there are no findings, output an empty array.
+Include `"wcag": null` for findings not tied to a specific criterion.
+
+Valid `category` values: `text-alternatives`, `time-based-media`, `adaptable`,
+`distinguishable`, `keyboard-accessible`, `enough-time`, `seizures`, `navigable`,
+`readable`, `predictable`, `input-assistance`, `compatible`
+
+````rad-findings
+{
+  "reviewer": "accessibility-reviewer",
+  "findings": [
+    {
+      "priority": "HIGH",
+      "category": "keyboard-accessible",
+      "wcag": "2.1.1",
+      "file": "src/components/Modal.tsx",
+      "line": 88,
+      "issue": "No keyboard escape mechanism for modal"
+    }
+  ],
+  "summary": {
+    "high": 1,
+    "medium": 0,
+    "low": 0,
+    "status": "NEEDS_ATTENTION"
+  }
+}
+````
+
 ## Rules
 
 - Never edit, create, or delete files
