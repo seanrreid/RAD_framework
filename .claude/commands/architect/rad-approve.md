@@ -124,11 +124,13 @@ Approved-By: [architect username from CLAUDE.md Role Assignments]
 Approved-At: [ISO 8601 timestamp — e.g. 2026-05-25T14:32:00Z]
 ```
 
-### Step 5: Commit approved plan to main
+### Step 5: Commit approved plan to plan branch
+
+Stay on (or check out) the plan branch — do not touch main:
 
 ```bash
-git checkout main
-git pull origin main
+git checkout plan/[feature-name]
+git pull origin plan/[feature-name]
 
 # Write updated plan file to working tree
 # [write full updated content to .agents/plans/[feature].md]
@@ -140,7 +142,11 @@ Approved-By: [architect username]
 Plan:        .agents/plans/[feature].md
 Waves:       [N]
 Tasks:       [total task count]"
+
+git push origin plan/[feature-name]
 ```
+
+Do not commit to main. Do not open a PR.
 
 ### Step 6: Output confirmation
 
@@ -150,7 +156,7 @@ Tasks:       [total task count]"
 Plan:        .agents/plans/[feature].md
 Approved-By: [architect username]
 Approved-At: [timestamp]
-Branch:      plan/[feature-name] (kept as reference — no merge required)
+Branch:      plan/[feature-name]
 
 Team can now run:
   /rad-deliver .agents/plans/[feature].md
@@ -163,7 +169,8 @@ Team can now run:
 - Only architects listed in CLAUDE.md Role Assignments may run this command
 - Never approve a plan with unreviewed out-of-scope dependencies
 - Never approve a plan with Status: in-progress, complete, or approved
-- Commit only the plan file — no other files
+- Commit only the plan file to the plan branch — no other files
+- Never commit to main — the plan lands on main when the deliver PR is merged
 - If the architect provides feedback, set Status to needs-revision, not approved
 - Do not delete the plan branch — preserve it as a reference
-- The git commit on main is the audit trail — include approver identity in the message
+- The approval commit on the plan branch is the audit trail — include approver identity in the message

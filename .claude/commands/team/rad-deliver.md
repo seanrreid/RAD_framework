@@ -42,9 +42,8 @@ If not approved:
 
 Plan:   [plan file]
 Branch: [plan branch]
-PR:     [PR url from plan file]
 
-The architect must review and merge the plan PR before execution can begin.
+The architect must run /rad-approve [feature-name] before execution can begin.
 ```
 
 Stop. Do not proceed.
@@ -178,7 +177,23 @@ architect — do not open the PR until resolved.
 
 If `check-tests.sh` fails, write the missing test files before proceeding.
 
-### Step 7: Open code review PR
+### Step 7: Update plan status to complete
+
+Update the plan file's Status field and commit it to the deliver branch so it
+lands on main when the deliver PR is merged:
+
+```
+Status: complete
+Completed-At: [ISO 8601 timestamp]
+```
+
+```bash
+# [write updated plan file with Status: complete and Completed-At]
+git add .agents/plans/[feature].md
+git commit -m "deliver([feature]): mark plan complete"
+```
+
+### Step 8: Open code review PR
 
 ```bash
 scripts/open-pr.sh \
@@ -190,7 +205,7 @@ scripts/open-pr.sh \
   --label "rad:deliver"
 ```
 
-### Step 8: Final output
+### Step 9: Final output
 
 ```
 ✓ Delivery complete: [feature name]
@@ -208,7 +223,7 @@ Architect review required before merging.
 
 ## Rules
 
-- Hard stop if plan branch is not merged — never execute an unapproved plan
+- Hard stop if plan is not approved — never execute an unapproved plan
 - Load only files listed in each task — no speculative reads
 - One task at a time — never skip ahead within a wave
 - Cap retries at 2 per task — surface to architect on third failure

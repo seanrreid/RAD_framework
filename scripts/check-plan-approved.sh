@@ -24,13 +24,13 @@ BASE_BRANCH="${2:-main}"
 FEATURE=$(basename "$PLAN_BRANCH")
 PLAN_FILE=".agents/plans/$FEATURE.md"
 
-# ── Primary check: Status field in plan file on base branch ──────────────────
+# ── Primary check: Status field in plan file on plan branch ──────────────────
 
 check_file_status() {
   local status
 
-  # Try reading from the base branch first, then working tree
-  status=$(git show "origin/$BASE_BRANCH:$PLAN_FILE" 2>/dev/null \
+  # Try reading from the plan branch first, then working tree
+  status=$(git show "origin/$PLAN_BRANCH:$PLAN_FILE" 2>/dev/null \
     | grep "^Status:" | head -1 | awk '{print $2}' || true)
 
   if [[ -z "$status" ]]; then

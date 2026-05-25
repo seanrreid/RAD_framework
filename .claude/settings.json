@@ -1,0 +1,8 @@
+{
+  "autoMode": {
+    "allow": [
+      "$defaults",
+      "Edit(.claude/commands/*)"
+    ]
+  }
+}
