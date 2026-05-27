@@ -16,9 +16,10 @@ designers working within defined boundaries.
 ARCHITECT                          TEAM
 ─────────                          ────
 /rad-design                        /rad-plan [feature]
-  Interview + generate               Research within agent boundaries
-  .claude/agents/ hierarchy          Generate plan file
-                                     Optional: open draft PR for visibility
+  Interview + generate               Explore sub-agent researches codebase
+  .claude/agents/ hierarchy          Returns bounded RESEARCH_SUMMARY
+                                     Generate + lint plan file
+                                     Open draft PR for architect review
 
                                    /rad-adopt [issue or description]
                                      Same as /rad-plan, sourced from
@@ -31,8 +32,9 @@ ARCHITECT                          TEAM
 
                                    /rad-deliver [plan-file]
                                      Checks plan has Status: approved
-                                     Wave execution in fresh contexts
-                                     Atomic commit per step
+                                     Each wave → fresh sub-agent context
+                                     Orchestrator carries only WAVE_RESULT
+                                     Atomic commit per task
                                      Execution log appended per step
 
                     ── Gate 2 ──
@@ -55,6 +57,22 @@ ARCHITECT                          TEAM
 - All implementation changes
 - Architect reviews the *output* after execution
 - Standard code review workflow
+
+---
+
+## Token Efficiency
+
+RAD delegates heavy context work to sub-agents so main sessions stay lean:
+
+| Phase | What runs in a sub-agent | What stays in main context |
+|-------|--------------------------|---------------------------|
+| `/rad-plan` research | Explore sub-agent: searches codebase, returns `RESEARCH_SUMMARY` | The summary block (~20 lines) |
+| `/rad-deliver` per wave | Wave sub-agent: loads files, implements, validates, commits | `WAVE_RESULT` block per wave |
+| `/rad-review` | quality-reviewer + accessibility-reviewer agents | Finding summaries |
+
+The plan linter enforces a **context budget** on the Files in Scope table:
+- **Warn** at >800 lines in scope — consider splitting
+- **Error** at >1500 lines — must split before the plan can be approved
 
 ---
 
@@ -165,7 +183,7 @@ your-project/
     ├── check-role.sh                 ← validates contributor role vs. command
     ├── check-scope.sh                ← validates file changes against agent scope
     ├── check-tests.sh                ← checks for test coverage in deliver output
-    ├── lint-plan.sh                  ← validates plan file structure
+    ├── lint-plan.sh                  ← validates plan structure + context budget
     └── rad-status.sh                 ← powers /rad-status dashboard
 ```
 
