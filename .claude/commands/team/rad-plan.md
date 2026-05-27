@@ -1,15 +1,16 @@
 ---
 description: >
-  Plan a feature or bug fix within your role's agent boundaries. Researches the
-  codebase using scoped context tools, generates a wave-structured plan file,
-  commits it to a plan branch, and opens a draft PR for architect review.
-  Execution is blocked until the architect merges the plan PR.
+  Plan a feature or bug fix within your role's agent boundaries. Delegates
+  codebase research to an Explore sub-agent that returns bounded summaries.
+  Main context receives only the research summary, then generates a
+  wave-structured plan file, commits it to a plan branch, and opens a draft
+  PR for architect review. Execution is blocked until the architect approves.
 ---
 
 # /rad-plan
 
 Research and plan a feature within your agent boundaries. The plan becomes a
-PR that the architect must review and merge before execution can begin.
+PR that the architect must review and approve before execution can begin.
 
 ## Input
 
@@ -34,13 +35,57 @@ Read `CLAUDE.md` to find:
 Only call agents available to your role. If a feature requires an agent outside
 your role's scope, note it in the plan as a dependency requiring architect involvement.
 
-### Step 2: Research using context tools
+### Step 2: Delegate research to an Explore sub-agent
 
-Call the relevant context tools through their orchestrator — do not read files
-directly. Each tool call returns a bounded summary (≤15 lines).
+Spawn an Explore sub-agent with the prompt below. Fill in all bracketed values
+before calling. **Do not read files directly in main context** — the sub-agent
+returns bounded summaries; use those to write the plan.
 
-Cap at 10 tool calls. If the feature requires more, the scope is too large —
-break it into two plans.
+```
+You are researching a codebase to support a feature plan. Return bounded
+summaries only — no raw file dumps. Cap each file summary at 15 lines.
+Stop after 10 searches total regardless of what remains.
+
+Feature: [feature description from $ARGUMENTS]
+Role scope: [agent scope for this role from CLAUDE.md Agent Scope Map]
+
+Research goals:
+1. Find the files most likely touched by this feature (entry points, components,
+   models, routes, tests — whatever is relevant to the stack)
+2. For each file found, summarize: what it does, approximate line count,
+   which lines are relevant to this feature
+3. Identify any shared infrastructure, auth modules, or files this feature
+   must not touch
+4. Note any existing patterns (naming, structure, test conventions) the
+   implementation should follow
+
+Return format — output this block and nothing after it:
+
+RESEARCH_SUMMARY
+feature: [feature name]
+searches_used: [N] of 10
+
+files:
+  - path: [file path]
+    lines: [approximate line count]
+    relevant_lines: [range or "throughout"]
+    summary: [1–2 sentences: what it does and what changes for this feature]
+
+do_not_touch:
+  - [path] — [why]
+
+patterns:
+  - [observed pattern the plan should follow]
+
+out_of_scope_flags:
+  - [anything that signals this feature may cross agent scope boundaries]
+END_RESEARCH_SUMMARY
+```
+
+**After the sub-agent returns:** parse the `RESEARCH_SUMMARY` block. This is
+your complete research input. Do not spawn additional research agents or read
+files directly. If the summary reveals the feature is larger than one plan can
+hold (more than ~12 files in scope), split into two plans before continuing.
 
 ### Step 3: Generate the wave-structured plan
 
@@ -58,9 +103,11 @@ PR: [will be filled after PR creation]
 [List every agent called during research. Flag any out-of-scope dependencies.]
 
 ## Files in Scope
+<!-- Lines must be a range (e.g. 45-120) or a single number. The linter sums
+     these to compute context budget. Warn at 800 lines, error at 1500. -->
 | File | Lines | Change |
 |------|-------|--------|
-| [path] | [range] | [what changes] |
+| [path] | [start-end] | [what changes] |
 
 ## Execution Notes
 
@@ -183,9 +230,10 @@ Run /rad-deliver .agents/plans/[feature-name].md once approved.
 ## Rules
 
 - Only call agents available to your role (check Agent Scope Map in CLAUDE.md)
-- Do not read files directly — only through context tool orchestrators
+- Do not read files directly — delegate all research to the Explore sub-agent
 - Do not write any code in this phase
-- Cap research at 10 tool calls — split the plan if more is needed
+- Research is one sub-agent call — do not spawn multiple research agents
+- Cap the sub-agent at 10 searches — split the plan if the feature needs more
 - Every plan must have at least 2 non-goals
 - Do not run `/rad-deliver` yourself — wait for the architect to run `/rad-approve`
 - If out-of-scope dependencies exist, flag them clearly — do not attempt to

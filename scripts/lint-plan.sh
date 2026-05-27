@@ -16,6 +16,8 @@ PLAN_FILE="${1:-}"
 
 ERRORS=()
 WARNINGS=()
+TOTAL_LINES=0
+BUDGET_COMPUTED=false
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -28,7 +30,7 @@ section_content() {
 }
 
 header_field() {
-  grep "^$1:" "$PLAN_FILE" | head -1 | sed "s/^$1:[[:space:]]*//"
+  grep "^$1:" "$PLAN_FILE" | head -1 | sed "s/^$1:[[:space:]]*//" || true
 }
 
 # ── Header fields ─────────────────────────────────────────────────────────────
@@ -119,6 +121,40 @@ if has_section "Files in Scope"; then
   )
 fi
 
+# ── Context budget ────────────────────────────────────────────────────────────
+# Sum line ranges from the Files in Scope table (column 3 = Lines).
+# Range "45-120" → 76 lines. Plain number "150" → 150 lines. Others skipped.
+
+BUDGET_WARN=800
+BUDGET_ERROR=1500
+
+if has_section "Files in Scope"; then
+  while IFS= read -r lines_val; do
+    lines_val=$(echo "$lines_val" | tr -d '[:space:]')
+    [[ -z "$lines_val" || "$lines_val" == "Lines" || "$lines_val" == "[start-end]" || "$lines_val" == "[range]" ]] && continue
+    if [[ "$lines_val" =~ ^([0-9]+)-([0-9]+)$ ]]; then
+      count=$(( ${BASH_REMATCH[2]} - ${BASH_REMATCH[1]} + 1 ))
+      TOTAL_LINES=$(( TOTAL_LINES + count ))
+      BUDGET_COMPUTED=true
+    elif [[ "$lines_val" =~ ^[0-9]+$ ]]; then
+      TOTAL_LINES=$(( TOTAL_LINES + lines_val ))
+      BUDGET_COMPUTED=true
+    fi
+  done < <(
+    awk '/^## Files in Scope/{found=1; next} /^## /{found=0} found && /^\|/' "$PLAN_FILE" \
+      | grep -v "^| *File\|^|[-| ]*$" \
+      | awk -F'|' '{print $3}'
+  )
+
+  if $BUDGET_COMPUTED; then
+    if [[ "$TOTAL_LINES" -gt "$BUDGET_ERROR" ]]; then
+      ERRORS+=("Context budget too large: ~${TOTAL_LINES} lines in scope (max ${BUDGET_ERROR}). Split into two plans.")
+    elif [[ "$TOTAL_LINES" -gt "$BUDGET_WARN" ]]; then
+      WARNINGS+=("Context budget is large: ~${TOTAL_LINES} lines across all files. Consider splitting if waves are dense.")
+    fi
+  fi
+fi
+
 # ── Execution Notes — Do Not Touch vs Files in Scope conflict ────────────────
 
 if has_section "Execution Notes" && has_section "Files in Scope"; then
@@ -154,7 +190,9 @@ fi
 PLAN_NAME=$(basename "$PLAN_FILE")
 
 if [[ "${#ERRORS[@]}" -eq 0 && "${#WARNINGS[@]}" -eq 0 ]]; then
-  echo "✓ $PLAN_NAME — plan is valid (waves: $WAVE_COUNT)"
+  BUDGET_MSG=""
+  $BUDGET_COMPUTED && BUDGET_MSG=", budget: ~${TOTAL_LINES}L"
+  echo "✓ $PLAN_NAME — plan is valid (waves: $WAVE_COUNT${BUDGET_MSG})"
   exit 0
 fi
 

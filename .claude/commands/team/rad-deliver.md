@@ -1,14 +1,17 @@
 ---
 description: >
   Execute an approved plan from .agents/plans/ using wave-based execution.
-  Each wave runs tasks in fresh contexts. Requires the plan's PR branch to be
-  merged before execution begins. Creates a deliver branch and opens a code
-  review PR when complete.
+  Each wave runs in a fresh sub-agent context — main context holds only the
+  execution log and wave outcomes, not file contents or diffs. Requires the
+  plan branch to be merged before execution begins. Creates a deliver branch
+  and opens a code review PR when complete.
 ---
 
 # /rad-deliver
 
-Execute an approved plan wave by wave, task by task, in fresh contexts.
+Execute an approved plan wave by wave. Each wave is delegated to a sub-agent
+with only the files it needs. Main context stays lean — it orchestrates and
+logs, never accumulates task implementation detail.
 
 ## Input
 
@@ -19,7 +22,6 @@ Execute an approved plan wave by wave, task by task, in fresh contexts.
 
 If empty, list available approved plans:
 ```bash
-# List plans that are approved (branch merged)
 ls .agents/plans/*.md | while read f; do
   grep "^Status:" "$f" | grep -q "approved" && echo "$f"
 done
@@ -56,7 +58,18 @@ git pull origin main
 git checkout -b deliver/[feature-name]
 ```
 
-### Step 3: Initialize execution log
+### Step 3: Read plan and initialize orchestration state
+
+Read the plan file **once** and extract:
+
+- `## Execution Notes` section (Key Files, Do Not Touch, Reminders)
+- All wave definitions (wave number, type, tasks with file lists and validation)
+- `## Tests to Write` section
+
+Store this as your working plan state. **Do not re-read the plan file during
+wave execution** — you already have everything you need.
+
+### Step 4: Initialize execution log
 
 Create `.agents/logs/[feature-name]-[YYYY-MM-DD].md`:
 
@@ -73,97 +86,141 @@ Executor role: [developer | designer]
 |------|------|------|--------|--------|------|
 ```
 
-### Step 4: Execute wave by wave
+### Step 5: Execute waves via sub-agents
 
-For each wave in the plan:
+For each wave in the plan, announce it, then delegate to a wave sub-agent.
+After the agent returns, update the execution log and decide whether to continue.
 
-**Wave announcement:**
+**Wave announcement (orchestrator output):**
 ```
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Wave [N]: [parallel | sequential] — [task count] tasks
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
-**Before the first wave, read `## Execution Notes`:**
+**Invoke the wave sub-agent** with this prompt (fill in all bracketed values
+from your plan state before calling):
 
-- Load every file listed under `### Key Files` as baseline context
-- Note every file listed under `### Do Not Touch` — treat these as hard stops
-  equivalent to out-of-scope files; stop and surface to architect if a task
-  requires touching them
-- Note any `### Reminders` — apply them throughout execution
+```
+You are executing Wave [N] of a RAD delivery. Do not read files speculatively —
+only load what is listed below. Do not open PRs or push branches.
 
-**For each task in the wave:**
+Branch: deliver/[feature-name]
+Feature: [feature-name]
+Execution log: .agents/logs/[feature-name]-[date].md
+Wave type: [parallel | sequential]
 
-1. Load only the files listed for this task — no speculative reads
+## Execution Notes
+### Do Not Touch
+[lines from plan — hard stops, treat as out-of-scope]
+
+### Key Files (pre-load before starting)
+[lines from plan]
+
+### Reminders
+[lines from plan]
+
+## Tasks
+
+### Task [N.1]: [title]
+File: [path:lines]
+What: [precise description from plan]
+Validate: [validation command from plan]
+
+### Task [N.2]: [title]
+...
+
+## For each task:
+1. Load only the files listed — no additional reads
 2. Implement exactly what the task describes — nothing more
-3. Run the task's validation check
+3. Run the validation command
 4. If validation passes:
-   ```bash
    git add [changed files]
    git commit -m "deliver([feature]): [task title]
 
-   Wave [N], Task [N.N]
+   Wave [N], Task [N.M]
    Validated: [validation method]"
-   ```
 5. Append to execution log:
-   ```
-   | [step#] | [wave] | [task title] | ✓ complete | [commit hash] | [time] |
-   ```
-6. Output step summary:
-   ```
-   ✓ Task [N.N]: [title]
-   Changed: [files]
-   Commit:  [hash]
-   ```
+   | [step#] | Wave [N] | [task title] | ✓ complete | [commit hash] | [time] |
+6. Do not continue to the next task if validation fails
 
-**For parallel waves:** Execute tasks sequentially (Claude Code is single-threaded)
-but mark them as logically parallel in the log. Do not wait for human confirmation
-between parallel tasks in the same wave — they are independent.
+## Return format
+At the end, output exactly this block and nothing after it:
 
-**For sequential waves:** Wait for wave N to complete before starting wave N+1.
-Output wave completion before proceeding:
+WAVE_RESULT
+wave: [N]
+status: [complete | failed]
+tasks:
+  - title: [task title]
+    status: [complete | failed]
+    commit: [hash or —]
+    error: [one-line summary or —]
+END_WAVE_RESULT
+```
+
+**After the sub-agent returns:**
+
+1. Parse the `WAVE_RESULT` block
+2. Append any missing execution log rows (the agent writes them, but verify)
+3. Output wave completion:
+
 ```
 ✓ Wave [N] complete — [task count] tasks
-Starting Wave [N+1]...
+  Task [N.1]: [title] — [commit hash]
+  Task [N.2]: [title] — [commit hash]
 ```
 
-### Step 5: Handle task failures
+4. Proceed to the next wave **only if** `status: complete`
 
-If a task fails validation:
+**If the wave sub-agent returns `status: failed`:**
+
 ```
-✗ Task [N.N]: [title]
-Issue: [what failed]
-Validation: [what was run]
-Error: [compact error summary — not full stack trace]
+✗ Wave [N] failed at Task [N.M]: [title]
+Issue: [error from WAVE_RESULT]
 
 Options:
-  1. Fix and retry this task
-  2. Update the plan for this task and retry
+  1. Fix and retry this wave
+  2. Update the plan for the failed task and retry
   3. Stop — open a blocking issue on the plan PR
 ```
 
-Append to execution log:
-```
-| [step#] | [wave] | [task title] | ✗ failed | — | [time] |
-```
+Cap retry attempts at 2 per wave. On third failure, stop and surface to architect.
 
-Do not proceed to the next wave if a task fails.
-Cap retry attempts at 2 per task. On third failure, stop and surface to architect.
+Do not shed the `WAVE_RESULT` content between waves — keep the summary rows
+in your context as the carry-forward state. Discard nothing from the log, but
+do not re-read file contents from completed waves.
 
 ### Step 6: Write tests
 
-After all waves complete, write the tests listed in the plan's "Tests to Write"
-section. Commit them:
+After all waves complete, delegate test writing to a sub-agent:
 
-```bash
-git add [test files]
-git commit -m "test([feature]): add tests per plan
+```
+You are writing tests for a completed RAD delivery. Do not modify any files
+outside the test paths listed below.
 
-Tests:
-[list of tests written]"
+Branch: deliver/[feature-name]
+Feature: [feature-name]
+
+## Tests to Write
+[full "Tests to Write" section from the plan]
+
+Write each test file. Then run:
+  git add [test files]
+  git commit -m "test([feature]): add tests per plan
+
+  Tests:
+  [list of tests written]"
+
+Return:
+TEST_RESULT
+status: [complete | failed]
+tests:
+  - file: [path]
+    status: [written | failed]
+END_TEST_RESULT
 ```
 
-### Step 6b: Scope and test verification
+### Step 7: Scope and test verification
 
 Run deterministic checks before opening the PR:
 
@@ -177,7 +234,7 @@ architect — do not open the PR until resolved.
 
 If `check-tests.sh` fails, write the missing test files before proceeding.
 
-### Step 7: Update plan status to complete
+### Step 8: Update plan status to complete
 
 Update the plan file's Status field and commit it to the deliver branch so it
 lands on main when the deliver PR is merged:
@@ -188,12 +245,11 @@ Completed-At: [ISO 8601 timestamp]
 ```
 
 ```bash
-# [write updated plan file with Status: complete and Completed-At]
 git add .agents/plans/[feature].md
 git commit -m "deliver([feature]): mark plan complete"
 ```
 
-### Step 8: Open code review PR
+### Step 9: Open code review PR
 
 ```bash
 scripts/open-pr.sh \
@@ -205,7 +261,7 @@ scripts/open-pr.sh \
   --label "rad:deliver"
 ```
 
-### Step 9: Final output
+### Step 10: Final output
 
 ```
 ✓ Delivery complete: [feature name]
@@ -224,10 +280,11 @@ Architect review required before merging.
 ## Rules
 
 - Hard stop if plan is not approved — never execute an unapproved plan
-- Load only files listed in each task — no speculative reads
-- One task at a time — never skip ahead within a wave
-- Cap retries at 2 per task — surface to architect on third failure
-- Execution log must be updated after every task — not just at the end
+- Read the plan file **once** at Step 3 — do not re-read it during wave execution
+- Each wave runs in a sub-agent — never execute task file edits directly in main context
+- Main context carries only: WAVE_RESULT summaries and the execution log — not file contents
+- Cap retries at 2 per wave — surface to architect on third failure
+- Execution log must be updated after every wave — not just at the end
 - Never modify files outside the plan's "Files in Scope" without stopping to ask
-- Compact error messages — never dump full stack traces into context
 - Tests are mandatory — do not skip the "Tests to Write" section
+- Do not push or open a PR inside a wave sub-agent — that is the orchestrator's responsibility
