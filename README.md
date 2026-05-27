@@ -1,4 +1,6 @@
-# RAD — Research · Architect · Deliver
+# RAD: Research, Architect, Deliver
+
+![Rad Logo](./assets/rad_logo.png)
 
 A hybrid agent framework for small teams. Combines rpi-design's information
 boundary architecture with GSD-style wave execution and PR-based approval gates.
