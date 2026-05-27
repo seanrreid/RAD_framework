@@ -26,14 +26,20 @@ Task 1.3                                     Task 3.3
 
 ## Parallel vs sequential — what it actually means
 
-**Claude Code is single-threaded.** Parallel tasks in RAD don't literally run
-simultaneously — they run in sequence but are treated as logically independent.
+Each wave runs in a fresh sub-agent context. The main orchestrator (`/rad-deliver`)
+invokes one sub-agent per wave, receives a `WAVE_RESULT` summary back, updates
+the execution log, and decides whether to proceed. File contents from completed
+waves never accumulate in the main context.
+
+**Claude Code is single-threaded within a wave.** Parallel tasks don't run
+simultaneously — the wave sub-agent executes them back-to-back, but treats
+them as logically independent.
 
 The practical difference:
-- **Parallel wave**: Claude executes all tasks back-to-back without waiting
-  for human confirmation between them. Each task still gets its own commit.
-- **Sequential wave**: Claude executes each task, outputs the result, and
-  waits for you to confirm before the next task starts.
+- **Parallel wave**: the sub-agent executes all tasks back-to-back without
+  waiting for human confirmation between them. Each task still gets its own commit.
+- **Sequential wave**: the sub-agent executes each task and stops if any fails
+  before moving to the next. The orchestrator reports the outcome after the wave.
 
 Mark tasks as parallel when they're genuinely independent and you trust them
 to run without a checkpoint between them. Mark tasks as sequential when each
@@ -87,8 +93,11 @@ Wave 1 (parallel)
 
 - Max 3 tasks per wave — if you need more, add another wave
 - Max 5 waves per plan — if you need more, split into two plans
-- Each task should fit in ~50% of a fresh context window
+- Each task should fit in ~50% of a fresh context window (the wave sub-agent's context)
 - A task that touches more than one file is usually too big — split it
+- **Context budget:** the total lines across all files in scope is checked by
+  `lint-plan.sh`. Warn at >800 lines; error (blocks approval) at >1500 lines.
+  If the linter flags your plan's budget, split into two plans before submitting.
 
 ---
 

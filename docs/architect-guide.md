@@ -189,9 +189,11 @@ The contributor should have stopped and commented. Review the situation:
   update the plan to account for the dependency
 
 ### Context getting noisy
-If a contributor is reporting that Claude is giving inconsistent or incorrect
-results mid-execution, the context has rotted. Ask them to start a new Claude
-Code session and re-run `/rad-deliver` — it will resume from the execution log.
+Wave sub-agents keep the delivery orchestrator's context lean — each wave runs
+in isolation and only returns a `WAVE_RESULT` summary to main context. Genuine
+context rot is now uncommon but can still happen during repeated correction
+loops on a failing task. Ask the contributor to start a new Claude Code session
+and re-run `/rad-deliver` — it resumes from the execution log.
 
 ---
 

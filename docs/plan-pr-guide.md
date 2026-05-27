@@ -32,6 +32,11 @@ Files in Scope should only reference directories listed under the
 contributor's role in the Agent Scope Map.
 ```
 
+Also check that the plan passed the linter's context budget check. The linter
+runs during `/rad-plan` and warns at >800 lines in scope, errors at >1500.
+If a plan with a budget error reaches you, ask the contributor to split it —
+it cannot be approved in this state.
+
 ### 2. Plan precision
 Can a junior dev execute this plan without interpretation?
 

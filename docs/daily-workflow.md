@@ -46,10 +46,12 @@ Commit the agent files. They are the architecture — they belong in version con
 ```
 
 This will:
-1. Research using your role's available agents
-2. Generate a wave-structured plan
+1. Spawn an Explore sub-agent to research the codebase within your role's scope,
+   returning a bounded `RESEARCH_SUMMARY` (no raw file reads in your main context)
+2. Generate a wave-structured plan from the summary
 3. Commit the plan to `plan/[feature-name]`
-4. Open a draft PR with the plan as a reviewable checklist
+4. Lint the plan — checks structure, wave limits, and context budget
+5. Open a draft PR with the plan as a reviewable checklist
 
 Then wait. Do not run `/rad-deliver` until the architect runs `/rad-approve`.
 
@@ -105,16 +107,19 @@ the plan file, pushes, and you re-review. Merge when satisfied.
 /rad-deliver .agents/plans/add-skeleton-loading.md
 ```
 
-This checks the plan branch is merged, creates a `deliver/[feature]` branch,
-and executes the plan wave by wave. Each task gets its own commit. Each completed
-step is logged in `.agents/logs/`.
+This checks the plan is approved, creates a `deliver/[feature]` branch, and
+executes the plan wave by wave. Each wave runs in a fresh sub-agent context —
+the orchestrator only carries `WAVE_RESULT` summaries forward, not file contents.
+Each task gets its own commit. Each completed step is logged in `.agents/logs/`.
 
 **During execution:**
-- Between waves, output is shown — review it before the next wave starts
-- If a task fails, stop and fix before continuing — don't push through
-- If context is getting noisy after many corrections, stop — start a new
-  Claude Code session and re-run `/rad-deliver` with the same plan file.
-  It will resume from where the log shows completion.
+- Between waves, the orchestrator outputs a completion summary — review it
+  before the next wave starts
+- If a wave fails, stop and fix before continuing — don't push through
+- Context rot is rare because wave sub-agents keep main context lean, but can
+  still happen during repeated correction loops. If it does: start a new Claude
+  Code session and re-run `/rad-deliver` with the same plan file — it resumes
+  from the execution log.
 
 ---
 
@@ -165,9 +170,10 @@ Stop execution. Comment on the deliver PR describing the dependency. The
 architect either expands the plan or handles the dependency separately.
 
 **Context gets noisy during execution:**
-Start a new Claude Code session. Run `/rad-deliver .agents/plans/[feature].md`
-again. The command checks the execution log and resumes from the last
-successfully committed step.
+Wave sub-agents keep the orchestrator's context lean during normal execution.
+If noise does accumulate (usually from repeated correction loops on a failing
+task), start a new Claude Code session and run
+`/rad-deliver .agents/plans/[feature].md` again — it resumes from the execution log.
 
 ---
 

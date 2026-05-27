@@ -157,15 +157,19 @@ faster than fixing a scope violation in review.
 **Running /rad-deliver before the plan PR is merged.**
 `/rad-deliver` will stop you with an error. Wait for the merge.
 
-**Reading files directly instead of through agents.**
-The agents are how you read the codebase. If an agent doesn't cover what you
-need, it's likely outside your scope — flag it, don't work around it.
+**Reading files directly during planning.**
+`/rad-plan` delegates research to an Explore sub-agent — you don't read files
+yourself during the planning phase. The sub-agent returns a bounded summary
+that stays within your role's scope boundaries. If something needed isn't
+covered, it's likely out of scope — flag it as a dependency, don't work around it.
 
 **Skipping /rad-review before requesting architect review.**
 The architect will find the same issues and send you back to fix them. Save
 the round-trip.
 
 **Making the plan too large.**
-If your plan has more than 5 waves or touches more than 10 files, split it
+If your plan has more than 5 waves or touches more than ~12 files, split it
 into two plans. Smaller plans are faster to review, easier to execute, and
-easier to debug when something goes wrong.
+easier to debug when something goes wrong. The linter enforces a context
+budget on the Files in Scope table — if it errors on budget, you must split
+before the plan can be approved.
