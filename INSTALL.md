@@ -147,21 +147,13 @@ When a new version of RAD is available, re-run the installer with `--upgrade`:
 bash /tmp/rad/install.sh --dir /path/to/your-project --upgrade
 ```
 
-The upgrade overwrites:
-- `.claude/commands/` — all command files
-- `scripts/` — all script files
+The upgrade overwrites `.claude/commands/` and `scripts/`, and never touches
+`CLAUDE.md`, `.claude/agents/`, or `.agents/` content. It works whether or not
+the project was originally set up with the installer.
 
-The upgrade **never** touches:
-- `CLAUDE.md` — your project configuration
-- `.claude/agents/` — your generated agent files
-- `.agents/` — your research, architecture, plans, and logs
-
-After upgrading, commit the updated commands and scripts:
-
-```bash
-git add .claude/commands/ scripts/
-git commit -m "chore: upgrade RAD framework to latest"
-```
+See **[UPGRADE.md](UPGRADE.md)** for the full guide, including upgrading
+projects that didn't use the installer, a manual upgrade path, and how local
+edits are handled.
 
 ---
 
