@@ -60,7 +60,8 @@ claude-code
 ```
 
 You should see the platform, agent inventory, and your role in the output.
-If you see "No agents defined", ask the architect to run `/rad-design` first.
+If you see "No agents defined", the architect needs to run `/rad-research`
+then `/rad-design` to set up the agent architecture first.
 
 ### 4. Understand your boundaries
 

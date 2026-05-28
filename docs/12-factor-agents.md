@@ -177,7 +177,7 @@ context window.
 Factor 3. The entire orchestrator/context-tool hierarchy is Factor 10
 expressed as a system. Each context tool does exactly one thing. Each role
 orchestrator owns exactly one domain. The parent orchestrator delegates rather
-than executing. The rpi-design research phase identifies the domain boundaries
+than executing. The `/rad-research` command identifies the domain boundaries
 that make Factor 10 work for your specific project.
 
 ---
@@ -189,11 +189,10 @@ platform, cron job — the same agent should be triggerable from any surface
 without modification. Coupling an agent to its invocation channel creates
 maintenance burden and limits adoption.
 
-**In this skill:** The rpi-design skill itself demonstrates this — it runs
-identically whether invoked via `/rpi-design` in Claude Code, via
-`runner/run.py` from the CLI, or by feeding the phase prompts manually to any
-LLM API. The generated architectures should document all intended trigger
-points in `CLAUDE.md` and the compaction artifact.
+**In RAD:** The RAD commands demonstrate this — `/rad-research`, `/rad-plan`,
+and `/rad-deliver` run identically whether invoked in Claude Code's desktop
+app, the CLI, or the IDE extension. The generated architectures should document
+all intended trigger points in `CLAUDE.md` and the compaction artifact.
 
 ---
 
@@ -222,13 +221,14 @@ Don't wait for the agent to discover it needs a file and fetch it mid-run.
 Pre-fetch known dependencies upfront, reducing mid-execution surprises and
 improving first-attempt success rates.
 
-**In this skill:** The research phase of rpi-design pre-fetches project context
-before planning begins. The `/prime` command (practitioner template) pre-fetches
-codebase context before any feature work. The gap: this pre-fetch is still
-agentic (the LLM decides what to read) rather than deterministic (scanning the
-task description for links and file references and fetching them automatically
-before the LLM loop starts). The Stripe Minions architecture does this
-deterministically — a known improvement for future iterations.
+**In RAD:** The `/rad-research` command pre-fetches project context from a spec
+artifact before architecture design begins. The `/rad-plan` Explore sub-agent
+pre-fetches codebase context before any feature planning. The gap: this
+pre-fetch is still agentic (the LLM decides what to read) rather than
+deterministic (scanning the task description for links and file references and
+fetching them automatically before the LLM loop starts). The Stripe Minions
+architecture does this deterministically — a known improvement for future
+iterations.
 
 ---
 

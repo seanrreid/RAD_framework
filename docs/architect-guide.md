@@ -11,9 +11,9 @@ You have everything the team has, plus:
 
 | Command | Install location | Purpose |
 |---------|-----------------|---------|
-| `/rad-design` | `~/.claude/commands/` | Generate agent architecture |
+| `/rad-design` | `~/.claude/commands/` | Draft and generate agent architecture |
 | `/rad-approve` | `~/.claude/commands/` | Review and approve plan PRs |
-| All team commands | Project `.claude/commands/` | Plan, deliver, review, status |
+| All team commands | Project `.claude/commands/` | Research, plan, deliver, review, status |
 | `/rad-insights` | Shared (project + global) | Review pattern analysis across cycles |
 
 Install architect commands to your global Claude Code config:
@@ -28,32 +28,45 @@ in the project `.claude/commands/` and are committed to the repo.
 
 ## Setting up a new project
 
-### 1. Run /rad-design
+Project setup is two commands. `/rad-research` can be run by anyone on the
+team. `/rad-design` is typically run by whoever holds the architect role.
+
+### 1. Run /rad-research
 
 ```
-/rad-design
+/rad-research [path-to-prd or issue-url]
 ```
 
-This runs the rpi-design interview. You'll be asked about:
-- Project description and domains
-- Codebase structure and stack
-- Common task types
-- Anything unusual
+Point it at your PRD, a GitHub/GitLab issue, or paste the spec inline.
+It extracts what's being built, asks RAD-specific clarifying questions (team
+roles, platform, domain sensitivity), and writes `.agents/research/[slug].md`.
 
-After the interview, a draft architecture is generated. React to it, refine it,
-then confirm. The command generates:
-- `.claude/agents/*.md` — agent definitions with role annotations
-- The Agent Scope Map block to paste into `CLAUDE.md`
+A developer can do this step and hand the artifact to you for review before
+you run `/rad-design`.
 
-### 2. Assign roles to agents
+### 2. Run /rad-design
 
-The generated agents will have default role assignments:
-- UI, frontend, content agents → `developer, designer`
-- API, backend agents → `developer`
-- Auth, payments, infra, database agents → `architect`
+```
+/rad-design [slug]
+```
 
-Review these and adjust to match your team. Edit the `roles:` frontmatter field
-in each `.claude/agents/*.md` file.
+Reads the research artifact and writes an architecture draft to
+`.agents/architecture/[slug].md` with `Status: draft`. The draft contains:
+- The full agent hierarchy
+- Role assignments per agent
+- Scope and output contracts for every agent
+- The scope map ready for `CLAUDE.md`
+
+Review the draft and edit it directly. Adjust role assignments, tighten scope
+boundaries, add constraints. When satisfied, change `Status: draft` to
+`Status: approved` and re-run:
+
+```
+/rad-design [slug]
+```
+
+This generates all `.claude/agents/*.md` files in parallel and prints the
+Agent Scope Map block to paste into `CLAUDE.md`.
 
 ### 3. Update CLAUDE.md
 
@@ -63,7 +76,7 @@ Fill in the role assignments with your team members' usernames.
 ### 4. Commit and push
 
 ```bash
-git add .claude/agents/ CLAUDE.md
+git add .claude/agents/ .agents/research/ .agents/architecture/ CLAUDE.md
 git commit -m "chore: initialize RAD agent architecture"
 git push
 ```
@@ -90,14 +103,22 @@ Project → Settings → Repository → Protected Branches → Allowed to merge:
 
 ## Maintaining the architecture
 
-### When to re-run /rad-design
+### When to re-run /rad-research and /rad-design
 
+Re-run `/rad-research` when the project scope changes significantly — new
+domains added, team composition changes, or a new PRD supersedes the original.
+Update the research artifact, then re-run `/rad-design` to regenerate the
+architecture draft.
+
+Re-run `/rad-design` alone (without `/rad-research`) when the architecture
+needs adjustment but the research is still accurate:
 - Major codebase restructuring (new top-level directories, new services)
 - Adding a new domain that doesn't fit existing agents
 - Onboarding a new role type with different access needs
 
-Re-running `/rad-design` generates new agent files. Review the diff carefully
-before committing — existing plans reference current agent scopes.
+Re-running `/rad-design` on an approved architecture artifact regenerates the
+agent files. Review the diff carefully before committing — existing plans
+reference current agent scopes.
 
 ### Updating individual agents
 

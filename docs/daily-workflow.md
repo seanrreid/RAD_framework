@@ -3,7 +3,8 @@
 How the team uses RAD day-to-day. The full loop for any feature:
 
 ```
-Architect:  /rad-design        ← once per project (or after major changes)
+Anyone:     /rad-research [prd or issue]  ← once per project setup
+Architect:  /rad-design [slug]            ← once per project setup
 
 Developer:  /rad-plan [feature]    ← opens plan PR
 Architect:  [reviews plan PR]      ← Gate 1: approach approval
@@ -19,15 +20,29 @@ Architect:  [merges code PR]       ← feature ships
 
 ## Starting a new project
 
-**Architect only:**
+Project setup is a two-step process. Either step can be done by anyone on
+the team, but `/rad-design` is typically run by whoever holds the architect role.
+
+### Step 1: Research
 
 ```
-/rad-design
+/rad-research [path-to-prd or issue-url]
 ```
 
-This runs the rpi-design interview, generates `.claude/agents/` files with
-role-annotated information boundaries, and produces the Agent Scope Map for
-`CLAUDE.md`. Do this before the team starts any planning.
+Point it at your PRD, a GitHub/GitLab issue, or paste a spec inline.
+It asks a few RAD-specific clarifying questions — team roles, platform,
+domain sensitivity — and writes `.agents/research/[slug].md`.
+
+### Step 2: Design
+
+```
+/rad-design [slug]
+```
+
+Reads the research artifact and drafts the agent hierarchy to
+`.agents/architecture/[slug].md` with `Status: draft`. Review the draft,
+edit role assignments or scope boundaries as needed, then change the status
+to `approved` and re-run `/rad-design [slug]` to generate the agent files.
 
 Then install the agents into the project:
 
@@ -35,7 +50,8 @@ Then install the agents into the project:
 cp -r .claude/agents/ /path/to/project/.claude/agents/
 ```
 
-Commit the agent files. They are the architecture — they belong in version control.
+Commit the agent files and the research/architecture artifacts. They are the
+architecture — they belong in version control.
 
 ---
 

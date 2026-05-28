@@ -1,21 +1,20 @@
 # Applying RAD to an Existing Project
 
-For projects with no prior rpi-design architecture. Expect 2–3 weeks of
-gradual rollout rather than 3 days. The extra time is spent on archaeology,
-accurate CLAUDE.md authoring, and agent validation against the real codebase.
-
-If your project was built with rpi-design, see `migration-from-rpi.md` instead.
+For projects that don't yet have a RAD agent architecture. Expect 2–3 weeks
+of gradual rollout rather than a big-bang migration. The extra time is spent
+on archaeology, accurate CLAUDE.md authoring, and agent validation against
+the real codebase.
 
 ---
 
 ## Why this takes longer
 
-On a greenfield or non-rpi project, you're working backward: generating
-an architecture from a codebase that already exists, rather than building
-a codebase from an architecture you designed. The risks are:
+On an existing project, you're working backward: generating an architecture
+from a codebase that already exists, rather than building a codebase from an
+architecture you designed. The risks are:
 
-- **Wrong boundaries** — rpi-design's interview generates scopes from what
-  you describe. If your description doesn't match the real directory structure,
+- **Wrong boundaries** — `/rad-research` generates scopes from what you
+  describe. If your description doesn't match the real directory structure,
   the agent scopes will be wrong and the team will hit them immediately.
 - **Stale CLAUDE.md** — writing CLAUDE.md from memory produces a document
   full of what you think is true, not what is true. Claude will make wrong
@@ -34,7 +33,7 @@ The team keeps working normally. You do not introduce RAD yet.
 
 ### Step 1: Audit the real codebase
 
-Before the rpi-design interview, understand what you actually have.
+Before running `/rad-research`, understand what you actually have.
 
 ```bash
 # Real directory structure
@@ -56,23 +55,29 @@ Pay attention to:
 - Files nobody has touched → low risk, broader scope is fine
 - Directories that span multiple domains → boundary decisions to make explicit
 
-### Step 2: Run /rad-design
+### Step 2: Run /rad-research, then /rad-design
 
 ```
-/rad-design
+/rad-research [path-to-readme-or-spec]
 ```
 
-Answer the research questions based on what the audit revealed, not what you
-remember or wish were true. The most important answers:
+If you don't have a formal PRD, point it at your README or paste a description
+of the project inline. Answer the clarifying questions based on what the audit
+revealed, not what you remember or wish were true. The most important inputs:
 
 - **Domains**: what are the real domain boundaries in the code, not the
   conceptual ones in your head
 - **Structure**: the actual directories, not the intended ones
-- **Common tasks**: what the team actually does most often, not what they should do
-- **Unusual constraints**: legacy decisions, external dependencies, compliance rules
+- **Constraints**: legacy decisions, external dependencies, compliance rules
 
-When the draft architecture is generated, validate each proposed scope against
-the real directory structure:
+Then run:
+
+```
+/rad-design [slug]
+```
+
+Review the architecture draft carefully. Validate each proposed scope against
+the real directory structure before approving:
 
 ```bash
 # For each proposed scope, verify it exists
@@ -219,8 +224,9 @@ and CLAUDE.md as they surface. Commit each fix immediately.
 
 ### "The agents reference paths that don't exist"
 
-Your rpi-design interview described an idealized structure. Run the audit
-commands from Week 1 and update the agent scope to match reality.
+The `/rad-research` interview described an idealized structure. Run the audit
+commands from Week 1, update `.agents/research/[slug].md` to match reality,
+and re-run `/rad-design` to regenerate the agent files.
 
 ### "Claude keeps doing things it shouldn't"
 

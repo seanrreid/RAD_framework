@@ -149,8 +149,9 @@ Plan PRs require:
 ## Workflow
 
 ```
-Architect:  /rad-design   → defines .claude/agents/ boundaries
-Team:       /rad-plan     → plan branch + optional PR for visibility (Gate 1)
+Anyone:     /rad-research → consumes PRD/issue, writes .agents/research/
+Architect:  /rad-design   → drafts + generates .claude/agents/ boundaries
+Team:       /rad-plan     → plan branch + PR for architect review (Gate 1)
 Team:       /rad-adopt    → same as /rad-plan but sourced from a pre-existing issue
 Architect:  /rad-approve  → reviews plan, commits approval to main
 Team:       /rad-deliver  → wave execution (Gate 2 code PR)

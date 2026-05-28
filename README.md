@@ -2,28 +2,30 @@
 
 ![Rad Logo](./assets/rad_logo.png)
 
-A hybrid agent framework for small teams. Combines rpi-design's information
-boundary architecture with GSD-style wave execution and PR-based approval gates.
+A hybrid agent framework for small teams. Enforces information boundary
+architecture, GSD-style wave execution, and PR-based approval gates.
 
-Built for teams with a primary architect/gatekeeper and junior developers or
-designers working within defined boundaries.
+Built for teams of any size — works with a dedicated architect or with a
+developer playing both roles on smaller projects.
 
 ---
 
 ## How It Works
 
 ```
-ARCHITECT                          TEAM
-─────────                          ────
-/rad-design                        /rad-plan [feature]
-  Interview + generate               Explore sub-agent researches codebase
-  .claude/agents/ hierarchy          Returns bounded RESEARCH_SUMMARY
-                                     Generate + lint plan file
+ARCHITECT / TEAM                   TEAM
+────────────────                   ────
+/rad-research [prd or issue]       /rad-plan [feature]
+  Consume spec artifact              Explore sub-agent researches codebase
+  Clarify team + platform            Returns bounded RESEARCH_SUMMARY
+  Write .agents/research/[slug]      Generate + lint plan file
                                      Open draft PR for architect review
-
-                                   /rad-adopt [issue or description]
-                                     Same as /rad-plan, sourced from
-                                     a pre-existing issue or description
+/rad-design [slug]
+  Read research artifact           /rad-adopt [issue or description]
+  Draft agent hierarchy              Same as /rad-plan, sourced from
+  Write .agents/architecture/        a pre-existing issue or description
+  [architect reviews + approves]
+  Generate .claude/agents/ files
 
                     ── Gate 1 ──
                     /rad-approve (architect)
@@ -66,6 +68,8 @@ RAD delegates heavy context work to sub-agents so main sessions stay lean:
 
 | Phase | What runs in a sub-agent | What stays in main context |
 |-------|--------------------------|---------------------------|
+| `/rad-research` URL input | Haiku sub-agent: fetches and summarizes spec URL | Bounded `SPEC_SUMMARY` block |
+| `/rad-design` file generation | Parallel Haiku sub-agents: one per agent file | Completion confirmations |
 | `/rad-plan` research | Explore sub-agent: searches codebase, returns `RESEARCH_SUMMARY` | The summary block (~20 lines) |
 | `/rad-deliver` per wave | Wave sub-agent: loads files, implements, validates, commits | `WAVE_RESULT` block per wave |
 | `/rad-review` | quality-reviewer + accessibility-reviewer agents | Finding summaries |
@@ -81,8 +85,8 @@ The plan linter enforces a **context budget** on the Files in Scope table:
 | Role | Commands | Access |
 |------|----------|--------|
 | Architect | All commands + `/rad-design`, `/rad-approve` | Defines agent boundaries, approves plans, merges PRs |
-| Developer | `/rad-plan`, `/rad-adopt`, `/rad-deliver`, `/rad-review`, `/accessibility-review`, `/quality-review` | Plans and executes within boundaries |
-| Designer | `/rad-plan`, `/rad-adopt`, `/rad-deliver` | UI-scoped planning and execution only |
+| Developer | `/rad-research`, `/rad-plan`, `/rad-adopt`, `/rad-deliver`, `/rad-review`, `/accessibility-review`, `/quality-review` | Research, plan, and execute within boundaries |
+| Designer | `/rad-research`, `/rad-plan`, `/rad-adopt`, `/rad-deliver` | UI-scoped research, planning, and execution |
 | All roles | `/rad-status`, `/rad-insights` | Team dashboard and review pattern analysis |
 
 Install architect commands from `.claude/commands/architect/` to `~/.claude/commands/`.
@@ -159,19 +163,22 @@ your-project/
 │   │   └── quality-reviewer.md       ← built-in reviewer (invoked by /rad-review)
 │   └── commands/
 │       ├── architect/
-│       │   ├── rad-approve.md        → /rad-approve (architect)
-│       │   └── rad-design.md         → /rad-design  (architect)
+│       │   ├── rad-approve.md        → /rad-approve   (architect)
+│       │   └── rad-design.md         → /rad-design    (architect)
 │       ├── team/
-│       │   ├── rad-plan.md           → /rad-plan    (team)
-│       │   ├── rad-adopt.md          → /rad-adopt   (team)
-│       │   ├── rad-deliver.md        → /rad-deliver (team)
-│       │   ├── rad-review.md         → /rad-review  (team)
+│       │   ├── rad-research.md       → /rad-research  (team)
+│       │   ├── rad-plan.md           → /rad-plan      (team)
+│       │   ├── rad-adopt.md          → /rad-adopt     (team)
+│       │   ├── rad-deliver.md        → /rad-deliver   (team)
+│       │   ├── rad-review.md         → /rad-review    (team)
 │       │   ├── accessibility-review.md → /accessibility-review (team)
 │       │   └── quality-review.md     → /quality-review (team)
 │       └── shared/
-│           ├── rad-status.md         → /rad-status  (shared)
-│           └── rad-insights.md       → /rad-insights (shared)
+│           ├── rad-status.md         → /rad-status    (shared)
+│           └── rad-insights.md       → /rad-insights  (shared)
 ├── .agents/
+│   ├── research/                     ← research artifacts (/rad-research output)
+│   ├── architecture/                 ← architecture drafts (/rad-design draft → approved)
 │   ├── plans/                        ← plan artifacts (Gate 1)
 │   ├── logs/                         ← execution logs per plan
 │   ├── findings.jsonl                ← append-only review findings log (written by /rad-review)
@@ -199,8 +206,7 @@ your-project/
 | `docs/wave-execution.md` | How /rad-deliver runs tasks in waves |
 | `docs/platform-support.md` | Git platform configuration and fallbacks |
 | `docs/onboarding.md` | Guide for new team members |
-| `docs/migration-from-rpi.md` | Migrating from rpi-design practitioner template (3 days) |
-| `docs/apply-to-existing.md` | Applying RAD to an existing project with no prior rpi (2–3 weeks) |
+| `docs/apply-to-existing.md` | Applying RAD to an existing project (2–3 weeks) |
 | `docs/12-factor-agents.md` | How RAD maps to 12-Factor Agent principles |
 | `docs/maintaining-claude-md.md` | Keeping CLAUDE.md accurate over time |
 | `.agents/findings/README.md` | Findings log schema, record types, and jq query reference |
