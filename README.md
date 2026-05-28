@@ -97,41 +97,14 @@ branch protection and PR workflow, not command access control.
 
 ## Installation
 
-### 1. Copy commands and agents
-
 ```bash
-cp -r .claude/commands/ /path/to/your-project/.claude/commands/
-cp -r .claude/agents/   /path/to/your-project/.claude/agents/
+git clone https://github.com/torchcodelab/rad-framework /tmp/rad
+bash /tmp/rad/install.sh --dir /path/to/your-project
 ```
 
-### 2. Install scripts
-
-```bash
-cp -r scripts/ /path/to/your-project/scripts/
-chmod +x /path/to/your-project/scripts/*.sh
-```
-
-### 3. Configure git platform
-
-```bash
-scripts/detect-platform.sh  # auto-detects from git remote
-
-# Or set explicitly in CLAUDE.md:
-# platform: github | gitlab | bitbucket | forgejo | manual
-```
-
-### 4. Fill in CLAUDE.md
-
-Open `CLAUDE.md` and complete all sections. The RAD Configuration section
-defines role assignments and platform settings.
-
-### 5. Verify
-
-```
-/rad-status
-```
-
-You should see platform detection, agent count, and role confirmation.
+The installer handles directory structure, commands, scripts, and CLAUDE.md
+scaffolding in one step. See [INSTALL.md](INSTALL.md) for the full guide
+including upgrade and uninstall instructions.
 
 ---
 
