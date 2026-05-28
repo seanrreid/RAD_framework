@@ -88,10 +88,10 @@ get_target() {
 }
 
 validate_target() {
-  TARGET_DIR="$(cd "$TARGET_DIR" && pwd)"
-
   [[ -d "$TARGET_DIR" ]] \
     || error "Directory does not exist: $TARGET_DIR"
+
+  TARGET_DIR="$(cd "$TARGET_DIR" && pwd)"
 
   [[ -d "$TARGET_DIR/.git" ]] \
     || error "$TARGET_DIR is not a git repository. Run 'git init' first."
