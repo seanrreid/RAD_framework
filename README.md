@@ -159,6 +159,7 @@ your-project/
 
 | Doc | Read when |
 |-----|-----------|
+| `INSTALL.md` | Installing, upgrading, or uninstalling RAD |
 | `docs/daily-workflow.md` | Getting started with the team workflow |
 | `docs/architect-guide.md` | Setting up and maintaining the architecture |
 | `docs/plan-pr-guide.md` | How plan PRs work and what to review |

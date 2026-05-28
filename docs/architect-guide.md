@@ -24,8 +24,15 @@ access is enforced by branch protection, not file visibility.
 
 ## Setting up a new project
 
-Project setup is two commands. `/rad-research` can be run by anyone on the
-team. `/rad-design` is typically run by whoever holds the architect role.
+### 0. Install RAD
+
+```bash
+git clone https://github.com/torchcodelab/rad-framework /tmp/rad
+bash /tmp/rad/install.sh --dir /path/to/your-project
+```
+
+Follow the post-install steps in [INSTALL.md](../INSTALL.md): fill in
+`CLAUDE.md`, create platform labels, and commit the installed files.
 
 ### 1. Run /rad-research
 

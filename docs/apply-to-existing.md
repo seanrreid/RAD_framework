@@ -31,7 +31,23 @@ The three-week sequence addresses all three.
 
 The team keeps working normally. You do not introduce RAD yet.
 
-### Step 1: Audit the real codebase
+### Step 1: Install RAD
+
+```bash
+git clone https://github.com/torchcodelab/rad-framework /tmp/rad
+bash /tmp/rad/install.sh --dir /path/to/your-project
+```
+
+Complete the post-install steps in [INSTALL.md](../INSTALL.md), then commit:
+
+```bash
+git add .claude/ .agents/ scripts/ CLAUDE.md
+git commit -m "chore: install RAD framework"
+```
+
+Do not push to the team yet — you'll validate the architecture solo first.
+
+### Step 2: Audit the real codebase
 
 Before running `/rad-research`, understand what you actually have.
 
@@ -55,7 +71,7 @@ Pay attention to:
 - Files nobody has touched → low risk, broader scope is fine
 - Directories that span multiple domains → boundary decisions to make explicit
 
-### Step 2: Run /rad-research, then /rad-design
+### Step 3: Run /rad-research, then /rad-design
 
 ```
 /rad-research [path-to-readme-or-spec]
@@ -88,9 +104,9 @@ find . -name "*.tsx" | head -5  # what's the real pattern?
 
 Request changes to the draft until the scopes match reality.
 
-### Step 3: Validate agents solo for one week
+### Step 4: Validate agents solo for one week
 
-Install the generated agents. Use them yourself on real tasks for a week
+Use the generated agents yourself on real tasks for a week
 before the team sees them.
 
 Run `/rad-plan` on something real. Go through the full loop. Look for:
@@ -113,7 +129,7 @@ developer actually needs for routine work. Demote it to `developer`.
 Fix issues in the `.claude/agents/*.md` files directly. This week of solo
 validation is the highest-leverage time investment in the whole migration.
 
-### Step 4: Write an accurate CLAUDE.md
+### Step 5: Write an accurate CLAUDE.md
 
 Write CLAUDE.md last — after the audit, not before. Verify every fact:
 

@@ -20,10 +20,25 @@ Architect:  [merges code PR]       ← feature ships
 
 ## Starting a new project
 
-Project setup is a two-step process. Either step can be done by anyone on
-the team, but `/rad-design` is typically run by whoever holds the architect role.
+### Step 1: Install RAD
 
-### Step 1: Research
+```bash
+git clone https://github.com/torchcodelab/rad-framework /tmp/rad
+bash /tmp/rad/install.sh --dir /path/to/your-project
+```
+
+This copies all commands, scripts, and directory structure into your project.
+See [INSTALL.md](../INSTALL.md) for the full guide including post-install
+platform setup and label creation.
+
+Commit the installed files before proceeding:
+
+```bash
+git add .claude/ .agents/ scripts/ CLAUDE.md
+git commit -m "chore: install RAD framework"
+```
+
+### Step 2: Research
 
 ```
 /rad-research [path-to-prd or issue-url]
@@ -33,7 +48,7 @@ Point it at your PRD, a GitHub/GitLab issue, or paste a spec inline.
 It asks a few RAD-specific clarifying questions — team roles, platform,
 domain sensitivity — and writes `.agents/research/[slug].md`.
 
-### Step 2: Design
+### Step 3: Design
 
 ```
 /rad-design [slug]
@@ -42,16 +57,16 @@ domain sensitivity — and writes `.agents/research/[slug].md`.
 Reads the research artifact and drafts the agent hierarchy to
 `.agents/architecture/[slug].md` with `Status: draft`. Review the draft,
 edit role assignments or scope boundaries as needed, then change the status
-to `approved` and re-run `/rad-design [slug]` to generate the agent files.
+to `approved` and re-run `/rad-design [slug]` to generate the agent files
+directly into `.claude/agents/`.
 
-Then install the agents into the project:
+Commit everything — the generated agents are the architecture:
 
 ```bash
-cp -r .claude/agents/ /path/to/project/.claude/agents/
+git add .claude/agents/ .agents/research/ .agents/architecture/ CLAUDE.md
+git commit -m "chore: initialize RAD agent architecture"
+git push
 ```
-
-Commit the agent files and the research/architecture artifacts. They are the
-architecture — they belong in version control.
 
 ---
 
