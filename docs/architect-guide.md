@@ -9,20 +9,16 @@ maintaining agent boundaries, and operating the two approval gates.
 
 You have everything the team has, plus:
 
-| Command | Install location | Purpose |
-|---------|-----------------|---------|
-| `/rad-design` | `~/.claude/commands/` | Draft and generate agent architecture |
-| `/rad-approve` | `~/.claude/commands/` | Review and approve plan PRs |
-| All team commands | Project `.claude/commands/` | Research, plan, deliver, review, status |
-| `/rad-insights` | Shared (project + global) | Review pattern analysis across cycles |
+| Command | Purpose |
+|---------|---------|
+| `/rad-design` | Draft and generate agent architecture |
+| `/rad-approve` | Review and approve plan PRs |
+| All team commands | Research, plan, deliver, review, status |
+| `/rad-insights` | Review pattern analysis across cycles |
 
-Install architect commands to your global Claude Code config:
-```bash
-cp .claude/commands/architect/* ~/.claude/commands/
-```
-
-These are global — they follow you across all RAD projects. Team commands stay
-in the project `.claude/commands/` and are committed to the repo.
+All commands are committed to the project repo alongside team commands — no
+global install needed. The `architect/` subdirectory signals responsibility;
+access is enforced by branch protection, not file visibility.
 
 ---
 

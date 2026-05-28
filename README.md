@@ -82,65 +82,51 @@ The plan linter enforces a **context budget** on the Files in Scope table:
 
 ## Role Structure
 
-| Role | Commands | Access |
-|------|----------|--------|
-| Architect | All commands + `/rad-design`, `/rad-approve` | Defines agent boundaries, approves plans, merges PRs |
-| Developer | `/rad-research`, `/rad-plan`, `/rad-adopt`, `/rad-deliver`, `/rad-review`, `/accessibility-review`, `/quality-review` | Research, plan, and execute within boundaries |
+| Role | Commands | Responsibility |
+|------|----------|----------------|
+| Architect | All commands | Defines agent boundaries, approves plans, merges PRs |
+| Developer | `/rad-research`, `/rad-plan`, `/rad-adopt`, `/rad-deliver`, `/rad-review` | Research, plan, and execute within boundaries |
 | Designer | `/rad-research`, `/rad-plan`, `/rad-adopt`, `/rad-deliver` | UI-scoped research, planning, and execution |
 | All roles | `/rad-status`, `/rad-insights` | Team dashboard and review pattern analysis |
 
-Install architect commands from `.claude/commands/architect/` to `~/.claude/commands/`.
-Install team commands from `.claude/commands/team/` to the project's `.claude/commands/`.
+All commands are committed to the project repo. The `architect/` subdirectory
+signals which commands carry architect-level responsibility — enforcement is via
+branch protection and PR workflow, not command access control.
 
 ---
 
 ## Installation
 
-### 1. Copy agent definitions
+### 1. Copy commands and agents
 
 ```bash
-cp -r .claude/agents/ /path/to/your-project/.claude/agents/
+cp -r .claude/commands/ /path/to/your-project/.claude/commands/
+cp -r .claude/agents/   /path/to/your-project/.claude/agents/
 ```
 
-### 2. Install architect commands (your machine only)
+### 2. Install scripts
 
 ```bash
-cp .claude/commands/architect/* ~/.claude/commands/
-cp .claude/commands/shared/* ~/.claude/commands/
-```
-
-### 3. Install team commands (project-level, committed to repo)
-
-```bash
-cp .claude/commands/team/* /path/to/your-project/.claude/commands/
-cp .claude/commands/shared/* /path/to/your-project/.claude/commands/
-```
-
-### 4. Install scripts
-
-```bash
-cp scripts/* /path/to/your-project/scripts/
+cp -r scripts/ /path/to/your-project/scripts/
 chmod +x /path/to/your-project/scripts/*.sh
 ```
 
-### 5. Configure git platform
+### 3. Configure git platform
 
 ```bash
-# GitHub (default)
 scripts/detect-platform.sh  # auto-detects from git remote
 
 # Or set explicitly in CLAUDE.md:
-# git_platform: github | gitlab | bitbucket | forgejo | manual
+# platform: github | gitlab | bitbucket | forgejo | manual
 ```
 
-### 6. Fill in CLAUDE.md
+### 4. Fill in CLAUDE.md
 
-Open `CLAUDE.md` and complete all sections. Pay particular attention to
-the RAD Configuration section — it defines role boundaries and platform settings.
+Open `CLAUDE.md` and complete all sections. The RAD Configuration section
+defines role assignments and platform settings.
 
-### 7. Verify
+### 5. Verify
 
-In Claude Code, run:
 ```
 /rad-status
 ```
