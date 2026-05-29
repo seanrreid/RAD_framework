@@ -1,7 +1,7 @@
 # Plan: Fix open-pr.sh label handling (issue #2)
 Created: 2026-05-29
 Author: developer
-Status: approved
+Status: in-progress
 Branch: rad/fix-open-pr-labels
 Approved-By: Sean R Reid
 Approved-At: 2026-05-29T00:00:00Z
