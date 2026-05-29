@@ -134,7 +134,7 @@ If a task fails validation, `/rad-deliver` stops:
 Options:
   1. Fix and retry this task
   2. Update the plan for this task and retry
-  3. Stop — open a blocking issue on the plan PR
+  3. Stop — mark the plan blocked and flag the architect
 ```
 
 The plan task for Task 1.1 should have exported the model. Go back and fix
@@ -168,7 +168,7 @@ The log at `.agents/logs/[feature]-[date].md` records every step:
 # Execution Log: Add Planned Absences
 Plan: .agents/plans/add-planned-absences.md
 Started: 2025-03-04T14:23:00
-Branch: deliver/add-planned-absences
+Branch: rad/add-planned-absences
 
 ## Steps
 

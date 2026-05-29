@@ -3,18 +3,29 @@
 RAD works with any git platform. GitHub is the default with full CLI automation.
 Other platforms degrade gracefully to manual mode.
 
+RAD opens exactly one PR per feature: the **deliver PR**, created by
+`open-pr.sh` from the feature's `rad/[feature]` work branch to the default
+branch. There is no plan PR — `/rad-approve` records `Status: approved` on the
+`rad/` branch tip, and `check-plan-approved.sh` reads that approval directly
+with `git show`, so the approval check is platform-agnostic and needs no
+`gh`/`glab` PR-merge lookup.
+
 ---
 
 ## Supported platforms
 
-| Platform | PR automation | Approval check | Status |
-|----------|--------------|----------------|--------|
-| GitHub | ✅ Full (`gh` CLI) | ✅ Automatic | Default |
-| GitLab | ✅ Full (`glab` CLI) | ✅ Automatic | Supported |
-| Bitbucket | ⚠️ Manual instructions | ⚠️ Local git check | Partial |
-| Forgejo / Gitea | ⚠️ `tea` CLI if available | ⚠️ Local git check | Partial |
-| Self-hosted GitLab | ✅ Full (`glab` CLI) | ✅ Automatic | Supported |
-| Any other | ⚠️ Manual instructions | ⚠️ Local git check | Manual |
+"PR automation" below refers to the deliver PR — the only PR in the flow.
+The approval check is platform-agnostic everywhere: `check-plan-approved.sh`
+reads `Status: approved` from the `rad/` branch tip with `git show`.
+
+| Platform | Deliver PR automation | Approval check | Status |
+|----------|----------------------|----------------|--------|
+| GitHub | ✅ Full (`gh` CLI) | ✅ `git show` on branch tip | Default |
+| GitLab | ✅ Full (`glab` CLI) | ✅ `git show` on branch tip | Supported |
+| Bitbucket | ⚠️ Manual instructions | ✅ `git show` on branch tip | Partial |
+| Forgejo / Gitea | ⚠️ `tea` CLI if available | ✅ `git show` on branch tip | Partial |
+| Self-hosted GitLab | ✅ Full (`glab` CLI) | ✅ `git show` on branch tip | Supported |
+| Any other | ⚠️ Manual instructions | ✅ `git show` on branch tip | Manual |
 
 ---
 
@@ -38,22 +49,33 @@ gh auth login
 
 ### Labels setup
 
-Create these labels in your repo before first use:
+Create these labels in your repo before first use. The deliver PR carries
+`rad:deliver`; the `rad:` status labels mirror the plan doc's `Status:` and are
+applied best-effort by `scripts/rad-label.sh` (a no-op when `gh` is absent):
 ```bash
-gh label create "rad:plan" --color "0075ca" --description "RAD plan PR"
-gh label create "rad:pending-review" --color "e4e669" --description "Awaiting architect review"
 gh label create "rad:deliver" --color "0e8a16" --description "RAD delivery PR"
-gh label create "rad:changes-requested" --color "d93f0b" --description "Changes requested on plan"
+gh label create "rad:draft" --color "ededed" --description "Plan is a draft"
+gh label create "rad:pending-review" --color "e4e669" --description "Plan awaiting review"
+gh label create "rad:needs-revision" --color "d93f0b" --description "Plan needs revision"
+gh label create "rad:rejected" --color "b60205" --description "Plan rejected"
+gh label create "rad:approved" --color "0e8a16" --description "Plan approved"
+gh label create "rad:in-progress" --color "1d76db" --description "Delivery in progress"
+gh label create "rad:review" --color "fbca04" --description "Deliver PR in review"
+gh label create "rad:done" --color "5319e7" --description "Feature delivered"
 ```
 
 ### Branch protection (recommended)
 
-Protect `main` to enforce the gatekeeper role:
+Protect your default branch to enforce the gatekeeper role. Lane B keeps the
+plan and its approval entirely on the feature's `rad/[feature]` branch, so the
+only thing that ever merges to the protected default branch is the reviewed
+deliver PR — contributors never push directly to it:
 ```bash
-# Require PR reviews before merging
+# Require PR reviews before merging (the deliver PR)
 # Require status checks to pass
-# Restrict who can push directly to main (architect only)
-gh api repos/:owner/:repo/branches/main/protection \
+# Restrict who can push directly to the default branch (architect only)
+DEFAULT_BRANCH=$(scripts/get-default-branch.sh)
+gh api "repos/:owner/:repo/branches/$DEFAULT_BRANCH/protection" \
   --method PUT \
   --field required_pull_request_reviews='{"required_approving_review_count":1}' \
   --field enforce_admins=false
@@ -81,10 +103,15 @@ glab auth login
 ### Labels setup
 
 ```bash
-glab label create "rad:plan" --color "#0075ca" --description "RAD plan MR"
-glab label create "rad:pending-review" --color "#e4e669" --description "Awaiting architect review"
 glab label create "rad:deliver" --color "#0e8a16" --description "RAD delivery MR"
-glab label create "rad:changes-requested" --color "#d93f0b" --description "Changes requested"
+glab label create "rad:draft" --color "#ededed" --description "Plan is a draft"
+glab label create "rad:pending-review" --color "#e4e669" --description "Plan awaiting review"
+glab label create "rad:needs-revision" --color "#d93f0b" --description "Plan needs revision"
+glab label create "rad:rejected" --color "#b60205" --description "Plan rejected"
+glab label create "rad:approved" --color "#0e8a16" --description "Plan approved"
+glab label create "rad:in-progress" --color "#1d76db" --description "Delivery in progress"
+glab label create "rad:review" --color "#fbca04" --description "Deliver MR in review"
+glab label create "rad:done" --color "#5319e7" --description "Feature delivered"
 ```
 
 ### Self-hosted GitLab
@@ -103,30 +130,27 @@ glab auth login --hostname git.yourcompany.com
 
 Bitbucket's CLI (`bb`) has limited functionality. RAD uses manual mode for Bitbucket.
 
-When `/rad-plan` completes, it will output:
+When `/rad-deliver` completes, it will output:
 ```
 ┌─────────────────────────────────────────────────────┐
 │  Manual PR Creation Required                        │
 └─────────────────────────────────────────────────────┘
 
-Branch pushed: plan/feature-name
-Target:        main
+Branch pushed: rad/feature-name
+Target:        <default branch>
 
-Title: Plan: Feature Name
+Title: Deliver: Feature Name
 
-Open a PR at: https://bitbucket.org/your-org/your-repo/pull-requests/new?source=plan/feature-name
+Open a PR at: https://bitbucket.org/your-org/your-repo/pull-requests/new?source=rad/feature-name
 
 After creating the PR, paste the URL here so it can be
 recorded in the plan file.
 ```
 
-The approval check falls back to local git:
-```bash
-git fetch origin main
-git branch -r --merged origin/main | grep plan/feature-name
-```
-
-This correctly detects merge status but requires a recent `git fetch`.
+The approval check (Gate 1) needs no PR on any platform:
+`check-plan-approved.sh` runs `git show` against the `rad/` branch tip to read
+the plan doc's `Status: approved`. Only the deliver PR (Gate 2) requires the
+manual creation step above.
 
 ---
 
@@ -150,9 +174,12 @@ Set `platform: manual` in `CLAUDE.md` to always use manual mode, regardless
 of what platform is detected.
 
 Manual mode:
-- `/rad-plan` prints PR creation instructions instead of opening the PR
-- After you manually create the PR, paste the URL and it's recorded in the plan
-- `check-plan-approved.sh` uses local git to detect merge status
+- `/rad-deliver` prints deliver-PR creation instructions instead of opening
+  the PR (this is the only PR in the flow)
+- After you manually create the deliver PR, paste the URL and it's recorded
+  in the plan
+- `check-plan-approved.sh` reads `Status: approved` from the `rad/` branch tip
+  with `git show` — the same platform-agnostic check used everywhere
 - All other RAD functionality works identically
 
 Manual mode is useful for:

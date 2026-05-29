@@ -5,7 +5,7 @@
 # Usage:
 #   ./install.sh                        # interactive — prompts for target directory
 #   ./install.sh --dir /path/to/project # non-interactive target
-#   ./install.sh --upgrade              # update commands + scripts, skip user data
+#   ./install.sh --upgrade              # update commands + skills + scripts, skip user data
 #   ./install.sh --yes                  # accept all defaults without prompting
 #
 # On upgrade, CLAUDE.md, .claude/agents/, and .agents/ content are never overwritten.
@@ -107,6 +107,7 @@ create_dirs() {
 
   local dirs=(
     ".claude/commands"
+    ".claude/skills"
     ".claude/agents"
     ".agents/research"
     ".agents/architecture"
@@ -133,12 +134,22 @@ copy_commands() {
   info "shared/    — rad-status, rad-insights"
 }
 
+copy_skills() {
+  header "Installing skills"
+
+  cp -r "$RAD_DIR/.claude/skills/." "$TARGET_DIR/.claude/skills/"
+  success "Skills → .claude/skills/"
+  info "kickoff — /kickoff session-start ritual"
+  info "wrap    — /wrap session-end ritual"
+}
+
 copy_scripts() {
   header "Installing scripts"
 
   cp "$RAD_DIR/scripts/"*.sh "$TARGET_DIR/scripts/"
   chmod +x "$TARGET_DIR/scripts/"*.sh
   success "Scripts → scripts/"
+  info "includes get-default-branch.sh, checkout-plan.sh, rad-label.sh"
 }
 
 copy_agents_meta() {
@@ -224,10 +235,9 @@ print_next_steps() {
   echo "     Open $TARGET_DIR/CLAUDE.md and complete every section."
   echo "     Pay particular attention to the RAD Configuration section."
   echo ""
-  echo "  2. Create platform labels (GitHub example)"
-  echo "     gh label create 'rad:plan'           --color '0075ca' --description 'RAD plan PR'"
-  echo "     gh label create 'rad:pending-review'  --color 'e4e669' --description 'Awaiting architect review'"
-  echo "     gh label create 'rad:deliver'          --color '0e8a16' --description 'RAD delivery PR'"
+  echo "  2. Create the deliver-PR label (GitHub example)"
+  echo "     gh label create 'rad:deliver' --color '0e8a16' --description 'RAD delivery PR'"
+  echo "     (rad:<status> labels are auto-created on first use by scripts/rad-label.sh)"
   echo ""
   echo "  3. Commit the RAD files"
   echo "     git add .claude/ .agents/ scripts/ CLAUDE.md"
@@ -262,6 +272,7 @@ main() {
 
   create_dirs
   copy_commands
+  copy_skills
   copy_scripts
   copy_agents_meta
   scaffold_claude_md

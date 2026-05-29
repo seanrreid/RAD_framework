@@ -64,6 +64,9 @@ your-project/
 │       └── shared/
 │           ├── rad-status.md         → /rad-status
 │           └── rad-insights.md       → /rad-insights
+│   └── skills/
+│       ├── kickoff/SKILL.md          → /kickoff
+│       └── wrap/SKILL.md             → /wrap
 ├── .agents/
 │   ├── research/                     ← /rad-research output
 │   ├── architecture/                 ← /rad-design drafts
@@ -72,12 +75,18 @@ your-project/
 │   └── findings/                     ← /rad-review findings log
 └── scripts/
     ├── detect-platform.sh
+    ├── get-default-branch.sh
+    ├── checkout-plan.sh
+    ├── rad-label.sh
     ├── open-pr.sh
     ├── check-plan-approved.sh
     ├── check-scope.sh
     ├── lint-plan.sh
     └── rad-status.sh
 ```
+
+The installer also copies the RAD skills into `.claude/skills/` (`kickoff/` and
+`wrap/`, providing `/kickoff` and `/wrap`) alongside all `scripts/*.sh` helpers.
 
 `.claude/agents/` is not populated at install time — the architecture process
 (`/rad-research` → `/rad-design`) generates those files for your specific project.
@@ -93,26 +102,32 @@ is critical — it defines your platform, team roles, and branch conventions.
 
 ### 2. Create platform labels
 
+There is no plan PR in RAD (the old `rad:plan` label is gone) — the only PR is the
+deliver PR, so the only label you must create up front is `rad:deliver`. The
+`rad:<status>` board labels (`rad:draft`, `rad:pending-review`, `rad:approved`,
+`rad:in-progress`, `rad:review`, `rad:done`, …) are created automatically on first
+use by `scripts/rad-label.sh`, so you do not need to pre-create them.
+
 **GitHub:**
 ```bash
-gh label create 'rad:plan'            --color '0075ca' --description 'RAD plan PR'
-gh label create 'rad:pending-review'  --color 'e4e669' --description 'Awaiting architect review'
-gh label create 'rad:deliver'         --color '0e8a16' --description 'RAD delivery PR'
+gh label create 'rad:deliver' --color '0e8a16' --description 'RAD delivery PR'
+# rad:<status> labels are auto-created by scripts/rad-label.sh on first use.
 ```
 
 **GitLab:**
 ```bash
-glab label create 'rad:plan'           --color '#0075ca'
-glab label create 'rad:pending-review' --color '#e4e669'
-glab label create 'rad:deliver'        --color '#0e8a16'
+glab label create 'rad:deliver' --color '#0e8a16'
+# rad:<status> labels are auto-created by scripts/rad-label.sh on first use.
 ```
 
 ### 3. Set up branch protection (recommended)
 
-Protect `main` so only designated architects can merge. This is what enforces
-the approval gates — not command access.
+Protect your default branch (the one set as `default_branch:` in CLAUDE.md) so
+only designated architects can merge. This is what enforces the Gate 2 deliver
+PR review — not command access. Keeping the default branch protected is also why
+RAD routes the plan doc through the deliver PR rather than committing it directly.
 
-**GitHub:**
+**GitHub** (replace `main` with your default branch):
 ```bash
 gh api repos/:owner/:repo/branches/main/protection \
   --method PUT \
@@ -147,9 +162,9 @@ When a new version of RAD is available, re-run the installer with `--upgrade`:
 bash /tmp/rad/install.sh --dir /path/to/your-project --upgrade
 ```
 
-The upgrade overwrites `.claude/commands/` and `scripts/`, and never touches
-`CLAUDE.md`, `.claude/agents/`, or `.agents/` content. It works whether or not
-the project was originally set up with the installer.
+The upgrade overwrites `.claude/commands/`, `.claude/skills/`, and `scripts/`,
+and never touches `CLAUDE.md`, `.claude/agents/`, or `.agents/` content. It works
+whether or not the project was originally set up with the installer.
 
 See **[UPGRADE.md](UPGRADE.md)** for the full guide, including upgrading
 projects that didn't use the installer, a manual upgrade path, and how local
@@ -162,7 +177,7 @@ edits are handled.
 RAD has no daemon or global state. To remove it from a project:
 
 ```bash
-rm -rf .claude/commands/ scripts/
+rm -rf .claude/commands/ .claude/skills/ scripts/
 rm -rf .agents/research/ .agents/architecture/ .agents/plans/ .agents/logs/ .agents/findings/
 rm CLAUDE.md
 git add -A
