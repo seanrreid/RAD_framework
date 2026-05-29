@@ -47,10 +47,13 @@ ADOPTED_FROM=$(header_field "Adopted-From")
 
 # Branch (Lane B work branch). Missing is a warning (older/migrated plans);
 # a present-but-malformed value is an error since /rad-deliver gates on it.
+# Use a literal prefix test (not regex) so a custom RAD_BRANCH_PREFIX with regex
+# metacharacters can't break validation; the slug after the prefix is then
+# checked against the allowed character set.
 PREFIX="${RAD_BRANCH_PREFIX:-rad/}"
 if [[ -z "$BRANCH" ]]; then
   WARNINGS+=("Missing Branch field — Lane B plans should record their work branch (e.g. ${PREFIX}feature-slug)")
-elif [[ ! "$BRANCH" =~ ^${PREFIX}[a-z0-9][a-z0-9-]*$ ]]; then
+elif [[ "$BRANCH" != "${PREFIX}"* || ! "${BRANCH#"$PREFIX"}" =~ ^[a-z0-9][a-z0-9-]*$ ]]; then
   ERRORS+=("Invalid Branch value: '$BRANCH' (expected ${PREFIX}feature-slug, lowercase/digits/hyphens)")
 fi
 

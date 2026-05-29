@@ -24,14 +24,21 @@ BASE_BRANCH="${3:-$("$SCRIPT_DIR/get-default-branch.sh" 2>/dev/null || echo main
 [[ ! -f "$PLAN_FILE" ]]    && { echo "ERROR: plan file not found: $PLAN_FILE"; exit 2; }
 
 # ── Build declared scope set ──────────────────────────────────────────────────
+# Newline-delimited list rather than an associative array, so this runs on
+# bash 3.2 (macOS stock) as well as bash 4+. Membership is an exact line match.
 
-declare -A SCOPE
+SCOPE_LIST=""
+
+scope_add() {
+  # Append a path if non-empty; dedup is unnecessary (membership test is exact).
+  [[ -n "$1" ]] && SCOPE_LIST="${SCOPE_LIST}${1}"$'\n'
+}
 
 # Files from ## Files in Scope table (column 2)
 while IFS= read -r path; do
   path=$(echo "$path" | tr -d '[:space:]')
   [[ -z "$path" || "$path" == "[path]" || "$path" == "File" ]] && continue
-  SCOPE["$path"]=1
+  scope_add "$path"
 done < <(
   awk '/^## Files in Scope/{found=1; next} /^## /{found=0} found && /^\|/' "$PLAN_FILE" \
     | grep -v "^| *File\|^|[-| ]*$" \
@@ -43,7 +50,7 @@ while IFS= read -r line; do
   # Format: - [ ] description — path/to/test_file.ext
   if [[ "$line" =~ —[[:space:]]+([^[:space:]].+)$ ]]; then
     testfile=$(echo "${BASH_REMATCH[1]}" | tr -d '[:space:]')
-    [[ -n "$testfile" ]] && SCOPE["$testfile"]=1
+    scope_add "$testfile"
   fi
 done < <(
   awk '/^## Tests to Write/{found=1; next} /^## /{found=0} found && /^- /' "$PLAN_FILE"
@@ -86,12 +93,13 @@ while IFS= read -r file; do
 
   # Check declared scope (exact match or prefix match for directories)
   declared=false
-  for declared_path in "${!SCOPE[@]}"; do
+  while IFS= read -r declared_path; do
+    [[ -z "$declared_path" ]] && continue
     if [[ "$file" == "$declared_path" || "$file" == "$declared_path/"* ]]; then
       declared=true
       break
     fi
-  done
+  done <<< "$SCOPE_LIST"
 
   if $declared; then
     IN_SCOPE+=("$file")
@@ -117,10 +125,12 @@ for f in "${OUT_OF_SCOPE[@]}"; do
   echo "  ✗ $f"
 done
 echo ""
-echo "Declared scope (${#SCOPE[@]} paths):"
-for p in "${!SCOPE[@]}"; do
+SCOPE_COUNT=$(printf '%s' "$SCOPE_LIST" | grep -c . || true)
+echo "Declared scope (${SCOPE_COUNT} paths):"
+while IFS= read -r p; do
+  [[ -z "$p" ]] && continue
   echo "  · $p"
-done
+done <<< "$SCOPE_LIST"
 echo ""
 echo "Out-of-scope changes require architect approval before this PR can merge."
 exit 1
