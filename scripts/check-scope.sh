@@ -41,7 +41,7 @@ while IFS= read -r path; do
   scope_add "$path"
 done < <(
   awk '/^## Files in Scope/{found=1; next} /^## /{found=0} found && /^\|/' "$PLAN_FILE" \
-    | grep -v "^| *File\|^|[-| ]*$" \
+    | grep -v "^| *File" | grep -v "^|[-| ]*$" \
     | awk -F'|' '{print $2}'
 )
 
@@ -49,7 +49,8 @@ done < <(
 while IFS= read -r line; do
   # Format: - [ ] description — path/to/test_file.ext
   if [[ "$line" =~ —[[:space:]]+([^[:space:]].+)$ ]]; then
-    testfile=$(echo "${BASH_REMATCH[1]}" | tr -d '[:space:]')
+    # Strip Markdown backticks as well as whitespace (authors often wrap the path).
+    testfile=$(echo "${BASH_REMATCH[1]}" | tr -d '[:space:]`')
     scope_add "$testfile"
   fi
 done < <(

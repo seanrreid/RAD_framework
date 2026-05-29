@@ -207,6 +207,29 @@ detect_and_report_platform() {
   esac
 }
 
+# ── Deliver-PR label ──────────────────────────────────────────────────────────
+
+ensure_deliver_label() {
+  header "Deliver-PR label"
+
+  # Best-effort: create the rad:deliver label up front so the first /rad-deliver
+  # PR doesn't fail with "label not found". No-op when gh is unavailable or
+  # unauthenticated (the printed next-steps cover the manual case).
+  if ! command -v gh >/dev/null 2>&1 || ! gh auth status >/dev/null 2>&1; then
+    warn "gh unavailable — create the 'rad:deliver' label manually (see next steps)"
+    return
+  fi
+
+  # Idempotent: `gh label create` exits non-zero if the label already exists, which
+  # is fine — either outcome leaves the label present, and neither fails the install.
+  if (cd "$TARGET_DIR" && gh label create rad:deliver --color 0e8a16 \
+        --description "RAD delivery PR" >/dev/null 2>&1); then
+    success "Created label 'rad:deliver'"
+  else
+    success "Label 'rad:deliver' already present (or could not be created — see next steps)"
+  fi
+}
+
 # ── Next steps ────────────────────────────────────────────────────────────────
 
 print_next_steps() {
@@ -277,6 +300,7 @@ main() {
   copy_agents_meta
   scaffold_claude_md
   detect_and_report_platform
+  ensure_deliver_label
   print_next_steps
 }
 

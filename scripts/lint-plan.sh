@@ -143,7 +143,7 @@ if has_section "Files in Scope"; then
     fi
   done < <(
     awk '/^## Files in Scope/{found=1; next} /^## /{found=0} found && /^\|/' "$PLAN_FILE" \
-      | grep -v "^| *File\|^|[-| ]*$" \
+      | grep -v "^| *File" | grep -v "^|[-| ]*$" \
       | awk -F'|' '{print $2}'
   )
 fi
@@ -169,7 +169,7 @@ if has_section "Files in Scope"; then
     fi
   done < <(
     awk '/^## Files in Scope/{found=1; next} /^## /{found=0} found && /^\|/' "$PLAN_FILE" \
-      | grep -v "^| *File\|^|[-| ]*$" \
+      | grep -v "^| *File" | grep -v "^|[-| ]*$" \
       | awk -F'|' '{print $3}'
   )
 
@@ -198,7 +198,7 @@ if has_section "Execution Notes" && has_section "Files in Scope"; then
       fi
     done < <(
       awk '/^## Files in Scope/{found=1; next} /^## /{found=0} found && /^\|/' "$PLAN_FILE" \
-        | grep -v "^| *File\|^|[-| ]*$" | awk -F'|' '{print $2}'
+        | grep -v "^| *File" | grep -v "^|[-| ]*$" | awk -F'|' '{print $2}'
     )
   done < <(
     awk '/^### Do Not Touch/{found=1; next} /^### /{found=0} found && /^- /' "$PLAN_FILE"
