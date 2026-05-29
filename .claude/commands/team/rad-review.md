@@ -14,10 +14,12 @@ problems early — better to find them now than in the architect's review.
 ## Input
 
 `$ARGUMENTS` (optional): specific files to review. If empty, reviews all
-changes on the current branch since branching from main.
+changes on the current `rad/[feature]` branch since it diverged from the default
+branch.
 
 ```bash
-git diff main...HEAD --name-only
+BASE=$(scripts/get-default-branch.sh)
+git diff "$BASE"...HEAD --name-only
 ```
 
 ---
@@ -27,9 +29,10 @@ git diff main...HEAD --name-only
 ### Step 1: Load context
 
 - Read `CLAUDE.md` conventions and constraints
-- Read the plan file for this deliver branch:
+- Read the plan file for this work branch:
   ```bash
-  FEATURE=$(git branch --show-current | sed 's/deliver\///')
+  BASE=$(scripts/get-default-branch.sh)
+  FEATURE=$(git branch --show-current | sed 's#^rad/##')
   PLAN=".agents/plans/$FEATURE.md"
   ```
 - Read the execution log:
@@ -40,7 +43,7 @@ git diff main...HEAD --name-only
 ### Step 2: Scope check
 
 ```bash
-scripts/check-scope.sh "$PLAN" deliver/[feature] main
+scripts/check-scope.sh "$PLAN" "rad/$FEATURE" "$BASE"
 ```
 
 The script outputs each changed file as in-scope or out-of-scope. Include its
@@ -53,12 +56,22 @@ For each task in the plan, verify the implementation matches the description:
 - Does it do what the task described — no more, no less?
 - Were non-goals respected?
 
+### Step 3b: Acceptance Criteria coverage
+
+Iterate over every item in the plan's `## Acceptance Criteria` list. For each
+`AC#N`, verify at least one Wave task's `Validate:` field cites it. Any AC with
+no citing task is **HIGH priority** — the plan declared an outcome that no task
+delivers. List every uncovered AC by number.
+
+(If the plan predates the AC schema and has no `## Acceptance Criteria` section,
+note that and skip — do not fabricate criteria.)
+
 ### Step 4: Quality review
 
 Spawn the `quality-reviewer` agent on the changed files:
 
 ```
-Use the quality-reviewer agent on all files changed since branching from main.
+Use the quality-reviewer agent on all files changed since branching from the default branch.
 ```
 
 Include the agent's full output in the review report. Promote any HIGH findings
@@ -69,7 +82,7 @@ to blocking issues in the summary.
 Spawn the `accessibility-reviewer` agent on changed frontend files:
 
 ```
-Use the accessibility-reviewer agent on all files changed since branching from main.
+Use the accessibility-reviewer agent on all files changed since branching from the default branch.
 ```
 
 Include the agent's full output. HIGH findings are blocking; MEDIUM findings
@@ -90,7 +103,7 @@ priority. For present test files, also verify:
 
 ```markdown
 ## Self-Review: [Feature Name]
-Branch: deliver/[feature-name]
+Branch: rad/[feature-name]
 Date: [timestamp]
 Files reviewed: [N]
 
@@ -100,6 +113,9 @@ Files reviewed: [N]
 ### Plan Fidelity
 [✓ Implementation matches plan | Issues found:]
 - [issue] — [file:line]
+
+### Acceptance Criteria Coverage
+[✓ All ACs covered by tasks | ✗ Uncovered (HIGH): AC#[N], AC#[M]]
 
 ### Conventions
 **Priority: HIGH**
@@ -132,7 +148,7 @@ outputs. Combine with cycle metadata and append to `.agents/findings.jsonl`.
 Get cycle metadata:
 
 ```bash
-FEATURE=$(git branch --show-current | sed 's/deliver\///')
+FEATURE=$(git branch --show-current | sed 's#^rad/##')
 DATE=$(date +%Y-%m-%d)
 CYCLE_ID="${FEATURE}-${DATE}"
 ```
@@ -159,6 +175,7 @@ Append — never overwrite. Create the file if it does not exist.
 
 - Do not fix issues — report them with file:line references
 - Out-of-scope changes are always HIGH priority — no exceptions
+- An acceptance criterion with no task delivering it is always HIGH priority
 - HIGH issues block architect review — fix them first
 - Do not flag style preferences not in `CLAUDE.md`
 - If a test is missing, it is a HIGH priority issue — tests are not optional
