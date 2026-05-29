@@ -34,21 +34,61 @@ cli_available() {
 
 # ── Plan inventory ────────────────────────────────────────────────────────────
 
+# Parse one plan doc (content on stdin) into a board row, keyed by feature slug.
+# Under Lane B, in-flight plans live on their rad/ branch tip — not the working
+# tree — so the board aggregates from branch tips first. The first source to set
+# a feature wins (branch tip > merged on default branch > local working tree).
+
+PREFIX="${RAD_BRANCH_PREFIX:-rad/}"
+declare -A PLAN_ROW
+
+emit_plan_row() {
+  # $1 = feature slug, $2 = source label, content on stdin
+  local feature="$1" source="$2" content status author waves tasks adopted_from
+  [[ -n "${PLAN_ROW[$feature]:-}" ]] && return 0   # higher-priority source already won
+  content=$(cat)
+
+  status=$(printf '%s\n' "$content"       | grep "^Status:"       | head -1 | awk '{print $2}' || echo "unknown")
+  author=$(printf '%s\n' "$content"       | grep "^Author:"       | head -1 | sed 's/^Author:[[:space:]]*//' || echo "")
+  adopted_from=$(printf '%s\n' "$content" | grep "^Adopted-From:" | head -1 | sed 's/^Adopted-From:[[:space:]]*//' || echo "")
+  waves=$(printf '%s\n' "$content"        | grep -c "^### Wave"  || echo "0")
+  tasks=$(printf '%s\n' "$content"        | grep -c "^#### Task" || echo "0")
+
+  PLAN_ROW[$feature]="$feature|${status:-unknown}|$author|$waves|$tasks|$source|$adopted_from"
+}
+
 collect_plans() {
-  local plans_dir=".agents/plans"
-  [[ ! -d "$plans_dir" ]] && return
+  local base ref branch feature path
 
-  find "$plans_dir" -name "*.md" ! -name "README.md" | sort | while read -r plan_file; do
-    local feature status author waves tasks pr adopted_from
-    feature=$(basename "$plan_file" .md)
-    status=$(grep   "^Status:"       "$plan_file" 2>/dev/null | head -1 | awk '{print $2}' || echo "unknown")
-    author=$(grep   "^Author:"       "$plan_file" 2>/dev/null | head -1 | sed 's/^Author:[[:space:]]*//' || echo "")
-    pr=$(grep       "^PR:"           "$plan_file" 2>/dev/null | head -1 | sed 's/^PR:[[:space:]]*//' || echo "")
-    adopted_from=$(grep "^Adopted-From:" "$plan_file" 2>/dev/null | head -1 | sed 's/^Adopted-From:[[:space:]]*//' || echo "")
-    waves=$(grep -c "^### Wave"      "$plan_file" 2>/dev/null || echo "0")
-    tasks=$(grep -c "^#### Task"     "$plan_file" 2>/dev/null || echo "0")
+  # 1. In-flight: one plan per rad/ branch tip on origin (canonical).
+  while read -r ref; do
+    [[ -z "$ref" ]] && continue
+    branch="${ref#origin/}"
+    feature="${branch#"$PREFIX"}"
+    git show "origin/${branch}:.agents/plans/${feature}.md" 2>/dev/null \
+      | emit_plan_row "$feature" "$branch" || true
+  done < <(git branch -r --list "origin/${PREFIX}*" 2>/dev/null | sed 's/^[[:space:]]*//')
 
-    echo "$feature|$status|$author|$waves|$tasks|$pr|$adopted_from"
+  # 2. Merged: plan docs that have landed on the default branch.
+  base=$("$SCRIPT_DIR/get-default-branch.sh" 2>/dev/null || echo main)
+  while read -r path; do
+    [[ -z "$path" ]] && continue
+    feature=$(basename "$path" .md)
+    git show "origin/${base}:${path}" 2>/dev/null \
+      | emit_plan_row "$feature" "${base} (merged)" || true
+  done < <(git ls-tree -r --name-only "origin/${base}" -- .agents/plans 2>/dev/null | grep -E '\.agents/plans/.*\.md$' | grep -v 'README.md' || true)
+
+  # 3. Local working tree — a plan authored locally but not yet pushed.
+  if [[ -d ".agents/plans" ]]; then
+    while read -r path; do
+      feature=$(basename "$path" .md)
+      emit_plan_row "$feature" "local (unpushed)" < "$path" || true
+    done < <(find ".agents/plans" -name "*.md" ! -name "README.md" 2>/dev/null | sort)
+  fi
+
+  # Emit collected rows, sorted by feature.
+  for feature in $(printf '%s\n' "${!PLAN_ROW[@]}" | sort); do
+    echo "${PLAN_ROW[$feature]}"
   done
 }
 
@@ -57,13 +97,9 @@ collect_plans() {
 collect_prs() {
   cli_available || return
 
+  # Lane B has a single PR per feature — the deliver PR. (There is no plan PR.)
   case "$PLATFORM" in
     github)
-      echo "--- plan PRs ---"
-      gh pr list --label "rad:plan" --state open \
-        --json title,url,author,createdAt \
-        --jq '.[] | "\(.title)|\(.url)|\(.author.login)|\(.createdAt)"' \
-        2>/dev/null || true
       echo "--- deliver PRs ---"
       gh pr list --label "rad:deliver" --state open \
         --json title,url,author,createdAt \
@@ -71,13 +107,6 @@ collect_prs() {
         2>/dev/null || true
       ;;
     gitlab)
-      echo "--- plan PRs ---"
-      glab mr list --label "rad:plan" --state opened --output json 2>/dev/null \
-        | python3 -c "
-import sys, json
-for mr in json.load(sys.stdin):
-    print(f\"{mr['title']}|{mr['web_url']}|{mr['author']['username']}|{mr['created_at']}\")
-" 2>/dev/null || true
       echo "--- deliver PRs ---"
       glab mr list --label "rad:deliver" --state opened --output json 2>/dev/null \
         | python3 -c "
@@ -140,7 +169,7 @@ if [[ -z "$PLANS" ]]; then
   echo "  No plans found. Run /rad-plan [feature] to create the first plan."
 else
   echo ""
-  while IFS='|' read -r feature status author waves tasks pr adopted_from; do
+  while IFS='|' read -r feature status author waves tasks where adopted_from; do
     status_icon="·"
     case "$status" in
       pending-review) status_icon="⏳" ;;
@@ -157,7 +186,7 @@ else
     [[ -n "$author" ]] && echo "    Author: $author"
     echo "    Waves:  $waves  Tasks: $tasks"
     [[ -n "$adopted_from" ]] && echo "    Source: $adopted_from"
-    [[ -n "$pr" && "$pr" != "PR:" ]] && echo "    PR:     $pr"
+    [[ -n "$where" ]] && echo "    Branch: $where"
 
     if [[ "$status" == "approved" ]]; then
       echo "    Run:    /rad-deliver .agents/plans/$feature.md"
@@ -179,24 +208,20 @@ if cli_available; then
   HAS_PRS=false
 
   while IFS= read -r line; do
-    if [[ "$line" == "--- plan PRs ---" ]];    then IN_SECTION="plan";    continue; fi
     if [[ "$line" == "--- deliver PRs ---" ]]; then IN_SECTION="deliver"; continue; fi
     [[ -z "$line" ]] && continue
 
     IFS='|' read -r title url author created_at <<< "$line"
     created_short=$(echo "$created_at" | cut -c1-10)
 
-    case "$IN_SECTION" in
-      plan)    echo "  Plan PR:    $title" ;;
-      deliver) echo "  Deliver PR: $title" ;;
-    esac
+    echo "  Deliver PR: $title"
     echo "    $url"
     echo "    $author · $created_short"
     echo ""
     HAS_PRS=true
   done <<< "$PR_DATA"
 
-  $HAS_PRS || echo "  No open plan or deliver PRs."
+  $HAS_PRS || echo "  No open deliver PRs."
   echo ""
 fi
 
