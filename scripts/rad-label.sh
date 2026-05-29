@@ -23,21 +23,28 @@ STATUS="${2:-}"
 [[ -z "$TARGET" ]] && { echo "ERROR: issue/PR number required" >&2; exit 1; }
 [[ -z "$STATUS" ]] && { echo "ERROR: status required" >&2; exit 1; }
 
-# All known RAD status labels and their colors (GitHub hex, no leading #).
-declare -A LABEL_COLOR=(
-  [draft]="cccccc"
-  [ready]="0e8a16"
-  [pending-review]="fbca04"
-  [needs-revision]="e99695"
-  [rejected]="b60205"
-  [approved]="1d76db"
-  [in-progress]="d93f0b"
-  [review]="5319e7"
-  [done]="0b5c2e"
-)
+# All known RAD status labels. Kept as a plain list + case map so the script runs
+# on bash 3.2 (macOS stock) as well as bash 4+ — no associative arrays.
+ALL_STATUSES="draft ready pending-review needs-revision rejected approved in-progress review done"
 
-if [[ -z "${LABEL_COLOR[$STATUS]:-}" ]]; then
-  echo "ERROR: unknown status '$STATUS' (expected: ${!LABEL_COLOR[*]})" >&2
+status_color() {
+  case "$1" in
+    draft)          echo "cccccc" ;;
+    ready)          echo "0e8a16" ;;
+    pending-review) echo "fbca04" ;;
+    needs-revision) echo "e99695" ;;
+    rejected)       echo "b60205" ;;
+    approved)       echo "1d76db" ;;
+    in-progress)    echo "d93f0b" ;;
+    review)         echo "5319e7" ;;
+    done)           echo "0b5c2e" ;;
+    *)              echo "" ;;
+  esac
+}
+
+COLOR=$(status_color "$STATUS")
+if [[ -z "$COLOR" ]]; then
+  echo "ERROR: unknown status '$STATUS' (expected: $ALL_STATUSES)" >&2
   exit 1
 fi
 
@@ -51,13 +58,13 @@ fi
 LABEL="rad:${STATUS}"
 
 # Ensure the target label exists (create-if-missing; ignore "already exists").
-gh label create "$LABEL" --color "${LABEL_COLOR[$STATUS]}" \
+gh label create "$LABEL" --color "$COLOR" \
   --description "RAD plan status: ${STATUS}" >/dev/null 2>&1 || true
 
 # Remove any other rad: status labels currently on the target, then add this one.
 # --remove-label is a no-op for labels not present, so passing all siblings is safe.
 REMOVE_ARGS=()
-for s in "${!LABEL_COLOR[@]}"; do
+for s in $ALL_STATUSES; do
   [[ "$s" == "$STATUS" ]] && continue
   REMOVE_ARGS+=(--remove-label "rad:${s}")
 done

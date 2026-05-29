@@ -40,12 +40,16 @@ cli_available() {
 # a feature wins (branch tip > merged on default branch > local working tree).
 
 PREFIX="${RAD_BRANCH_PREFIX:-rad/}"
-declare -A PLAN_ROW
+
+# Tracks features already emitted, so the first (highest-priority) source wins.
+# A space-delimited string keeps this bash-3.2 safe (no associative arrays).
+SEEN_FEATURES=" "
 
 emit_plan_row() {
   # $1 = feature slug, $2 = source label, content on stdin
   local feature="$1" source="$2" content status author waves tasks adopted_from
-  [[ -n "${PLAN_ROW[$feature]:-}" ]] && return 0   # higher-priority source already won
+  case "$SEEN_FEATURES" in *" $feature "*) cat >/dev/null; return 0 ;; esac
+  SEEN_FEATURES="${SEEN_FEATURES}${feature} "
   content=$(cat)
 
   status=$(printf '%s\n' "$content"       | grep "^Status:"       | head -1 | awk '{print $2}' || echo "unknown")
@@ -54,42 +58,41 @@ emit_plan_row() {
   waves=$(printf '%s\n' "$content"        | grep -c "^### Wave"  || echo "0")
   tasks=$(printf '%s\n' "$content"        | grep -c "^#### Task" || echo "0")
 
-  PLAN_ROW[$feature]="$feature|${status:-unknown}|$author|$waves|$tasks|$source|$adopted_from"
+  echo "$feature|${status:-unknown}|$author|$waves|$tasks|$source|$adopted_from"
 }
 
 collect_plans() {
   local base ref branch feature path
 
-  # 1. In-flight: one plan per rad/ branch tip on origin (canonical).
-  while read -r ref; do
-    [[ -z "$ref" ]] && continue
-    branch="${ref#origin/}"
-    feature="${branch#"$PREFIX"}"
-    git show "origin/${branch}:.agents/plans/${feature}.md" 2>/dev/null \
-      | emit_plan_row "$feature" "$branch" || true
-  done < <(git branch -r --list "origin/${PREFIX}*" 2>/dev/null | sed 's/^[[:space:]]*//')
+  # The three passes run in one subshell (piped to sort) so SEEN_FEATURES stays
+  # consistent across them. Priority: branch tip > merged on default > local tree.
+  {
+    # 1. In-flight: one plan per rad/ branch tip on origin (canonical).
+    while read -r ref; do
+      [[ -z "$ref" ]] && continue
+      branch="${ref#origin/}"
+      feature="${branch#"$PREFIX"}"
+      git show "origin/${branch}:.agents/plans/${feature}.md" 2>/dev/null \
+        | emit_plan_row "$feature" "$branch" || true
+    done < <(git branch -r --list "origin/${PREFIX}*" 2>/dev/null | sed 's/^[[:space:]]*//')
 
-  # 2. Merged: plan docs that have landed on the default branch.
-  base=$("$SCRIPT_DIR/get-default-branch.sh" 2>/dev/null || echo main)
-  while read -r path; do
-    [[ -z "$path" ]] && continue
-    feature=$(basename "$path" .md)
-    git show "origin/${base}:${path}" 2>/dev/null \
-      | emit_plan_row "$feature" "${base} (merged)" || true
-  done < <(git ls-tree -r --name-only "origin/${base}" -- .agents/plans 2>/dev/null | grep -E '\.agents/plans/.*\.md$' | grep -v 'README.md' || true)
-
-  # 3. Local working tree — a plan authored locally but not yet pushed.
-  if [[ -d ".agents/plans" ]]; then
+    # 2. Merged: plan docs that have landed on the default branch.
+    base=$("$SCRIPT_DIR/get-default-branch.sh" 2>/dev/null || echo main)
     while read -r path; do
+      [[ -z "$path" ]] && continue
       feature=$(basename "$path" .md)
-      emit_plan_row "$feature" "local (unpushed)" < "$path" || true
-    done < <(find ".agents/plans" -name "*.md" ! -name "README.md" 2>/dev/null | sort)
-  fi
+      git show "origin/${base}:${path}" 2>/dev/null \
+        | emit_plan_row "$feature" "${base} (merged)" || true
+    done < <(git ls-tree -r --name-only "origin/${base}" -- .agents/plans 2>/dev/null | grep -E '\.agents/plans/.*\.md$' | grep -v 'README.md' || true)
 
-  # Emit collected rows, sorted by feature.
-  for feature in $(printf '%s\n' "${!PLAN_ROW[@]}" | sort); do
-    echo "${PLAN_ROW[$feature]}"
-  done
+    # 3. Local working tree — a plan authored locally but not yet pushed.
+    if [[ -d ".agents/plans" ]]; then
+      while read -r path; do
+        feature=$(basename "$path" .md)
+        emit_plan_row "$feature" "local (unpushed)" < "$path" || true
+      done < <(find ".agents/plans" -name "*.md" ! -name "README.md" 2>/dev/null | sort)
+    fi
+  } | sort
 }
 
 # ── Open PRs ──────────────────────────────────────────────────────────────────

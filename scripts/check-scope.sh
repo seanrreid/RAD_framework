@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # check-scope.sh
-# Verifies that all files changed on a deliver branch are declared in the plan's
+# Verifies that all files changed on a work branch are declared in the plan's
 # "Files in Scope" section. Also allows test files listed in "Tests to Write".
 #
-# Usage: scripts/check-scope.sh <plan-file> <deliver-branch> [base-branch]
+# Usage: scripts/check-scope.sh <plan-file> <work-branch> [base-branch]
+#   base-branch defaults to the project default branch (get-default-branch.sh).
 #
 # Exit codes:
 #   0 = all changes within scope
@@ -12,9 +13,11 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 PLAN_FILE="${1:-}"
 DELIVER_BRANCH="${2:-}"
-BASE_BRANCH="${3:-main}"
+BASE_BRANCH="${3:-$("$SCRIPT_DIR/get-default-branch.sh" 2>/dev/null || echo main)}"
 
 [[ -z "$PLAN_FILE" ]]      && { echo "ERROR: plan file required";    exit 2; }
 [[ -z "$DELIVER_BRANCH" ]] && { echo "ERROR: deliver branch required"; exit 2; }
