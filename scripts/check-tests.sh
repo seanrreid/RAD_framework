@@ -27,6 +27,8 @@ UNRESOLVABLE=()
 while IFS= read -r line; do
   if [[ "$line" =~ —[[:space:]]+([^[:space:]].+)$ ]]; then
     testfile="${BASH_REMATCH[1]}"
+    # Strip Markdown backticks (authors commonly wrap the path) and trailing space.
+    testfile="${testfile//\`/}"
     testfile=$(echo "$testfile" | sed 's/[[:space:]]*$//')
 
     if [[ -z "$testfile" || "$testfile" == "[file]" ]]; then

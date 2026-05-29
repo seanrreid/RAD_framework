@@ -49,7 +49,8 @@ done < <(
 while IFS= read -r line; do
   # Format: - [ ] description — path/to/test_file.ext
   if [[ "$line" =~ —[[:space:]]+([^[:space:]].+)$ ]]; then
-    testfile=$(echo "${BASH_REMATCH[1]}" | tr -d '[:space:]')
+    # Strip Markdown backticks as well as whitespace (authors often wrap the path).
+    testfile=$(echo "${BASH_REMATCH[1]}" | tr -d '[:space:]`')
     scope_add "$testfile"
   fi
 done < <(
