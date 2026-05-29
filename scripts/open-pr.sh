@@ -29,8 +29,9 @@ while [[ $# -gt 0 ]]; do
     --no-draft) DRAFT="";   shift ;;
     --label)
       # Trim surrounding whitespace; skip empty values so no blank --label is built.
-      label_val="${2#"${2%%[![:space:]]*}"}"; label_val="${label_val%"${label_val##*[![:space:]]}"}"
-      [[ -n "$label_val" ]] && LABELS+=("$label_val")
+      _lv="${2#"${2%%[![:space:]]*}"}"; _lv="${_lv%"${_lv##*[![:space:]]}"}"
+      [[ -n "$_lv" ]] && LABELS+=("$_lv")
+      unset _lv
       shift 2 ;;
     *) echo "Unknown arg: $1"; exit 1 ;;
   esac

@@ -51,7 +51,7 @@ require_called "$TMP/gh.argv" "gh"
 grep -qxF -- "--label" "$TMP/gh.argv" || fail "GitHub: --label missing"
 [ "$(arg_after "$TMP/gh.argv" "--label")" = "rad:deliver" ] || fail "GitHub: label value wrong: [$(arg_after "$TMP/gh.argv" "--label")]"
 grep -qxF -- "--draft" "$TMP/gh.argv" && fail "GitHub: --draft present despite --no-draft" || true
-grep -qxF -- "" "$TMP/gh.argv" && fail "GitHub: empty argument present" || true
+awk 'NF==0{found=1} END{exit !found}' "$TMP/gh.argv" && fail "GitHub: empty argument present" || true
 echo "✓ GitHub: single label, --no-draft (the rad-deliver call)"
 
 # 2. GitHub, two labels, default draft → two separate "--label" args + "--draft".
