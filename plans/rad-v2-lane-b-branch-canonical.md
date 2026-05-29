@@ -317,4 +317,15 @@ None — all changes are within the framework's own commands, scripts, skills, a
 
 ## Notes
 
-*(Add during execution)*
+- 2026-05-29: Built on branch `rad/lane-b-v2`, six wave commits + one portability
+  fix. Several Wave 5 items were already present in the framework and were folded
+  into the waves that rewrote those files: richer plan schema (5.1) → Wave 2
+  rad-plan; execution log / retry cap / check-tests gate (5.2–5.4) already in
+  rad-deliver; intent confirmation + Issue Gaps (5.6) already in rad-adopt. Docs
+  (Wave 6) updated by four parallel agents over disjoint file sets.
+- Portability: `rad-label.sh` and `rad-status.sh` were rewritten to avoid bash-4+
+  associative arrays so they run on macOS stock bash 3.2. `check-scope.sh` base
+  branch default now derives from `get-default-branch.sh` (AC1).
+- Verified under both bash 5.2 and bash 3.2: all eight scripts parse and run;
+  AC1/3/4/6/9/10/16 spot-checked green; `lint-plan.sh` correctly fails a plan
+  missing `## Acceptance Criteria` and rejects a malformed `Branch:` value.
