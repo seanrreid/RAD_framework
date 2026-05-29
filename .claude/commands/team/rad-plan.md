@@ -3,14 +3,17 @@ description: >
   Plan a feature or bug fix within your role's agent boundaries. Delegates
   codebase research to an Explore sub-agent that returns bounded summaries.
   Main context receives only the research summary, then generates a
-  wave-structured plan file, commits it to a plan branch, and opens a draft
-  PR for architect review. Execution is blocked until the architect approves.
+  wave-structured plan file, cuts a rad/ work branch, and commits the plan to it.
+  No PR is opened — execution is blocked until the architect runs /rad-approve.
 ---
 
 # /rad-plan
 
-Research and plan a feature within your agent boundaries. The plan becomes a
-PR that the architect must review and approve before execution can begin.
+Research and plan a feature within your agent boundaries. The plan doc lives on
+its own `rad/[feature]` work branch (Lane B): nothing is committed to the default
+branch here. The architect approves with `/rad-approve` — there is no plan PR. The
+plan and its code reach the default branch later, together, via the single
+deliver PR.
 
 ## Input
 
@@ -89,15 +92,29 @@ hold (more than ~12 files in scope), split into two plans before continuing.
 
 ### Step 3: Generate the wave-structured plan
 
+Derive the feature slug (kebab-case) and the work branch name `rad/[feature-slug]`.
+Record the branch in the `Branch:` header so every downstream step
+(`/rad-approve`, `/rad-deliver`) can resolve and validate it.
+
 ```markdown
 # Plan: [Feature Name]
 Created: [date]
 Author: [role — developer | designer]
 Status: pending-review
-PR: [will be filled after PR creation]
+Branch: rad/[feature-slug]
 
 ## Context
 [2–3 sentences: what exists today and what needs to change]
+
+## Scope
+| In scope | Out of scope |
+|---|---|
+| [what this plan will change] | [related thing this plan will NOT touch] |
+
+## Acceptance Criteria
+<!-- Numbered, testable outcomes. Every Wave task's Validate: field must cite one. -->
+1. [observable, verifiable outcome]
+2. [observable, verifiable outcome]
 
 ## Agent Scope
 [List every agent called during research. Flag any out-of-scope dependencies.]
@@ -133,7 +150,7 @@ Tasks in this wave [can run in parallel | must run in sequence].
 #### Task 1.1: [title]
 File: [path:lines]
 What: [precise description]
-Validate: [how to verify]
+Validate: AC#[N] — [how to verify]
 
 #### Task 1.2: [title]  ← parallel with 1.1 if wave is parallel
 ...
@@ -162,27 +179,34 @@ Depends on: Wave 1 complete
 - Tasks that depend on prior output → new wave, mark `sequential`
 - Max 3 tasks per wave. If more needed, add another wave.
 - Max 5 waves total. If more needed, split into two plans.
+- Every task's `Validate:` field must cite a specific `AC#N` — no floating tasks.
 
 ### Step 4: Save the plan
 
-Save to: `.agents/plans/[kebab-case-feature-name].md`
+Save to: `.agents/plans/[feature-slug].md`
 
 ### Step 4b: Lint the plan
 
 ```bash
-scripts/lint-plan.sh .agents/plans/[feature-name].md
+scripts/lint-plan.sh .agents/plans/[feature-slug].md
 ```
 
 Fix any errors before committing. Warnings should be reviewed but do not block.
 
-### Step 5: Commit and open plan PR
+### Step 5: Cut the work branch and commit the plan
+
+Cut `rad/[feature-slug]` from the project default branch and commit the plan doc
+to it. **No PR is opened, and nothing is committed to the default branch.**
 
 ```bash
-# Create and switch to plan branch
-git checkout -b plan/[feature-name]
+BASE=$(scripts/get-default-branch.sh)
+
+# Cut the work branch from the latest default branch
+git fetch origin "$BASE"
+git checkout -b "rad/[feature-slug]" "origin/$BASE"
 
 # Stage only the plan file
-git add .agents/plans/[feature-name].md
+git add .agents/plans/[feature-slug].md
 git commit -m "plan: [feature name]
 
 Author: [role]
@@ -190,39 +214,29 @@ Waves: [N]
 Tasks: [total task count]
 Out-of-scope deps: [yes/no]"
 
-# Open PR via platform script
-scripts/open-pr.sh \
-  --title "Plan: [Feature Name]" \
-  --body "[plan file contents rendered as checklist]" \
-  --base main \
-  --head plan/[feature-name] \
-  --label "rad:plan" \
-  --label "rad:pending-review"
+# Publish the branch tip — /rad-approve reads the plan from origin/rad/[feature-slug]
+git push -u origin "rad/[feature-slug]"
 ```
 
-### Step 6: Record PR URL in plan file
-
-After the PR is created, update the plan file's `PR:` field with the URL.
-Amend the commit:
+If the project tracks plans against issues and `gh` is available, mirror the
+status label (best-effort; no-ops without `gh`):
 
 ```bash
-git add .agents/plans/[feature-name].md
-git commit --amend --no-edit
-git push --force-with-lease origin plan/[feature-name]
+scripts/rad-label.sh [issue-number] pending-review   # omit if there is no issue
 ```
 
-### Step 7: Output summary
+### Step 6: Output summary
 
 ```
-Plan created: .agents/plans/[feature-name].md
-Branch:       plan/[feature-name]
-PR:           [url]
+Plan created: .agents/plans/[feature-slug].md
+Branch:       rad/[feature-slug]   (pushed — no PR; this is the Lane B model)
 Waves:        [N]
 Tasks:        [total]
+ACs:          [count]
 
 Waiting for architect approval.
-The architect will run /rad-approve [feature-name] to unblock execution.
-Run /rad-deliver .agents/plans/[feature-name].md once approved.
+The architect runs /rad-approve [feature-slug] to unblock execution.
+Run /rad-deliver .agents/plans/[feature-slug].md once approved.
 ```
 
 ---
@@ -234,7 +248,10 @@ Run /rad-deliver .agents/plans/[feature-name].md once approved.
 - Do not write any code in this phase
 - Research is one sub-agent call — do not spawn multiple research agents
 - Cap the sub-agent at 10 searches — split the plan if the feature needs more
-- Every plan must have at least 2 non-goals
+- Every plan must have at least 2 non-goals and at least 1 acceptance criterion
+- Every Wave task's `Validate:` must cite an `AC#N`
+- Cut the `rad/[feature]` branch from the default branch and commit the plan there —
+  never commit the plan to the default branch, and never open a plan PR
 - Do not run `/rad-deliver` yourself — wait for the architect to run `/rad-approve`
 - If out-of-scope dependencies exist, flag them clearly — do not attempt to
   work around them by reading files directly

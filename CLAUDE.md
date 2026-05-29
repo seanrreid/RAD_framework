@@ -77,7 +77,7 @@
 
 - Never commit secrets, tokens, or credentials
 - Never assume a library exists — only use packages in the package file
-- Never execute /rad-deliver without a plan file with Status: approved on main (set by /rad-approve)
+- Never execute /rad-deliver without a plan file with Status: approved on its rad/ branch tip (set by /rad-approve)
 -
 
 ---
@@ -102,20 +102,34 @@ Run `scripts/detect-platform.sh` to auto-detect from your git remote.
 
 ### Branch Conventions
 
+One work branch per feature, cradle-to-grave (plan → approval → code). It is the
+head of the single deliver PR. `plan/` and `deliver/` are retired.
+
 ```
-plan branches:    plan/[feature-name]
-deliver branches: deliver/[feature-name]
+work branches: rad/[feature-name]
 ```
+
+The branch is cut from `default_branch` by `/rad-plan` (or `/rad-adopt`), recorded
+in the plan doc's `Branch:` header, and never merged piecemeal — the plan doc and
+code reach `default_branch` together via the deliver PR. To use a different prefix,
+set `RAD_BRANCH_PREFIX` (e.g. `RAD_BRANCH_PREFIX=feature/`) in your environment.
 
 ### PR Labels
 
 ```
-plan PRs:    rad:plan, rad:pending-review
 deliver PRs: rad:deliver
 ```
 
-Create these labels in your repo before first use.
-GitHub: Settings → Labels. GitLab: Project → Labels.
+RAD status labels (mirrored onto the issue/PR by `scripts/rad-label.sh`, when a
+target and `gh` are available — a fetch-free board layer; git branch tips remain
+canonical):
+
+```
+rad:draft  rad:pending-review  rad:needs-revision  rad:rejected
+rad:approved  rad:in-progress  rad:review  rad:done
+```
+
+Labels are created on first use. GitHub: Settings → Labels. GitLab: Project → Labels.
 
 ### Role Assignments
 
@@ -125,15 +139,17 @@ developers: []
 designers:  []
 ```
 
-Architects have merge rights on plan PRs.
-Developers and designers open plan PRs but cannot merge them.
+Architects approve plans via `/rad-approve` and merge deliver PRs.
+Developers and designers plan and deliver but cannot approve their own plans.
 
 ### Approval Rules
 
-Plan PRs require:
-- [ ] Architect review and approval
-- [ ] No unresolved comments
+A plan is approved when the architect runs `/rad-approve`, which writes
+`Status: approved` to the plan doc on its `rad/` branch tip. There is no plan PR.
+Approval requires:
+- [ ] Architect review and approval (recorded on the work-branch tip)
 - [ ] All files within declared agent scope (checked by /rad-review)
+- [ ] Acceptance Criteria all covered by tasks (checked by /rad-review)
 
 ### Agent Scope Map
 
@@ -151,11 +167,11 @@ Plan PRs require:
 ```
 Anyone:     /rad-research → consumes PRD/issue, writes .agents/research/
 Architect:  /rad-design   → drafts + generates .claude/agents/ boundaries
-Team:       /rad-plan     → plan branch + PR for architect review (Gate 1)
+Team:       /rad-plan     → cuts rad/[feature] branch, commits plan (no PR)
 Team:       /rad-adopt    → same as /rad-plan but sourced from a pre-existing issue
-Architect:  /rad-approve  → reviews plan, commits approval to main
-Team:       /rad-deliver  → wave execution (Gate 2 code PR)
-Architect:  PR review     → merge to main
+Architect:  /rad-approve  → records approval on the branch tip (Gate 1, no PR)
+Team:       /rad-deliver  → wave execution on the same branch, opens the deliver PR (Gate 2)
+Architect:  PR review     → merge the rad/[feature] branch to default_branch
 ```
 
 See `docs/daily-workflow.md` for the full guide.
