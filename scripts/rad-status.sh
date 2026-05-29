@@ -143,7 +143,9 @@ collect_logs() {
     # making the value multiline and corrupting the downstream `-gt` comparison.
     tasks_done=$(grep -c "✓ complete" "$log_file" 2>/dev/null || true)
     tasks_failed=$(grep -c "✗ failed"  "$log_file" 2>/dev/null || true)
-    echo "$feature|$date_str|$tasks_done|$tasks_failed"
+    # Normalize to 0 if grep wrote nothing (e.g. an unreadable file) so the
+    # downstream numeric comparison never sees an empty operand.
+    echo "$feature|$date_str|${tasks_done:-0}|${tasks_failed:-0}"
   done
 }
 

@@ -226,7 +226,10 @@ ensure_deliver_label() {
         --description "RAD delivery PR" >/dev/null 2>&1); then
     success "Created label 'rad:deliver'"
   else
-    success "Label 'rad:deliver' already present (or could not be created — see next steps)"
+    # Non-zero almost always means "label already exists" (idempotent re-run); it
+    # could also be a permissions issue. Either way the install proceeds; the
+    # next-steps section repeats the manual `gh label create` command.
+    info "Label 'rad:deliver' already exists (or needs manual creation — see step 2 below)"
   fi
 }
 

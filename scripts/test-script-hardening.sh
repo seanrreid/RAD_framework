@@ -19,7 +19,9 @@ fail() { echo "✗ $1"; exit 1; }
 # rad-status exit 1 whenever any log existed.
 t3() {
   local d="$TMP/p3"
-  mkdir -p "$d/scripts" "$d/.agents/logs" "$d/.claude/agents"
+  # .agents/plans is created so the fixture is a realistic repo; this test asserts
+  # only the logs (Recent Executions) path — the plans path is covered elsewhere.
+  mkdir -p "$d/scripts" "$d/.agents/logs" "$d/.agents/plans" "$d/.claude/agents"
   cp "$HERE/rad-status.sh" "$HERE/get-default-branch.sh" "$HERE/detect-platform.sh" "$d/scripts/"
   printf '**Name:** t\ndefault_branch: main\n' > "$d/CLAUDE.md"
   printf '| 1 | 1 | t | ✓ complete | a | d |\n'                > "$d/.agents/logs/older-2026-05-26.md"
@@ -99,11 +101,16 @@ EOF
   printf '%s\n' "$out" | grep -q  "does not exist: ---"   && fail "#4: separator row leaked as a file path" || true
 
   # check-role: a configured architect resolves (exit 0); a non-configured name denied (exit 1).
+  # The fixture includes the unfilled "[your GitHub...]" placeholder line so the
+  # `grep -v "^\[your GitHub"` filter (split in fix #4) is regression-tested: the
+  # placeholder must NOT be treated as a configured architect.
   local md="$TMP/cm.md"
-  printf 'architect:  alice\ndevelopers: []\n' > "$md"
+  printf 'architect:  alice\narchitect:  [your GitHub/GitLab username]\ndevelopers: []\n' > "$md"
   bash "$HERE/check-role.sh" architect "$md" "alice"  >/dev/null 2>&1 || fail "#4: configured architect not matched"
   bash "$HERE/check-role.sh" architect "$md" "mallory" >/dev/null 2>&1 && fail "#4: non-architect wrongly matched" || true
-  echo "✓ #4: table-pipe grep filters intact; check-role resolves correctly"
+  bash "$HERE/check-role.sh" architect "$md" "[your GitHub/GitLab username]" >/dev/null 2>&1 \
+    && fail "#4: placeholder line wrongly matched as an architect" || true
+  echo "✓ #4: table-pipe grep filters intact; check-role resolves + filters placeholder"
 }
 
 # ── #7: check-tests.sh resolves a backtick-wrapped test path ──────────────────
