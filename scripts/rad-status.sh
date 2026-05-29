@@ -127,13 +127,22 @@ collect_logs() {
   local logs_dir=".agents/logs"
   [[ ! -d "$logs_dir" ]] && return
 
-  find "$logs_dir" -name "*.md" ! -name "README.md" | \
-    xargs ls -t 2>/dev/null | head -5 | while read -r log_file; do
+  # List the 5 newest logs by mtime in a single `ls -t` (no xargs batching, so the
+  # ordering is correct regardless of count) and read one path per line (space-safe).
+  # `ls -t` on the glob is portable (no GNU `find -printf`); `|| true` guards the
+  # no-match case so the empty glob doesn't trip `set -euo pipefail`.
+  local logs
+  logs=$(ls -t "$logs_dir"/*.md 2>/dev/null | grep -v '/README\.md$' | head -5 || true)
+  [[ -z "$logs" ]] && return
+  printf '%s\n' "$logs" | while read -r log_file; do
     local feature date_str tasks_done tasks_failed
     feature=$(basename "$log_file" .md | sed 's/-[0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}$//')
     date_str=$(basename "$log_file" .md | grep -o '[0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}' || echo "")
-    tasks_done=$(grep -c "✓ complete" "$log_file" 2>/dev/null || echo "0")
-    tasks_failed=$(grep -c "✗ failed"  "$log_file" 2>/dev/null || echo "0")
+    # grep -c already prints 0 when there are no matches (it just also exits 1),
+    # so swallow the exit with `|| true` — `|| echo 0` would append a SECOND line,
+    # making the value multiline and corrupting the downstream `-gt` comparison.
+    tasks_done=$(grep -c "✓ complete" "$log_file" 2>/dev/null || true)
+    tasks_failed=$(grep -c "✗ failed"  "$log_file" 2>/dev/null || true)
     echo "$feature|$date_str|$tasks_done|$tasks_failed"
   done
 }
