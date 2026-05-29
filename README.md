@@ -19,46 +19,63 @@ ARCHITECT / TEAM                   TEAM
   Consume spec artifact              Explore sub-agent researches codebase
   Clarify team + platform            Returns bounded RESEARCH_SUMMARY
   Write .agents/research/[slug]      Generate + lint plan file
-                                     Open draft PR for architect review
-/rad-design [slug]
-  Read research artifact           /rad-adopt [issue or description]
-  Draft agent hierarchy              Same as /rad-plan, sourced from
-  Write .agents/architecture/        a pre-existing issue or description
-  [architect reviews + approves]
+                                     Cut rad/[feature] work branch
+/rad-design [slug]                   Commit plan to that branch (no PR)
+  Read research artifact
+  Draft agent hierarchy            /rad-adopt [issue or description]
+  Write .agents/architecture/        Same as /rad-plan, sourced from
+  [architect reviews + approves]     a pre-existing issue or description
   Generate .claude/agents/ files
 
                     ── Gate 1 ──
                     /rad-approve (architect)
-                    Reviews plan, commits Status: approved to main
-                    No branch merge required
+                    Reviews plan, writes Status: approved to the
+                    rad/[feature] branch tip and pushes it
+                    No PR — approval lives on the branch
 
                                    /rad-deliver [plan-file]
                                      Checks plan has Status: approved
+                                     Runs on the existing rad/[feature] branch
                                      Each wave → fresh sub-agent context
                                      Orchestrator carries only WAVE_RESULT
                                      Atomic commit per task
                                      Execution log appended per step
+                                     Opens the single deliver PR
 
                     ── Gate 2 ──
-                    Architect reviews code PR
-                    Standard code review
-                    Merge to main
+                    Architect reviews the deliver PR
+                    (rad/[feature] → default branch)
+                    Plan doc + code land together
+                    Standard code review, then merge
 ```
 
 ---
 
+## One Branch, One PR
+
+Every feature lives on a single `rad/[feature]` work branch, cradle to grave.
+`/rad-plan` cuts it from the default branch and commits the plan doc to it.
+`/rad-approve` writes `Status: approved` to that branch's tip. `/rad-deliver`
+runs on the same branch and opens the one deliver PR. The plan doc and the code
+reach the default branch together through that single reviewed PR, which keeps
+contributors off the protected default branch. There is no plan PR.
+
+The default branch is whatever you set as `default_branch:` in CLAUDE.md
+(resolved by `scripts/get-default-branch.sh`) — it is never hardcoded.
+
 ## Two Gates
 
 **Gate 1 — Plan approval** (architect runs `/rad-approve`)
-- One file: `.agents/plans/[feature].md`
+- One file: `.agents/plans/[feature].md` on the `rad/[feature]` branch
 - Architect reviews the *approach* before code is written
-- `/rad-approve` commits `Status: approved` to the plan file on `main` — no branch merge required
-- Blocked: `/rad-deliver` checks for `Status: approved` in the plan file
+- `/rad-approve` writes `Status: approved` to the plan doc on the branch tip and
+  pushes that branch — no PR, no merge to the default branch
+- Blocked: `/rad-deliver` checks for `Status: approved` at the branch tip
 
-**Gate 2 — Code PR** (`deliver/[feature]` → `main`)
-- All implementation changes
+**Gate 2 — Deliver PR** (`rad/[feature]` → default branch)
+- Plan doc and all implementation changes, together
 - Architect reviews the *output* after execution
-- Standard code review workflow
+- Standard code review workflow, then merge
 
 ---
 
@@ -87,7 +104,7 @@ The plan linter enforces a **context budget** on the Files in Scope table:
 | Architect | All commands | Defines agent boundaries, approves plans, merges PRs |
 | Developer | `/rad-research`, `/rad-plan`, `/rad-adopt`, `/rad-deliver`, `/rad-review` | Research, plan, and execute within boundaries |
 | Designer | `/rad-research`, `/rad-plan`, `/rad-adopt`, `/rad-deliver` | UI-scoped research, planning, and execution |
-| All roles | `/rad-status`, `/rad-insights` | Team dashboard and review pattern analysis |
+| All roles | `/rad-status`, `/rad-insights`, `/kickoff`, `/wrap` | Team dashboard, review pattern analysis, session start/end rituals |
 
 All commands are committed to the project repo. The `architect/` subdirectory
 signals which commands carry architect-level responsibility — enforcement is via
@@ -135,6 +152,9 @@ your-project/
 │       └── shared/
 │           ├── rad-status.md         → /rad-status    (shared)
 │           └── rad-insights.md       → /rad-insights  (shared)
+│   └── skills/
+│       ├── kickoff/SKILL.md          → /kickoff       (session start ritual)
+│       └── wrap/SKILL.md             → /wrap          (session end ritual)
 ├── .agents/
 │   ├── research/                     ← research artifacts (/rad-research output)
 │   ├── architecture/                 ← architecture drafts (/rad-design draft → approved)
@@ -144,8 +164,11 @@ your-project/
 │   └── findings/README.md            ← findings log schema and query reference
 └── scripts/
     ├── detect-platform.sh            ← detects git platform from remote
+    ├── get-default-branch.sh         ← resolves default_branch from CLAUDE.md
+    ├── checkout-plan.sh              ← checks out a plan's rad/[feature] branch
+    ├── rad-label.sh                  ← applies RAD labels to a PR
     ├── open-pr.sh                    ← platform-agnostic PR creation
-    ├── check-plan-approved.sh        ← checks Status: approved or branch merge
+    ├── check-plan-approved.sh        ← checks Status: approved at branch tip
     ├── check-role.sh                 ← validates contributor role vs. command
     ├── check-scope.sh                ← validates file changes against agent scope
     ├── check-tests.sh                ← checks for test coverage in deliver output
@@ -163,7 +186,7 @@ your-project/
 | `UPGRADE.md` | Upgrading an existing RAD project to the latest version |
 | `docs/daily-workflow.md` | Getting started with the team workflow |
 | `docs/architect-guide.md` | Setting up and maintaining the architecture |
-| `docs/plan-pr-guide.md` | How plan PRs work and what to review |
+| `docs/plan-pr-guide.md` | How plan approval works and what to review |
 | `docs/wave-execution.md` | How /rad-deliver runs tasks in waves |
 | `docs/platform-support.md` | Git platform configuration and fallbacks |
 | `docs/onboarding.md` | Guide for new team members |

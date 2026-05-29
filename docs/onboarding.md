@@ -1,7 +1,7 @@
 # Onboarding — New Team Members
 
 Welcome to a project using the RAD framework. This guide gets you from zero
-to submitting your first plan PR.
+to your first planned, approved, and delivered feature.
 
 ---
 
@@ -84,8 +84,10 @@ dependency — don't try to work around it.
 /rad-status
 ```
 
-See what's in progress, what's waiting for architect review, and whether any
-plans are approved and ready to execute.
+See what's in progress, what's waiting for architect approval, and whether any
+plans are approved and ready to execute. To start a session in full, run
+`/kickoff` — it reads `CLAUDE.md`, keeps you off the default branch, and reports
+plans by status. Run `/wrap` at the end of your session.
 
 ### Step 2: Plan your feature
 
@@ -95,19 +97,25 @@ plans are approved and ready to execute.
 
 This will:
 - Research the relevant parts of the codebase (within your boundaries)
-- Generate a wave-structured plan
-- Open a draft PR for architect review
+- Generate a wave-structured plan, including a `## Scope` and
+  `## Acceptance Criteria` section
+- Cut the `rad/[feature]` work branch from the default branch (recorded in the
+  plan doc's `Branch:` field) and commit the plan to it
 
-You'll see a PR URL at the end. Share it with the architect.
+No PR is opened — the plan lives on your `rad/[feature]` branch. Let the
+architect know it's ready to approve.
 
 ### Step 3: Wait for plan approval
 
-The architect reviews your plan PR. They may:
-- **Merge it** — you're approved to execute
-- **Request changes** — update the plan file and push
-- **Close it** — the approach needs rethinking; they'll explain why
+The architect reviews the plan on your `rad/[feature]` branch. They may:
+- **Run `/rad-approve [feature]`** — this records `Status: approved` on the
+  branch tip and you're cleared to execute
+- **Request changes** — update the plan file and push to the branch; they
+  re-review
+- **Reject the approach** — they'll explain what needs rethinking
 
-Don't start executing until the plan PR is merged.
+There is no plan PR. Don't start executing until `/rad-approve` has recorded
+approval on the branch tip.
 
 ### Step 4: Execute the plan
 
@@ -115,8 +123,11 @@ Don't start executing until the plan PR is merged.
 /rad-deliver .agents/plans/[your-feature].md
 ```
 
-This runs your plan wave by wave. Watch for failures — if a task fails twice,
-stop and leave a comment on the plan PR rather than pushing through.
+This runs on your `rad/[feature]` branch (gating on the approved status at the
+branch tip), wave by wave. Watch for failures — if a task fails twice, stop and
+flag it to the architect rather than pushing through. When the waves complete,
+it opens the single deliver PR (`rad:deliver`) from `rad/[feature]` to the
+default branch — this is the one PR in the workflow.
 
 ### Step 5: Self-review
 
@@ -136,16 +147,17 @@ let the architect know it's ready for review.
 
 ## What to do when you're blocked
 
-**Your plan PR has been waiting a while:**
-Ping the architect directly — plan PRs should be fast to review.
+**Your plan has been waiting on approval a while:**
+Ping the architect directly — plan approval should be fast.
 
 **A task failed during execution and you can't fix it:**
-Leave a comment on the plan PR: what failed, what you tried, what the error was.
-Do not force through a failing task.
+Tell the architect: what failed, what you tried, what the error was. Do not
+force through a failing task.
 
 **The feature requires something outside your scope:**
-Update the plan to flag it as an out-of-scope dependency. Comment on the plan
-PR asking the architect how to proceed. Do not read files outside your scope.
+Update the plan on your `rad/[feature]` branch to flag it as an out-of-scope
+dependency, and ask the architect how to proceed. Do not read files outside
+your scope.
 
 **You're not sure if something is in your scope:**
 Run `/rad-status` and check the Agent Scope Map. When in doubt, ask — it's
@@ -155,8 +167,9 @@ faster than fixing a scope violation in review.
 
 ## Common mistakes
 
-**Running /rad-deliver before the plan PR is merged.**
-`/rad-deliver` will stop you with an error. Wait for the merge.
+**Running /rad-deliver before the plan is approved.**
+`/rad-deliver` gates on the approved status at the `rad/[feature]` branch tip
+and will stop you with an error. Wait for `/rad-approve`.
 
 **Reading files directly during planning.**
 `/rad-plan` delegates research to an Explore sub-agent — you don't read files

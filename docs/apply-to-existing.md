@@ -21,7 +21,9 @@ architecture you designed. The risks are:
   assumptions and the team will spend sessions correcting them.
 - **Workflow resistance** — a team with existing habits will resist more
   ceremony unless they understand why it's there. Gradual rollout with
-  visible wins is more effective than a big-bang migration.
+  visible wins is more effective than a big-bang migration. RAD keeps the
+  ceremony light: there is one work branch per feature (`rad/[feature]`) and
+  one PR (the deliver PR) — approval happens on the branch tip, not in a PR.
 
 The three-week sequence addresses all three.
 
@@ -109,7 +111,10 @@ Request changes to the draft until the scopes match reality.
 Use the generated agents yourself on real tasks for a week
 before the team sees them.
 
-Run `/rad-plan` on something real. Go through the full loop. Look for:
+Run `/rad-plan` on something real. It cuts a `rad/[feature]` branch from your
+default branch and commits the plan doc to it. Run `/rad-approve` to record
+`Status: approved` on that branch tip, then `/rad-deliver` to open the single
+deliver PR back to the default branch. Go through the full loop. Look for:
 
 **Scope mismatches**: agent says it reads `src/components` but the relevant
 files are in `src/features/*/components`. Fix the agent scope.
@@ -167,30 +172,34 @@ full team yet.
 30 minutes, one-on-one. Show them:
 - What RAD is and why you're introducing it
 - Their agent boundaries (what they can and can't access)
-- The full loop: `/rad-plan` → plan PR → you review → merge → `/rad-deliver` → code PR
-- What you look for in a plan PR (be specific — show the review checklist)
-- How fast you'll turn around plan PRs (commit to a number: "within 4 hours during work hours")
+- The full loop: `/rad-plan` (cuts `rad/[feature]`, commits the plan doc) →
+  you review the plan on the branch → `/rad-approve` (Gate 1, records
+  `Status: approved` on the branch tip, no PR) → `/rad-deliver` (opens the
+  single deliver PR) → you review and merge the deliver PR (Gate 2)
+- What you look for when reviewing a plan (be specific — show the review checklist)
+- How fast you'll turn around plan reviews (commit to a number: "within 4 hours during work hours")
 
-### Step 2: First plan PR together
+### Step 2: First plan together
 
 Pick a real feature they were going to work on anyway. Walk through
-`/rad-plan` together. Let them drive, you observe. When the plan PR opens,
-review it synchronously — talk through what you're checking and why.
-Merge it together.
+`/rad-plan` together. Let them drive, you observe. The plan doc lands on a
+`rad/[feature]` branch — review it synchronously on that branch, talk through
+what you're checking and why, then run `/rad-approve` together to record the
+approval on the branch tip.
 
-Then let them run `/rad-deliver` solo. Check in when the code PR opens.
+Then let them run `/rad-deliver` solo. Check in when the deliver PR opens.
 
 ### Step 3: Solo feature
 
-Let them run the next feature entirely solo. Review the plan PR asynchronously.
-Give feedback on the plan (not just approval/reject — explain what could
-be more precise).
+Let them run the next feature entirely solo. Review the plan on its `rad/`
+branch asynchronously before running `/rad-approve`. Give feedback on the plan
+(not just approve/reject — explain what could be more precise).
 
 ### Step 4: Assess and adjust
 
 After two features with the pilot developer:
 - Are the agent scopes correct? Did they hit any boundaries that shouldn't exist?
-- Is the plan PR turnaround working? Are they blocked waiting?
+- Is the plan review turnaround working? Are they blocked waiting on `/rad-approve`?
 - Is the wave structure producing good execution? Any task failures?
 - What confused them?
 
@@ -206,11 +215,12 @@ Present RAD to the full team. Frame it as solving a problem they've probably
 experienced — context rot, Claude going off-track in long sessions, code that
 diverges from what was planned.
 
-Show the pilot developer's plan PRs as examples. Let them speak to the
-experience — peer testimonial is more credible than architect advocacy.
+Show the pilot developer's plans and deliver PRs as examples. Let them speak
+to the experience — peer testimonial is more credible than architect advocacy.
 
 Cover:
-- What changes about their workflow (plan PRs are new, commands rename slightly)
+- What changes about their workflow (one `rad/[feature]` branch per feature,
+  approval recorded on the branch tip, a single deliver PR to the default branch)
 - What doesn't change (the mental model, the phase discipline, the plan format)
 - Their specific boundaries (show the Agent Scope Map from CLAUDE.md)
 - The onboarding doc location (`docs/onboarding.md`)
@@ -229,7 +239,7 @@ The first week of full-team operation will surface remaining issues:
 - Scope boundaries that need adjustment
 - CLAUDE.md facts that are wrong or missing
 - Wave structure confusion (most teams default to everything sequential at first)
-- Plan PR turnaround bottlenecks
+- Plan approval (`/rad-approve`) turnaround bottlenecks
 
 Treat this week as calibration, not failure. Fix issues in the agent files
 and CLAUDE.md as they surface. Commit each fix immediately.
@@ -249,22 +259,24 @@ and re-run `/rad-design` to regenerate the agent files.
 CLAUDE.md is wrong or incomplete. Find the specific wrong fact, verify the
 correct one against the codebase, fix it, commit.
 
-### "The plan PRs are slowing us down"
+### "Plan approval is slowing us down"
 
-Your turnaround is too slow. Plan PRs should be 5–10 minutes to review —
-they're one markdown file. If reviews take longer, the plans are too large
-(ask for splits) or too vague (request changes rather than approving).
+Your turnaround is too slow. Reviewing a plan should be 5–10 minutes —
+it's one markdown file on the `rad/[feature]` branch. If reviews take longer,
+the plans are too large (ask for splits) or too vague (request changes via
+`Status: needs-revision` rather than approving).
 
-If you genuinely can't review plan PRs within 4 hours during work hours,
-the gate model is wrong for your situation. Consider async approval (Slack
-message instead of PR) or delegating Gate 1 to a senior developer.
+If you genuinely can't review and run `/rad-approve` within 4 hours during
+work hours, the gate model is wrong for your situation. Consider delegating
+Gate 1 to a senior developer, or recording an out-of-band approval with
+`/rad-approve --on-behalf-of`.
 
 ### "Nobody is using the wave structure correctly"
 
 Everything ends up in one sequential wave. Share `docs/wave-execution.md`
-and add a plan PR review checklist item: "Could any tasks in the same wave
+and add a plan review checklist item: "Could any tasks in the same wave
 run in parallel?" For the first month, give explicit wave feedback on every
-plan PR even if you otherwise approve it.
+plan even if you otherwise approve it.
 
 ### "A developer needs access to something outside their scope"
 
@@ -276,15 +288,16 @@ they need, or expand scope narrowly with documented justification.
 
 ## What success looks like at 30 days
 
-- Plan PRs are opened within a few hours of a feature being started
-- Plan PR reviews take under 10 minutes and are turned around same day
+- Plans are committed to a `rad/[feature]` branch within a few hours of a
+  feature being started
+- Plan reviews take under 10 minutes and `/rad-approve` is run same day
 - `/rad-deliver` runs cleanly on approved plans without scope violations
 - CLAUDE.md is being updated when new facts are discovered
 - The team is catching their own scope issues in `/rad-review` before
-  you see them in code review
+  you see them in the deliver PR
 - Context rot complaints have dropped (sessions stay focused)
 
 If you're not seeing this at 30 days, the bottleneck is usually one of:
-plan PRs taking too long to review, agent scopes that don't match reality,
+plan reviews taking too long to approve, agent scopes that don't match reality,
 or a CLAUDE.md that hasn't been maintained. Check those three before
 assuming the framework isn't working.

@@ -22,7 +22,7 @@ that date.
 
 ```bash
 if [ ! -f .agents/findings.jsonl ]; then
-  echo "No findings log found. Run /rad-review on at least one deliver branch first."
+  echo "No findings log found. Run /rad-review on at least one rad/ work branch first."
   exit 0
 fi
 ```

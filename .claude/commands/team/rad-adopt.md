@@ -90,13 +90,23 @@ Use the same structure as `/rad-plan`, with two additions to the header:
 Created: [date]
 Author: [role — architect | developer | designer]
 Status: pending-review
+Branch: rad/[feature-slug]
 Adopted-From: [issue URL or description]
 Issue-Title: [original issue title, if fetched]
-PR: [will be filled after PR creation]
 
 ## Context
 [2–3 sentences: what exists today, what the issue reported, what needs to change.
  Note if the original issue was vague or under-specified.]
+
+## Scope
+| In scope | Out of scope |
+|---|---|
+| [what this plan will change] | [related thing this plan will NOT touch] |
+
+## Acceptance Criteria
+<!-- Numbered, testable outcomes. Every Wave task's Validate: field must cite one. -->
+1. [observable, verifiable outcome]
+2. [observable, verifiable outcome]
 
 ## Agent Scope
 [List every agent called during research. Flag out-of-scope dependencies.]
@@ -130,7 +140,7 @@ Tasks in this wave [can run in parallel | must run in sequence].
 #### Task 1.1: [title]
 File: [path:lines]
 What: [precise description]
-Validate: [how to verify]
+Validate: AC#[N] — [how to verify]
 
 ...
 
@@ -157,10 +167,11 @@ judgment calls that the original issue left open.
 
 ### Step 6: Save the plan
 
-Save to: `.agents/plans/[kebab-case-feature-name].md`
+Save to: `.agents/plans/[feature-slug].md`
 
-Derive the feature name from the issue title or description — keep it short
-and descriptive.
+Derive the feature slug (kebab-case) from the issue title or description — keep
+it short and descriptive — and record the work branch `rad/[feature-slug]` in the
+plan's `Branch:` header.
 
 ### Step 6b: Lint the plan
 
@@ -171,12 +182,17 @@ scripts/lint-plan.sh .agents/plans/[feature-name].md
 Fix any errors before committing. For adopted plans, `lint-plan.sh` also
 verifies `## Issue Gaps` is non-empty. Warnings should be reviewed but do not block.
 
-### Step 7: Commit and open plan PR
+### Step 7: Cut the work branch and commit the plan
+
+Cut `rad/[feature-slug]` from the project default branch and commit the plan doc
+to it. **No PR is opened, and nothing is committed to the default branch.**
 
 ```bash
-git checkout -b plan/[feature-name]
+BASE=$(scripts/get-default-branch.sh)
+git fetch origin "$BASE"
+git checkout -b "rad/[feature-slug]" "origin/$BASE"
 
-git add .agents/plans/[feature-name].md
+git add .agents/plans/[feature-slug].md
 git commit -m "adopt: [feature name]
 
 Adopted-From: [issue URL or short description]
@@ -185,38 +201,22 @@ Waves: [N]
 Tasks: [total task count]
 Out-of-scope deps: [yes/no]"
 
-scripts/open-pr.sh \
-  --title "Adopt: [Feature Name]" \
-  --body "[plan file contents rendered as checklist]" \
-  --base main \
-  --head plan/[feature-name] \
-  --label "rad:plan" \
-  --label "rad:pending-review"
+git push -u origin "rad/[feature-slug]"
+scripts/rad-label.sh [issue-number] pending-review   # omit if there is no issue
 ```
 
-### Step 8: Record PR URL and output summary
-
-Update the plan file's `PR:` field, then amend:
-
-```bash
-git add .agents/plans/[feature-name].md
-git commit --amend --no-edit
-git push --force-with-lease origin plan/[feature-name]
-```
-
-Output:
+### Step 8: Output summary
 
 ```
-Plan adopted: .agents/plans/[feature-name].md
+Plan adopted: .agents/plans/[feature-slug].md
 Source:       [issue URL or description]
-Branch:       plan/[feature-name]
-PR:           [url]
+Branch:       rad/[feature-slug]   (pushed — no PR; this is the Lane B model)
 Waves:        [N]
 Tasks:        [total]
 Issue Gaps:   [count — assumptions the architect should verify]
 
 Waiting for architect approval.
-The architect will run /rad-approve [feature-name] to unblock execution.
+The architect runs /rad-approve [feature-slug] to unblock execution.
 ```
 
 ---
@@ -227,7 +227,10 @@ The architect will run /rad-approve [feature-name] to unblock execution.
 - Do not read files directly — only through context tool orchestrators
 - Do not write any code in this phase
 - Cap research at 10 tool calls — split if more is needed
-- Every plan must have at least 2 non-goals
+- Every plan must have at least 2 non-goals and at least 1 acceptance criterion
+- Every Wave task's `Validate:` must cite an `AC#N`
+- Cut the `rad/[feature]` branch from the default branch and commit the plan there —
+  never commit the plan to the default branch, and never open a plan PR
 - The `## Issue Gaps` section is mandatory — never leave it empty
 - Do not run `/rad-deliver` yourself — wait for the architect to run `/rad-approve`
 - If the original issue references work already partially done, note it in

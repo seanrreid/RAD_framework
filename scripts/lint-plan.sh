@@ -38,11 +38,24 @@ header_field() {
 STATUS=$(header_field "Status")
 AUTHOR=$(header_field "Author")
 CREATED=$(header_field "Created")
+BRANCH=$(header_field "Branch")
 ADOPTED_FROM=$(header_field "Adopted-From")
 
 [[ -z "$STATUS" ]]  && ERRORS+=("Missing required field: Status")
 [[ -z "$AUTHOR" ]]  && ERRORS+=("Missing required field: Author")
 [[ -z "$CREATED" ]] && ERRORS+=("Missing required field: Created")
+
+# Branch (Lane B work branch). Missing is a warning (older/migrated plans);
+# a present-but-malformed value is an error since /rad-deliver gates on it.
+# Use a literal prefix test (not regex) so a custom RAD_BRANCH_PREFIX with regex
+# metacharacters can't break validation; the slug after the prefix is then
+# checked against the allowed character set.
+PREFIX="${RAD_BRANCH_PREFIX:-rad/}"
+if [[ -z "$BRANCH" ]]; then
+  WARNINGS+=("Missing Branch field — Lane B plans should record their work branch (e.g. ${PREFIX}feature-slug)")
+elif [[ "$BRANCH" != "${PREFIX}"* || ! "${BRANCH#"$PREFIX"}" =~ ^[a-z0-9][a-z0-9-]*$ ]]; then
+  ERRORS+=("Invalid Branch value: '$BRANCH' (expected ${PREFIX}feature-slug, lowercase/digits/hyphens)")
+fi
 
 VALID_STATUSES="pending-review approved in-progress complete blocked rejected needs-revision"
 if [[ -n "$STATUS" ]] && ! echo "$VALID_STATUSES" | grep -qw "$STATUS"; then
@@ -51,10 +64,24 @@ fi
 
 # ── Required sections ─────────────────────────────────────────────────────────
 
-REQUIRED_SECTIONS=("Context" "Agent Scope" "Files in Scope" "Execution Notes" "Wave Plan" "Tests to Write" "Non-Goals" "Risks")
+REQUIRED_SECTIONS=("Context" "Scope" "Acceptance Criteria" "Agent Scope" "Files in Scope" "Execution Notes" "Wave Plan" "Tests to Write" "Non-Goals" "Risks")
 for section in "${REQUIRED_SECTIONS[@]}"; do
   has_section "$section" || ERRORS+=("Missing required section: ## $section")
 done
+
+# ── Acceptance Criteria — non-empty, and every task validates against one ──────
+
+if has_section "Acceptance Criteria"; then
+  AC_COUNT=$(section_content "Acceptance Criteria" | grep -cE "^[0-9]+\." || true)
+  [[ "$AC_COUNT" -eq 0 ]] && ERRORS+=("## Acceptance Criteria is empty — list at least one numbered, testable outcome")
+
+  # Every task should cite an AC# in its Validate: line.
+  TASKS_TOTAL=$(grep -cE "^#### Task" "$PLAN_FILE" || true)
+  TASKS_WITH_AC=$(grep -E "^Validate:" "$PLAN_FILE" | grep -cE "AC#?[0-9]+" || true)
+  if [[ "$TASKS_TOTAL" -gt 0 && "$TASKS_WITH_AC" -lt "$TASKS_TOTAL" ]]; then
+    WARNINGS+=("$((TASKS_TOTAL - TASKS_WITH_AC)) of $TASKS_TOTAL tasks have a Validate: line that does not cite an AC# — every task should map to an acceptance criterion")
+  fi
+fi
 
 # Adopted plans require Issue Gaps
 if [[ -n "$ADOPTED_FROM" ]]; then

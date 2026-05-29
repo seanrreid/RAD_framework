@@ -1,20 +1,23 @@
 #!/usr/bin/env bash
 # check-role.sh
-# Verifies the current git user has a required RAD role as declared in CLAUDE.md.
+# Verifies an identity has a required RAD role as declared in CLAUDE.md.
+# By default the identity is the current git user; pass a name/email as the
+# third argument to validate someone else (used by /rad-approve --on-behalf-of).
 #
-# Usage: scripts/check-role.sh <required-role> [claude-md-path]
+# Usage: scripts/check-role.sh <required-role> [claude-md-path] [identity-override]
 #
 # Roles: architect | developer | designer
 #
 # Exit codes:
-#   0 = user has the required role
-#   1 = user does not have the required role
+#   0 = identity has the required role
+#   1 = identity does not have the required role
 #   2 = usage error or role config not found
 
 set -euo pipefail
 
 REQUIRED_ROLE="${1:-}"
 CLAUDE_MD="${2:-CLAUDE.md}"
+IDENTITY_OVERRIDE="${3:-}"
 
 [[ -z "$REQUIRED_ROLE" ]] && { echo "ERROR: required role argument missing"; exit 2; }
 [[ ! -f "$CLAUDE_MD" ]]   && { echo "ERROR: CLAUDE.md not found at: $CLAUDE_MD"; exit 2; }
@@ -23,19 +26,25 @@ VALID_ROLES="architect developer designer"
 echo "$VALID_ROLES" | grep -qw "$REQUIRED_ROLE" \
   || { echo "ERROR: unknown role '$REQUIRED_ROLE'. Must be one of: $VALID_ROLES"; exit 2; }
 
-# ── Get current git user ──────────────────────────────────────────────────────
+# ── Resolve the identity to check ─────────────────────────────────────────────
 
-GIT_NAME=$(git config user.name 2>/dev/null || echo "")
-GIT_EMAIL=$(git config user.email 2>/dev/null || echo "")
+if [[ -n "$IDENTITY_OVERRIDE" ]]; then
+  # Validate a named identity (e.g. an architect who approved out-of-band).
+  GIT_NAME="$IDENTITY_OVERRIDE"
+  GIT_EMAIL="$IDENTITY_OVERRIDE"
+else
+  GIT_NAME=$(git config user.name 2>/dev/null || echo "")
+  GIT_EMAIL=$(git config user.email 2>/dev/null || echo "")
+
+  if [[ -z "$GIT_NAME" && -z "$GIT_EMAIL" ]]; then
+    echo "⚠ Cannot determine git user identity (git config user.name/email not set)"
+    echo "  Set git user identity or configure roles in CLAUDE.md to use role-gated commands."
+    exit 2
+  fi
+fi
 
 # Derive username from email (part before @)
 EMAIL_USER=$(echo "$GIT_EMAIL" | sed 's/@.*//')
-
-if [[ -z "$GIT_NAME" && -z "$GIT_EMAIL" ]]; then
-  echo "⚠ Cannot determine git user identity (git config user.name/email not set)"
-  echo "  Set git user identity or configure roles in CLAUDE.md to use role-gated commands."
-  exit 2
-fi
 
 # ── Extract role assignments from CLAUDE.md ───────────────────────────────────
 # Looks for the Role Assignments block:
@@ -84,9 +93,13 @@ done <<< "$ROLE_USERS"
 
 echo "✗ Permission denied: this command requires the '$REQUIRED_ROLE' role."
 echo ""
-echo "Your git identity:"
-[[ -n "$GIT_NAME" ]]  && echo "  Name:  $GIT_NAME"
-[[ -n "$GIT_EMAIL" ]] && echo "  Email: $GIT_EMAIL"
+if [[ -n "$IDENTITY_OVERRIDE" ]]; then
+  echo "Identity checked: $IDENTITY_OVERRIDE"
+else
+  echo "Your git identity:"
+  [[ -n "$GIT_NAME" ]]  && echo "  Name:  $GIT_NAME"
+  [[ -n "$GIT_EMAIL" ]] && echo "  Email: $GIT_EMAIL"
+fi
 echo ""
 echo "Configured $REQUIRED_ROLE(s) in CLAUDE.md:"
 while IFS= read -r u; do
