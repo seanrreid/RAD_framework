@@ -16,7 +16,9 @@ BODY=""
 BASE="$("$SCRIPT_DIR/get-default-branch.sh" 2>/dev/null || echo main)"
 HEAD=""
 DRAFT="--draft"
-LABELS=""
+# Indexed array (bash 3.2 safe) — never a space-joined string, so no leading
+# blank element leaks into the GitHub args or the GitLab comma-join.
+LABELS=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -25,7 +27,11 @@ while [[ $# -gt 0 ]]; do
     --base)    BASE="$2";   shift 2 ;;
     --head)    HEAD="$2";   shift 2 ;;
     --no-draft) DRAFT="";   shift ;;
-    --label)   LABELS="$LABELS $2"; shift 2 ;;
+    --label)
+      # Trim surrounding whitespace; skip empty values so no blank --label is built.
+      label_val="${2#"${2%%[![:space:]]*}"}"; label_val="${label_val%"${label_val##*[![:space:]]}"}"
+      [[ -n "$label_val" ]] && LABELS+=("$label_val")
+      shift 2 ;;
     *) echo "Unknown arg: $1"; exit 1 ;;
   esac
 done
