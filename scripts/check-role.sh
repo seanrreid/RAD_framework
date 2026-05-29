@@ -67,7 +67,7 @@ extract_role_users() {
     | tr -d '[]' \
     | tr ',' '\n' \
     | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' \
-    | grep -v "^$\|^\[your GitHub"
+    | grep -v "^$" | grep -v "^\[your GitHub"
 }
 
 ROLE_USERS=$(extract_role_users "$REQUIRED_ROLE")

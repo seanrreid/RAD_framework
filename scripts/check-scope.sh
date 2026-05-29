@@ -41,7 +41,7 @@ while IFS= read -r path; do
   scope_add "$path"
 done < <(
   awk '/^## Files in Scope/{found=1; next} /^## /{found=0} found && /^\|/' "$PLAN_FILE" \
-    | grep -v "^| *File\|^|[-| ]*$" \
+    | grep -v "^| *File" | grep -v "^|[-| ]*$" \
     | awk -F'|' '{print $2}'
 )
 
