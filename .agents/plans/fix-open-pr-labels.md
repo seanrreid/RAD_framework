@@ -82,9 +82,12 @@ the array is non-empty. Keep the draft flag handling array-safe.
 Validate: AC#1 — for `--label rad:deliver` the built arg is `--label rad:deliver`; for two labels it is `--label a,b` (no leading comma).
 
 ## Tests to Write
-- [ ] GitLab join yields `rad:deliver` (not `,rad:deliver`) for one label, and `a,b` for two — `scripts/open-pr.sh` (bash verification snippet; framework has no test harness)
-- [ ] GitHub argv contains a separate `--label` per value and no stray empty arg with `--no-draft` — `scripts/open-pr.sh` (bash verification snippet)
-- [ ] `bash -n scripts/open-pr.sh` and a `/bin/bash` (3.2) parse both pass — `scripts/open-pr.sh`
+<!-- Delivery-time correction: the framework has no unit harness, so these were
+     consolidated into one committed, runnable assertion script that drives
+     open-pr.sh with stubbed gh/glab/git and checks the built argv. -->
+- [x] GitLab join yields rad:deliver (not ,rad:deliver) and omits --label when no labels — scripts/test-open-pr.sh
+- [x] GitHub passes a separate --label per value and no stray empty/--draft arg with --no-draft — scripts/test-open-pr.sh
+- [x] Passes under default bash and /bin/bash (3.2) — scripts/test-open-pr.sh
 
 ## Non-Goals
 - Do not change any label names, values, or the `rad:` taxonomy
