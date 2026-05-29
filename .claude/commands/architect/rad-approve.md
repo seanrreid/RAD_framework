@@ -1,9 +1,10 @@
 ---
 description: >
-  ARCHITECT ONLY. Review and approve a pending plan. Records the approval on the
-  plan's rad/ work-branch tip (never on the default branch), which unblocks
-  /rad-deliver. There is no plan PR — the plan reaches the default branch later
-  via the deliver PR.
+  Review and approve a pending plan. Architect-only by default; the
+  --on-behalf-of proxy flag lets a non-architect record an approval the architect
+  already gave out-of-band. Records the approval on the plan's rad/ work-branch
+  tip (never on the default branch), which unblocks /rad-deliver. There is no plan
+  PR — the plan reaches the default branch later via the deliver PR.
 ---
 
 # /rad-approve
@@ -14,9 +15,27 @@ branch tip. Nothing is committed to the default branch here.
 
 ## Input
 
-`$ARGUMENTS` should be a plan name or path:
+`$ARGUMENTS` should be a plan name or path, optionally followed by the
+proxy-approval flags:
 - `feature-name` → resolves to `.agents/plans/feature-name.md` on `rad/feature-name`
 - `.agents/plans/feature-name.md` → used directly
+- `feature-name --on-behalf-of "Sean R Reid" --evidence "Slack #rad 2026-05-28: 'plan looks good, approve it'"`
+
+### Proxy approval (`--on-behalf-of`)
+
+By default this command is architect-only — it gates on the git user's role.
+When the architect approves a plan **out-of-band** (Slack, a PR comment, a verbal
+yes in standup) but doesn't run `/rad-approve` themselves, a team member may
+record that approval with:
+
+- `--on-behalf-of "<architect name>"` — who actually approved. Must resolve to a
+  configured architect in CLAUDE.md (validated, not just typed).
+- `--evidence "<text or link>"` — **required** with `--on-behalf-of`. A quote,
+  Slack permalink, or PR-comment URL showing the architect's approval. This is
+  the audit-trail substitute for the architect running the command themselves.
+
+The recording user's own git identity is captured separately as `Recorded-By`,
+so the record always shows both who approved and who entered it.
 
 If empty, list plans awaiting approval (reading branch tips, since plans live on
 their work branches):
@@ -30,13 +49,43 @@ scripts/rad-status.sh 2>/dev/null | grep pending-review \
 
 ## Process
 
-### Step 1: Verify architect role
+### Step 1: Verify authority to approve
+
+First, parse `$ARGUMENTS` for the proxy flags. Everything before the first `--`
+flag is the plan name/path; capture the values of `--on-behalf-of` and
+`--evidence` if present.
+
+**Default (no `--on-behalf-of`)** — gate on the running user's role:
 
 ```bash
 scripts/check-role.sh architect
 ```
 
 If the script exits non-zero, stop. Do not proceed.
+
+**Proxy (`--on-behalf-of "<name>"` present)** — validate the named approver, not
+the running user:
+
+```bash
+# 1. The approver name is mandatory. An empty value would let check-role.sh fall
+#    back to the running user's identity, corrupting the audit trail — refuse it.
+[[ -z "${ON_BEHALF_OF//[[:space:]]/}" ]] && { echo "✗ --on-behalf-of requires the name of the architect who approved."; exit 1; }
+
+# 2. Evidence is mandatory for proxy approval (reject whitespace-only values).
+[[ -z "${EVIDENCE//[[:space:]]/}" ]] && { echo "✗ --on-behalf-of requires --evidence (cite where the architect approved)."; exit 1; }
+
+# 3. The named approver must be a configured architect.
+scripts/check-role.sh architect CLAUDE.md "$ON_BEHALF_OF"
+```
+
+If the named approver is not a configured architect, stop:
+
+```
+✗ "<name>" is not a configured architect in CLAUDE.md — cannot record their approval.
+```
+
+Note: the running user does **not** need the architect role in proxy mode — that's
+the point of the flag. Their identity is recorded as `Recorded-By`.
 
 ### Step 2: Check out the work branch at its tip and read the plan
 
@@ -105,7 +154,9 @@ Waves: [N] | Tasks: [total] | ACs: [count] | Out-of-scope deps: [yes/no]
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
-Ask the architect to confirm:
+Confirm before approving.
+
+**Default mode** — ask the architect to confirm:
 
 ```
 Approve this plan?
@@ -114,20 +165,47 @@ Approve this plan?
   feedback → request revision with notes
 ```
 
+**Proxy mode (`--on-behalf-of`)** — restate the recorded approval and confirm the
+evidence is accurate before writing it:
+
+```
+Record {architect}'s approval of this plan?
+  Approver: {architect}  (out-of-band — see evidence)
+  Evidence: {evidence text/link}
+  Recorder: {your git user}
+
+  yes → record approval and unblock /rad-deliver
+  no  → cancel, no changes made
+```
+
 - **yes** → proceed to Step 4
 - **no** → update Status to `rejected`, commit + push to the work branch, output rejection notice, stop
+  (proxy mode: a `no` simply cancels — make no changes)
 - **feedback** → prompt for feedback text, append as `## Architect Feedback` section,
   update Status to `needs-revision`, commit + push to the work branch, output revision notice, stop
+  (default mode only)
 
 ### Step 4: Update plan file status
 
 Update the plan header fields in the working tree (you are on the work branch tip
-from Step 2):
+from Step 2).
+
+**Default mode** — architect ran the command directly:
 
 ```
 Status: approved
 Approved-By: [architect username from CLAUDE.md Role Assignments]
 Approved-At: [ISO 8601 timestamp — e.g. 2026-05-25T14:32:00Z]
+```
+
+**Proxy mode (`--on-behalf-of`)** — record both parties and the evidence:
+
+```
+Status: approved
+Approved-By: [architect from --on-behalf-of] (out-of-band)
+Approved-At: [ISO 8601 timestamp]
+Recorded-By: [your git user]
+Approval-Evidence: [evidence text or link from --evidence]
 ```
 
 ### Step 5: Commit the approval to the work branch
@@ -157,6 +235,8 @@ scripts/rad-label.sh [issue-number] approved   # omit if there is no issue
 
 ### Step 6: Output confirmation
 
+**Default mode:**
+
 ```
 ✓ Plan approved: [feature name]
 
@@ -169,15 +249,39 @@ Branch:      rad/[feature-name]
   /rad-deliver .agents/plans/[feature].md
 ```
 
+**Proxy mode:**
+
+```
+✓ Plan approved (recorded on behalf of [architect]): [feature name]
+
+Plan:        .agents/plans/[feature].md
+Approved-By: [architect] (out-of-band)
+Recorded-By: [your git user]
+Approved-At: [timestamp]
+Evidence:    [evidence]
+Branch:      rad/[feature-name]
+
+/rad-deliver is now unblocked:
+  /rad-deliver .agents/plans/[feature].md
+```
+
 ---
 
 ## Rules
 
-- Only architects listed in CLAUDE.md Role Assignments may run this command
+- Default mode is architect-only — only architects listed in CLAUDE.md Role Assignments may approve directly
 - Never approve a plan with unreviewed out-of-scope dependencies
 - Never approve a plan with Status: in-progress, complete, or approved
 - Commit only the plan file to the work branch — no other files
 - Never commit to the default branch — the plan lands there when the deliver PR merges
 - If the architect provides feedback, set Status to needs-revision, not approved
 - Do not delete the work branch — it carries the plan, approval, and (later) the code
-- The approval commit on the work-branch tip is the audit trail — include approver identity in the message
+- The approval commit on the work-branch tip is the audit trail — set Approved-By and Approved-At
+
+### Proxy approval (`--on-behalf-of`)
+
+- `--on-behalf-of` records an approval the architect already gave **elsewhere** — it is not a way to self-approve or bypass the architect. The architect must actually have approved.
+- `--on-behalf-of` requires `--evidence`. No evidence → refuse.
+- The name passed to `--on-behalf-of` must resolve to a configured architect in CLAUDE.md. A non-architect name → refuse.
+- Always record both `Approved-By` (the architect) and `Recorded-By` (whoever ran the command). Never collapse them — the split is the integrity of the gate.
+- Use proxy mode honestly: only when you can cite a real, specific approval (a quote, Slack permalink, or PR comment). Fabricating or paraphrasing an approval that didn't happen defeats the purpose of the gate.
