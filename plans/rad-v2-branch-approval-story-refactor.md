@@ -2,7 +2,17 @@
 
 Created: 2026-05-26
 Author: architect
-Status: pending-review
+Status: superseded
+
+> **SUPERSEDED 2026-05-29** by `plans/rad-v2-lane-b-branch-canonical.md`.
+> This plan's Wave 2 commits the plan file *directly to the default branch*
+> (Lane A). That conflicts with protected default branches and the goal of
+> keeping multiple contributors off the default branch. The successor plan
+> keeps the plan doc canonical on its **work branch tip** (Lane B) and reaches
+> the default branch only via the reviewed deliver PR. Most of this plan's
+> orthogonal improvements (richer plan doc, execution log, retry cap, AC
+> coverage, Issue Gaps, /kickoff + /wrap) are carried forward into the
+> successor. Kept for historical context — do not execute.
 
 ## Context
 

@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # open-pr.sh
 # Opens a PR/MR on the detected git platform.
-# Usage: scripts/open-pr.sh --title "Plan: feature-name" --body "..." --base main --head plan/feature-name --draft --label "rad:plan"
+# Usage: scripts/open-pr.sh --title "Deliver: feature-name" --body "..." --head rad/feature-name --no-draft --label "rad:deliver"
 #
+# --base defaults to the project default branch (scripts/get-default-branch.sh).
 # Outputs the PR URL on success, or prints manual instructions if CLI unavailable.
 
 set -euo pipefail
@@ -12,7 +13,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Parse args
 TITLE=""
 BODY=""
-BASE="main"
+BASE="$("$SCRIPT_DIR/get-default-branch.sh" 2>/dev/null || echo main)"
 HEAD=""
 DRAFT="--draft"
 LABELS=""
