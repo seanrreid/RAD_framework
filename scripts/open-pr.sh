@@ -16,7 +16,9 @@ BODY=""
 BASE="$("$SCRIPT_DIR/get-default-branch.sh" 2>/dev/null || echo main)"
 HEAD=""
 DRAFT="--draft"
-LABELS=""
+# Indexed array (bash 3.2 safe) — never a space-joined string, so no leading
+# blank element leaks into the GitHub args or the GitLab comma-join.
+LABELS=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -25,7 +27,12 @@ while [[ $# -gt 0 ]]; do
     --base)    BASE="$2";   shift 2 ;;
     --head)    HEAD="$2";   shift 2 ;;
     --no-draft) DRAFT="";   shift ;;
-    --label)   LABELS="$LABELS $2"; shift 2 ;;
+    --label)
+      # Trim surrounding whitespace; skip empty values so no blank --label is built.
+      _lv="${2#"${2%%[![:space:]]*}"}"; _lv="${_lv%"${_lv##*[![:space:]]}"}"
+      [[ -n "$_lv" ]] && LABELS+=("$_lv")
+      unset _lv
+      shift 2 ;;
     *) echo "Unknown arg: $1"; exit 1 ;;
   esac
 done
@@ -37,10 +44,18 @@ PLATFORM=$("$SCRIPT_DIR/detect-platform.sh" --quiet)
 REMOTE_URL=$(git remote get-url origin 2>/dev/null || echo "")
 
 open_github() {
-  local label_flags=""
-  for label in $LABELS; do
-    label_flags="$label_flags --label $label"
-  done
+  # Build flag arrays so each label is its own quoted --label arg and an empty
+  # draft flag contributes no argument (no unquoted string expansion).
+  # The count-guarded loop and ${arr[@]+"${arr[@]}"} expansion keep empty arrays
+  # from tripping `set -u` on bash 3.2 (macOS stock).
+  local label_args=() draft_args=()
+  local label
+  if [[ ${#LABELS[@]} -gt 0 ]]; then
+    for label in "${LABELS[@]}"; do
+      label_args+=(--label "$label")
+    done
+  fi
+  [[ -n "$DRAFT" ]] && draft_args=("$DRAFT")
 
   local url
   url=$(gh pr create \
@@ -48,19 +63,26 @@ open_github() {
     --body "$BODY" \
     --base "$BASE" \
     --head "$HEAD" \
-    $DRAFT \
-    $label_flags \
+    ${draft_args[@]+"${draft_args[@]}"} \
+    ${label_args[@]+"${label_args[@]}"} \
     2>&1)
 
   echo "$url"
 }
 
 open_gitlab() {
-  local mr_flags="--squash-before-merge"
-  [[ -n "$DRAFT" ]] && mr_flags="$mr_flags --draft"
+  # Fixed flags as an array (no unquoted string expansion).
+  local mr_flags=(--squash-before-merge)
+  [[ -n "$DRAFT" ]] && mr_flags+=(--draft)
 
-  local label_list
-  label_list=$(echo "$LABELS" | tr ' ' ',')
+  # Comma-join the label array with no leading/trailing comma, and only pass
+  # --label when there is at least one label. Count-guarded for bash-3.2 set -u.
+  local label_args=()
+  if [[ ${#LABELS[@]} -gt 0 ]]; then
+    local label_list old_ifs="$IFS"
+    IFS=','; label_list="${LABELS[*]}"; IFS="$old_ifs"
+    label_args=(--label "$label_list")
+  fi
 
   local url
   url=$(glab mr create \
@@ -68,8 +90,8 @@ open_gitlab() {
     --description "$BODY" \
     --target-branch "$BASE" \
     --source-branch "$HEAD" \
-    --label "$label_list" \
-    $mr_flags \
+    ${label_args[@]+"${label_args[@]}"} \
+    "${mr_flags[@]}" \
     2>&1)
 
   echo "$url"
