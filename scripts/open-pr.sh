@@ -43,10 +43,18 @@ PLATFORM=$("$SCRIPT_DIR/detect-platform.sh" --quiet)
 REMOTE_URL=$(git remote get-url origin 2>/dev/null || echo "")
 
 open_github() {
-  local label_flags=""
-  for label in $LABELS; do
-    label_flags="$label_flags --label $label"
-  done
+  # Build flag arrays so each label is its own quoted --label arg and an empty
+  # draft flag contributes no argument (no unquoted string expansion).
+  # The count-guarded loop and ${arr[@]+"${arr[@]}"} expansion keep empty arrays
+  # from tripping `set -u` on bash 3.2 (macOS stock).
+  local label_args=() draft_args=()
+  local label
+  if [[ ${#LABELS[@]} -gt 0 ]]; then
+    for label in "${LABELS[@]}"; do
+      label_args+=(--label "$label")
+    done
+  fi
+  [[ -n "$DRAFT" ]] && draft_args=("$DRAFT")
 
   local url
   url=$(gh pr create \
@@ -54,8 +62,8 @@ open_github() {
     --body "$BODY" \
     --base "$BASE" \
     --head "$HEAD" \
-    $DRAFT \
-    $label_flags \
+    ${draft_args[@]+"${draft_args[@]}"} \
+    ${label_args[@]+"${label_args[@]}"} \
     2>&1)
 
   echo "$url"
