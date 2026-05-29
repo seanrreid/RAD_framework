@@ -105,7 +105,7 @@ Ask all of the following at once — do not drip them one at a time:
 A few things the spec won't tell me:
 
 1. **Team:** Who will work on this? List names or usernames for:
-   - Architect (has merge rights on plan PRs): 
+   - Architect (approves plans via /rad-approve, merges deliver PRs): 
    - Developers:
    - Designers (if any):
    If there's no designated architect, say so — one person can fill both roles.

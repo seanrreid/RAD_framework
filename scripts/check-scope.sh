@@ -20,7 +20,7 @@ DELIVER_BRANCH="${2:-}"
 BASE_BRANCH="${3:-$("$SCRIPT_DIR/get-default-branch.sh" 2>/dev/null || echo main)}"
 
 [[ -z "$PLAN_FILE" ]]      && { echo "ERROR: plan file required";    exit 2; }
-[[ -z "$DELIVER_BRANCH" ]] && { echo "ERROR: deliver branch required"; exit 2; }
+[[ -z "$DELIVER_BRANCH" ]] && { echo "ERROR: work branch required"; exit 2; }
 [[ ! -f "$PLAN_FILE" ]]    && { echo "ERROR: plan file not found: $PLAN_FILE"; exit 2; }
 
 # ── Build declared scope set ──────────────────────────────────────────────────
@@ -55,7 +55,7 @@ ALWAYS_ALLOW_PREFIXES=(
   ".agents/plans/"
 )
 
-# ── Get changed files on deliver branch ───────────────────────────────────────
+# ── Get changed files on the work branch ──────────────────────────────────────
 
 CHANGED_FILES=$(git diff --name-only "origin/$BASE_BRANCH"..."$DELIVER_BRANCH" 2>/dev/null \
   || git diff --name-only "$BASE_BRANCH"..."$DELIVER_BRANCH" 2>/dev/null \

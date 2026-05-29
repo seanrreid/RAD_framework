@@ -1,15 +1,16 @@
 ---
 description: >
-  Review code changes on the current deliver branch against the plan and project
+  Review code changes on the current rad/ work branch against the plan and project
   conventions. Run after /rad-deliver completes and before requesting architect
-  review. Catches scope drift, convention violations, and missing test coverage
-  before the architect sees the PR.
+  review. Catches scope drift, convention violations, missing AC coverage, and
+  missing test coverage before the architect sees the deliver PR.
 ---
 
 # /rad-review
 
-Self-review the deliver branch before requesting architect review. Catches
-problems early — better to find them now than in the architect's review.
+Self-review the `rad/[feature]` work branch before requesting architect review.
+Catches problems early — better to find them now than in the architect's review
+of the deliver PR.
 
 ## Input
 
