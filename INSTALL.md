@@ -100,13 +100,19 @@ The installer also copies the RAD skills into `.claude/skills/` (`kickoff/` and
 Open `CLAUDE.md` and complete every section. The RAD Configuration section
 is critical — it defines your platform, team roles, and branch conventions.
 
-### 2. Create platform labels
+### 2. Platform labels (usually automatic)
 
 There is no plan PR in RAD (the old `rad:plan` label is gone) — the only PR is the
-deliver PR, so the only label you must create up front is `rad:deliver`. The
-`rad:<status>` board labels (`rad:draft`, `rad:pending-review`, `rad:approved`,
-`rad:in-progress`, `rad:review`, `rad:done`, …) are created automatically on first
-use by `scripts/rad-label.sh`, so you do not need to pre-create them.
+deliver PR, which uses the `rad:deliver` label.
+
+`install.sh` already creates `rad:deliver` for you when `gh` is available and
+authenticated, and the `rad:<status>` board labels (`rad:draft`,
+`rad:pending-review`, `rad:approved`, `rad:in-progress`, `rad:review`,
+`rad:done`, …) are created automatically on first use by `scripts/rad-label.sh`.
+**So in the common case there is nothing to do here.**
+
+Only if the installer ran without `gh` (or on GitLab) create the deliver label
+manually:
 
 **GitHub:**
 ```bash

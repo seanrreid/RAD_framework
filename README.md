@@ -184,6 +184,7 @@ your-project/
 |-----|-----------|
 | `INSTALL.md` | Installing or uninstalling RAD |
 | `UPGRADE.md` | Upgrading an existing RAD project to the latest version |
+| `docs/how-it-works.md` | The whole process explained — model, lifecycle, guardrails |
 | `docs/daily-workflow.md` | Getting started with the team workflow |
 | `docs/architect-guide.md` | Setting up and maintaining the architecture |
 | `docs/plan-pr-guide.md` | How plan approval works and what to review |
