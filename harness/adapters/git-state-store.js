@@ -33,8 +33,12 @@ import { join, dirname } from 'node:path';
 import { reduce, phaseOf } from '../events.js';
 import { validateTransition } from '../transitions.js';
 // gates.js is imported lazily inside gate() — it pulls in js-yaml (the only
-// runtime dep), so deferring the import keeps the rest of the StateStore usable
-// (and unit-testable) even where the policy parser is not installed.
+// runtime dep). This keeps THIS MODULE importable and its non-gate methods
+// (append/history/phase/plan/list/recordApproval) usable and unit-testable
+// without js-yaml installed, and lets tests inject `evaluateGate` to exercise
+// gate() hermetically. Note: the full harness still needs js-yaml — spine.js
+// imports matrix.js eagerly — so js-yaml is optional only for StateStore-only
+// consumers, not for the harness as a whole.
 
 /**
  * Default shell-out helper: run a script/command synchronously and capture its

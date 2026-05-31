@@ -48,6 +48,7 @@ const POST_CHECKS = ['check-scope.sh', 'check-tests.sh', 'open-pr.sh'];
  * @param {(wave: Object) => Promise<{ outcome: string }>} args.runWave - MODEL boundary
  * @param {(script: string, feature: string) => { status: number }} args.sh - Bash boundary
  * @param {() => string} args.now - injected clock (ISO timestamp)
+ * @param {number} [args.maxAttempts] - per-wave attempt ceiling (defaults to MAX_ATTEMPTS); injectable for tests
  * @returns {Promise<Object>} structured terminal result
  */
 export async function deliverSpine({
@@ -59,6 +60,7 @@ export async function deliverSpine({
   runWave,
   sh,
   now,
+  maxAttempts = MAX_ATTEMPTS,
 }) {
   // ── DET gate: approval. The human (or proxy) decided earlier; here we ENFORCE
   // it. A blocked gate is a normal outcome — return structured, append nothing
@@ -78,7 +80,7 @@ export async function deliverSpine({
     let lastPrint = null;
     let advanced = false;
 
-    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       const result = await runWave(wave);
 
       state.append({

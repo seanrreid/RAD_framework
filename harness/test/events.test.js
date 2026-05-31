@@ -55,11 +55,10 @@ test('reduce collects every approval (direct + proxy) with audit fields', () => 
   ];
   const { approvals } = reduce(history);
   assert.equal(approvals.length, 2);
-  assert.deepEqual(approvals[0], {
-    actor: 'architect',
-    recordedBy: undefined,
-    ts: 't1',
-  });
+  // Direct approval: no recordedBy key at all (not an undefined-valued one).
+  assert.deepEqual(approvals[0], { actor: 'architect', ts: 't1' });
+  assert.equal('recordedBy' in approvals[0], false);
+  // Proxy approval: both names present.
   assert.deepEqual(approvals[1], {
     actor: 'architect',
     recordedBy: 'dev',

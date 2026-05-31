@@ -103,7 +103,7 @@ export function phaseOf(history) {
  * Pure fold over an array of events → derived state.
  *
  * @param {Event[]} history - in-memory event array (no I/O performed)
- * @returns {{ phase: (Phase|null), markers: string[], approvals: Array<{actor: string, recordedBy: (string|undefined), ts: string}> }}
+ * @returns {{ phase: (Phase|null), markers: string[], approvals: Array<{actor: string, ts: string, recordedBy?: string}> }}
  */
 export function reduce(history) {
   if (!Array.isArray(history)) {
@@ -118,11 +118,11 @@ export function reduce(history) {
     markers.add(event.type);
 
     if (event.type === 'approved') {
-      approvals.push({
-        actor: event.actor,
-        recordedBy: event.recordedBy,
-        ts: event.ts,
-      });
+      // Only include recordedBy when present, so a direct approval carries no
+      // undefined-valued key — the public shape is the *absence* of the key.
+      const approval = { actor: event.actor, ts: event.ts };
+      if (event.recordedBy !== undefined) approval.recordedBy = event.recordedBy;
+      approvals.push(approval);
     }
   }
 

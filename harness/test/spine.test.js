@@ -249,6 +249,29 @@ test('(g) budget exhaustion: distinct-fingerprint failures hit the cap, not the 
   assert.ok(!state.appended.some((e) => e.type === 'pr-opened'));
 });
 
+test('(g2) injected maxAttempts overrides the default budget', async () => {
+  const state = makeFakeState({ gateResult: passingGate, plan: { waves: [{ n: 1 }] } });
+  let i = 0;
+  let runWaveCalls = 0;
+  const runWave = async () => {
+    runWaveCalls += 1;
+    return { outcome: 'fail-tests', summary: `distinct failure ${i++}` };
+  };
+  const result = await deliverSpine({
+    feature: 'demo',
+    state,
+    docs: {},
+    matrix: MATRIX,
+    gates: {},
+    runWave,
+    sh: () => ({ status: 0 }),
+    now: fixedClock(),
+    maxAttempts: 2,
+  });
+  assert.equal(result.stopped, 'budget');
+  assert.equal(runWaveCalls, 2); // honored the injected cap, not the default 3
+});
+
 test('(h) null plan: no waves → post-checks run and pr-opened, ok with waves:0', async () => {
   const state = makeFakeState({ gateResult: passingGate, plan: null });
   let runWaveCalls = 0;
