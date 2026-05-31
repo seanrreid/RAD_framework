@@ -1,0 +1,21 @@
+# gates.yaml — the gate rules. Each gate name maps to the rule the harness
+# enforces deterministically before proceeding past a checkpoint. The JS
+# (gates.js) LOADS and evaluates these rules; it contains no gate policy of its
+# own beyond what is declared here (design Decision 5 + Decision 1).
+#
+# A gate rule declares:
+#   eventType    : the event type that satisfies the gate when present
+#   requiredRole  : the role the event's `actor` must represent
+#   condition     : the structural pass condition. Supported:
+#                     actor-has-role — passes when an event of `eventType` whose
+#                     `actor` is the required role exists in history. A PROXY
+#                     event (actor = the authority, recordedBy = someone else)
+#                     still satisfies it, since attribution rides on `actor`
+#                     (see "Approval without a bottleneck: the proxy event").
+#   reason        : human-readable explanation surfaced when the gate fails
+
+approved:
+  eventType: approved
+  requiredRole: architect
+  condition: actor-has-role
+  reason: needs an approved event attributed to role:architect
