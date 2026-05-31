@@ -60,6 +60,7 @@ is repo-wide framework development). No out-of-scope agents required.
 | harness/README.md | 1-15 | Module pointer to the design doc (entailed by Task 1.1; scope amended at delivery, architect-approved) |
 | harness/.gitignore | 1-5 | Ignores `node_modules/` so the `js-yaml` install is not committed (scope amended at delivery, architect-approved) |
 | harness/package-lock.json | 1-30 | Lockfile for the declared `js-yaml` dependency (scope amended at delivery, architect-approved) |
+| .agents/findings.jsonl | 1-30 | RAD review-log appends from the /rad-review cycle (process artifact; declared so check-scope passes — see Risks) |
 
 ## Execution Notes
 
