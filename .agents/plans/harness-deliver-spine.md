@@ -1,7 +1,7 @@
 # Plan: Harness Migration Step 1 — StateStore Core & Deliver Spine
 Created: 2026-05-31
 Author: developer
-Status: approved
+Status: in-progress
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-05-31T20:14:43Z
 Branch: rad/harness-deliver-spine
