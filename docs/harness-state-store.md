@@ -6,6 +6,8 @@
 > Question being answered: *How do we migrate RAD's orchestration into code without
 > marrying the design to git — and in a way that serves speed, quality,
 > determinism, and portability at once?*
+> Prior art: validated and refined against **[WorkOS Case](https://github.com/workos/case)**,
+> a production harness that ships this exact pattern (see "Prior art" at the end).
 
 ---
 
@@ -45,7 +47,9 @@ interface StateStore {
   history(feature): Event[]          // full who/when/why trail — the audit log
   list(filter?):    FeatureState[]   // for rad-status — no fan-out over N branches
 
-  // WRITE — the ONLY mutation in the whole system
+  // WRITE — the ONLY mutation in the whole system.
+  // Validates legality BEFORE persisting: an illegal transition throws
+  // TransitionError and is never written (see Decision 4).
   append(event: Event): void
 
   // GATE — a deterministic predicate the harness pauses on (first-class; see below)
@@ -102,6 +106,28 @@ Combining State and Artifacts into one store is less code today but re-fuses
 exactly the thing we are separating. Two ports lets state move to a log/DB while
 documents stay in git — independently, each a one-file adapter swap.
 
+### Decision 4 — `append()` validates the transition before persisting (from Case)
+
+`gate()` answers *"may I proceed past this point?"* — a forward check at a gate.
+It does **not** answer *"was this state change even legal?"* Those are different
+questions, and a robust state machine needs both. So `append()` runs a
+`validateTransition(event, currentState)` check first and **throws rather than
+writes** on an illegal move. Examples of illegal moves that should never reach
+the log:
+
+- any event after a terminal `done`/`delivered` event for the feature;
+- `wave-complete` for a feature whose `phase` is not `in-progress`;
+- a `revision-requested` with no preceding reviewer/verifier output;
+- a duplicate `approved` that would silently shadow an earlier authority.
+
+This is the **enforcement teeth** for the whole model: `gate()` is proceed-time,
+transition-validation is record-time, and together they make an invalid history
+*unrepresentable* rather than merely *discouraged*. WorkOS Case implements exactly
+this — its `EventAppender.append()` calls `validateTransition()` and raises
+`LifecycleValidationError` (e.g. *"Cannot append events after pipeline end,"*
+*"Cannot request revision without evaluator output"*) before the event is ever
+written to the log. We adopt the same record-time guard.
+
 ---
 
 ## Approval without a bottleneck: the proxy event
@@ -146,11 +172,49 @@ today and lives in the platform + role script, not the state layer.
 
 ---
 
+## The stop-condition matrix — the core of deterministic control flow (from Case)
+
+The audit's first instinct was a wave loop that says *"retry at most twice, then
+escalate."* That ad-hoc policy is exactly the prose-as-control-flow we are trying
+to leave behind. The disciplined form — and the single highest-leverage borrow
+from WorkOS Case — is a **unified, exhaustiveness-tested stop-condition matrix**:
+every `(phase, outcome)` pair maps to exactly one declared action, with **no
+default fallthrough**.
+
+```ts
+type Outcome = 'success' | 'fail-tests' | 'fail-scope' | 'fail-protocol'
+             | 'fail-timeout' | 'no-changes' | 'abort-user'
+type Action  = 'advance' | 'retry' | 'revision' | 'abort' | 'skip-to' | 'surface'
+
+// The ONLY place a "what happens next" decision lives. A test asserts every
+// applicable (phase, outcome) pair has an entry — a missing pair fails CI.
+function resolveOutcome(phase: Phase, outcome: Outcome): { action: Action; to?: Phase }
+```
+
+Case proves this out in `src/dag/outcome-table.ts`, kept in sync with a
+human-readable `docs/failure-matrix.md` by an exhaustiveness test that forbids a
+`default` branch. The payoff is precisely priority #3 (**deterministic >
+probabilistic**): no failure mode is ever resolved by model judgment or by prose
+the model might mis-apply — each one has a *declared, tested* response. It is also
+the audit's "control flow is code" thesis made auditable: the entire policy is one
+table a non-engineer architect can read (priority #1, readability offset).
+
+Two refinements we take from Case alongside the table:
+
+- **Failure fingerprinting (doom-loop breaker).** Before spending a retry/revision,
+  hash the failure (`SHA-256` of failed-check categories + error summary). If a
+  cycle produces a fingerprint identical to the previous one, the work is provably
+  stuck — `abort` immediately instead of burning the remaining budget. This is
+  strictly better than a fixed retry count.
+- **Bounded revision budget.** Reviewer/verifier failures route back to the
+  implementer as structured feedback (`revision`), capped (Case uses two cycles),
+  with the fingerprint breaker as the early-exit.
+
 ## `rad-deliver` as a harness spine, calling the ports
 
-This is the audit's step-1 prototype, written against the ports instead of
-against git. The 336 lines of prose collapse to a short deterministic driver with
-the model called only at MODEL points.
+This is the audit's step-1 prototype, written against the ports and driven by the
+matrix instead of an inline retry count. The 336 lines of prose collapse to a
+short deterministic driver with the model called only at MODEL points.
 
 ```js
 // rad-deliver — control flow is CODE; the model is called only at MODEL points.
@@ -168,27 +232,42 @@ if (!g.passed) {
 const plan = state.plan(feature)
 state.append({ feature, type: 'deliver-started', actor: whoami(), ts: now() })
 
-// ── DET wave loop — retry/escalation policy is code; implementation is the MODEL call ──
+// ── DET wave loop — the MATRIX decides what happens next, not an inline counter ──
 await pipeline(plan.waves, async (wave) => {
-  let attempt = 0, result
-  do {
-    attempt++
-    result = await agent(implementPrompt(wave, plan), {
-      label:  `wave-${wave.n}:try-${attempt}`,
+  let lastPrint = null
+  while (true) {
+    const result = await agent(implementPrompt(wave, plan), {
+      label:  `wave-${wave.n}`,
       schema: WAVE_RESULT,                 // structured output — model never re-parses text
     })
     state.append({ feature, type: 'wave-attempt', actor: whoami(), ts: now(),
-                   data: { wave: wave.n, attempt, status: result.status } })
-  } while (result.status !== 'complete' && attempt < 3)   // ← DET retry policy, was prose
+                   data: { wave: wave.n, outcome: result.outcome } })
 
-  if (result.status !== 'complete') {                     // ← DET escalation, was prose
-    state.append({ feature, type: 'wave-failed', actor: whoami(), ts: now(),
-                   data: { wave: wave.n } })
-    throw new Error(`Wave ${wave.n} failed after ${attempt} attempts`)
+    // Doom-loop breaker: identical failure twice in a row ⇒ provably stuck.
+    const print = fingerprint(result)       // SHA-256 of failed categories + summary
+    if (print === lastPrint) {
+      state.append({ feature, type: 'wave-failed', actor: whoami(), ts: now(),
+                     data: { wave: wave.n, reason: 'doom-loop' } })
+      throw new Error(`Wave ${wave.n}: identical failure twice — aborting`)
+    }
+    lastPrint = print
+
+    const { action } = resolveOutcome('implement', result.outcome)  // ← the matrix, not prose
+    switch (action) {
+      case 'advance':
+        state.append({ feature, type: 'wave-complete', actor: whoami(), ts: now(),
+                       data: { wave: wave.n } })
+        return result
+      case 'retry':
+      case 'revision':
+        continue                            // loop; budget enforced inside resolveOutcome
+      case 'abort':
+      case 'surface':
+        state.append({ feature, type: 'wave-failed', actor: whoami(), ts: now(),
+                       data: { wave: wave.n, action } })
+        throw new Error(`Wave ${wave.n}: ${action} per stop-condition matrix`)
+    }
   }
-  state.append({ feature, type: 'wave-complete', actor: whoami(), ts: now(),
-                 data: { wave: wave.n } })
-  return result
 })
 
 // ── DET post-checks: existing bash guardrails (asset b), called by path, unchanged ──
@@ -199,8 +278,9 @@ state.append({ feature, type: 'pr-opened', actor: whoami(), ts: now() })
 ```
 
 What is deliberately *absent*: no `git`, no `jq`, no state file paths, no
-string-parsing of a `Status:` line. The only git left is inside the bash
-guardrails and behind the `git` state adapter.
+string-parsing of a `Status:` line, and no hand-rolled retry arithmetic. The only
+git left is inside the bash guardrails and behind the `git` state adapter; every
+"what next" decision lives in the one tested matrix.
 
 ---
 
@@ -271,8 +351,33 @@ adapter swap — decided later with a running system in hand.
    retry/gate/log, existing `scripts/*.sh` via `sh()`.
 3. **Proxy-aware `approved` event** wired into `gate('approved')`, preserving
    `--on-behalf-of` with a full `recordedBy` audit trail.
-4. Only then consider an **event-log adapter** as the second `StateStore`
-   implementation, and flip the default when proven.
+4. **The `(phase, outcome) → action` matrix** as `resolveOutcome()` plus its
+   exhaustiveness test and the failure-fingerprint breaker — the deterministic
+   heart of the wave loop (from Case).
+5. **The event-log adapter is the target, not a someday-maybe** (see the hinge
+   note below). Build it as the second `StateStore` implementation and flip the
+   default once the git adapter has proven the spine end-to-end.
+
+---
+
+## On the git-coupling hinge (audit open question #1)
+
+The audit parked the question *"are we married to git for state?"* This design's
+answer, sharpened by prior art: **no — and the event log is where we are headed,
+not merely where we could go.**
+
+WorkOS Case is the strongest available data point. Facing the same choice, it does
+**not** store run state on git branch tips or in git history at all — it keeps an
+append-only event log under a **git-ignored `.case/<task-slug>/events/` directory**
+and lets git hold only the output PR. A peer who pushed this furthest *decoupled
+state from git entirely.* That is exactly our `eventlog` adapter, and it is the
+direction our own portability priority (#4) already points.
+
+So the two-port seam still does its job — ship on the `git` adapter for a
+zero-migration drop-in — but we should treat the **event-log adapter as the
+destination** and the git adapter as the bootstrap that proves the harness before
+we cut state's last tie to git. The hinge is no longer blocking *and* no longer
+genuinely open: migrate behind the seam, then move state off branch tips.
 
 ---
 
@@ -285,3 +390,61 @@ adapter swap — decided later with a running system in hand.
 - **Readability for a non-engineer architect** (audit open question #2) — the
   `history()` trail + rendered projections are the proposed offset; validate with
   a real architect once the spine renders status.
+
+---
+
+## Prior art: WorkOS Case
+
+**[WorkOS Case](https://github.com/workos/case)** ("the reliability layer for
+agent-authored pull requests") is a production harness in the same species as RAD,
+and it independently shipped the core of this design. It is the strongest
+validation that the "third way" is real rather than speculative, and the source of
+three refinements folded into this doc.
+
+**What it validates (we were already aligned):**
+
+- *"A deterministic TypeScript pipeline executor for phase transitions. The LLMs
+  do the work inside each phase; TypeScript decides which phase runs next."* — the
+  audit's thesis, in production.
+- **Append-only event log + reducer.** `src/events/reducer.ts` folds events into
+  state (`reduceEvents`), exactly our "state is a pure fold over `history()`."
+- **Doc/state split (our Decision 2).** Case separates human intent (`task.md`)
+  from machine state (`task.json`), and *regenerates* the machine file from the
+  fold via `src/events/projections.ts` — status is a projection, never
+  hand-edited.
+
+**What we borrowed (the three refinements):**
+
+1. **The stop-condition matrix** (`src/dag/outcome-table.ts` +
+   `docs/failure-matrix.md`): every `(phase, outcome)` pair maps to one of
+   `advance | retry | revision | abort | skip-to | surface`, exhaustiveness-tested
+   with no default fallthrough. Promoted here from a footnote to the deterministic
+   heart of the wave loop.
+2. **Record-time transition validation** (`src/events/appender.ts` calls
+   `validateTransition`, raising `LifecycleValidationError`): adopted as Decision 4
+   — `append()` rejects illegal transitions before persisting.
+3. **Failure fingerprinting** (SHA-256 of failed categories + summary) as a
+   doom-loop breaker, replacing a fixed retry count.
+
+**Where Case diverges — and what it tells us:**
+
+- **State is not on git branch tips.** Case keeps the event log in a git-ignored
+  `.case/` directory; git holds only the output PR. This is the empirical basis for
+  treating our `eventlog` adapter as the destination (see the hinge note above).
+- **Human approval between phases is an explicit non-goal.** Case leans
+  fix-forward — mechanical evidence gates (`tested` / `reviewed` markers checked
+  before a PR is opened) plus a retrospective learning loop — rather than a
+  blocking human approval step. RAD deliberately keeps the `rad-approve` human gate
+  (priority #1: no slop). Case is the far end of the same automation path our
+  `gate()`-plus-policy-adapter design reaches toward: as enforced gates and
+  evidence mature, the human gate can be relaxed *one gate at a time* without a
+  rewrite. We are choosing a more gated point on that spectrum *today*, by design,
+  not by limitation.
+
+**Other Case ideas noted for later** (not yet adopted): `[enforced]` vs
+`[advisory]` golden principles with literal check commands (turns prose
+conventions into scriptable gates — a natural extension of `scripts/check-*.sh`);
+profiles (`standard` vs `tiny`, skipping verification for trivial changes — a speed
+lever); per-role model configuration; and the retrospective → escalate-to-docs/
+playbooks/enforcement loop (a more developed form of RAD's `findings.jsonl` +
+`/rad-insights`).
