@@ -1,0 +1,35 @@
+# matrix.yaml — the stop-condition matrix. The ONLY place a "what happens next"
+# decision lives. The JS (matrix.js) merely LOADS and looks up this table; it
+# carries no policy of its own (design Decision 5).
+#
+# A test asserts every applicable (phase, outcome) pair has an entry. There is no
+# default fallthrough — an unknown (phase, outcome) pair MUST throw, never resolve
+# to a silent default (see docs/harness-state-store.md, the stop-condition matrix).
+#
+# Outcomes: success | fail-tests | fail-scope | fail-protocol
+#           | fail-timeout | no-changes | abort-user
+# Actions:  advance | retry | revision | abort | skip-to | surface
+#   - advance  : the wave passed; move to the next wave. `to:` is OPTIONAL and
+#                reserved for a future multi-phase spine (e.g. implement → verify);
+#                the step-1 spine models a single `implement` phase plus guardrail
+#                post-checks, so it does not consume `to`.
+#   - retry    : re-run the same phase (budget enforced by the caller)
+#   - revision : route structured feedback back for a bounded revision cycle
+#   - abort    : stop the pipeline; the failure is fatal
+#   - skip-to  : jump forward to the `to:` phase, bypassing intermediates (REQUIRES `to`)
+#   - surface  : pause and raise to a human (non-deterministic failure)
+#
+# Only the `implement` phase is declared here, because the step-1 spine only
+# drives that phase (post-checks are guardrail scripts, not a matrix phase). A
+# `verify` phase will be added when/if the spine actually models one — we do not
+# ship rows no code path can reach.
+
+# implement — the wave phase. Covered fully against the Outcome set.
+implement:
+  success:       { action: advance }
+  fail-tests:    { action: revision }
+  fail-scope:    { action: abort }
+  fail-protocol: { action: abort }
+  fail-timeout:  { action: surface }
+  no-changes:    { action: abort }
+  abort-user:    { action: abort }
