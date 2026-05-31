@@ -1,0 +1,16 @@
+{
+  "name": "@rad/harness",
+  "version": "0.0.0",
+  "private": true,
+  "description": "RAD orchestration harness — the deterministic StateStore core (migration step 1).",
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "dependencies": {
+    "js-yaml": "^4.1.0"
+  }
+}
