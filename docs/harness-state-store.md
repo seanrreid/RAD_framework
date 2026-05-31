@@ -93,6 +93,12 @@ its automation seam at once**, so it earns its own method:
   harness change.** You move from human-gated to auto-gated one gate at a time —
   never a rewrite. This is the concrete path toward full automation.
 
+Per the readability requirement (Decision 5), gate *rules* are declared in the
+same kind of human-readable file as the matrix — e.g. `gates.yaml` mapping a gate
+name to its required event type, `requiredRole`, and pass condition. `gate()`
+loads and evaluates them; an architect can read and change a gate without touching
+JS.
+
 ### Decision 2 — `Status:` leaves the plan doc (confirmed)
 
 The log is canonical; the doc's status is a **rendered projection**, not a stored
@@ -127,6 +133,45 @@ this — its `EventAppender.append()` calls `validateTransition()` and raises
 `LifecycleValidationError` (e.g. *"Cannot append events after pipeline end,"*
 *"Cannot request revision without evaluator output"*) before the event is ever
 written to the log. We adopt the same record-time guard.
+
+### Decision 5 — readability is a hard requirement; policy lives in declarative files (confirmed)
+
+A JS harness is less auditable by a non-engineer architect than today's prose
+commands (audit open question #2). Rather than accept that as a cost, we make
+readability a **hard requirement**: all *policy* — the stop-condition matrix and
+the gate rules — lives in declarative `*.yaml`/markdown files that an architect
+reads and edits directly. The JS *loads and applies* them; it never *contains*
+them. The `history()` event trail and rendered status projections cover the
+runtime-observability half. The line we hold: control *flow* may be code, but
+control *policy* must be human-readable. (See the matrix and gate sections.)
+
+### Decision 6 — the event log is git-tracked, per-feature JSONL (confirmed)
+
+Where the log lives matters because RAD is a **team** tool, unlike single-operator
+Case. State must travel between teammates, so we keep git as the cheap sync
+transport — but only as *transport*, not as the state cell:
+
+- **Git-tracked, not git-ignored.** The event log is a committed file on the work
+  branch, so `git push`/`pull` keeps the whole team on one board. (Case
+  git-ignores its log because it is single-operator and only the output PR needs
+  to travel — the opposite of our priority #1.) This decouples state from the
+  branch-tip/`Status:`-string model *without* losing free team sync, and the port
+  still permits a SQLite/service adapter later when real concurrency demands it.
+- **JSONL, reusing the `findings.jsonl` precedent.** One JSON object per line:
+  appends are cheap and crash-tolerant (a half-written final line is skipped, not
+  fatal), the log is streamable (`tail -f`, `jq -c`) for a live `rad-status`, and
+  diffs stay clean. RAD already runs this format in `.agents/findings.jsonl`; the
+  event log is its sibling (per-feature lifecycle state vs. cross-cycle findings).
+- **One file per feature**, not one global log — different features are different
+  files, which avoids merge contention on concurrent appends across branches.
+
+Format roles across RAD, for clarity:
+
+| Format | Used for | Why |
+|---|---|---|
+| **JSONL** | event log (new), `findings.jsonl` (exists) | append-only streams; crash-tolerant; streamable |
+| **YAML / markdown (declarative)** | stop-condition matrix, gate rules | human-read/edited *policy* — satisfies Decision 5 |
+| **Markdown (narrative)** | plans, research, architecture | human-authored documents (the ArtifactStore) |
 
 ---
 
@@ -181,23 +226,40 @@ from WorkOS Case — is a **unified, exhaustiveness-tested stop-condition matrix
 every `(phase, outcome)` pair maps to exactly one declared action, with **no
 default fallthrough**.
 
-```ts
-type Outcome = 'success' | 'fail-tests' | 'fail-scope' | 'fail-protocol'
-             | 'fail-timeout' | 'no-changes' | 'abort-user'
-type Action  = 'advance' | 'retry' | 'revision' | 'abort' | 'skip-to' | 'surface'
+**Readability is a hard requirement (settled), so the matrix is a declarative
+file, not inline JS.** The policy lives in a `matrix.yaml` (or markdown table) a
+non-engineer architect reads and edits; `resolveOutcome()` *loads* it. The JS is
+only the lookup, never the policy.
 
-// The ONLY place a "what happens next" decision lives. A test asserts every
-// applicable (phase, outcome) pair has an entry — a missing pair fails CI.
+```yaml
+# matrix.yaml — the ONLY place a "what happens next" decision lives.
+# A test asserts every applicable (phase, outcome) pair has an entry; a missing
+# pair fails CI. Outcomes: success | fail-tests | fail-scope | fail-protocol
+#                          | fail-timeout | no-changes | abort-user
+# Actions:  advance | retry | revision | abort | skip-to | surface
+implement:
+  success:       { action: advance,  to: verify }
+  fail-tests:    { action: revision }
+  fail-scope:    { action: abort }
+  no-changes:    { action: abort }
+  fail-timeout:  { action: surface }
+  abort-user:    { action: abort }
+```
+
+```ts
+// JS is the lookup only — it carries no policy of its own.
+const matrix = loadMatrix('matrix.yaml')
 function resolveOutcome(phase: Phase, outcome: Outcome): { action: Action; to?: Phase }
 ```
 
-Case proves this out in `src/dag/outcome-table.ts`, kept in sync with a
+Case proves the pattern out in `src/dag/outcome-table.ts`, kept in sync with a
 human-readable `docs/failure-matrix.md` by an exhaustiveness test that forbids a
-`default` branch. The payoff is precisely priority #3 (**deterministic >
-probabilistic**): no failure mode is ever resolved by model judgment or by prose
-the model might mis-apply — each one has a *declared, tested* response. It is also
-the audit's "control flow is code" thesis made auditable: the entire policy is one
-table a non-engineer architect can read (priority #1, readability offset).
+`default` branch. We push it one step further to satisfy the readability
+requirement: the human-readable file *is* the source, not a doc that must be kept
+in sync with code. The payoff is precisely priority #3 (**deterministic >
+probabilistic**) — no failure mode is ever resolved by model judgment or prose the
+model might mis-apply — and priority #1 readability: the entire policy is one
+declarative table an architect can audit and change without reading JS.
 
 Two refinements we take from Case alongside the table:
 
@@ -374,22 +436,41 @@ state from git entirely.* That is exactly our `eventlog` adapter, and it is the
 direction our own portability priority (#4) already points.
 
 So the two-port seam still does its job — ship on the `git` adapter for a
-zero-migration drop-in — but we should treat the **event-log adapter as the
-destination** and the git adapter as the bootstrap that proves the harness before
-we cut state's last tie to git. The hinge is no longer blocking *and* no longer
-genuinely open: migrate behind the seam, then move state off branch tips.
+zero-migration drop-in — but we treat the **event-log adapter as the destination**
+and the git adapter as the bootstrap that proves the harness before we cut state's
+tie to the branch-tip/`Status:`-string model.
+
+**One deliberate divergence from Case (settled — Decision 6):** Case *git-ignores*
+its event log because it is single-operator and only the PR needs to travel. RAD
+is a team tool (priority #1), so the event log is **git-tracked** — a committed,
+per-feature `events.jsonl` on the work branch. We keep git as the cheap sync
+*transport* (the whole team sees one board via push/pull) while moving the state
+*model* into the log behind the port. That is the distinction that resolves the
+hinge: we are not married to git as the *state cell*, but we still lean on git as
+the *transport* until team scale justifies a SQLite/service adapter. The hinge is
+no longer blocking *and* no longer genuinely open.
 
 ---
 
+## Settled this round
+
+- **State transport** — git-tracked, per-feature `events.jsonl` (Decision 6), not
+  git-ignored like Case. Resolves the audit's "event-log adapter file format"
+  open item.
+- **Readability** — hard requirement; matrix + gate rules in declarative
+  YAML/markdown the harness loads (Decision 5). Resolves audit open question #2.
+- **State target** — event-log adapter is the destination; git adapter is the
+  bootstrap (the hinge note above). Resolves audit open question #1.
+
 ## Open / deferred
 
-- **Event-log adapter file format** (single `events.jsonl` per repo vs. per
-  feature; ordering/compaction) — deferred until step 4.
 - **Policy-adapter design for auto-approval** — the automation endgame; scoped
   only after the human-gated spine is proven.
-- **Readability for a non-engineer architect** (audit open question #2) — the
-  `history()` trail + rendered projections are the proposed offset; validate with
-  a real architect once the spine renders status.
+- **Log compaction / ordering at scale** — a per-feature `events.jsonl` is fine
+  for now; revisit compaction and a SQLite/service adapter only when team
+  concurrency or a dashboard makes the git-tracked file the bottleneck.
+- **Matrix/gate schema** — the exact YAML shape for `matrix.yaml` and `gates.yaml`
+  (and their exhaustiveness/validation tests) — pinned down during the spine build.
 
 ---
 
