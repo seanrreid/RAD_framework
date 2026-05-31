@@ -17,3 +17,4 @@ Executor role: developer
 | 3.1 | Wave 3 | Git StateStore adapter | ✓ complete | ab0fbf0 | 2026-05-31T20:32:20Z |
 | 3.2 | Wave 3 | Git ArtifactStore adapter | ✓ complete | 6c13ede | 2026-05-31T20:34:31Z |
 | 4.1 | Wave 4 | Deliver spine control flow | ✓ complete | 969319d | 2026-05-31T20:38:57Z |
+| 7 | Tests | unit suite (8 files) | ✓ complete | 34b5d7d | 2026-05-31T20:43:10Z |
