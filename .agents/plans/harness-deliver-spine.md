@@ -56,6 +56,9 @@ is repo-wide framework development). No out-of-scope agents required.
 | harness/adapters/git-state-store.js | 1-150 | Git adapter: `append` (validate→write per-feature `events.jsonl`), `history`, `phase` (fold), `plan` (parse doc), `gate` (gates.js + wrap `check-plan-approved.sh`/`check-role.sh`), `list`, proxy-aware `recordApproval` |
 | harness/adapters/git-artifact-store.js | 1-85 | Git ArtifactStore: read/write plan docs on the work branch |
 | harness/spine.js | 1-120 | `deliverSpine({state, docs, matrix, gates, runWave, sh})` — deterministic control flow with MODEL + Bash boundaries injected |
+| harness/README.md | 1-15 | Module pointer to the design doc (entailed by Task 1.1; scope amended at delivery, architect-approved) |
+| harness/.gitignore | 1-5 | Ignores `node_modules/` so the `js-yaml` install is not committed (scope amended at delivery, architect-approved) |
+| harness/package-lock.json | 1-30 | Lockfile for the declared `js-yaml` dependency (scope amended at delivery, architect-approved) |
 
 ## Execution Notes
 
