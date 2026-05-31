@@ -6,10 +6,14 @@ import { tmpdir } from 'node:os';
 import { createGitStateStore } from '../adapters/git-state-store.js';
 import { TransitionError } from '../transitions.js';
 
-function withTempRepo(fn) {
+// Async so an async `fn` is fully awaited BEFORE the temp dir is removed. With a
+// synchronous try/finally, an async fn's body would run after cleanup, executing
+// I/O against an already-deleted directory (false-passing tests). `await fn(...)`
+// is a no-op for synchronous callbacks, so both styles are correct.
+async function withTempRepo(fn) {
   const repoRoot = mkdtempSync(join(tmpdir(), 'rad-state-'));
   try {
-    return fn(repoRoot);
+    return await fn(repoRoot);
   } finally {
     rmSync(repoRoot, { recursive: true, force: true });
   }
@@ -18,8 +22,8 @@ function withTempRepo(fn) {
 const eventsFile = (repoRoot, feature) =>
   join(repoRoot, '.agents', 'state', feature, 'events.jsonl');
 
-test('append writes a JSONL line per legal event; phase derives from the log', () => {
-  withTempRepo((repoRoot) => {
+test('append writes a JSONL line per legal event; phase derives from the log', async () => {
+  await withTempRepo((repoRoot) => {
     const store = createGitStateStore({ repoRoot });
     const feature = 'demo';
 
@@ -38,8 +42,8 @@ test('append writes a JSONL line per legal event; phase derives from the log', (
   });
 });
 
-test('an illegal transition throws TransitionError and writes nothing', () => {
-  withTempRepo((repoRoot) => {
+test('an illegal transition throws TransitionError and writes nothing', async () => {
+  await withTempRepo((repoRoot) => {
     const store = createGitStateStore({ repoRoot });
     const feature = 'demo';
 
@@ -54,8 +58,8 @@ test('an illegal transition throws TransitionError and writes nothing', () => {
   });
 });
 
-test('duplicate approved is rejected and does not corrupt the log', () => {
-  withTempRepo((repoRoot) => {
+test('duplicate approved is rejected and does not corrupt the log', async () => {
+  await withTempRepo((repoRoot) => {
     const store = createGitStateStore({ repoRoot });
     const feature = 'demo';
     store.append({ feature, type: 'approved', actor: 'architect', ts: 't0' });
@@ -67,8 +71,8 @@ test('duplicate approved is rejected and does not corrupt the log', () => {
   });
 });
 
-test('history() skips an unparseable trailing line (crash tolerance)', () => {
-  withTempRepo((repoRoot) => {
+test('history() skips an unparseable trailing line (crash tolerance)', async () => {
+  await withTempRepo((repoRoot) => {
     const store = createGitStateStore({ repoRoot });
     const feature = 'demo';
     store.append({ feature, type: 'plan-created', actor: 'dev', ts: 't0' });
@@ -82,8 +86,8 @@ test('history() skips an unparseable trailing line (crash tolerance)', () => {
   });
 });
 
-test('recordApproval appends a proxy-aware approved event', () => {
-  withTempRepo((repoRoot) => {
+test('recordApproval appends a proxy-aware approved event', async () => {
+  await withTempRepo((repoRoot) => {
     const store = createGitStateStore({ repoRoot });
     const feature = 'demo';
     store.recordApproval({ feature, actor: 'architect', recordedBy: 'dev', ts: 't0' });
@@ -139,6 +143,43 @@ test('gate(approved) is downgraded when the branch-tip script reports not-approv
     const result = await store.gate('demo', 'approved');
     assert.equal(result.passed, false);
     assert.match(result.reason, /check-plan-approved\.sh/);
+  });
+});
+
+test('append rejects an unsafe feature slug (path traversal) and writes nothing', async () => {
+  await withTempRepo((repoRoot) => {
+    const store = createGitStateStore({ repoRoot });
+    for (const bad of ['../escape', 'a/b', '..', 'UPPER', '']) {
+      assert.throws(
+        () => store.append({ feature: bad, type: 'deliver-started', actor: 'harness', ts: 't0' }),
+        /invalid feature slug|event\.feature is required/,
+      );
+    }
+  });
+});
+
+test('append requires event.type and event.actor', async () => {
+  await withTempRepo((repoRoot) => {
+    const store = createGitStateStore({ repoRoot });
+    assert.throws(
+      () => store.append({ feature: 'demo', actor: 'harness', ts: 't0' }),
+      /event\.type is required/,
+    );
+    assert.throws(
+      () => store.append({ feature: 'demo', type: 'deliver-started', ts: 't0' }),
+      /event\.actor is required/,
+    );
+    // Nothing persisted from the rejected appends.
+    assert.equal(store.history('demo').length, 0);
+  });
+});
+
+test('history/phase/plan reject an unsafe feature slug', async () => {
+  await withTempRepo((repoRoot) => {
+    const store = createGitStateStore({ repoRoot });
+    assert.throws(() => store.history('../x'), /invalid feature slug/);
+    assert.throws(() => store.phase('a/b'), /invalid feature slug/);
+    assert.throws(() => store.plan('..'), /invalid feature slug/);
   });
 });
 

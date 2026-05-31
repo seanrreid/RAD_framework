@@ -201,3 +201,87 @@ test('(e) a matrix abort outcome stops the spine with stopped:matrix', async () 
   assert.equal(result.action, 'abort');
   assert.ok(!state.appended.some((e) => e.type === 'pr-opened'));
 });
+
+test('(f) a fail-timeout outcome surfaces via the matrix (stopped:matrix, action:surface)', async () => {
+  const state = makeFakeState({ gateResult: passingGate, plan: { waves: [{ n: 1 }] } });
+  const runWave = async () => ({ outcome: 'fail-timeout' }); // matrix → surface
+  const result = await deliverSpine({
+    feature: 'demo',
+    state,
+    docs: {},
+    matrix: MATRIX,
+    gates: {},
+    runWave,
+    sh: () => ({ status: 0 }),
+    now: fixedClock(),
+  });
+  assert.equal(result.stopped, 'matrix');
+  assert.equal(result.action, 'surface');
+  assert.ok(!state.appended.some((e) => e.type === 'pr-opened'));
+});
+
+test('(g) budget exhaustion: distinct-fingerprint failures hit the cap, not the doom-loop', async () => {
+  const state = makeFakeState({ gateResult: passingGate, plan: { waves: [{ n: 1 }] } });
+  // Each attempt is a revision-triggering failure with a DISTINCT summary, so no
+  // two fingerprints match — the doom-loop never trips and the MAX_ATTEMPTS cap
+  // is what stops the wave.
+  let i = 0;
+  let runWaveCalls = 0;
+  const runWave = async () => {
+    runWaveCalls += 1;
+    return { outcome: 'fail-tests', summary: `distinct failure ${i++}` };
+  };
+  const result = await deliverSpine({
+    feature: 'demo',
+    state,
+    docs: {},
+    matrix: MATRIX,
+    gates: {},
+    runWave,
+    sh: () => ({ status: 0 }),
+    now: fixedClock(),
+  });
+  assert.equal(result.stopped, 'budget');
+  assert.equal(result.ok, false);
+  assert.equal(result.wave, 1);
+  assert.equal(runWaveCalls, 3); // MAX_ATTEMPTS
+  assert.ok(state.appended.some((e) => e.type === 'wave-failed'));
+  assert.ok(!state.appended.some((e) => e.type === 'pr-opened'));
+});
+
+test('(h) null plan: no waves → post-checks run and pr-opened, ok with waves:0', async () => {
+  const state = makeFakeState({ gateResult: passingGate, plan: null });
+  let runWaveCalls = 0;
+  const result = await deliverSpine({
+    feature: 'demo',
+    state,
+    docs: {},
+    matrix: MATRIX,
+    gates: {},
+    runWave: async () => {
+      runWaveCalls += 1;
+      return { outcome: 'success' };
+    },
+    sh: () => ({ status: 0 }),
+    now: fixedClock(),
+  });
+  assert.deepEqual(result, { ok: true, waves: 0 });
+  assert.equal(runWaveCalls, 0);
+  const types = state.appended.map((e) => e.type);
+  assert.deepEqual(types, ['deliver-started', 'pr-opened']);
+});
+
+test('(i) empty waves array behaves like null plan', async () => {
+  const state = makeFakeState({ gateResult: passingGate, plan: { waves: [] } });
+  const result = await deliverSpine({
+    feature: 'demo',
+    state,
+    docs: {},
+    matrix: MATRIX,
+    gates: {},
+    runWave: async () => ({ outcome: 'success' }),
+    sh: () => ({ status: 0 }),
+    now: fixedClock(),
+  });
+  assert.deepEqual(result, { ok: true, waves: 0 });
+});

@@ -64,6 +64,27 @@ function defaultSh(file, args = [], opts = {}) {
   }
 }
 
+/**
+ * A safe feature slug: lowercase alphanumeric + hyphens, no path separators, no
+ * '..'. Feature names arrive from untrusted event payloads and plan names and are
+ * interpolated into filesystem paths and a shell argument (the branch passed to
+ * check-plan-approved.sh), so they MUST be validated before use to prevent path
+ * traversal. Mirrors the `rad/<feature>` branch grammar the scripts enforce.
+ */
+function isSafeFeature(feature) {
+  return typeof feature === 'string' && /^[a-z0-9][a-z0-9-]*$/.test(feature);
+}
+
+/** Throw on any feature that is not a safe slug. */
+function assertSafeFeature(feature) {
+  if (!isSafeFeature(feature)) {
+    throw new Error(
+      `invalid feature slug ${JSON.stringify(feature)} ` +
+        `(expected /^[a-z0-9][a-z0-9-]*$/ — no path separators or '..')`,
+    );
+  }
+}
+
 /** Path to a feature's event log, relative to repoRoot. */
 function eventsPath(repoRoot, feature) {
   return join(repoRoot, '.agents', 'state', feature, 'events.jsonl');
@@ -188,6 +209,7 @@ export function createGitStateStore({
 
   /** Read + parse a feature's event log (crash-tolerant). */
   function history(feature) {
+    assertSafeFeature(feature);
     return readEvents(eventsPath(repoRoot, feature));
   }
 
@@ -204,6 +226,9 @@ export function createGitStateStore({
     }
     const { feature } = event;
     if (!feature) throw new Error('append(event): event.feature is required');
+    assertSafeFeature(feature);
+    if (!event.type) throw new Error('append(event): event.type is required');
+    if (!event.actor) throw new Error('append(event): event.actor is required');
 
     const existing = history(feature);
     // reduce derives the current state; transition validation reads its history.
@@ -225,6 +250,7 @@ export function createGitStateStore({
 
   /** Parse the feature's plan doc structured sections, or null if none. */
   function plan(feature) {
+    assertSafeFeature(feature);
     const file = planPath(repoRoot, feature);
     if (!existsSync(file)) return null;
     return parsePlan(readFileSync(file, 'utf8'));
@@ -298,7 +324,11 @@ export function createGitStateStore({
     const stateDir = join(repoRoot, '.agents', 'state');
     if (existsSync(stateDir)) {
       for (const entry of readdirSync(stateDir, { withFileTypes: true })) {
-        if (entry.isDirectory() && existsSync(eventsPath(repoRoot, entry.name))) {
+        if (
+          entry.isDirectory() &&
+          isSafeFeature(entry.name) &&
+          existsSync(eventsPath(repoRoot, entry.name))
+        ) {
           features.add(entry.name);
         }
       }
@@ -308,7 +338,8 @@ export function createGitStateStore({
     if (existsSync(plansDir)) {
       for (const entry of readdirSync(plansDir)) {
         if (entry.endsWith('.md') && entry !== 'README.md') {
-          features.add(entry.replace(/\.md$/, ''));
+          const name = entry.replace(/\.md$/, '');
+          if (isSafeFeature(name)) features.add(name);
         }
       }
     }

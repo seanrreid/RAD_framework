@@ -55,6 +55,24 @@ test('Decision 2: the artifact store exposes NO Status-mutating method', () => {
   });
 });
 
+test('an explicit name that escapes repoRoot is rejected', () => {
+  withTempRepo((repoRoot) => {
+    const docs = createGitArtifactStore({ repoRoot });
+    for (const bad of ['../escape.md', '../../etc/passwd', './../../x.md']) {
+      assert.throws(() => docs.read('demo', bad), /escapes repoRoot/);
+      assert.throws(() => docs.write('demo', bad, 'x'), /escapes repoRoot/);
+    }
+  });
+});
+
+test('a named artifact with an unsafe feature slug is rejected', () => {
+  withTempRepo((repoRoot) => {
+    const docs = createGitArtifactStore({ repoRoot });
+    assert.throws(() => docs.read('../evil', 'plan'), /invalid feature slug/);
+    assert.throws(() => docs.write('a/b', 'plan', 'x'), /invalid feature slug/);
+  });
+});
+
 test('createGitArtifactStore requires repoRoot', () => {
   assert.throws(() => createGitArtifactStore({}), /repoRoot is required/);
 });

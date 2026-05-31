@@ -29,7 +29,8 @@
 import { resolveOutcome } from './matrix.js';
 import { fingerprint } from './fingerprint.js';
 
-/** Bounded attempt budget per wave (Case uses two cycles). */
+/** Bounded attempt budget per wave — the hard ceiling. The doom-loop breaker is
+ * the early exit; this cap only bites when every attempt fails *differently*. */
 const MAX_ATTEMPTS = 3;
 
 /** Post-check guardrails, run in order after every wave advances. */
@@ -88,27 +89,9 @@ export async function deliverSpine({
         data: { wave: wave.n, outcome: result.outcome },
       });
 
-      // Doom-loop breaker: an identical failure fingerprint twice in a row means
-      // the work is provably stuck — abort immediately rather than burn budget.
-      const print = fingerprint(result);
-      if (print === lastPrint) {
-        state.append({
-          feature,
-          type: 'wave-failed',
-          actor: 'harness',
-          ts: now(),
-          data: { wave: wave.n, reason: 'doom-loop' },
-        });
-        return {
-          stopped: 'doom-loop',
-          ok: false,
-          wave: wave.n,
-          outcome: result.outcome,
-        };
-      }
-      lastPrint = print;
-
+      // The MATRIX decides what happens next — never inline retry arithmetic.
       const { action } = resolveOutcome('implement', result.outcome, matrix);
+
       if (action === 'advance') {
         state.append({
           feature,
@@ -120,11 +103,32 @@ export async function deliverSpine({
         advanced = true;
         break;
       }
+
       if (action === 'retry' || action === 'revision') {
-        // Loop again, within the bounded budget. The doom-loop breaker is the
-        // early-exit; the budget cap is the hard ceiling.
-        continue;
+        // Doom-loop breaker: an identical *failure* fingerprint twice in a row
+        // means the retry is provably stuck — abort rather than burn the budget.
+        // Only failing (retry/revision) outcomes are fingerprinted here, so a
+        // genuine success can never trip the breaker (it advances above first).
+        const print = fingerprint(result);
+        if (print === lastPrint) {
+          state.append({
+            feature,
+            type: 'wave-failed',
+            actor: 'harness',
+            ts: now(),
+            data: { wave: wave.n, reason: 'doom-loop' },
+          });
+          return {
+            stopped: 'doom-loop',
+            ok: false,
+            wave: wave.n,
+            outcome: result.outcome,
+          };
+        }
+        lastPrint = print;
+        continue; // within the bounded budget; the cap is the hard ceiling.
       }
+
       // 'abort' | 'surface' (and any other declared terminal action).
       state.append({
         feature,

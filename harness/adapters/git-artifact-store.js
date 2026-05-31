@@ -21,32 +21,64 @@ import {
   existsSync,
   mkdirSync,
 } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join, dirname, resolve, relative, isAbsolute } from 'node:path';
+
+/** A safe feature slug (see git-state-store.js): no path separators, no '..'. */
+function isSafeFeature(feature) {
+  return typeof feature === 'string' && /^[a-z0-9][a-z0-9-]*$/.test(feature);
+}
 
 /**
- * Resolve a document name to its on-disk path under repoRoot. Names map to the
- * repo's existing layout:
- *   - 'plan'     → .agents/plans/<feature>.md
- *   - 'research' → .agents/research/<feature>.md
- *   - 'log'      → .agents/logs/<feature>.md
- * A name containing a path separator or '.' (e.g. an explicit relative path or a
- * dated log filename) is treated as a repo-relative path verbatim.
+ * Assert that an absolute path stays within repoRoot. Both `feature` and `name`
+ * arrive from callers handling untrusted input; without this an explicit `name`
+ * like '../../etc/passwd' would escape the repo via path.join. Throws otherwise.
+ */
+function assertWithinRepo(repoRoot, abs) {
+  const rel = relative(repoRoot, abs);
+  if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) {
+    throw new Error(`artifact path escapes repoRoot: ${JSON.stringify(abs)}`);
+  }
+}
+
+/**
+ * Resolve a document name to its on-disk path under repoRoot. Two modes:
+ *
+ *   - NAMED (no '/' or '.'): maps to the repo's layout, namespaced by feature —
+ *       'plan'     → .agents/plans/<feature>.md
+ *       'research' → .agents/research/<feature>.md
+ *       'log'      → .agents/logs/<feature>.md
+ *     Requires a safe `feature` slug.
+ *
+ *   - EXPLICIT (contains '/' or '.', e.g. a dated log filename or a relative
+ *     path): treated as a repo-relative path VERBATIM. `feature` is intentionally
+ *     ignored in this mode — the caller owns the full path. The resolved path is
+ *     bounds-checked to remain within repoRoot (no '..' escape).
  *
  * @param {string} repoRoot
  * @param {string} feature
  * @param {string} name
- * @returns {string} absolute path
+ * @returns {string} absolute path (guaranteed within repoRoot)
  */
 function resolvePath(repoRoot, feature, name) {
   if (typeof name !== 'string' || name.length === 0) {
     throw new Error('artifact name is required');
   }
 
-  // An explicit path or a filename with an extension is used as-is (repo-relative).
+  // EXPLICIT mode: repo-relative path used as-is, but bounds-checked. `feature`
+  // is deliberately not applied here — the caller supplies the full path.
   if (name.includes('/') || name.includes('.')) {
-    return join(repoRoot, name);
+    const abs = resolve(repoRoot, name);
+    assertWithinRepo(repoRoot, abs);
+    return abs;
   }
 
+  // NAMED mode: namespaced by feature, which must be a safe slug.
+  if (!isSafeFeature(feature)) {
+    throw new Error(
+      `invalid feature slug ${JSON.stringify(feature)} ` +
+        `(expected /^[a-z0-9][a-z0-9-]*$/ for a named artifact)`,
+    );
+  }
   switch (name) {
     case 'plan':
       return join(repoRoot, '.agents', 'plans', `${feature}.md`);

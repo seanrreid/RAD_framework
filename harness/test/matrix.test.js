@@ -15,7 +15,6 @@ test('loadMatrix parses matrix.yaml to an object of phase rows', () => {
   const matrix = loadMatrix();
   assert.equal(typeof matrix, 'object');
   assert.ok(matrix.implement);
-  assert.ok(matrix.verify);
   // path defaults to the YAML next to the module.
   assert.ok(DEFAULT_MATRIX_PATH.endsWith('matrix.yaml'));
 });
@@ -29,11 +28,12 @@ test('EXHAUSTIVENESS: every declared (phase, outcome) pair resolves to a defined
         resolved && VALID_ACTIONS.has(resolved.action),
         `(${phase}, ${outcome}) resolved to an undefined/invalid action: ${JSON.stringify(resolved)}`,
       );
-      // advance / skip-to must name a target phase.
-      if (resolved.action === 'advance' || resolved.action === 'skip-to') {
+      // skip-to must name a target phase. `advance` may carry an optional `to`
+      // (reserved for a future multi-phase spine) but does not require one.
+      if (resolved.action === 'skip-to') {
         assert.ok(
           typeof resolved.to === 'string' && resolved.to.length > 0,
-          `(${phase}, ${outcome}) action '${resolved.action}' must declare a 'to' phase`,
+          `(${phase}, ${outcome}) action 'skip-to' must declare a 'to' phase`,
         );
       }
     }
@@ -44,7 +44,6 @@ test('resolveOutcome returns the YAML-declared action for sample pairs', () => {
   const matrix = loadMatrix();
   assert.deepEqual(resolveOutcome('implement', 'success', matrix), {
     action: 'advance',
-    to: 'verify',
   });
   assert.deepEqual(resolveOutcome('implement', 'fail-tests', matrix), {
     action: 'revision',
@@ -52,13 +51,11 @@ test('resolveOutcome returns the YAML-declared action for sample pairs', () => {
   assert.deepEqual(resolveOutcome('implement', 'fail-scope', matrix), {
     action: 'abort',
   });
-  assert.deepEqual(resolveOutcome('verify', 'success', matrix), {
-    action: 'advance',
-    to: 'done',
+  assert.deepEqual(resolveOutcome('implement', 'fail-timeout', matrix), {
+    action: 'surface',
   });
-  assert.deepEqual(resolveOutcome('verify', 'no-changes', matrix), {
-    action: 'advance',
-    to: 'done',
+  assert.deepEqual(resolveOutcome('implement', 'abort-user', matrix), {
+    action: 'abort',
   });
 });
 
