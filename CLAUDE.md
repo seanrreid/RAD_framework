@@ -134,7 +134,7 @@ Labels are created on first use. GitHub: Settings â†’ Labels. GitLab: Project â†
 ### Role Assignments
 
 ```
-architect:  [your GitHub/GitLab username]
+architect:  sean@torchcodelab.com
 developers: []
 designers:  []
 ```
