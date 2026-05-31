@@ -14,3 +14,5 @@ Executor role: developer
 | 2.1 | Wave 2 | Declarative stop-condition matrix + resolver | ✓ complete | 8335ee2 | 2026-05-31T20:26:12Z |
 | 2.2 | Wave 2 | Declarative gate rules + evaluator | ✓ complete | a48a1f7 | 2026-05-31T20:26:19Z |
 | 2.3 | Wave 2 | Failure fingerprint | ✓ complete | 3b3f8e4 | 2026-05-31T20:26:26Z |
+| 3.1 | Wave 3 | Git StateStore adapter | ✓ complete | ab0fbf0 | 2026-05-31T20:32:20Z |
+| 3.2 | Wave 3 | Git ArtifactStore adapter | ✓ complete | 6c13ede | 2026-05-31T20:34:31Z |
