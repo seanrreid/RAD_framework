@@ -1,7 +1,7 @@
 # Plan: Exempt RAD process artifacts from scope check
 Created: 2026-06-01
 Author: architect
-Status: approved
+Status: in-progress
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-06-01T15:41:27Z
 Branch: rad/scope-check-process-artifacts-exempt
