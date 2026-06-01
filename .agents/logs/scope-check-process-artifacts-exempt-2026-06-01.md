@@ -8,3 +8,5 @@ Executor role: architect
 
 | Step | Wave | Task | Status | Commit | Time |
 |------|------|------|--------|--------|------|
+| 1 | Wave 1 | Add findings.jsonl to the allowlist | ✓ complete | 3a7eb78 | 11:49 |
+| 2 | Wave 1 | Add regression test | ✓ complete | b85e8c9 | 11:50 |
