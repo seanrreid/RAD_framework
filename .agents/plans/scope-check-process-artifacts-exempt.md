@@ -1,7 +1,9 @@
 # Plan: Exempt RAD process artifacts from scope check
 Created: 2026-06-01
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-06-01T15:41:27Z
 Branch: rad/scope-check-process-artifacts-exempt
 Adopted-From: https://github.com/seanrreid/RAD_framework/issues/14
 Issue-Title: check-scope.sh should exempt RAD bookkeeping files (findings.jsonl, .agents/logs/)
