@@ -234,45 +234,53 @@ Record {architect}'s approval of this plan?
   update Status to `needs-revision`, commit + push to the work branch, output revision notice, stop
   (default mode only)
 
-### Step 4: Update plan file status
+### Step 4: Record the approval (delegated to the CLI)
 
-Update the plan header fields in the working tree (you are on the work branch tip
-from Step 2).
+**Do not write the plan-doc Status fields or append the event yourself.** The
+`rad` CLI owns the recording — it both appends the `approved` event to the
+feature's `events.jsonl` (via `recordApproval`) AND writes the plan-doc Status
+header (`Status: approved`, `Approved-By`, `Approved-At`, plus `Recorded-By` and
+`Approval-Evidence` in proxy mode). It performs the same authority checks
+(`scripts/check-role.sh`) described in Step 1, so a refusal here mirrors that gate.
+
+Run it from the repo root on the work-branch tip you checked out in Step 2:
 
 **Default mode** — architect ran the command directly:
 
-```
-Status: approved
-Approved-By: [architect username from CLAUDE.md Role Assignments]
-Approved-At: [ISO 8601 timestamp — e.g. 2026-05-25T14:32:00Z]
+```bash
+node harness/cli.js approve "$FEATURE"
 ```
 
-**Proxy mode (`--on-behalf-of`)** — record both parties and the evidence:
+**Proxy mode (`--on-behalf-of`)** — pass the approver and the required evidence:
 
+```bash
+node harness/cli.js approve "$FEATURE" \
+  --on-behalf-of "$ON_BEHALF_OF" \
+  --evidence "$EVIDENCE"
 ```
-Status: approved
-Approved-By: [architect from --on-behalf-of] (out-of-band)
-Approved-At: [ISO 8601 timestamp]
-Recorded-By: [your git user]
-Approval-Evidence: [evidence text or link from --evidence]
-```
+
+The CLI prints a single structured success line
+(`rad approve: ok feature=… status=approved approved-by=… approved-at=… proxy=…`)
+and exits 0 on success, or exits non-zero with a clear message (and writes
+nothing) on a refusal — e.g. a non-architect with no valid proxy pair, or
+`--on-behalf-of` without `--evidence`. If it exits non-zero, stop and surface its
+message; do not hand-edit the plan file to work around it.
 
 ### Step 5: Commit the approval to the work branch
 
-The approval must reach the work-branch tip — `/rad-deliver` gates on it via
-`check-plan-approved.sh`, which reads `origin/rad/[feature]` first. Commit and
-push to the work branch. **Never check out or commit to the default branch.**
+The CLI has already written the plan file (Step 4); your only job here is to
+commit and push that change. The approval must reach the work-branch tip —
+`/rad-deliver` gates on it via `check-plan-approved.sh`, which reads
+`origin/rad/[feature]` first. **Never check out or commit to the default branch.**
 
 ```bash
-git add .agents/plans/[feature].md
-git commit -m "approve: [feature name]
+git add ".agents/plans/$FEATURE.md" ".agents/state/$FEATURE/events.jsonl"
+git commit -m "approve: $FEATURE
 
-Approved-By: [architect username]
-Plan:        .agents/plans/[feature].md
-Waves:       [N]
-Tasks:       [total task count]"
+Plan:  .agents/plans/$FEATURE.md
+(Status + approved event written by: node harness/cli.js approve)"
 
-git push origin "rad/[feature-name]"
+git push origin "rad/$FEATURE"
 ```
 
 If the project tracks plans against issues and `gh` is available, mirror the
