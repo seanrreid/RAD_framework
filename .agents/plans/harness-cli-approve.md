@@ -1,7 +1,9 @@
 # Plan: rad CLI foundation + approve cutover
 Created: 2026-06-01
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-06-02T18:05:34Z
 Branch: rad/harness-cli-approve
 Adopted-From: https://github.com/seanrreid/RAD_framework/issues/13
 Issue-Title: Harness migration step 2: wire the spine to the Workflow tool + cut commands over
