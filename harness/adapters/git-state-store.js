@@ -262,57 +262,26 @@ export function createGitStateStore({
 
   /**
    * Evaluate a named gate. Delegates the predicate to evaluateGate() over the
-   * event history. For the `approved` gate, additionally wraps the existing
-   * branch-tip authority: check-plan-approved.sh (status) and, when an approving
-   * event exists, check-role.sh (the actor actually holds the architect role).
-   * The wrapped scripts are the authority — a passing log result is downgraded
-   * to failed if the guardrails disagree.
+   * event history — a pure fold over the frozen event log. No shell-outs are
+   * performed here; all authority (role verification) is established at
+   * WRITE-TIME by recordApproval (which calls check-role.sh and freezes the
+   * verified role into the event). Gate evaluation reads only what is already
+   * frozen in the log.
+   *
+   * TRANSITIONAL NOTE — doc-Status authority (check-plan-approved.sh):
+   *   The branch-tip doc-Status check (scripts/check-plan-approved.sh) is a
+   *   complementary guardrail that was previously performed here at read-time.
+   *   It is now the responsibility of the PROSE /rad-deliver Step 2
+   *   (Decision 2 endpoint) — see docs/daily-workflow.md. It must NOT be
+   *   re-introduced into this function; doing so would couple the pure gate
+   *   fold to external filesystem/git state.
    *
    * Async: the gate-rule evaluator is loaded lazily (it pulls in the YAML
    * policy parser), so callers `await state.gate(...)`.
    */
   async function gate(feature, name) {
     const evaluate = await resolveEvaluateGate();
-    const result = evaluate(name, history(feature));
-
-    if (name !== 'approved') return result;
-
-    // Branch-tip status authority: scripts/check-plan-approved.sh rad/<feature>.
-    const branch = `${process.env.RAD_BRANCH_PREFIX ?? 'rad/'}${feature}`;
-    const approvedScript = join(repoRoot, 'scripts', 'check-plan-approved.sh');
-    const statusCheck = sh(approvedScript, [branch], { cwd: repoRoot });
-
-    if (statusCheck.status !== 0) {
-      return {
-        ...result,
-        passed: false,
-        reason:
-          `branch-tip authority (check-plan-approved.sh) reports not approved: ` +
-          `${(statusCheck.stdout || statusCheck.stderr || '').trim()}`,
-        satisfiedBy: null,
-      };
-    }
-
-    // Role authority: the approving actor must actually hold the required role.
-    if (result.passed && result.satisfiedBy && result.requiredRole) {
-      const roleScript = join(repoRoot, 'scripts', 'check-role.sh');
-      const roleCheck = sh(
-        roleScript,
-        [result.requiredRole, claudeMdPath, result.satisfiedBy.actor],
-        { cwd: repoRoot },
-      );
-      if (roleCheck.status !== 0) {
-        return {
-          ...result,
-          passed: false,
-          reason:
-            `role authority (check-role.sh) rejected actor ` +
-            `'${result.satisfiedBy.actor}' as role:${result.requiredRole}`,
-        };
-      }
-    }
-
-    return result;
+    return evaluate(name, history(feature));
   }
 
   /**

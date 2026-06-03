@@ -137,50 +137,60 @@ test('append(approved) without role is rejected by transition guard (rule e)', a
   });
 });
 
-test('gate(approved) is hermetic with an injected sh + injected evaluator', async () => {
+test('gate(approved) is a pure fold — no sh called, decides from history alone (passed:true)', async () => {
   await withTempRepo(async (repoRoot) => {
-    const calls = [];
+    const shCalls = [];
     const sh = (file, args) => {
-      calls.push({ file, args });
+      shCalls.push({ file, args });
       return { status: 0, stdout: '', stderr: '' };
     };
-    // Inject the gate evaluator so gates.js / scripts are not loaded for real.
-    const evaluateGate = (name, history) => ({
+    // Inject the gate evaluator to control what evaluateGate returns.
+    const evaluateGate = (_name, _hist) => ({
       passed: true,
       reason: 'ok',
       requiredRole: 'architect',
-      satisfiedBy: { actor: 'architect', recordedBy: 'dev' },
+      satisfiedBy: { actor: 'sean@torchcodelab.com', role: 'architect', recordedBy: 'dev' },
     });
     const store = createGitStateStore({ repoRoot, sh, evaluateGate });
     const feature = 'demo';
-    store.recordApproval({ feature, actor: 'architect', recordedBy: 'dev', ts: 't0' });
+    store.recordApproval({ feature, actor: 'sean@torchcodelab.com', recordedBy: 'dev', ts: 't0' });
 
     const result = await store.gate(feature, 'approved');
     assert.equal(result.passed, true);
-    assert.deepEqual(result.satisfiedBy, { actor: 'architect', recordedBy: 'dev' });
-    // Both branch-tip authority scripts were consulted via injected sh.
-    const scripts = calls.map((c) => c.file);
-    assert.ok(scripts.some((s) => s.endsWith('check-plan-approved.sh')));
-    assert.ok(scripts.some((s) => s.endsWith('check-role.sh')));
+    assert.deepEqual(result.satisfiedBy, { actor: 'sean@torchcodelab.com', role: 'architect', recordedBy: 'dev' });
+    // Pure fold: gate() must NOT call any shell scripts.
+    // (sh is still injected; calls from recordApproval are separate — we verify
+    //  that no calls happened AFTER the store was created, but recordApproval may
+    //  call sh for the write-time role check. Reset to isolate gate() calls.)
+    shCalls.length = 0;
+    await store.gate(feature, 'approved');
+    assert.equal(shCalls.length, 0, 'gate() must not invoke sh at read-time');
   });
 });
 
-test('gate(approved) is downgraded when the branch-tip script reports not-approved', async () => {
+test('gate(approved) returns passed:false for a role-less event (pure fold, no sh)', async () => {
   await withTempRepo(async (repoRoot) => {
-    const sh = (file) => {
-      if (file.endsWith('check-plan-approved.sh')) return { status: 1, stdout: 'not approved', stderr: '' };
+    const shCalls = [];
+    const sh = (file, args) => {
+      shCalls.push({ file, args });
       return { status: 0, stdout: '', stderr: '' };
     };
-    const evaluateGate = () => ({
-      passed: true,
-      reason: 'ok',
+    // Inject evaluateGate to simulate a history with no matching role.
+    const evaluateGate = (_name, _hist) => ({
+      passed: false,
+      reason: 'needs an approved event with role:architect frozen at write-time',
       requiredRole: 'architect',
-      satisfiedBy: { actor: 'architect' },
+      satisfiedBy: null,
     });
     const store = createGitStateStore({ repoRoot, sh, evaluateGate });
+
+    shCalls.length = 0; // isolate gate() from any prior calls
     const result = await store.gate('demo', 'approved');
     assert.equal(result.passed, false);
-    assert.match(result.reason, /check-plan-approved\.sh/);
+    assert.match(result.reason, /architect/);
+    assert.equal(result.satisfiedBy, null);
+    // Still no sh calls from gate() itself.
+    assert.equal(shCalls.length, 0, 'gate() must not invoke sh even on failure');
   });
 });
 
