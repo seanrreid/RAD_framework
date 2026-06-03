@@ -36,7 +36,7 @@ scope_add() {
 
 # Files from ## Files in Scope table (column 2)
 while IFS= read -r path; do
-  path=$(echo "$path" | tr -d '[:space:]')
+  path=$(echo "$path" | tr -d '[:space:]`')
   [[ -z "$path" || "$path" == "[path]" || "$path" == "File" ]] && continue
   scope_add "$path"
 done < <(
