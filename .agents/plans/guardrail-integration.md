@@ -1,7 +1,9 @@
 # Plan: Guardrail Integration
 Created: 2026-06-03
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-06-03T00:00:00Z
 Branch: rad/guardrail-integration
 
 ## Context
