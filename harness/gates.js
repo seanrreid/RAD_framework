@@ -6,11 +6,12 @@
  * gates.yaml; this module LOADS and evaluates them and contains no gate policy
  * of its own beyond the structural conditions the YAML declares.
  *
- * Proxy approval: an `approved` event attributed to the architect (`actor`)
- * satisfies the gate even when physically run by someone else (`recordedBy`).
- * The decision rides on `actor`; `recordedBy` is preserved for the audit trail
- * and surfaced via `satisfiedBy` (see docs/harness-state-store.md, "Approval
- * without a bottleneck").
+ * Proxy approval: an `approved` event whose `role` field equals the required
+ * role satisfies the gate even when physically run by someone else
+ * (`recordedBy`). The decision rides on `role` (frozen at write-time by
+ * `recordApproval`); `actor` and `recordedBy` are preserved for the audit
+ * trail and surfaced via `satisfiedBy` (see docs/harness-state-store.md,
+ * "Approval without a bottleneck").
  */
 
 import { readFileSync } from 'node:fs';
@@ -29,8 +30,8 @@ export const DEFAULT_GATES_PATH = join(HERE, 'gates.yaml');
  * @typedef {Object} GateResult
  * @property {boolean} passed       - whether the gate is satisfied
  * @property {string}  reason       - human-readable explanation
- * @property {string} [requiredRole] - the role the satisfying actor must hold
- * @property {Object} [satisfiedBy] - { actor, recordedBy? } of the satisfying event, or null
+ * @property {string} [requiredRole] - the role the satisfying event must carry
+ * @property {Object} [satisfiedBy] - { actor, role, recordedBy? } of the satisfying event, or null
  */
 
 /**
@@ -49,19 +50,19 @@ export function loadGates(path = DEFAULT_GATES_PATH) {
 }
 
 /**
- * Does an actor represent the required role? The store records *asserted*
- * identity (the role trust boundary lives in check-role.sh, not here), so the
- * default resolver treats the `actor` string as carrying the role directly.
- * Callers with a real role map may pass `roleOf` to override.
+ * Does an event's frozen `role` field satisfy the required role? The `role`
+ * is written once by `recordApproval` (write-time authority) and never
+ * re-derived here. Callers with a real role map may pass `roleOf` to override
+ * for legacy/testing purposes.
  *
- * @param {string} actor
+ * @param {string} role         - the role frozen into the event
  * @param {string} requiredRole
- * @param {(actor: string) => string} [roleOf]
+ * @param {(role: string) => string} [roleOf] - optional override (maps role → canonical role)
  * @returns {boolean}
  */
-function actorHasRole(actor, requiredRole, roleOf) {
-  if (typeof roleOf === 'function') return roleOf(actor) === requiredRole;
-  return actor === requiredRole;
+function eventHasRole(role, requiredRole, roleOf) {
+  if (typeof roleOf === 'function') return roleOf(role) === requiredRole;
+  return role === requiredRole;
 }
 
 /**
@@ -70,7 +71,7 @@ function actorHasRole(actor, requiredRole, roleOf) {
  * @param {string} name - gate name declared in gates.yaml
  * @param {import('./events.js').Event[]} history - the feature's event trail
  * @param {Object} [gates] - pre-loaded gate rules; loaded from disk if omitted
- * @param {{ roleOf?: (actor: string) => string }} [opts] - optional role resolver
+ * @param {{ roleOf?: (role: string) => string }} [opts] - optional role resolver
  * @returns {GateResult}
  */
 export function evaluateGate(name, history, gates = loadGates(), opts = {}) {
@@ -82,17 +83,19 @@ export function evaluateGate(name, history, gates = loadGates(), opts = {}) {
   const { eventType, requiredRole, condition, reason } = rule;
   const events = Array.isArray(history) ? history : [];
 
-  if (condition !== 'actor-has-role') {
+  if (condition !== 'role-equals') {
     throw new Error(
       `Gate '${name}' declares unsupported condition '${condition}'`,
     );
   }
 
+  // Match on the event's frozen `role` field (written once at write-time by
+  // recordApproval). `actor` identifies the human; `role` carries authority.
   const match = events.find(
     (e) =>
       e &&
       e.type === eventType &&
-      actorHasRole(e.actor, requiredRole, opts.roleOf),
+      eventHasRole(e.role, requiredRole, opts.roleOf),
   );
 
   if (match) {
@@ -102,6 +105,7 @@ export function evaluateGate(name, history, gates = loadGates(), opts = {}) {
       requiredRole,
       satisfiedBy: {
         actor: match.actor,
+        role: match.role,
         ...(match.recordedBy !== undefined
           ? { recordedBy: match.recordedBy }
           : {}),
