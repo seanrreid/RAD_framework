@@ -101,4 +101,15 @@ export function validateTransition(event, currentState) {
       );
     }
   }
+
+  // (e) An approved event must carry a frozen role — recordApproval is the one
+  // canonical constructor of approved events and always stamps role at write-time.
+  // A role-less approved event means write-time authority was bypassed (e.g. a
+  // direct append() call) — reject it as an illegal transition.
+  if (event.type === 'approved' && !event.role) {
+    throw new TransitionError(
+      'Cannot append an approved event without a frozen role — use recordApproval, which verifies and stamps the role at write-time',
+      { event, rule: 'approved-missing-role' },
+    );
+  }
 }

@@ -85,6 +85,21 @@ test('legal moves return normally (no throw)', () => {
   );
 });
 
+test('illegal (e): approved without role is rejected', () => {
+  // An approved event missing the role field bypassed write-time authority.
+  // validateTransition is the backstop — it must reject it.
+  assert.throws(
+    () => validateTransition(ev('approved', { actor: 'architect' }), {
+      history: [ev('plan-created')],
+    }),
+    (err) => {
+      assert.ok(err instanceof TransitionError);
+      assert.equal(err.rule, 'approved-missing-role');
+      return true;
+    },
+  );
+});
+
 test('validateTransition tolerates empty / missing currentState', () => {
   assert.doesNotThrow(() => validateTransition(ev('research-created'), {}));
   assert.doesNotThrow(() => validateTransition(ev('research-created'), undefined));

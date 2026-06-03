@@ -370,17 +370,36 @@ export function createGitStateStore({
    * physically ran it). The gate is satisfied by `actor`; `recordedBy` preserves
    * the audit trail (design "Approval without a bottleneck").
    *
-   * @param {{ feature: string, actor: string, recordedBy?: string, ts?: string, evidence?: Object }} a
+   * Write-time authority: check-role.sh is invoked ONCE against the `actor`
+   * identity (in proxy mode this is the --on-behalf-of architect, not the
+   * physical runner). On a non-zero exit the call throws and nothing is written.
+   * The verified role is frozen into the event's `role` field so gate() reads
+   * authority from the immutable log — no repeat shell-outs required at read time.
+   *
+   * @param {{ feature: string, actor: string, requiredRole?: string, recordedBy?: string, ts?: string, evidence?: Object }} a
    */
-  function recordApproval({ feature, actor, recordedBy, ts, evidence } = {}) {
+  function recordApproval({ feature, actor, requiredRole = 'architect', recordedBy, ts, evidence } = {}) {
     if (!feature) throw new Error('recordApproval: feature is required');
     if (!actor) throw new Error('recordApproval: actor is required');
+
+    // Verify role at write-time. The `actor` is the identity whose authority we
+    // are freezing — in proxy mode the runner (recordedBy) is not the one being
+    // checked. Refuse before writing anything on a failed check.
+    const roleScript = join(repoRoot, 'scripts', 'check-role.sh');
+    const roleCheck = sh(roleScript, [requiredRole, claudeMdPath, actor], { cwd: repoRoot });
+    if (roleCheck.status !== 0) {
+      throw new Error(
+        `recordApproval: role check failed — actor '${actor}' does not hold role '${requiredRole}': ` +
+        `${(roleCheck.stdout || roleCheck.stderr || '').trim()}`,
+      );
+    }
 
     /** @type {import('../events.js').Event} */
     const event = {
       feature,
       type: 'approved',
       actor,
+      role: requiredRole,
       ts: ts ?? new Date().toISOString(),
     };
     if (recordedBy !== undefined) event.recordedBy = recordedBy;

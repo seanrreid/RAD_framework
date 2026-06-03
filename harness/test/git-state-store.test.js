@@ -27,7 +27,8 @@ test('append writes a JSONL line per legal event; phase derives from the log', a
     const store = createGitStateStore({ repoRoot });
     const feature = 'demo';
 
-    store.append({ feature, type: 'approved', actor: 'architect', ts: 't0' });
+    // approved events must carry a frozen role (transition rule e).
+    store.append({ feature, type: 'approved', actor: 'architect', role: 'architect', ts: 't0' });
     store.append({ feature, type: 'deliver-started', actor: 'harness', ts: 't1' });
     store.append({ feature, type: 'wave-attempt', actor: 'harness', ts: 't2' });
 
@@ -62,9 +63,10 @@ test('duplicate approved is rejected and does not corrupt the log', async () => 
   await withTempRepo((repoRoot) => {
     const store = createGitStateStore({ repoRoot });
     const feature = 'demo';
-    store.append({ feature, type: 'approved', actor: 'architect', ts: 't0' });
+    // approved events must carry role (transition rule e).
+    store.append({ feature, type: 'approved', actor: 'architect', role: 'architect', ts: 't0' });
     assert.throws(
-      () => store.append({ feature, type: 'approved', actor: 'architect', ts: 't1' }),
+      () => store.append({ feature, type: 'approved', actor: 'architect', role: 'architect', ts: 't1' }),
       TransitionError,
     );
     assert.equal(store.history(feature).length, 1);
@@ -86,16 +88,52 @@ test('history() skips an unparseable trailing line (crash tolerance)', async () 
   });
 });
 
-test('recordApproval appends a proxy-aware approved event', async () => {
+test('recordApproval stamps role and appends a proxy-aware approved event', async () => {
   await withTempRepo((repoRoot) => {
-    const store = createGitStateStore({ repoRoot });
+    // Inject sh so check-role.sh is not invoked against the real (temp) repo.
+    const sh = () => ({ status: 0, stdout: '', stderr: '' });
+    const store = createGitStateStore({ repoRoot, sh });
     const feature = 'demo';
     store.recordApproval({ feature, actor: 'architect', recordedBy: 'dev', ts: 't0' });
     const hist = store.history(feature);
     assert.equal(hist.length, 1);
     assert.equal(hist[0].type, 'approved');
     assert.equal(hist[0].actor, 'architect');
+    // role is frozen at write-time by recordApproval.
+    assert.equal(hist[0].role, 'architect');
     assert.equal(hist[0].recordedBy, 'dev');
+  });
+});
+
+test('recordApproval refuses and writes nothing when check-role.sh fails', async () => {
+  await withTempRepo((repoRoot) => {
+    const sh = () => ({ status: 1, stdout: 'Permission denied', stderr: '' });
+    const store = createGitStateStore({ repoRoot, sh });
+    const feature = 'demo';
+    assert.throws(
+      () => store.recordApproval({ feature, actor: 'not-an-architect', ts: 't0' }),
+      /role check failed/,
+    );
+    // Nothing written — the log must remain absent.
+    assert.equal(store.history(feature).length, 0);
+  });
+});
+
+test('append(approved) without role is rejected by transition guard (rule e)', async () => {
+  await withTempRepo((repoRoot) => {
+    const store = createGitStateStore({ repoRoot });
+    const feature = 'demo';
+    // Bypass recordApproval and directly append an approved event without role —
+    // validateTransition must reject it.
+    assert.throws(
+      () => store.append({ feature, type: 'approved', actor: 'architect', ts: 't0' }),
+      (err) => {
+        assert.ok(err instanceof TransitionError);
+        assert.equal(err.rule, 'approved-missing-role');
+        return true;
+      },
+    );
+    assert.equal(store.history(feature).length, 0);
   });
 });
 
