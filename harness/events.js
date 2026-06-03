@@ -19,9 +19,12 @@
  *   'wave-attempt' | 'wave-complete' | 'wave-failed' | 'approved' |
  *   'pr-opened' | 'revision-requested' | 'research-created' | 'plan-created' |
  *   'done'
- * @property {string}  actor        - WHO the event is attributed to
+ * @property {string}  actor        - WHO the event is attributed to (human identity)
  * @property {string}  ts           - ISO timestamp, passed in by the caller
  * @property {string} [recordedBy]  - WHO physically ran the command, if not `actor`
+ * @property {string} [role]        - verified role token (present on `approved` events;
+ *   frozen at write-time by recordApproval after check-role.sh confirms the actor
+ *   holds the required role). `actor` is the human identity; `role` is the authority.
  * @property {Object} [data]        - event-specific payload
  */
 
@@ -103,7 +106,7 @@ export function phaseOf(history) {
  * Pure fold over an array of events → derived state.
  *
  * @param {Event[]} history - in-memory event array (no I/O performed)
- * @returns {{ phase: (Phase|null), markers: string[], approvals: Array<{actor: string, ts: string, recordedBy?: string}> }}
+ * @returns {{ phase: (Phase|null), markers: string[], approvals: Array<{actor: string, ts: string, role?: string, recordedBy?: string}> }}
  */
 export function reduce(history) {
   if (!Array.isArray(history)) {
@@ -118,9 +121,10 @@ export function reduce(history) {
     markers.add(event.type);
 
     if (event.type === 'approved') {
-      // Only include recordedBy when present, so a direct approval carries no
-      // undefined-valued key — the public shape is the *absence* of the key.
+      // Only include optional fields when present, so a direct approval carries no
+      // undefined-valued keys — the public shape is the *absence* of the key.
       const approval = { actor: event.actor, ts: event.ts };
+      if (event.role !== undefined) approval.role = event.role;
       if (event.recordedBy !== undefined) approval.recordedBy = event.recordedBy;
       approvals.push(approval);
     }

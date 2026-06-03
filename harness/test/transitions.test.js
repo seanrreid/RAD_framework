@@ -23,7 +23,7 @@ test('illegal (a): event after a terminal phase throws', () => {
 });
 
 test('illegal (b): wave-complete when not in-progress throws', () => {
-  const history = [ev('approved', { actor: 'architect' })]; // phase = approved
+  const history = [ev('approved', { actor: 'architect', role: 'architect' })]; // phase = approved
   assert.throws(
     () => validateTransition(ev('wave-complete'), { history }),
     (err) => {
@@ -47,9 +47,9 @@ test('illegal (c): revision-requested with no evaluator output throws', () => {
 });
 
 test('illegal (d): duplicate approved throws', () => {
-  const history = [ev('approved', { actor: 'architect' })];
+  const history = [ev('approved', { actor: 'architect', role: 'architect' })];
   assert.throws(
-    () => validateTransition(ev('approved', { actor: 'architect' }), { history }),
+    () => validateTransition(ev('approved', { actor: 'architect', role: 'architect' }), { history }),
     (err) => {
       assert.ok(err instanceof TransitionError);
       assert.equal(err.rule, 'duplicate-approved');
@@ -61,14 +61,14 @@ test('illegal (d): duplicate approved throws', () => {
 test('legal moves return normally (no throw)', () => {
   // approval onto a planned feature
   assert.doesNotThrow(() =>
-    validateTransition(ev('approved', { actor: 'architect' }), {
+    validateTransition(ev('approved', { actor: 'architect', role: 'architect' }), {
       history: [ev('plan-created')],
     }),
   );
   // deliver-started onto approved
   assert.doesNotThrow(() =>
     validateTransition(ev('deliver-started'), {
-      history: [ev('plan-created'), ev('approved', { actor: 'architect' })],
+      history: [ev('plan-created'), ev('approved', { actor: 'architect', role: 'architect' })],
     }),
   );
   // wave-complete while in-progress
