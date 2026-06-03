@@ -1,7 +1,8 @@
 # Plan: rad CLI foundation + approve cutover
 Created: 2026-06-01
 Author: architect
-Status: in-progress
+Status: complete
+Completed-At: 2026-06-03T00:00:00Z
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-06-02T18:05:34Z
 Branch: rad/harness-cli-approve
