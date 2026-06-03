@@ -93,6 +93,86 @@ The installer also copies the RAD skills into `.claude/skills/` (`kickoff/` and
 
 ---
 
+## Guardrail Pack
+
+RAD ships a guardrail pack in `ai/` that gives every wave sub-agent a consistent
+set of coding rules. The pack is treated as framework code — it is always overwritten
+on install and upgrade, the same as `.claude/commands/` and `scripts/`.
+
+### What the ai/ directory contains
+
+```
+ai/
+├── guardrails.md        ← baseline coding-agent rules (always loaded)
+├── slop-register.md     ← project-specific overrides (customize for your stack)
+└── extensions/
+    ├── backend.md       ← routes, services, jobs, API clients
+    ├── database.md      ← migrations, models, queries, transactions
+    ├── frontend.md      ← UI components, CSS, forms, accessibility
+    ├── security.md      ← auth, sessions, secrets, permissions, crypto
+    └── testing.md       ← tests, fixtures, mocks, snapshots
+```
+
+`ai/guardrails.md` is the baseline every agent loads unconditionally. The
+extensions add domain-specific rules on top. The source of truth is the
+[agent_guides repo](https://github.com/seanrreid/agent_guides) — sync from there
+when upstream updates are released.
+
+### Customizing ai/slop-register.md for your stack
+
+`ai/slop-register.md` is the one file in `ai/` you are meant to edit. It captures
+project-specific mistakes your agents repeat. Keep entries short and concrete.
+
+Examples by stack:
+
+```markdown
+## Deprecated Or Forbidden
+- Do not use: `moment.js` — use `date-fns` instead.
+- Do not use: raw `fetch` — use the project's `apiClient` helper.
+
+## Required Conventions
+- Always use: `logger.error(err, context)` for error logging, not `console.error`.
+- Always use: `z.parse()` (Zod) for external input validation at API boundaries.
+
+## Layering Rules
+- Never place: database queries in route handlers — use the repository layer.
+
+## Required Checks
+- Run before handoff: `pnpm typecheck && pnpm test`
+```
+
+Add an entry whenever the same agent mistake appears more than once.
+Remove entries when the codebase changes and the rule no longer applies.
+
+### Extension loading protocol
+
+Wave sub-agents follow the smallest-relevant-set principle:
+
+1. Always load `ai/guardrails.md` as the baseline.
+2. List the file paths to be touched in the wave.
+3. Match each path against the `Applies When` section of each extension file.
+4. Load only the extensions that match. When in doubt, include the extension.
+5. State the loaded extensions explicitly before writing any code.
+
+This keeps context tight while ensuring agents have the rules they need for
+the work they are actually doing.
+
+### Verifying the agent loaded the right extensions
+
+Before a task begins, ask the agent to summarize its active guardrails:
+
+```
+Summarize the guardrail extensions you have loaded for this task and why each
+one applies.
+```
+
+A correct response names the baseline and each domain extension with a one-line
+rationale. If the agent lists extensions that do not apply to the task, prompt it
+to drop them and restate. If it omits an applicable extension, provide the path
+and ask it to re-read before proceeding.
+
+---
+
 ## Post-Install Setup
 
 ### 1. Fill in CLAUDE.md

@@ -100,6 +100,57 @@ priority. For present test files, also verify:
 - [ ] Tests behavior, not implementation
 - [ ] Includes error/edge paths, not just the happy path
 
+### Step 5b: Guardrail review
+
+Always load `ai/guardrails.md` as the baseline.
+
+Then, from the list of changed file paths, match each path against the
+`Applies When` clause of each file in `ai/extensions/` and load only the
+extensions that match:
+
+| Extension file | Applies When (summary) |
+|---|---|
+| `ai/extensions/backend.md` | server routes, controllers, services, jobs, queues, RPC handlers, API clients, backend config, request validation, authorization, logging, error handling, rate limits, retries, caching, service boundaries |
+| `ai/extensions/database.md` | migrations, schema definitions, models, query builders, repositories, seed data, indexes, data access logic, persistence behavior, transactions, constraints, backfills, tenancy filters |
+| `ai/extensions/frontend.md` | UI components, CSS, routes, forms, client-side state, browser behavior, visual design, accessibility, frontend tests |
+| `ai/extensions/security.md` | authentication, authorization, sessions, secrets, permissions, roles, audit logs, cryptography, dependency trust, input handling, file uploads, webhooks, payments, data exposure |
+| `ai/extensions/testing.md` | tests, fixtures, test helpers, mocks, snapshots, factories, CI test commands |
+
+Load only files whose `Applies When` section matches the changed paths or task domain. State which extensions were loaded (or "baseline only" if none apply).
+
+**Examine the diff for each changed file:**
+
+```bash
+BASE=$(scripts/get-default-branch.sh)
+git diff "$BASE"...HEAD -- [file]
+```
+
+Run the **Review Checklist** from `ai/guardrails.md` against the actual changes. Check for each of these 10 items:
+
+1. Plausible but incorrect logic
+2. Over-engineered abstractions for a small task
+3. Code that ignores local conventions
+4. Hallucinated or deprecated APIs
+5. Broad error handling that makes failures harder to debug
+6. Cargo-cult retries, caching, circuit breakers, or validation
+7. Duplicated behavior with a slightly different implementation
+8. Changed public contracts without matching tests and callers
+9. Responsibilities moved into the wrong module or layer
+10. Large blast radius for a narrow request
+
+**Classify each finding:**
+
+- **HARD** (blocks the PR): hallucinated/deprecated APIs (item 4), broad catch blocks that swallow errors (item 5), responsibilities moved to the wrong module/layer (item 9), changed public contracts without updated tests/callers (item 8), large blast radius for a narrow request (item 10)
+- **SOFT** (advisory): over-engineered abstractions (item 2), code ignoring local conventions (item 3), duplicated behavior (item 7), cargo-cult patterns (item 6)
+
+Note: item 1 (plausible but incorrect logic) should be classified HARD if the logic error would produce incorrect runtime behavior, SOFT if it is stylistic or speculative.
+
+**Gate decision:**
+
+- If any **HARD** violations are found: output a FAIL report listing each violation with `file:line` reference. **Do not proceed to Step 6 or the PR-open step.** The review status is `NEEDS FIXES FIRST`.
+- If only **SOFT** findings: append them to the review summary as "Advisory" items and continue.
+- If no findings: output `Guardrails: PASS` and continue.
+
 ### Step 6: Output the review
 
 ```markdown
@@ -130,6 +181,16 @@ Files reviewed: [N]
 
 ### Test Coverage
 - [✓ | ✗] [test description] — [file]
+
+### Guardrails
+Extensions loaded: [baseline only | baseline + [list]]
+Status: [PASS | FAIL]
+
+**HARD violations (blocking):**
+- [violation] — [file:line]
+
+**Advisory (SOFT):**
+- [finding] — [file:line]
 
 ### Summary
 Status: [READY FOR ARCHITECT REVIEW | NEEDS FIXES FIRST]

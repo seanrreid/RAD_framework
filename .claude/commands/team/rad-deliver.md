@@ -158,6 +158,19 @@ Wave type: [parallel | sequential]
 ### Reminders
 [lines from plan]
 
+## Guardrail Extensions
+
+Before writing any code, complete this protocol:
+
+1. List the file paths you expect to touch in this wave.
+2. Match each path against the "Applies When" clause of each file in `ai/extensions/`
+   (frontend.md, backend.md, database.md, security.md, testing.md).
+3. Always load `ai/guardrails.md` as the baseline — no exceptions.
+4. Load only the domain extensions whose "Applies When" clause matches your changed
+   paths or the task domain. When in doubt, include the extension.
+5. State the loaded extensions explicitly (e.g., "Loaded: ai/guardrails.md,
+   ai/extensions/backend.md, ai/extensions/security.md") before writing any code.
+
 ## Tasks
 
 ### Task [N.1]: [title]

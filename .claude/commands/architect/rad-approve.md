@@ -154,6 +154,55 @@ Waves: [N] | Tasks: [total] | ACs: [count] | Out-of-scope deps: [yes/no]
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
+After rendering the review summary, scan the plan's wave structure for slop-risk
+signals before presenting the confirmation prompt. This is a **read-only analysis**
+— it never modifies the plan or blocks approval automatically.
+
+**Slop-risk signals to detect** (scan every wave and task):
+
+1. **Undefined failure semantics** — a task introduces retries, queues, caches, or
+   background jobs without specifying what happens on failure (e.g. "add retry
+   logic" with no failure behavior defined).
+
+2. **Speculative generality** — a task asks for a "system for X", "framework for Y",
+   or "mechanism to handle future Z" without a concrete present requirement. Matches
+   the `ai/guardrails.md` rule: "Avoid speculative generality. Code for the known
+   requirement, not imagined future variants."
+
+3. **Scope too broad to validate** — a task whose `What:` description covers more
+   than one distinct behavior, making it impossible to validate against a single AC.
+
+4. **Cross-layer responsibility leakage** — a task that places auth, persistence,
+   validation, formatting, or transport logic in a module description that doesn't
+   own that responsibility.
+
+5. **Missing or vague Validate field** — a task whose `Validate:` field doesn't
+   cite a specific `AC#` or describes verification in terms that can't be confirmed
+   without reading the code.
+
+For each signal found, record: which task (Wave N, Task N.M), the signal type, and
+a one-line description of what triggered it.
+
+**Output the guardrails report** immediately after the closing `━━━` line and
+before the confirmation prompt:
+
+If no signals found:
+```
+Guardrails: PASS — no slop-risk signals detected across [N] tasks
+```
+
+If signals found:
+```
+Guardrails: FLAG — [count] signal(s) detected
+
+┌─ Wave [N], Task [N.M]: [task title]
+│  Signal: [signal type]
+│  Detail: [one-line description]
+└─
+
+Architect may approve despite flags — these are advisory, not blocking.
+```
+
 Confirm before approving.
 
 **Default mode** — ask the architect to confirm:
