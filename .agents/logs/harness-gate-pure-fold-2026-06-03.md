@@ -8,3 +8,5 @@ Executor role: architect
 
 | Step | Wave | Task | Status | Commit | Time |
 |------|------|------|--------|--------|------|
+| 1 | Wave 1 | Event shape — identity actor + verified role | ✓ complete | 24f72e8 | 2026-06-03 |
+| 2 | Wave 1 | Write-time role freeze + transition guard | ✓ complete | cde0400 | 2026-06-03 |
