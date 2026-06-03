@@ -275,8 +275,9 @@ export async function approveCommand(argv, ctx) {
     recordedBy = runningUser;
   }
 
-  // The event-log attribution: gates.yaml requires `actor` to BE the role token.
-  const actor = 'architect';
+  // The event-log actor is the human identity (approvedBy); recordApproval freezes
+  // the verified role token into the event's `role` field at write-time.
+  const actor = approvedBy;
 
   const planFile = join(repoRoot, '.agents', 'plans', `${feature}.md`);
   if (!existsSync(planFile)) {
