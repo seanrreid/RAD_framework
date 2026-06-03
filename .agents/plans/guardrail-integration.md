@@ -1,7 +1,8 @@
 # Plan: Guardrail Integration
 Created: 2026-06-03
 Author: architect
-Status: in-progress
+Status: complete
+Completed-At: 2026-06-03T00:00:00Z
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-06-03T00:00:00Z
 Branch: rad/guardrail-integration
@@ -32,18 +33,19 @@ RAD orchestrates wave-based delivery via sub-agents but provides no coding disci
 ## Files in Scope
 | File | Lines | Change |
 |------|-------|--------|
-| `ai/guardrails.md` (new) | 1-92 | Copy from agent_guides source |
-| `ai/slop-register.md` (new) | 1-52 | Copy template from agent_guides source |
-| `ai/extensions/backend.md` (new) | 1-20 | Copy from agent_guides source |
-| `ai/extensions/database.md` (new) | 1-20 | Copy from agent_guides source |
-| `ai/extensions/frontend.md` (new) | 1-20 | Copy from agent_guides source |
-| `ai/extensions/security.md` (new) | 1-20 | Copy from agent_guides source |
-| `ai/extensions/testing.md` (new) | 1-20 | Copy from agent_guides source |
-| `.claude/commands/team/rad-deliver.md` | 138-196 | Add guardrail extension loading step to wave sub-agent prompt template |
-| `.claude/commands/team/rad-review.md` | 1-183 | Add guardrail review section with domain extension loading and hard-gate logic |
-| `.claude/commands/architect/rad-approve.md` | 50-157 | Add plan-analysis step with PASS/FLAG slop-risk report |
-| `install.sh` | 200-270 | Add `ai/` copy to project scaffold section |
-| `INSTALL.md` | 1-200 | Document ai/ guardrail pack, customization steps, extension loading protocol |
+| ai/guardrails.md | 1-92 | New — copy from agent_guides source |
+| ai/slop-register.md | 1-52 | New — copy template from agent_guides source |
+| ai/extensions/backend.md | 1-20 | New — copy from agent_guides source |
+| ai/extensions/database.md | 1-20 | New — copy from agent_guides source |
+| ai/extensions/frontend.md | 1-20 | New — copy from agent_guides source |
+| ai/extensions/security.md | 1-20 | New — copy from agent_guides source |
+| ai/extensions/testing.md | 1-20 | New — copy from agent_guides source |
+| .claude/commands/team/rad-deliver.md | 138-196 | Add guardrail extension loading step to wave sub-agent prompt template |
+| .claude/commands/team/rad-review.md | 1-183 | Add guardrail review section with domain extension loading and hard-gate logic |
+| .claude/commands/architect/rad-approve.md | 50-157 | Add plan-analysis step with PASS/FLAG slop-risk report |
+| install.sh | 200-270 | Add ai/ copy to project scaffold section |
+| INSTALL.md | 1-200 | Document ai/ guardrail pack, customization steps, extension loading protocol |
+| .agents/findings/guardrail-integration-verification.md | 1-80 | New — verification guide for manual test scenarios |
 
 ## Execution Notes
 
