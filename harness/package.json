@@ -4,6 +4,9 @@
   "private": true,
   "description": "RAD orchestration harness — the deterministic StateStore core (migration step 1).",
   "type": "module",
+  "bin": {
+    "rad": "./cli.js"
+  },
   "engines": {
     "node": ">=18"
   },
