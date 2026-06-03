@@ -143,6 +143,18 @@ copy_skills() {
   info "wrap    — /wrap session-end ritual"
 }
 
+copy_ai_guardrails() {
+  header "Installing guardrail pack"
+
+  # ai/ is framework code — always overwrite on install and upgrade.
+  mkdir -p "$TARGET_DIR/ai/extensions"
+  cp -r "$RAD_DIR/ai/." "$TARGET_DIR/ai/"
+  success "Guardrail pack → ai/"
+  info "ai/guardrails.md     — baseline coding-agent rules"
+  info "ai/slop-register.md  — project-specific overrides (customize for your stack)"
+  info "ai/extensions/       — domain extensions: backend, database, frontend, security, testing"
+}
+
 copy_scripts() {
   header "Installing scripts"
 
@@ -299,6 +311,7 @@ main() {
   create_dirs
   copy_commands
   copy_skills
+  copy_ai_guardrails
   copy_scripts
   copy_agents_meta
   scaffold_claude_md
