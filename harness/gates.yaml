@@ -5,17 +5,19 @@
 #
 # A gate rule declares:
 #   eventType    : the event type that satisfies the gate when present
-#   requiredRole  : the role the event's `actor` must represent
+#   requiredRole  : the role the event's `role` field must equal
 #   condition     : the structural pass condition. Supported:
-#                     actor-has-role — passes when an event of `eventType` whose
-#                     `actor` is the required role exists in history. A PROXY
-#                     event (actor = the authority, recordedBy = someone else)
-#                     still satisfies it, since attribution rides on `actor`
+#                     role-equals — passes when an event of `eventType` whose
+#                     frozen `role` field equals `requiredRole` exists in history.
+#                     The `role` is written once at write-time by `recordApproval`
+#                     (authority is checked by check-role.sh then frozen into the
+#                     event). A PROXY event (actor = someone else, recordedBy = runner)
+#                     still satisfies it, since authority rides on `role`
 #                     (see "Approval without a bottleneck: the proxy event").
 #   reason        : human-readable explanation surfaced when the gate fails
 
 approved:
   eventType: approved
   requiredRole: architect
-  condition: actor-has-role
-  reason: needs an approved event attributed to role:architect
+  condition: role-equals
+  reason: needs an approved event with role:architect frozen at write-time

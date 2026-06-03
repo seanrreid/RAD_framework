@@ -44,26 +44,45 @@ test('reduce surfaces a marker per observed event type', () => {
 
 test('reduce collects every approval (direct + proxy) with audit fields', () => {
   const history = [
-    { feature: 'f', type: 'approved', actor: 'architect', ts: 't1' },
+    { feature: 'f', type: 'approved', actor: 'architect', role: 'architect', ts: 't1' },
     {
       feature: 'f',
       type: 'approved',
       actor: 'architect',
+      role: 'architect',
       recordedBy: 'dev',
       ts: 't2',
     },
   ];
   const { approvals } = reduce(history);
   assert.equal(approvals.length, 2);
-  // Direct approval: no recordedBy key at all (not an undefined-valued one).
-  assert.deepEqual(approvals[0], { actor: 'architect', ts: 't1' });
+  // Direct approval: role present, no recordedBy key at all (not an undefined-valued one).
+  assert.deepEqual(approvals[0], { actor: 'architect', role: 'architect', ts: 't1' });
   assert.equal('recordedBy' in approvals[0], false);
-  // Proxy approval: both names present.
+  // Proxy approval: actor (identity), role (authority), recordedBy (runner) all present.
   assert.deepEqual(approvals[1], {
     actor: 'architect',
+    role: 'architect',
     recordedBy: 'dev',
     ts: 't2',
   });
+});
+
+test('reduce surfaces role on approved events; actor is the identity token', () => {
+  const history = [
+    {
+      feature: 'f',
+      type: 'approved',
+      actor: 'sean@torchcodelab.com',
+      role: 'architect',
+      ts: 't1',
+    },
+  ];
+  const { approvals } = reduce(history);
+  assert.equal(approvals.length, 1);
+  assert.equal(approvals[0].actor, 'sean@torchcodelab.com');
+  assert.equal(approvals[0].role, 'architect');
+  assert.equal('recordedBy' in approvals[0], false);
 });
 
 test('reduce ignores unknown event types for phase but still marks them', () => {

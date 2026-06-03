@@ -27,7 +27,8 @@ test('append writes a JSONL line per legal event; phase derives from the log', a
     const store = createGitStateStore({ repoRoot });
     const feature = 'demo';
 
-    store.append({ feature, type: 'approved', actor: 'architect', ts: 't0' });
+    // approved events must carry a frozen role (transition rule e).
+    store.append({ feature, type: 'approved', actor: 'architect', role: 'architect', ts: 't0' });
     store.append({ feature, type: 'deliver-started', actor: 'harness', ts: 't1' });
     store.append({ feature, type: 'wave-attempt', actor: 'harness', ts: 't2' });
 
@@ -62,9 +63,10 @@ test('duplicate approved is rejected and does not corrupt the log', async () => 
   await withTempRepo((repoRoot) => {
     const store = createGitStateStore({ repoRoot });
     const feature = 'demo';
-    store.append({ feature, type: 'approved', actor: 'architect', ts: 't0' });
+    // approved events must carry role (transition rule e).
+    store.append({ feature, type: 'approved', actor: 'architect', role: 'architect', ts: 't0' });
     assert.throws(
-      () => store.append({ feature, type: 'approved', actor: 'architect', ts: 't1' }),
+      () => store.append({ feature, type: 'approved', actor: 'architect', role: 'architect', ts: 't1' }),
       TransitionError,
     );
     assert.equal(store.history(feature).length, 1);
@@ -86,63 +88,109 @@ test('history() skips an unparseable trailing line (crash tolerance)', async () 
   });
 });
 
-test('recordApproval appends a proxy-aware approved event', async () => {
+test('recordApproval stamps role and appends a proxy-aware approved event', async () => {
   await withTempRepo((repoRoot) => {
-    const store = createGitStateStore({ repoRoot });
+    // Inject sh so check-role.sh is not invoked against the real (temp) repo.
+    const sh = () => ({ status: 0, stdout: '', stderr: '' });
+    const store = createGitStateStore({ repoRoot, sh });
     const feature = 'demo';
     store.recordApproval({ feature, actor: 'architect', recordedBy: 'dev', ts: 't0' });
     const hist = store.history(feature);
     assert.equal(hist.length, 1);
     assert.equal(hist[0].type, 'approved');
     assert.equal(hist[0].actor, 'architect');
+    // role is frozen at write-time by recordApproval.
+    assert.equal(hist[0].role, 'architect');
     assert.equal(hist[0].recordedBy, 'dev');
   });
 });
 
-test('gate(approved) is hermetic with an injected sh + injected evaluator', async () => {
-  await withTempRepo(async (repoRoot) => {
-    const calls = [];
-    const sh = (file, args) => {
-      calls.push({ file, args });
-      return { status: 0, stdout: '', stderr: '' };
-    };
-    // Inject the gate evaluator so gates.js / scripts are not loaded for real.
-    const evaluateGate = (name, history) => ({
-      passed: true,
-      reason: 'ok',
-      requiredRole: 'architect',
-      satisfiedBy: { actor: 'architect', recordedBy: 'dev' },
-    });
-    const store = createGitStateStore({ repoRoot, sh, evaluateGate });
+test('recordApproval refuses and writes nothing when check-role.sh fails', async () => {
+  await withTempRepo((repoRoot) => {
+    const sh = () => ({ status: 1, stdout: 'Permission denied', stderr: '' });
+    const store = createGitStateStore({ repoRoot, sh });
     const feature = 'demo';
-    store.recordApproval({ feature, actor: 'architect', recordedBy: 'dev', ts: 't0' });
-
-    const result = await store.gate(feature, 'approved');
-    assert.equal(result.passed, true);
-    assert.deepEqual(result.satisfiedBy, { actor: 'architect', recordedBy: 'dev' });
-    // Both branch-tip authority scripts were consulted via injected sh.
-    const scripts = calls.map((c) => c.file);
-    assert.ok(scripts.some((s) => s.endsWith('check-plan-approved.sh')));
-    assert.ok(scripts.some((s) => s.endsWith('check-role.sh')));
+    assert.throws(
+      () => store.recordApproval({ feature, actor: 'not-an-architect', ts: 't0' }),
+      /role check failed/,
+    );
+    // Nothing written — the log must remain absent.
+    assert.equal(store.history(feature).length, 0);
   });
 });
 
-test('gate(approved) is downgraded when the branch-tip script reports not-approved', async () => {
+test('append(approved) without role is rejected by transition guard (rule e)', async () => {
+  await withTempRepo((repoRoot) => {
+    const store = createGitStateStore({ repoRoot });
+    const feature = 'demo';
+    // Bypass recordApproval and directly append an approved event without role —
+    // validateTransition must reject it.
+    assert.throws(
+      () => store.append({ feature, type: 'approved', actor: 'architect', ts: 't0' }),
+      (err) => {
+        assert.ok(err instanceof TransitionError);
+        assert.equal(err.rule, 'approved-missing-role');
+        return true;
+      },
+    );
+    assert.equal(store.history(feature).length, 0);
+  });
+});
+
+test('gate(approved) is a pure fold — no sh called, decides from history alone (passed:true)', async () => {
   await withTempRepo(async (repoRoot) => {
-    const sh = (file) => {
-      if (file.endsWith('check-plan-approved.sh')) return { status: 1, stdout: 'not approved', stderr: '' };
+    const shCalls = [];
+    const sh = (file, args) => {
+      shCalls.push({ file, args });
       return { status: 0, stdout: '', stderr: '' };
     };
-    const evaluateGate = () => ({
+    // Inject the gate evaluator to control what evaluateGate returns.
+    const evaluateGate = (_name, _hist) => ({
       passed: true,
       reason: 'ok',
       requiredRole: 'architect',
-      satisfiedBy: { actor: 'architect' },
+      satisfiedBy: { actor: 'sean@torchcodelab.com', role: 'architect', recordedBy: 'dev' },
     });
     const store = createGitStateStore({ repoRoot, sh, evaluateGate });
+    const feature = 'demo';
+    store.recordApproval({ feature, actor: 'sean@torchcodelab.com', recordedBy: 'dev', ts: 't0' });
+
+    const result = await store.gate(feature, 'approved');
+    assert.equal(result.passed, true);
+    assert.deepEqual(result.satisfiedBy, { actor: 'sean@torchcodelab.com', role: 'architect', recordedBy: 'dev' });
+    // Pure fold: gate() must NOT call any shell scripts.
+    // (sh is still injected; calls from recordApproval are separate — we verify
+    //  that no calls happened AFTER the store was created, but recordApproval may
+    //  call sh for the write-time role check. Reset to isolate gate() calls.)
+    shCalls.length = 0;
+    await store.gate(feature, 'approved');
+    assert.equal(shCalls.length, 0, 'gate() must not invoke sh at read-time');
+  });
+});
+
+test('gate(approved) returns passed:false for a role-less event (pure fold, no sh)', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const shCalls = [];
+    const sh = (file, args) => {
+      shCalls.push({ file, args });
+      return { status: 0, stdout: '', stderr: '' };
+    };
+    // Inject evaluateGate to simulate a history with no matching role.
+    const evaluateGate = (_name, _hist) => ({
+      passed: false,
+      reason: 'needs an approved event with role:architect frozen at write-time',
+      requiredRole: 'architect',
+      satisfiedBy: null,
+    });
+    const store = createGitStateStore({ repoRoot, sh, evaluateGate });
+
+    shCalls.length = 0; // isolate gate() from any prior calls
     const result = await store.gate('demo', 'approved');
     assert.equal(result.passed, false);
-    assert.match(result.reason, /check-plan-approved\.sh/);
+    assert.match(result.reason, /architect/);
+    assert.equal(result.satisfiedBy, null);
+    // Still no sh calls from gate() itself.
+    assert.equal(shCalls.length, 0, 'gate() must not invoke sh even on failure');
   });
 });
 
