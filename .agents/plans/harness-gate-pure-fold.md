@@ -1,7 +1,8 @@
 # Plan: Pure-fold gate + write-time role authority
 Created: 2026-06-02
 Author: architect
-Status: in-progress
+Status: complete
+Completed-At: 2026-06-03T00:00:00Z
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-06-02T19:37:42Z
 Branch: rad/harness-gate-pure-fold
