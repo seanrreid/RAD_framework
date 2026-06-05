@@ -9,6 +9,10 @@ description: >
 
 Show a snapshot of the RAD framework state for this project.
 
+> **CLI shortcut:** `node harness/cli.js status [--phase <phase>]` prints a quick
+> harness-internal feature table (Feature / Status / Branch) without running the
+> full script output below.
+
 ---
 
 ## Process
