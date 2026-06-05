@@ -1,7 +1,8 @@
 # Plan: rad status CLI subcommand
 Created: 2026-06-05
 Author: architect
-Status: in-progress
+Status: complete
+Completed-At: 2026-06-05T20:10:00Z
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-06-05T19:50:38.457Z
 Branch: rad/rad-status-cli
