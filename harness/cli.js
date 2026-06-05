@@ -40,6 +40,11 @@ const SUBCOMMANDS = {
     usage: 'rad deliver <feature> [--model <model-id>]',
     run: (argv, ctx) => deliverCommand(argv, ctx),
   },
+  status: {
+    summary: 'Show current state of all rad/ features.',
+    usage: 'rad status [--phase <phase>]',
+    run: (argv, ctx) => statusCommand(argv, ctx),
+  },
 };
 
 /** The harness package root (where cli.js lives). */
@@ -552,6 +557,83 @@ export async function approveCommand(argv, ctx) {
       `rad approve: ok feature=${feature} status=approved approved-by=${approvedBy} approved-at=${ts} proxy=false\n`,
     );
   }
+  return 0;
+}
+
+/**
+ * Hand-rolled argv parser for `status`. Returns the optional `--phase <value>`
+ * filter. Throws on unknown flags or a flag missing its value.
+ *
+ * @param {string[]} argv
+ * @returns {{ phase?: string }}
+ */
+function parseStatusArgs(argv) {
+  let phase;
+
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg === '--phase') {
+      const val = argv[i + 1];
+      if (val === undefined) throw new Error('--phase requires a value');
+      phase = val;
+      i += 1;
+    } else if (arg.startsWith('--')) {
+      throw new Error(`unknown option '${arg}'`);
+    } else {
+      throw new Error(`unexpected argument '${arg}'`);
+    }
+  }
+
+  return { phase };
+}
+
+/**
+ * `status [--phase <phase>]`.
+ *
+ * Read-only: lists all known rad/ features and their current phase. No git
+ * writes, no events appended, no plan-doc mutations.
+ *
+ * @param {string[]} argv - args after `status`
+ * @param {{ repoRoot: string, sh?: typeof defaultSh }} ctx
+ * @returns {Promise<number>}
+ */
+export async function statusCommand(argv, ctx) {
+  const { repoRoot } = ctx;
+  const sh = ctx.sh ?? defaultSh;
+
+  let parsed;
+  try {
+    parsed = parseStatusArgs(argv);
+  } catch (err) {
+    process.stderr.write(`rad status: ${err.message}\n`);
+    process.stderr.write('Usage: rad status [--phase <phase>]\n');
+    return 1;
+  }
+
+  const { phase } = parsed;
+  const claudeMd = join(repoRoot, 'CLAUDE.md');
+  const state = createGitStateStore({ repoRoot, sh, claudeMd });
+
+  const features = state.list(phase ? { phase } : {});
+
+  if (features.length === 0) {
+    process.stdout.write('rad status: no features found\n');
+    return 0;
+  }
+
+  // Compute column widths. Feature column grows with longest name; Status and
+  // Branch are fixed-width enough to hold any phase name and rad/<feature>.
+  const featureWidth = Math.max('Feature'.length, ...features.map((f) => f.feature.length));
+  const statusWidth = 16;
+
+  const header = `${'Feature'.padEnd(featureWidth)}  ${'Status'.padEnd(statusWidth)}  Branch`;
+  const divider = `${'-'.repeat(featureWidth)}  ${'-'.repeat(statusWidth)}  ------`;
+  const rows = features.map(
+    (f) =>
+      `${f.feature.padEnd(featureWidth)}  ${(f.phase ?? '').padEnd(statusWidth)}  rad/${f.feature}`,
+  );
+
+  process.stdout.write([header, divider, ...rows, ''].join('\n'));
   return 0;
 }
 
