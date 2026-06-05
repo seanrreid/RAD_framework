@@ -57,10 +57,11 @@ done < <(
   awk '/^## Tests to Write/{found=1; next} /^## /{found=0} found && /^- /' "$PLAN_FILE"
 )
 
-# Always allow execution logs, the plan file itself, and the review findings log
+# Always allow execution logs, the plan file itself, state files, and the review findings log
 ALWAYS_ALLOW_PREFIXES=(
   ".agents/logs/"
   ".agents/plans/"
+  ".agents/state/"
   ".agents/findings.jsonl"
 )
 
