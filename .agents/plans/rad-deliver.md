@@ -1,7 +1,8 @@
 # Plan: rad deliver CLI subcommand
 Created: 2026-06-05
 Author: architect
-Status: in-progress
+Status: complete
+Completed-At: 2026-06-05T18:20:00Z
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-06-05T17:44:58.705Z
 Branch: rad/rad-deliver
@@ -52,7 +53,9 @@ scope.
 | harness/runwave.js | new file ~100 | Export createRunWave({apiKey, model, repoRoot}) → async runWave(wave, planCtx) that constructs prompt, calls SDK, streams, parses WAVE_RESULT |
 | harness/cli.js | 27-35 + ~150 new | Add deliver entry to SUBCOMMANDS; parseDeliverArgs; deliverCommand |
 | harness/package.json | throughout | Add @anthropic-ai/claude-agent-sdk dependency |
+| harness/package-lock.json | throughout | Lockfile updated by npm install (companion to package.json dep addition) |
 | harness/test/deliver.test.js | new file ~150 | node --test cases for AC#1 smoke, AC#3 auth guard, AC#4 gate refusal |
+| .agents/state/rad-deliver/events.jsonl | new file | Framework state artifact written by rad approve (always travels with plan) |
 
 ## Execution Notes
 
