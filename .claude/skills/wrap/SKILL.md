@@ -51,10 +51,42 @@ session has continuity:
 - {date}: {one-line summary of what was done and what's next}
 ```
 
-### 4. Reconcile the execution log (delivery sessions only)
+### 4. Reconcile plan vs. actual (delivery sessions only)
 
-If on a `rad/` branch with an execution log under `.agents/logs/`, confirm the log's
-final rows reflect what actually completed. Skip silently if there's no log.
+If on a `rad/` branch with an execution log under `.agents/logs/`, produce a brief
+reconciliation note. Skip silently if there's no log.
+
+```bash
+# Find the execution log for this feature
+ls .agents/logs/[feature-name]-*.md 2>/dev/null | tail -1
+```
+
+Check three things:
+
+**ACs covered:** For each numbered AC in the plan, was it cited in a completed task
+commit? Note any that were deferred or skipped.
+
+**Concerns flagged:** Were any tasks marked `done_with_concerns`? List each concern
+one-line so the architect sees them in the session summary without digging into the log.
+
+**Deferred items:** Anything in `## Non-Goals` or the wave plan that was explicitly
+left for a follow-up? Name it so the next session has a standing start.
+
+Append this as a `## Session Notes` block to the plan doc (create the section if absent):
+
+```
+## Session Notes
+
+- {date}: Delivered Wave [N]. ACs covered: [list]. Concerns: [list or none].
+  Deferred: [list or none].
+```
+
+Commit it to the work branch:
+```bash
+git add .agents/plans/[feature-name].md
+git commit -m "wrap([feature]): session reconciliation note"
+git push origin "rad/[feature-name]"
+```
 
 ### 5. Output the session summary
 
@@ -71,6 +103,9 @@ final rows reflect what actually completed. Skip silently if there's no log.
 
 ## Plan status changes
 - {feature}: {old} → {new}
+
+## Concerns flagged
+- {done_with_concerns items from delivery, or "none"}
 
 ## Next session
 - {the obvious next step}

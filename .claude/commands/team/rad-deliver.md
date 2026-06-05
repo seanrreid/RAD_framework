@@ -185,15 +185,31 @@ Validate: [AC#N and validation method from plan]
 1. Load only the files listed — no additional reads
 2. Implement exactly what the task describes — nothing more
 3. Run the validation command
-4. If validation passes:
+4. Self-classify the outcome before reporting:
+   - Did the AC pass? → continue to step 5
+   - AC failed — is the fix a code change? → `blocked_code`
+   - AC failed — is the task description ambiguous or contradictory? → `blocked_spec`
+   - AC failed — does the plan appear wrong for the actual codebase? → `blocked_intent`
+   - AC passed but you noticed something adjacent worth flagging? → `done_with_concerns` (note it in `concern:`)
+5. If validation passes (complete or done_with_concerns):
    git add [changed files]
    git commit -m "deliver([feature]): [task title]
 
    Wave [N], Task [N.M]
    Validated: [AC#N — validation method]"
-5. Append to execution log:
+6. Append to execution log:
    | [step#] | Wave [N] | [task title] | ✓ complete | [commit hash] | [time] |
-6. Do not continue to the next task if validation fails
+7. Do not continue to the next task if blocked_* — report immediately in WAVE_RESULT
+
+## Task status values
+
+Each task reports one of five statuses:
+
+- `complete` — AC validated, committed, no concerns
+- `done_with_concerns` — AC validated and committed, but the agent flagged something adjacent the architect should know (logged in `concern:`)
+- `blocked_code` — implementation bug; the AC failed; a bounded retry is appropriate
+- `blocked_spec` — the AC or task description is ambiguous; retrying won't help — escalate immediately
+- `blocked_intent` — the plan itself appears wrong for the codebase; retrying won't help — escalate immediately
 
 ## Return format
 At the end, output exactly this block and nothing after it:
@@ -203,9 +219,10 @@ wave: [N]
 status: [complete | failed]
 tasks:
   - title: [task title]
-    status: [complete | failed]
+    status: [complete | done_with_concerns | blocked_code | blocked_spec | blocked_intent]
     commit: [hash or —]
-    error: [one-line summary or —]
+    concern: [one-line concern if done_with_concerns, else —]
+    error: [one-line summary if blocked_*, else —]
 END_WAVE_RESULT
 ```
 
@@ -218,24 +235,26 @@ END_WAVE_RESULT
 ```
 ✓ Wave [N] complete — [task count] tasks
   Task [N.1]: [title] — [commit hash]
-  Task [N.2]: [title] — [commit hash]
+  Task [N.2]: [title] — ⚠ done_with_concerns — [concern]
 ```
 
-4. Proceed to the next wave **only if** `status: complete`
+4. Proceed to the next wave **only if** all tasks are `complete` or `done_with_concerns`
 
-**If the wave sub-agent returns `status: failed`:**
+**If any task returns `blocked_*`:**
 
-Retry the failed task at most twice (re-delegate a fresh sub-agent scoped to just
-that task). On the **third** failure, stop the whole delivery and emit a
-structured escalation — do not continue to the next task or wave:
+- `blocked_code` → retry the failed task at most **twice** (re-delegate a fresh sub-agent scoped to just that task). On the **third** failure, stop and escalate.
+- `blocked_spec` or `blocked_intent` → **do not retry**; escalate immediately with the failure class.
+
+Emit a structured escalation and stop — do not continue to the next task or wave:
 
 ```
 ✗ Delivery blocked — Wave [N], Task [N.M]: [title]
-AC:        AC#[N] — [criterion]
-Issue:     [error from WAVE_RESULT]
-Tried:     [1-line summary of each of the 3 attempts]
-Branch:    rad/[feature-name]  (partial work is committed and pushed)
-Escalate:  architect review needed before continuing.
+AC:           AC#[N] — [criterion]
+Failure class: [blocked_code | blocked_spec | blocked_intent]
+Issue:        [error from WAVE_RESULT]
+Tried:        [1-line summary of each attempt, or "1 attempt — no retry (spec/intent failure)"]
+Branch:       rad/[feature-name]  (partial work is committed and pushed)
+Escalate:     architect review needed before continuing.
 ```
 
 Do not shed the `WAVE_RESULT` content between waves — keep the summary rows
