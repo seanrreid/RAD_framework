@@ -23,6 +23,9 @@ import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import process from 'node:process';
 
 import { createGitStateStore, defaultSh } from './adapters/git-state-store.js';
+import { deliverSpine } from './spine.js';
+import { createRunWave } from './runwave.js';
+import { loadMatrix } from './matrix.js';
 
 const SUBCOMMANDS = {
   approve: {
@@ -31,6 +34,11 @@ const SUBCOMMANDS = {
     // run is wired below, after the command is defined, to keep the table near
     // the top of the file while letting the implementation read top-down.
     run: (argv, ctx) => approveCommand(argv, ctx),
+  },
+  deliver: {
+    summary: 'Run approved plan wave execution via Claude Agent SDK.',
+    usage: 'rad deliver <feature> [--model <model-id>]',
+    run: (argv, ctx) => deliverCommand(argv, ctx),
   },
 };
 
@@ -125,6 +133,227 @@ function parseApproveArgs(argv) {
 /** True when a string is present and not whitespace-only. */
 function isNonEmpty(s) {
   return typeof s === 'string' && s.trim() !== '';
+}
+
+/**
+ * Hand-rolled argv parser for `deliver`. Returns the positional feature and the
+ * optional `--model <id>` value. Throws on a flag that is missing its value or
+ * on extra positionals so malformed invocations fail loudly.
+ *
+ * @param {string[]} argv
+ * @returns {{ feature?: string, model: string }}
+ */
+function parseDeliverArgs(argv) {
+  let feature;
+  let model = 'claude-opus-4-8';
+
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg === '--model') {
+      const val = argv[i + 1];
+      if (val === undefined) throw new Error('--model requires a value');
+      model = val;
+      i += 1;
+    } else if (arg.startsWith('--')) {
+      throw new Error(`unknown option '${arg}'`);
+    } else if (feature === undefined) {
+      feature = arg;
+    } else {
+      throw new Error(`unexpected argument '${arg}'`);
+    }
+  }
+
+  return { feature, model };
+}
+
+/**
+ * Extract the body lines of a `### <name>` markdown sub-section (until the next
+ * `##` or `###` heading). Used to pull Do Not Touch / Key Files / Reminders from
+ * the plan's Execution Notes section.
+ *
+ * @param {string} text
+ * @param {string} name - sub-section heading (without the leading '### ')
+ * @returns {string[]}
+ */
+function subSectionLines(text, name) {
+  const lines = text.split('\n');
+  const out = [];
+  let inSection = false;
+  for (const line of lines) {
+    if (new RegExp(`^###\\s+${name}\\s*$`).test(line.trim())) {
+      inSection = true;
+      continue;
+    }
+    if (inSection) {
+      if (/^#{2,}/.test(line)) break;
+      out.push(line);
+    }
+  }
+  return out;
+}
+
+/**
+ * Parse a plan doc text to extract the planCtx fields needed by runWave.
+ *
+ * @param {string} text - full plan doc text
+ * @returns {{ branch: string, acceptanceCriteria: string[], executionNotes: { doNotTouch: string[], keyFiles: string[], reminders: string[] } }}
+ */
+function parsePlanCtx(text) {
+  // Branch: extract from `Branch: rad/feature` header line
+  let branch = '';
+  for (const line of text.split('\n')) {
+    const m = /^Branch:\s*(.+)$/.exec(line.trim());
+    if (m) { branch = m[1].trim(); break; }
+  }
+
+  // Acceptance Criteria: numbered list lines in `## Acceptance Criteria`
+  const acLines = [];
+  let inAc = false;
+  for (const line of text.split('\n')) {
+    if (/^##\s+Acceptance Criteria/.test(line)) { inAc = true; continue; }
+    if (inAc) {
+      if (/^##/.test(line)) break;
+      const trimmed = line.trim();
+      if (/^[0-9]+\./.test(trimmed)) acLines.push(trimmed);
+    }
+  }
+
+  // Execution Notes sub-sections
+  const doNotTouch = subSectionLines(text, 'Do Not Touch')
+    .map((l) => l.trim())
+    .filter((l) => l.startsWith('- '))
+    .map((l) => l.slice(2));
+
+  const keyFiles = subSectionLines(text, 'Key Files')
+    .map((l) => l.trim())
+    .filter((l) => l.startsWith('- '))
+    .map((l) => l.slice(2));
+
+  const reminders = subSectionLines(text, 'Reminders')
+    .map((l) => l.trim())
+    .filter((l) => l.startsWith('- '))
+    .map((l) => l.slice(2));
+
+  return {
+    branch,
+    acceptanceCriteria: acLines,
+    executionNotes: { doNotTouch, keyFiles, reminders },
+  };
+}
+
+/**
+ * `deliver <feature> [--model <model-id>]`.
+ *
+ * Reads the approved plan, constructs an SDK-backed runWave, and drives
+ * deliverSpine to completion. Returns an integer exit code — never calls
+ * process.exit() directly.
+ *
+ * @param {string[]} argv - args after `deliver`
+ * @param {{ repoRoot: string, sh?: typeof defaultSh, runWave?: Function }} ctx
+ * @returns {Promise<number>}
+ */
+export async function deliverCommand(argv, ctx) {
+  const { repoRoot } = ctx;
+  const sh = ctx.sh ?? defaultSh;
+
+  // Subcommand-level help: print usage and exit 0.
+  if (argv.includes('--help') || argv.includes('-h')) {
+    process.stdout.write('Usage: rad deliver <feature> [--model <model-id>]\n');
+    process.stdout.write('\nRun approved plan wave execution via Claude Agent SDK.\n');
+    return 0;
+  }
+
+  let parsed;
+  try {
+    parsed = parseDeliverArgs(argv);
+  } catch (err) {
+    process.stderr.write(`rad deliver: ${err.message}\n`);
+    process.stderr.write('Usage: rad deliver <feature> [--model <model-id>]\n');
+    return 1;
+  }
+
+  const { feature, model } = parsed;
+
+  if (!isNonEmpty(feature)) {
+    process.stderr.write('rad deliver: a feature name is required\n');
+    process.stderr.write('Usage: rad deliver <feature> [--model <model-id>]\n');
+    return 1;
+  }
+
+  // Security: check API key before any SDK construction or model call.
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!isNonEmpty(apiKey)) {
+    process.stderr.write('rad deliver: ANTHROPIC_API_KEY is required\n');
+    return 1;
+  }
+
+  const planFile = join(repoRoot, '.agents', 'plans', `${feature}.md`);
+  if (!existsSync(planFile)) {
+    process.stderr.write(`rad deliver: no plan doc at .agents/plans/${feature}.md\n`);
+    return 1;
+  }
+
+  // Read and parse the plan file for planCtx (execution notes, branch, AC list).
+  const planText = readFileSync(planFile, 'utf8');
+  const planCtx = parsePlanCtx(planText);
+  planCtx.feature = feature;
+  planCtx.executionLog = `.agents/logs/${feature}-${new Date().toISOString().slice(0, 10)}.md`;
+
+  const claudeMd = join(repoRoot, 'CLAUDE.md');
+  const state = createGitStateStore({ repoRoot, sh, claudeMd });
+
+  // Gate check: approved status must be established before any wave execution.
+  const g = await state.gate(feature, 'approved');
+  if (!g.passed) {
+    process.stderr.write(`rad deliver: gate not passed for '${feature}' — ${g.reason}\n`);
+    return 1;
+  }
+
+  // Accept an injected runWave (for tests) or construct an SDK-backed one.
+  let runWave;
+  if (ctx.runWave) {
+    runWave = ctx.runWave;
+  } else {
+    const sdkRunWave = createRunWave({ apiKey, model, repoRoot });
+    // Bind planCtx so deliverSpine's single-argument runWave(wave) call works.
+    runWave = (wave) => sdkRunWave(wave, planCtx);
+  }
+
+  const matrix = loadMatrix();
+
+  let result;
+  try {
+    result = await deliverSpine({
+      feature,
+      state,
+      docs: null,
+      matrix,
+      gates: null,
+      runWave,
+      sh: (script, feat) => sh(join(repoRoot, script), [feat], { cwd: repoRoot }),
+      now: () => new Date().toISOString(),
+    });
+  } catch (err) {
+    process.stderr.write(`rad deliver: unexpected error — ${err.message}\n`);
+    return 1;
+  }
+
+  if (result.ok) {
+    process.stdout.write(
+      `rad deliver: ok feature=${feature} waves=${result.waves} status=complete\n`,
+    );
+    return 0;
+  }
+
+  // Structured failure line (machine-greppable).
+  process.stderr.write(
+    `rad deliver: failed feature=${feature} stopped=${result.stopped}` +
+    (result.wave !== undefined ? ` wave=${result.wave}` : '') +
+    (result.action ? ` action=${result.action}` : '') +
+    (result.check ? ` check=${result.check}` : '') +
+    '\n',
+  );
+  return 1;
 }
 
 /**
