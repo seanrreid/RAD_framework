@@ -136,3 +136,26 @@ export function reduce(history) {
     approvals,
   };
 }
+
+/**
+ * Pure fold over an event history → the set of wave numbers that have already
+ * advanced (have a `wave-complete` event). Used by the deliver spine to resume
+ * after a crash: an already-completed wave is skipped, never re-run.
+ *
+ * Keys STRICTLY off `wave-complete` — a wave that only logged `wave-attempt`
+ * but never advanced is NOT included, so a mid-wave crash resumes that wave.
+ * Tolerates empty/partial/missing history; never throws on null/undefined.
+ *
+ * @param {Event[]} history - in-memory event array (no I/O performed)
+ * @returns {Set<number>} wave numbers (data.wave) of completed waves
+ */
+export function resumeFrom(history) {
+  const completed = new Set();
+  if (!Array.isArray(history)) return completed;
+  for (const event of history) {
+    if (event && event.type === 'wave-complete' && event.data) {
+      completed.add(event.data.wave);
+    }
+  }
+  return completed;
+}

@@ -28,13 +28,16 @@
 
 import { resolveOutcome } from './matrix.js';
 import { fingerprint } from './fingerprint.js';
+import { resumeFrom } from './events.js';
 
 /** Bounded attempt budget per wave — the hard ceiling. The doom-loop breaker is
  * the early exit; this cap only bites when every attempt fails *differently*. */
 const MAX_ATTEMPTS = 3;
 
-/** Post-check guardrails, run in order after every wave advances. */
-const POST_CHECKS = ['check-scope.sh', 'check-tests.sh', 'open-pr.sh'];
+/** Post-check guardrails, run in order after all waves. The test gate now runs
+ * per-wave (a regression blocks AT the introducing wave, not at the end), so
+ * check-tests is no longer an end post-check — only scope + PR remain. */
+const POST_CHECKS = ['check-scope.sh', 'open-pr.sh'];
 
 /**
  * Run the deliver spine for one feature.
@@ -75,24 +78,64 @@ export async function deliverSpine({
   const plan = state.plan(feature);
   const waves = (plan && plan.waves) || [];
 
+  // ── Resume: waves that already advanced on a prior run carry a `wave-complete`
+  // event. Skip them — never re-run runWave or append duplicate attempt/complete
+  // events. Keyed strictly off `wave-complete`, so a wave that crashed mid-run
+  // (attempt logged, never advanced) is NOT skipped and resumes here. ──
+  const completed = resumeFrom(state.history(feature));
+
+  // ── Resume verify (cheap, once): if a prior run already advanced one or more
+  // waves, the per-wave gate that guarded THIS run never ran for them. Before
+  // touching the first non-skipped wave, run ONE cumulative test gate to confirm
+  // the prior work is still green. If it is broken, escalate — don't build on a
+  // broken base. A fresh run (nothing skipped) does not run this. ──
+  let resumeVerified = false;
+
   // ── DET wave loop — the MATRIX decides what happens next, not a counter. ──
   for (const wave of waves) {
+    if (completed.has(wave.n)) continue;
+
+    if (completed.size > 0 && !resumeVerified) {
+      resumeVerified = true; // run exactly once, before the first non-skipped wave
+      const verify = sh('scripts/check-tests.sh', feature);
+      if (verify.status !== 0) {
+        return { stopped: 'resume-verify', ok: false };
+      }
+    }
+
     let lastPrint = null;
     let advanced = false;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       const result = await runWave(wave);
 
+      // ── Per-wave test gate. A wave the model thinks succeeded only advances if
+      // the cumulative tests are green at THIS point — otherwise it introduced a
+      // regression. DEMOTE it to fail-tests so the existing retry/revision path
+      // (bounded budget + doom-loop fingerprint) handles it; the wave then blocks
+      // here instead of advancing a broken base. ──
+      let { outcome } = result;
+      let gated = result;
+      if (resolveOutcome('implement', outcome, matrix).action === 'advance') {
+        const gate = sh('scripts/check-tests.sh', feature);
+        if (gate.status !== 0) {
+          outcome = 'fail-tests';
+          // Fingerprint a result that reflects the GATE failure, so repeated
+          // identical gate failures trip the doom-loop breaker rather than loop.
+          gated = { ...result, outcome, gateStatus: gate.status };
+        }
+      }
+
       state.append({
         feature,
         type: 'wave-attempt',
         actor: 'harness',
         ts: now(),
-        data: { wave: wave.n, outcome: result.outcome },
+        data: { wave: wave.n, outcome },
       });
 
       // The MATRIX decides what happens next — never inline retry arithmetic.
-      const { action } = resolveOutcome('implement', result.outcome, matrix);
+      const { action } = resolveOutcome('implement', outcome, matrix);
 
       if (action === 'advance') {
         state.append({
@@ -111,7 +154,7 @@ export async function deliverSpine({
         // means the retry is provably stuck — abort rather than burn the budget.
         // Only failing (retry/revision) outcomes are fingerprinted here, so a
         // genuine success can never trip the breaker (it advances above first).
-        const print = fingerprint(result);
+        const print = fingerprint(gated);
         if (print === lastPrint) {
           state.append({
             feature,
@@ -124,7 +167,7 @@ export async function deliverSpine({
             stopped: 'doom-loop',
             ok: false,
             wave: wave.n,
-            outcome: result.outcome,
+            outcome,
           };
         }
         lastPrint = print;
@@ -144,7 +187,7 @@ export async function deliverSpine({
         ok: false,
         wave: wave.n,
         action,
-        outcome: result.outcome,
+        outcome,
       };
     }
 
