@@ -1,0 +1,231 @@
+/**
+ * SDK (Anthropic) wave adapter — hardened.
+ *
+ * Drives a wave through the Claude Agent SDK's `query` loop, behind the SAME
+ * interface every adapter shares: runWave(wave, planCtx) -> result, where the
+ * result includes `outcome` (the matrix string the spine reads), `status`, and
+ * `tasks` (for logging). The plain-text WAVE_RESULT contract and all resilience
+ * helpers come from ./contract.js — this module owns only the SDK wiring.
+ *
+ * Hardening over the original runwave.js:
+ *   - Wall-clock timeout via AbortController + contract.withTimeout (maxTurns
+ *     is also set so the SDK self-limits) — exhaustion maps to 'fail-timeout'.
+ *   - ALLOW-LISTED env subset handed to the SDK (PATH, HOME, locale + the key)
+ *     instead of spreading the full process.env and its secrets.
+ *   - Classified-transient errors retried with contract.backoffWithJitter
+ *     before a terminal outcome; permanent/model/resource errors fail closed.
+ *   - One reprompt on a missing WAVE_RESULT block before failing 'fail-protocol'.
+ *   - contract.sanitizeErrorMessage on every surfaced error so the API key
+ *     never appears in logs/errors.
+ *
+ * The `query` dependency is injectable (opts.query) for hermetic testing — no
+ * real network calls in tests.
+ */
+
+import { query as defaultQuery } from '@anthropic-ai/claude-agent-sdk';
+
+import {
+  buildWavePrompt,
+  extractWaveResultBlock,
+  parseWaveResult,
+  resultToOutcome,
+  syntheticFailure,
+  sanitizeErrorMessage,
+  classifyError,
+  backoffWithJitter,
+  withTimeout,
+} from './contract.js';
+
+/** Env keys forwarded to the SDK subprocess. The API key is added separately. */
+const ENV_ALLOW_LIST = ['PATH', 'HOME', 'LANG', 'LC_ALL', 'TMPDIR', 'TERM'];
+
+/** Build the allow-listed env handed to the SDK (key injected by caller). */
+function buildSdkEnv(apiKey) {
+  const env = {};
+  for (const key of ENV_ALLOW_LIST) {
+    if (process.env[key] !== undefined) env[key] = process.env[key];
+  }
+  env.ANTHROPIC_API_KEY = apiKey;
+  return env;
+}
+
+/** Max transient retries before producing a terminal outcome. */
+const MAX_TRANSIENT_RETRIES = 3;
+
+/** Default per-wave wall-clock deadline and SDK turn ceiling. */
+const DEFAULT_TIMEOUT_MS = 600000;
+const DEFAULT_MAX_TURNS = 40;
+
+/**
+ * Create a runWave function backed by the Claude Agent SDK.
+ *
+ * Same signature as the historical runwave.js factory. The ANTHROPIC_API_KEY
+ * presence check is the caller's responsibility; this factory trusts apiKey and
+ * never logs it.
+ *
+ * @param {Object} opts
+ * @param {string} opts.apiKey - Anthropic API key (never logged)
+ * @param {string} [opts.model] - Claude model identifier
+ * @param {string} [opts.repoRoot] - absolute path to repo root (cwd for agent)
+ * @param {number} [opts.timeoutMs] - wall-clock deadline per wave
+ * @param {number} [opts.maxTurns] - SDK turn ceiling
+ * @param {Function} [opts.query] - injectable SDK query (defaults to the real one)
+ * @param {Function} [opts.sleep] - injectable delay (defaults to setTimeout); for tests
+ * @returns {(wave: Object, planCtx: Object) => Promise<{ outcome: string, status: string, tasks: Array }>}
+ */
+export function createRunWave({
+  apiKey,
+  model,
+  repoRoot,
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+  maxTurns = DEFAULT_MAX_TURNS,
+  query = defaultQuery,
+  sleep,
+} = {}) {
+  const delay =
+    sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+
+  /** Wrap a parsed `{ status, tasks }` into the full spine-facing result. */
+  function toResult(parsed) {
+    return {
+      outcome: resultToOutcome(parsed),
+      status: parsed.status,
+      tasks: parsed.tasks,
+    };
+  }
+
+  /**
+   * Run a single SDK query to completion, collecting assistant text. Returns
+   * `{ text }` on success. Throws on a thrown SDK error OR on an `is_error`
+   * result (so the retry/classify layer above handles both uniformly). The
+   * thrown error carries the (sanitized) summary.
+   *
+   * @param {string} prompt
+   * @returns {Promise<{ text: string }>}
+   */
+  async function runQueryOnce(prompt) {
+    const abortController = new AbortController();
+    let fullText = '';
+
+    const drain = (async () => {
+      const sdkQuery = query({
+        prompt,
+        options: {
+          env: buildSdkEnv(apiKey),
+          ...(model ? { model } : {}),
+          ...(repoRoot ? { cwd: repoRoot } : {}),
+          maxTurns,
+          abortController,
+          tools: { type: 'preset', preset: 'claude_code' },
+          allowedTools: ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep'],
+          permissionMode: 'acceptEdits',
+          persistSession: false,
+        },
+      });
+
+      for await (const message of sdkQuery) {
+        if (message.type === 'assistant') {
+          if (Array.isArray(message.message?.content)) {
+            for (const block of message.message.content) {
+              if (block.type === 'text') fullText += block.text;
+            }
+          }
+        } else if (message.type === 'result') {
+          if (!message.is_error && typeof message.result === 'string') {
+            fullText += message.result;
+          } else if (message.is_error) {
+            // Sanitize at CONSTRUCTION so the key can never reach a thrown/
+            // logged Error even if the SDK embeds it in message.errors.
+            const errSummary = sanitizeErrorMessage(
+              Array.isArray(message.errors)
+                ? message.errors.join('; ')
+                : 'SDK reported an error result',
+            );
+            throw new Error(errSummary);
+          }
+        }
+      }
+      return { text: fullText };
+    })();
+
+    return withTimeout(drain, timeoutMs, abortController);
+  }
+
+  /**
+   * Run one query with transient-retry + backoff. Returns `{ text }` on success
+   * or `{ terminal }` with a finished spine result when the run failed
+   * terminally (timeout/exhausted-transient/permanent/model/resource).
+   *
+   * @param {string} prompt
+   * @param {string|number} waveId
+   */
+  async function runWithRetry(prompt, waveId) {
+    let attempt = 0;
+    // attempt 0 is the initial call; up to MAX_TRANSIENT_RETRIES retries follow.
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      try {
+        return { text: (await runQueryOnce(prompt)).text };
+      } catch (err) {
+        const bucket = classifyError(err);
+        const safe = sanitizeErrorMessage(err?.message ?? String(err));
+
+        // A wall-clock timeout (sentinel-tagged by withTimeout) is terminal
+        // 'fail-timeout' for this adapter — do not retry past the deadline.
+        if (err && err._isRadTimeout) {
+          return {
+            terminal: {
+              outcome: 'fail-timeout',
+              status: 'failed',
+              tasks: syntheticFailure(waveId, safe).tasks,
+            },
+          };
+        }
+
+        if (bucket === 'transient' && attempt < MAX_TRANSIENT_RETRIES) {
+          attempt += 1;
+          await delay(backoffWithJitter(attempt));
+          continue;
+        }
+
+        // Transient exhausted, or permanent/model/resource — terminal failure.
+        return { terminal: toResult(syntheticFailure(waveId, safe)) };
+      }
+    }
+  }
+
+  /**
+   * @param {Object} wave
+   * @param {Object} planCtx
+   * @returns {Promise<{ outcome: string, status: string, tasks: Array }>}
+   */
+  return async function runWave(wave, planCtx) {
+    const waveId = wave.n ?? wave.number ?? wave.id ?? '?';
+    const prompt = buildWavePrompt(wave, planCtx);
+
+    const first = await runWithRetry(prompt, waveId);
+    if (first.terminal) return first.terminal;
+
+    let block = extractWaveResultBlock(first.text);
+    if (block) return toResult(parseWaveResult(block));
+
+    // Missing WAVE_RESULT — reprompt EXACTLY once for the protocol block.
+    const reprompt =
+      prompt +
+      '\n\nYour previous response did not include the required WAVE_RESULT block. ' +
+      'Re-run the wave and end your response with exactly one WAVE_RESULT ... ' +
+      'END_WAVE_RESULT block, and nothing after it.';
+
+    const second = await runWithRetry(reprompt, waveId);
+    if (second.terminal) return second.terminal;
+
+    block = extractWaveResultBlock(second.text);
+    if (block) return toResult(parseWaveResult(block));
+
+    return {
+      outcome: 'fail-protocol',
+      status: 'failed',
+      tasks: syntheticFailure(waveId, 'No WAVE_RESULT block after one reprompt').tasks,
+    };
+  };
+}

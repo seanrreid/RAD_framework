@@ -24,7 +24,9 @@ import process from 'node:process';
 
 import { createGitStateStore, defaultSh } from './adapters/git-state-store.js';
 import { deliverSpine } from './spine.js';
-import { createRunWave } from './runwave.js';
+import { createRunWave } from './adapters/agent/sdk.js';
+import { createCommandAdapter } from './adapters/agent/command.js';
+import { sanitizeErrorMessage } from './adapters/agent/contract.js';
 import { loadMatrix } from './matrix.js';
 
 const SUBCOMMANDS = {
@@ -285,10 +287,14 @@ export async function deliverCommand(argv, ctx) {
     return 1;
   }
 
-  // Security: check API key before any SDK construction or model call.
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!isNonEmpty(apiKey)) {
-    process.stderr.write('rad deliver: ANTHROPIC_API_KEY is required\n');
+  // Adapter selection (ENV-driven, no config-file loader). RAD_AGENT picks the
+  // runner: 'command' (default, vendor-neutral CLI) or 'sdk' (Anthropic SDK).
+  // Credential requirements differ per path and are validated below, just
+  // before constructing the chosen adapter — an injected ctx.runWave (tests)
+  // skips construction and therefore skips the credential check entirely.
+  const agentKind = isNonEmpty(process.env.RAD_AGENT) ? process.env.RAD_AGENT.trim() : 'command';
+  if (!ctx.runWave && agentKind !== 'command' && agentKind !== 'sdk') {
+    process.stderr.write(`rad deliver: unknown RAD_AGENT '${agentKind}' (expected 'command' or 'sdk')\n`);
     return 1;
   }
 
@@ -314,14 +320,31 @@ export async function deliverCommand(argv, ctx) {
     return 1;
   }
 
-  // Accept an injected runWave (for tests) or construct an SDK-backed one.
+  // Accept an injected runWave (for tests) or construct the selected adapter.
   let runWave;
   if (ctx.runWave) {
     runWave = ctx.runWave;
-  } else {
-    const sdkRunWave = createRunWave({ apiKey, model, repoRoot });
+  } else if (agentKind === 'sdk') {
+    // SDK path: requires ANTHROPIC_API_KEY (checked before any SDK construction
+    // or model call). Credentials are the SDK's concern, not the command path's.
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!isNonEmpty(apiKey)) {
+      process.stderr.write('rad deliver: ANTHROPIC_API_KEY is required\n');
+      return 1;
+    }
+    const adapter = createRunWave({ apiKey, model, repoRoot });
     // Bind planCtx so deliverSpine's single-argument runWave(wave) call works.
-    runWave = (wave) => sdkRunWave(wave, planCtx);
+    runWave = (wave) => adapter(wave, planCtx);
+  } else {
+    // Command path (default): no ANTHROPIC_API_KEY required — credentials are
+    // the configured command's concern. RAD_AGENT_CMD is mandatory here.
+    const cmd = process.env.RAD_AGENT_CMD;
+    if (!isNonEmpty(cmd)) {
+      process.stderr.write('rad deliver: RAD_AGENT_CMD is required when RAD_AGENT=command\n');
+      return 1;
+    }
+    const adapter = createCommandAdapter({ cmd, repoRoot });
+    runWave = (wave) => adapter(wave, planCtx);
   }
 
   const matrix = loadMatrix();
@@ -339,7 +362,9 @@ export async function deliverCommand(argv, ctx) {
       now: () => new Date().toISOString(),
     });
   } catch (err) {
-    process.stderr.write(`rad deliver: unexpected error — ${err.message}\n`);
+    // Sanitize: a deep spine/SDK error could otherwise surface a credential.
+    const safe = sanitizeErrorMessage(err?.message ?? String(err));
+    process.stderr.write(`rad deliver: unexpected error — ${safe}\n`);
     return 1;
   }
 
