@@ -12,3 +12,4 @@ Executor role: architect
 | 2 | Wave 1 | Add timeout / error-classification / backoff helpers | ✓ complete | b0717f5 | 2026-06-10T13:32:00Z |
 | 3 | Wave 2 | Command/driven adapter (the default) | ✓ complete | 3e421cf | 2026-06-10T13:45:00Z |
 | 4 | Wave 2 | SDK adapter (hardened) + runwave.js shim | ✓ complete | 16efa31 | 2026-06-10T13:52:00Z |
+| 5 | Wave 3 | Wire adapter selection into deliverCommand | ✓ complete | PENDING | 2026-06-10T14:05:00Z |
