@@ -62,6 +62,10 @@ agents; no out-of-scope agent dependencies.
 | harness/cli.js | 151-172, 260-362 | Parse `RAD_TOKEN_BUDGET`; read optional per-wave `model` from the plan into `planCtx` |
 | .claude/commands/shared/rad-insights.md | append | Add cost-per-feature / cost-per-wave aggregation from usage events |
 | harness/test/cost.test.js | 170 | New — usage recording (with/without adapter usage), per-wave model selection, budget breaker |
+| harness/test/agent-adapters.test.js | edit | Adapter usage-surfacing cases (Wave 1) — tests added to their natural home; scope added at deliver time, architect-accepted |
+| harness/test/agent-contract.test.js | edit | `buildWavePrompt` frugality reminder + usage-normalization cases — scope added at deliver time, architect-accepted |
+| harness/test/cli.test.js | edit | `parsePlanCtx` per-wave `Model:` parsing + `RAD_TOKEN_BUDGET` cases — scope added at deliver time, architect-accepted |
+| harness/test/spine.test.js | edit | Token-budget breaker (`stopped:'token-budget'`) cases — scope added at deliver time, architect-accepted |
 | docs/rad-cli.md | append | Document `RAD_TOKEN_BUDGET` and per-wave `model:` in the plan schema |
 | CLAUDE.md | 88-101 | Document `RAD_TOKEN_BUDGET` and the per-wave model tiering convention |
 
