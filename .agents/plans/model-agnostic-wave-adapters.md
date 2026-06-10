@@ -1,7 +1,7 @@
 # Plan: Model-Agnostic Wave Adapters
 Created: 2026-06-10
 Author: architect
-Status: approved
+Status: complete
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-06-10T13:12:36.487Z
 Branch: rad/model-agnostic-wave-adapters
@@ -81,6 +81,7 @@ agent dependencies.
 | docs/rad-wave-contract.md | 140 | New — provider-neutral wave contract: prompt shape, `WAVE_RESULT` spec, the `runWave` adapter interface, result→outcome mapping |
 | docs/rad-cli.md | 157-170 | Document adapter selection (`RAD_AGENT`, `RAD_AGENT_CMD`) and per-path credential requirements |
 | CLAUDE.md | 88-101 | Add agent-adapter config to the RAD Configuration section (`agent: command \| sdk`, `agent_cmd`, key requirements) |
+| harness/test/deliver.test.js | edit | Update the existing assertion that encoded the old "ANTHROPIC_API_KEY always required" behavior — forced by Task 3.1 making the `command` path key-free and deleting `runwave.js` (scope added at deliver time, architect-accepted) |
 
 ## Execution Notes
 
