@@ -487,6 +487,72 @@ test('(l) fresh run: nothing skipped → no cumulative resume-verify gate (only 
   assert.equal(checkTestsCalls.length, 1);
 });
 
+test('(n) AC#3 token-budget breaker: cumulative usage over budget aborts before the over-budget wave runs', async () => {
+  const state = makeFakeState({ gateResult: passingGate, plan: { waves: [{ n: 1 }, { n: 2 }] } });
+  // Wave 1 records usage that already meets/exceeds the low budget; the breaker
+  // must fire before wave 2 starts, so runWave is called exactly once.
+  const wavesRun = [];
+  const runWave = async (wave) => {
+    wavesRun.push(wave.n);
+    return { outcome: 'success', usage: { input: 60, output: 60, total: 120 } };
+  };
+  const result = await deliverSpine({
+    feature: 'demo',
+    state,
+    docs: {},
+    matrix: MATRIX,
+    gates: {},
+    runWave,
+    sh: () => ({ status: 0 }),
+    now: fixedClock(),
+    tokenBudget: 100,
+  });
+  assert.equal(result.stopped, 'token-budget');
+  assert.equal(result.ok, false);
+  assert.equal(result.wave, 2); // stopped at the wave it refused to start
+  assert.equal(result.spent, 120);
+  assert.equal(result.budget, 100);
+  assert.deepEqual(wavesRun, [1]); // wave 2 never ran
+  assert.ok(state.appended.some((e) => e.type === 'wave-failed' && e.data.reason === 'token-budget'));
+  assert.ok(!state.appended.some((e) => e.type === 'pr-opened'));
+});
+
+test('(n2) AC#3 token-budget unset: behavior is unchanged (full run completes)', async () => {
+  const state = makeFakeState({ gateResult: passingGate, plan: twoWaves });
+  const runWave = async () => ({ outcome: 'success', usage: { input: 999999, output: 999999, total: 1999998 } });
+  const result = await deliverSpine({
+    feature: 'demo',
+    state,
+    docs: {},
+    matrix: MATRIX,
+    gates: {},
+    runWave,
+    sh: () => ({ status: 0 }),
+    now: fixedClock(),
+    // tokenBudget omitted → breaker disabled even though usage is enormous.
+  });
+  assert.deepEqual(result, { ok: true, waves: 2 });
+  assert.ok(!state.appended.some((e) => e.type === 'token-budget' || (e.type === 'wave-failed')));
+});
+
+test('(n3) AC#3 token-budget tolerates missing usage (no NaN) and never trips when under budget', async () => {
+  const state = makeFakeState({ gateResult: passingGate, plan: twoWaves });
+  // No usage field at all (command adapter without usage) → contributes 0.
+  const runWave = async () => ({ outcome: 'success' });
+  const result = await deliverSpine({
+    feature: 'demo',
+    state,
+    docs: {},
+    matrix: MATRIX,
+    gates: {},
+    runWave,
+    sh: () => ({ status: 0 }),
+    now: fixedClock(),
+    tokenBudget: 100,
+  });
+  assert.deepEqual(result, { ok: true, waves: 2 });
+});
+
 test('(m) end post-checks run check-scope + open-pr (and no longer check-tests at the end)', async () => {
   const state = makeFakeState({ gateResult: passingGate, plan: { waves: [{ n: 1 }] } });
   const runWave = async () => ({ outcome: 'success' });

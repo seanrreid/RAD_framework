@@ -386,6 +386,11 @@ export async function deliverCommand(argv, ctx) {
 
   const matrix = loadMatrix();
 
+  // Optional cumulative token budget. RAD_TOKEN_BUDGET, when a positive integer,
+  // arms the spine's budget breaker; unset/invalid/0 leaves it null (disabled).
+  const parsedBudget = Number.parseInt(process.env.RAD_TOKEN_BUDGET ?? '', 10);
+  const tokenBudget = Number.isFinite(parsedBudget) && parsedBudget > 0 ? parsedBudget : null;
+
   let result;
   try {
     result = await deliverSpine({
@@ -397,6 +402,7 @@ export async function deliverCommand(argv, ctx) {
       runWave,
       sh: (script, feat) => sh(join(repoRoot, script), [feat], { cwd: repoRoot }),
       now: () => new Date().toISOString(),
+      tokenBudget,
     });
   } catch (err) {
     // Sanitize: a deep spine/SDK error could otherwise surface a credential.
@@ -418,6 +424,8 @@ export async function deliverCommand(argv, ctx) {
     (result.wave !== undefined ? ` wave=${result.wave}` : '') +
     (result.action ? ` action=${result.action}` : '') +
     (result.check ? ` check=${result.check}` : '') +
+    (result.spent !== undefined ? ` spent=${result.spent}` : '') +
+    (result.budget !== undefined ? ` budget=${result.budget}` : '') +
     '\n',
   );
   return 1;

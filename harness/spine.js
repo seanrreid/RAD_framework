@@ -52,6 +52,7 @@ const POST_CHECKS = ['check-scope.sh', 'open-pr.sh'];
  * @param {(script: string, feature: string) => { status: number }} args.sh - Bash boundary
  * @param {() => string} args.now - injected clock (ISO timestamp)
  * @param {number} [args.maxAttempts] - per-wave attempt ceiling (defaults to MAX_ATTEMPTS); injectable for tests
+ * @param {number} [args.tokenBudget] - optional cumulative token ceiling; 0/null/undefined disables the breaker (no behavior change)
  * @returns {Promise<Object>} structured terminal result
  */
 export async function deliverSpine({
@@ -64,6 +65,7 @@ export async function deliverSpine({
   sh,
   now,
   maxAttempts = MAX_ATTEMPTS,
+  tokenBudget = null,
 }) {
   // ── DET gate: approval. The human (or proxy) decided earlier; here we ENFORCE
   // it. A blocked gate is a normal outcome — return structured, append nothing
@@ -91,9 +93,29 @@ export async function deliverSpine({
   // broken base. A fresh run (nothing skipped) does not run this. ──
   let resumeVerified = false;
 
+  // ── Token-budget circuit breaker. OPTIONAL: a falsy `tokenBudget` (unset/0)
+  // fully disables it. Otherwise we accumulate each wave's recorded usage
+  // (`result.usage.total`, missing → 0) and, BEFORE starting the next wave,
+  // graceful-abort if cumulative spend has reached/exceeded the budget — a
+  // terminal return in the style of the other `stopped:` paths, never a throw. ──
+  let spent = 0;
+
   // ── DET wave loop — the MATRIX decides what happens next, not a counter. ──
   for (const wave of waves) {
     if (completed.has(wave.n)) continue;
+
+    // Budget check fires before running THIS wave (and before resume-verify) so
+    // an over-budget run stops without doing any further model work.
+    if (tokenBudget && spent >= tokenBudget) {
+      state.append({
+        feature,
+        type: 'wave-failed',
+        actor: 'harness',
+        ts: now(),
+        data: { wave: wave.n, reason: 'token-budget', spent, budget: tokenBudget },
+      });
+      return { stopped: 'token-budget', ok: false, wave: wave.n, spent, budget: tokenBudget };
+    }
 
     if (completed.size > 0 && !resumeVerified) {
       resumeVerified = true; // run exactly once, before the first non-skipped wave
@@ -145,6 +167,11 @@ export async function deliverSpine({
         // undefined, which folds/serializes the same as a legacy event.
         data: { wave: wave.n, outcome, usage: result.usage },
       });
+
+      // Accumulate this attempt's token spend for the budget breaker. Usage is
+      // OPTIONAL (a command adapter may emit none) — a missing total contributes
+      // 0, never NaN.
+      spent += result.usage?.total ?? 0;
 
       // The MATRIX decides what happens next — never inline retry arithmetic.
       const { action } = resolveOutcome('implement', outcome, matrix);

@@ -64,7 +64,7 @@ export function buildWavePrompt(wave, planCtx) {
     })
     .join('\n\n');
 
-  return `You are executing Wave ${waveNumber} of a RAD delivery. Do not read files speculatively — only load what is listed below. Do not open PRs or push branches.
+  return `You are executing Wave ${waveNumber} of a RAD delivery. Do not read files speculatively — only load what is listed below. Truncate large file/command outputs — do not paste entire files or long logs into your reasoning; load only what each task lists. Do not open PRs or push branches.
 
 Branch: ${branch}
 Feature: ${feature}
