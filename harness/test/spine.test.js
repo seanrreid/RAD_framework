@@ -86,10 +86,16 @@ test('(b) happy path → all waves advance, post-checks called in order, pr-open
   });
   assert.deepEqual(result, { ok: true, waves: 2 });
 
-  // Post-checks ran in declared order with the feature passed through.
+  // check-tests now runs per-wave (once per advancing wave), then the end
+  // post-checks are scope + open-pr only — check-tests is no longer at the end.
   assert.deepEqual(
     shCalls.map((c) => c.script),
-    ['scripts/check-scope.sh', 'scripts/check-tests.sh', 'scripts/open-pr.sh'],
+    [
+      'scripts/check-tests.sh', // wave 1 gate
+      'scripts/check-tests.sh', // wave 2 gate
+      'scripts/check-scope.sh', // end post-check
+      'scripts/open-pr.sh', // end post-check
+    ],
   );
   assert.ok(shCalls.every((c) => c.feature === 'demo'));
 
@@ -105,10 +111,11 @@ test('(b) happy path → all waves advance, post-checks called in order, pr-open
   ]);
 });
 
-test('(b2) a failing post-check halts before pr-opened', async () => {
+test('(b2) a failing end post-check (check-scope) halts before pr-opened', async () => {
   const state = makeFakeState({ gateResult: passingGate, plan: { waves: [{ n: 1 }] } });
   const runWave = async () => ({ outcome: 'success' });
-  const sh = (script) => (script.endsWith('check-tests.sh') ? { status: 1 } : { status: 0 });
+  // Per-wave check-tests passes (status 0); the end check-scope post-check fails.
+  const sh = (script) => (script.endsWith('check-scope.sh') ? { status: 1 } : { status: 0 });
   const result = await deliverSpine({
     feature: 'demo',
     state,
@@ -120,7 +127,7 @@ test('(b2) a failing post-check halts before pr-opened', async () => {
     now: fixedClock(),
   });
   assert.equal(result.stopped, 'post-check');
-  assert.equal(result.check, 'check-tests.sh');
+  assert.equal(result.check, 'check-scope.sh');
   assert.ok(!state.appended.some((e) => e.type === 'pr-opened'));
 });
 
@@ -307,4 +314,171 @@ test('(i) empty waves array behaves like null plan', async () => {
     now: fixedClock(),
   });
   assert.deepEqual(result, { ok: true, waves: 0 });
+});
+
+test('(j) per-wave gate: runWave advances but check-tests fails → wave NOT recorded complete, re-enters matrix (fail-tests → revision)', async () => {
+  const state = makeFakeState({ gateResult: passingGate, plan: { waves: [{ n: 1 }] } });
+  // runWave always claims success; the per-wave gate fails identically each time,
+  // so the wave is demoted to fail-tests (→ revision) and never advances. The
+  // identical gate failure trips the doom-loop breaker on the second attempt.
+  let runWaveCalls = 0;
+  const runWave = async () => {
+    runWaveCalls += 1;
+    return { outcome: 'success' };
+  };
+  let gateCalls = 0;
+  const sh = (script) => {
+    if (script.endsWith('check-tests.sh')) {
+      gateCalls += 1;
+      return { status: 1 }; // regression at this wave
+    }
+    return { status: 0 };
+  };
+  const result = await deliverSpine({
+    feature: 'demo',
+    state,
+    docs: {},
+    matrix: MATRIX,
+    gates: {},
+    runWave,
+    sh,
+    now: fixedClock(),
+  });
+  // Demoted to fail-tests → revision; identical fingerprint twice → doom-loop.
+  assert.equal(result.stopped, 'doom-loop');
+  assert.equal(result.ok, false);
+  assert.equal(result.wave, 1);
+  assert.equal(result.outcome, 'fail-tests'); // demoted, not 'success'
+  assert.equal(runWaveCalls, 2); // bounded by the doom-loop breaker
+  assert.equal(gateCalls, 2); // the per-wave gate ran on each advancing attempt
+  // The wave never advanced: no wave-complete, no pr-opened.
+  assert.ok(!state.appended.some((e) => e.type === 'wave-complete'));
+  assert.ok(!state.appended.some((e) => e.type === 'pr-opened'));
+  // The recorded attempt outcomes reflect the demotion, not the raw success.
+  const attempts = state.appended.filter((e) => e.type === 'wave-attempt');
+  assert.ok(attempts.every((e) => e.data.outcome === 'fail-tests'));
+});
+
+test('(k) resume verify: cumulative check-tests runs exactly once before the first non-skipped wave; failing it returns stopped:resume-verify', async () => {
+  // History seeded with wave-complete for waves 1 and 2 → resume; wave 3 pending.
+  const plan = { waves: [{ n: 1 }, { n: 2 }, { n: 3 }] };
+  const state = makeFakeState({ gateResult: passingGate, plan });
+  state.appended.push(
+    { feature: 'demo', type: 'wave-complete', data: { wave: 1 } },
+    { feature: 'demo', type: 'wave-complete', data: { wave: 2 } },
+  );
+
+  let runWaveCalls = 0;
+  const runWave = async () => {
+    runWaveCalls += 1;
+    return { outcome: 'success' };
+  };
+  let cumulativeChecks = 0;
+  const sh = (script) => {
+    if (script.endsWith('check-tests.sh')) {
+      cumulativeChecks += 1;
+      return { status: 1 }; // prior cumulative work is broken
+    }
+    return { status: 0 };
+  };
+  const result = await deliverSpine({
+    feature: 'demo',
+    state,
+    docs: {},
+    matrix: MATRIX,
+    gates: {},
+    runWave,
+    sh,
+    now: fixedClock(),
+  });
+  assert.deepEqual(result, { stopped: 'resume-verify', ok: false });
+  // Escalated before touching wave 3 — the cumulative gate ran exactly once, and
+  // runWave was never called (we did not build on a broken base).
+  assert.equal(cumulativeChecks, 1);
+  assert.equal(runWaveCalls, 0);
+  assert.ok(!state.appended.some((e) => e.type === 'pr-opened'));
+});
+
+test('(k2) resume verify passes once, then wave 3 runs and the spine completes', async () => {
+  const plan = { waves: [{ n: 1 }, { n: 2 }, { n: 3 }] };
+  const state = makeFakeState({ gateResult: passingGate, plan });
+  state.appended.push(
+    { feature: 'demo', type: 'wave-complete', data: { wave: 1 } },
+    { feature: 'demo', type: 'wave-complete', data: { wave: 2 } },
+  );
+  let runWaveCalls = 0;
+  const runWave = async () => {
+    runWaveCalls += 1;
+    return { outcome: 'success' };
+  };
+  const checkTestsCalls = [];
+  const sh = (script) => {
+    if (script.endsWith('check-tests.sh')) checkTestsCalls.push(script);
+    return { status: 0 };
+  };
+  const result = await deliverSpine({
+    feature: 'demo',
+    state,
+    docs: {},
+    matrix: MATRIX,
+    gates: {},
+    runWave,
+    sh,
+    now: fixedClock(),
+  });
+  assert.deepEqual(result, { ok: true, waves: 3 });
+  assert.equal(runWaveCalls, 1); // only the single non-skipped wave (3) ran
+  // check-tests fired twice: once for the resume verify, once for wave 3's gate.
+  assert.equal(checkTestsCalls.length, 2);
+});
+
+test('(l) fresh run: nothing skipped → no cumulative resume-verify gate (only per-wave gates)', async () => {
+  const state = makeFakeState({ gateResult: passingGate, plan: { waves: [{ n: 1 }] } });
+  const runWave = async () => ({ outcome: 'success' });
+  const checkTestsCalls = [];
+  const sh = (script) => {
+    if (script.endsWith('check-tests.sh')) checkTestsCalls.push(script);
+    return { status: 0 };
+  };
+  const result = await deliverSpine({
+    feature: 'demo',
+    state,
+    docs: {},
+    matrix: MATRIX,
+    gates: {},
+    runWave,
+    sh,
+    now: fixedClock(),
+  });
+  assert.deepEqual(result, { ok: true, waves: 1 });
+  // Exactly one check-tests call: the single wave's per-wave gate. No extra
+  // cumulative verify, because nothing was skipped.
+  assert.equal(checkTestsCalls.length, 1);
+});
+
+test('(m) end post-checks run check-scope + open-pr (and no longer check-tests at the end)', async () => {
+  const state = makeFakeState({ gateResult: passingGate, plan: { waves: [{ n: 1 }] } });
+  const runWave = async () => ({ outcome: 'success' });
+  const shCalls = [];
+  const sh = (script) => {
+    shCalls.push(script);
+    return { status: 0 };
+  };
+  const result = await deliverSpine({
+    feature: 'demo',
+    state,
+    docs: {},
+    matrix: MATRIX,
+    gates: {},
+    runWave,
+    sh,
+    now: fixedClock(),
+  });
+  assert.deepEqual(result, { ok: true, waves: 1 });
+  // The two end post-checks are scope then open-pr; check-tests is NOT among them.
+  const endChecks = shCalls.slice(-2);
+  assert.deepEqual(endChecks, ['scripts/check-scope.sh', 'scripts/open-pr.sh']);
+  // check-tests appears only as the per-wave gate, never after open-pr.
+  const openPrIdx = shCalls.indexOf('scripts/open-pr.sh');
+  assert.ok(!shCalls.slice(openPrIdx).includes('scripts/check-tests.sh'));
 });
