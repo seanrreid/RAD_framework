@@ -359,6 +359,37 @@ test('(j) per-wave gate: runWave advances but check-tests fails → wave NOT rec
   assert.ok(attempts.every((e) => e.data.outcome === 'fail-tests'));
 });
 
+test('(j2) per-wave gate doom-loop is model-variance-proof: gate fails identically while runWave rewords its output → aborts at the breaker, not the budget', async () => {
+  const state = makeFakeState({ gateResult: passingGate, plan: { waves: [{ n: 1 }] } });
+  // The model claims success but VARIES its summary every attempt; the gate fails
+  // identically. The demotion fingerprint must key off the STABLE gate failure,
+  // not the model's wording — otherwise each attempt hashes differently and the
+  // run burns the whole budget instead of tripping the doom-loop on attempt 2.
+  let i = 0;
+  const runWave = async () => ({ outcome: 'success', summary: `reworded ${i++}` });
+  let gateCalls = 0;
+  const sh = (script) => {
+    if (script.endsWith('check-tests.sh')) {
+      gateCalls += 1;
+      return { status: 1 }; // identical gate failure each attempt
+    }
+    return { status: 0 };
+  };
+  const result = await deliverSpine({
+    feature: 'demo',
+    state,
+    docs: {},
+    matrix: MATRIX,
+    gates: {},
+    runWave,
+    sh,
+    now: fixedClock(),
+  });
+  assert.equal(result.stopped, 'doom-loop'); // NOT 'budget' — the breaker tripped
+  assert.equal(result.ok, false);
+  assert.equal(gateCalls, 2); // aborted after 2, not all 3 (budget) attempts
+});
+
 test('(k) resume verify: cumulative check-tests runs exactly once before the first non-skipped wave; failing it returns stopped:resume-verify', async () => {
   // History seeded with wave-complete for waves 1 and 2 → resume; wave 3 pending.
   const plan = { waves: [{ n: 1 }, { n: 2 }, { n: 3 }] };

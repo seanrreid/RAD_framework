@@ -69,15 +69,19 @@ test('resumeFrom: mixed/partial history — only wave-complete events count', ()
   assert.ok(!completed.has(2), 'a wave-failed wave is not complete');
 });
 
-test('resumeFrom: a wave-complete missing data is tolerated (no throw)', () => {
-  // Defensive: an event with no data must not crash the fold. It contributes an
-  // undefined wave entry rather than throwing.
+test('resumeFrom: malformed / non-numeric wave-complete events contribute nothing', () => {
+  // Defensive: events with no data, no wave, or a non-numeric wave id must not
+  // crash the fold AND must not add a bogus entry — only numeric wave ids count
+  // (a string '3' would never match the numeric wave.n and would mis-skip).
   const history = [
     { type: 'wave-complete' }, // no data
-    { type: 'wave-complete', data: { wave: 3 } },
+    { type: 'wave-complete', data: {} }, // data but no wave
+    { type: 'wave-complete', data: { wave: '3' } }, // string id — ignored
+    { type: 'wave-complete', data: { wave: 3 } }, // the only valid one
   ];
   const completed = resumeFrom(history);
   assert.ok(completed.has(3));
+  assert.equal(completed.size, 1, 'malformed/non-numeric events contribute nothing');
 });
 
 // ── Resume idempotency at the spine level ──────────────────────────────────
@@ -201,6 +205,12 @@ test('resume idempotency: re-running an already fully-complete plan appends no n
     return { outcome: 'success' };
   };
 
+  const shCalls = [];
+  const sh = (script) => {
+    shCalls.push(script);
+    return { status: 0 };
+  };
+
   const result = await deliverSpine({
     feature: 'demo',
     state,
@@ -208,12 +218,18 @@ test('resume idempotency: re-running an already fully-complete plan appends no n
     matrix: MATRIX,
     gates: {},
     runWave,
-    sh: () => ({ status: 0 }),
+    sh,
     now: fixedClock(),
   });
 
   assert.deepEqual(result, { ok: true, waves: 2 });
   assert.equal(runWaveCalls, 0, 'all waves already complete — runWave never called');
+  // Every wave hits the skip `continue` before the resume-verify block, so the
+  // cumulative check-tests gate must never run when all waves are complete.
+  assert.ok(
+    !shCalls.includes('scripts/check-tests.sh'),
+    'check-tests must not run when all waves are already complete',
+  );
 
   // No new wave-attempt or wave-complete events appended (resume-verify and the
   // end deliver-started/pr-opened bookkeeping aside).

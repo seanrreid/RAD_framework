@@ -153,7 +153,15 @@ export function resumeFrom(history) {
   const completed = new Set();
   if (!Array.isArray(history)) return completed;
   for (const event of history) {
-    if (event && event.type === 'wave-complete' && event.data) {
+    // Only a numeric data.wave counts — the spine stores wave.n as a number, so
+    // a missing or string-typed wave id (corrupted event) must NOT enter the set
+    // (a string '3' would never match the numeric wave.n and would mis-skip).
+    if (
+      event &&
+      event.type === 'wave-complete' &&
+      event.data &&
+      typeof event.data.wave === 'number'
+    ) {
       completed.add(event.data.wave);
     }
   }
