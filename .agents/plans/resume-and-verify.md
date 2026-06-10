@@ -1,7 +1,9 @@
 # Plan: Resume and Per-Wave Verify
 Created: 2026-06-10
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-06-10T15:44:44.090Z
 Branch: rad/resume-and-verify
 
 ## Context
