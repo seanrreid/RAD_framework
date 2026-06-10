@@ -172,3 +172,39 @@ test('withTimeout — a fast promise resolves before the deadline', async () => 
   const value = await withTimeout(fast, 1000);
   assert.equal(value, 'done');
 });
+
+// --- Review fixes: escalation mapping + safe unknown-status default ---
+
+test('resultToOutcome — blocked_spec/blocked_intent escalate to fail-scope (non-retryable)', () => {
+  // The wave taxonomy says these are NOT fixable by retry — they must route to
+  // the abort/escalate path (fail-scope), not the revision/retry path (fail-tests).
+  const spec = resultToOutcome({ status: 'failed', tasks: [{ status: 'blocked_spec' }] });
+  assert.equal(spec, 'fail-scope');
+  const intent = resultToOutcome({
+    status: 'failed',
+    tasks: [{ status: 'complete' }, { status: 'blocked_intent' }],
+  });
+  assert.equal(intent, 'fail-scope');
+});
+
+test('resultToOutcome — a plain blocked_code stays fail-tests (retryable)', () => {
+  const outcome = resultToOutcome({ status: 'failed', tasks: [{ status: 'blocked_code' }] });
+  assert.equal(outcome, 'fail-tests');
+});
+
+test('parseWaveResult — an unrecognized task status defaults to non-passing, never success', () => {
+  const block = [
+    'wave: 1',
+    'status: complete',
+    'tasks:',
+    '  - title: typo status',
+    '    status: blocked-code',       // hyphen typo — not a valid status
+    '    commit: abc1234',
+    '    concern: —',
+    '    error: —',
+  ].join('\n');
+  const parsed = parseWaveResult(block);
+  assert.notEqual(parsed.tasks[0].status, 'complete');
+  // A malformed status must NOT be silently reported as a passing wave.
+  assert.equal(resultToOutcome(parsed), 'fail-tests');
+});

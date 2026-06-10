@@ -134,9 +134,13 @@ export function createRunWave({
           if (!message.is_error && typeof message.result === 'string') {
             fullText += message.result;
           } else if (message.is_error) {
-            const errSummary = Array.isArray(message.errors)
-              ? message.errors.join('; ')
-              : 'SDK reported an error result';
+            // Sanitize at CONSTRUCTION so the key can never reach a thrown/
+            // logged Error even if the SDK embeds it in message.errors.
+            const errSummary = sanitizeErrorMessage(
+              Array.isArray(message.errors)
+                ? message.errors.join('; ')
+                : 'SDK reported an error result',
+            );
             throw new Error(errSummary);
           }
         }
@@ -166,10 +170,9 @@ export function createRunWave({
         const bucket = classifyError(err);
         const safe = sanitizeErrorMessage(err?.message ?? String(err));
 
-        // A wall-clock timeout (withTimeout rejects 'timed out', bucketed
-        // transient) is terminal 'fail-timeout' for this adapter — do not retry
-        // past the deadline.
-        if (/timed out/.test(safe)) {
+        // A wall-clock timeout (sentinel-tagged by withTimeout) is terminal
+        // 'fail-timeout' for this adapter — do not retry past the deadline.
+        if (err && err._isRadTimeout) {
           return {
             terminal: {
               outcome: 'fail-timeout',

@@ -4,8 +4,8 @@
  * PURE module: it holds the plain-text WAVE_RESULT protocol (build the prompt,
  * extract + parse the result block, classify task statuses) plus the spine
  * reconciliation (resultToOutcome). It has NO dependency on any model SDK so it
- * can be shared by every provider adapter. The SDK-backed runner (runwave.js)
- * imports these helpers rather than owning them.
+ * can be shared by every provider adapter. The SDK-backed runner
+ * (adapters/agent/sdk.js) imports these helpers rather than owning them.
  *
  * Security: sanitizeErrorMessage strips anything that looks like a credential
  * before an error message is logged or surfaced.
@@ -198,7 +198,10 @@ export function parseWaveResult(block) {
     if (currentTask) {
       if (/^\s+status:\s/.test(line)) {
         const val = trimmed.replace(/^status:\s+/, '').trim();
-        currentTask.status = VALID_TASK_STATUSES.has(val) ? val : 'complete';
+        // Unknown/typo'd status defaults to a NON-passing value so a malformed
+        // status can never be silently reported as success (it must fail loud
+        // and route through the matrix). 'blocked_code' → fail-tests → revision.
+        currentTask.status = VALID_TASK_STATUSES.has(val) ? val : 'blocked_code';
       } else if (/^\s+commit:\s/.test(line)) {
         currentTask.commit = trimmed.replace(/^commit:\s+/, '').trim();
       } else if (/^\s+concern:\s/.test(line)) {
@@ -231,9 +234,12 @@ export function parseWaveResult(block) {
  * ones.
  *
  * Mapping:
- *   - unparseable / no tasks               → 'fail-protocol'
+ *   - unparseable / no tasks                 → 'fail-protocol'
  *   - every task complete/done_with_concerns → 'success'
- *   - any blocked or failed task           → 'fail-tests' (generic code failure)
+ *   - any blocked_spec / blocked_intent      → 'fail-scope' (NON-retryable: the
+ *       wave taxonomy says retrying won't help — the matrix aborts/escalates
+ *       rather than burning the bounded retry budget on an un-fixable failure)
+ *   - any other blocked/failed task          → 'fail-tests' (retryable code failure)
  *
  * @param {{ status?: string, tasks?: Array }} parsed
  * @returns {string} a matrix outcome string
@@ -245,8 +251,14 @@ export function resultToOutcome(parsed) {
 
   const passing = new Set(['complete', 'done_with_concerns']);
   const allPassed = parsed.tasks.every((t) => passing.has(t && t.status));
+  if (allPassed) return 'success';
 
-  return allPassed ? 'success' : 'fail-tests';
+  // A spec/intent block is the agent telling us retrying is futile — route it to
+  // the abort/escalate path, not the revision (retry) path that fail-tests takes.
+  const nonRetryable = new Set(['blocked_spec', 'blocked_intent']);
+  const hasNonRetryable = parsed.tasks.some((t) => nonRetryable.has(t && t.status));
+
+  return hasNonRetryable ? 'fail-scope' : 'fail-tests';
 }
 
 /**
@@ -422,7 +434,12 @@ export function withTimeout(promise, ms, abortController) {
       if (abortController && typeof abortController.abort === 'function') {
         abortController.abort();
       }
-      reject(new Error(`wave timed out after ${ms}ms`));
+      // Tag the error with a sentinel so callers discriminate a wall-clock
+      // timeout from a spawn/transport error WITHOUT parsing the message string
+      // (a remote ETIMEDOUT must not be misread as our deadline).
+      const err = new Error(`wave timed out after ${ms}ms`);
+      err._isRadTimeout = true;
+      reject(err);
     }, ms);
   });
 

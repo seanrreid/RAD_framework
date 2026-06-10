@@ -29,12 +29,15 @@ import {
   resultToOutcome,
   syntheticFailure,
   sanitizeErrorMessage,
-  classifyError,
   withTimeout,
 } from './contract.js';
 
 /** Env vars that are safe to forward to the child. Secrets are NOT in this set. */
 const ENV_ALLOW_LIST = ['PATH', 'HOME', 'LANG', 'LC_ALL', 'TMPDIR', 'TERM'];
+
+/** Hard cap on captured child output. A runaway agent that floods stdout is
+ * killed rather than buffered into an OOM before the wall-clock timeout fires. */
+const MAX_OUTPUT_BYTES = 10 * 1024 * 1024; // 10 MB
 
 /** Build the allow-listed env handed to the spawned child. */
 function buildChildEnv() {
@@ -62,7 +65,7 @@ function tokenizeCommand(cmd, prompt) {
   const argv = parts.map((part) => {
     if (part.includes('{prompt}')) {
       usedPlaceholder = true;
-      return part.replace('{prompt}', prompt);
+      return part.split('{prompt}').join(prompt);
     }
     return part;
   });
@@ -102,14 +105,26 @@ function spawnOnce(cmd, prompt, repoRoot) {
 
     let stdout = '';
     let stderr = '';
-    child.stdout.on('data', (d) => {
-      stdout += d.toString();
-    });
-    child.stderr.on('data', (d) => {
-      stderr += d.toString();
-    });
+    let total = 0;
+    let truncated = false;
+    // Cap combined output: a misbehaving agent must not OOM the orchestrator
+    // while we wait for the wall-clock timeout. On overflow, kill the child and
+    // surface `truncated` so the caller routes a terminal protocol failure.
+    const capture = (chunk, append) => {
+      if (truncated) return;
+      const s = chunk.toString();
+      total += Buffer.byteLength(s);
+      if (total > MAX_OUTPUT_BYTES) {
+        truncated = true;
+        child.kill('SIGKILL');
+        return;
+      }
+      append(s);
+    };
+    child.stdout.on('data', (d) => capture(d, (s) => { stdout += s; }));
+    child.stderr.on('data', (d) => capture(d, (s) => { stderr += s; }));
     child.on('error', (err) => reject(err));
-    child.on('close', (code) => resolve({ code, stdout, stderr }));
+    child.on('close', (code) => resolve({ code, stdout, stderr, truncated }));
 
     // Feed the prompt on stdin unless it was already substituted into argv.
     if (!usedPlaceholder) {
@@ -152,14 +167,21 @@ export function createCommandAdapter({ cmd, repoRoot, timeoutMs = 600000 } = {})
       run = await withTimeout(spawnOnce(cmd, prompt, repoRoot), timeoutMs);
     } catch (err) {
       const message = sanitizeErrorMessage(err?.message ?? String(err));
-      // withTimeout rejects with a message classifyError buckets 'transient';
-      // for this driven adapter a wall-clock timeout is terminal 'fail-timeout'.
-      if (classifyError(err) === 'transient' && /timed out/.test(message)) {
+      // A wall-clock timeout (sentinel-tagged by withTimeout) is terminal
+      // 'fail-timeout' for this driven adapter — never misread a spawn-level
+      // ETIMEDOUT as our deadline by parsing the message string.
+      if (err && err._isRadTimeout) {
         return { stdout: '', terminal: { outcome: 'fail-timeout', status: 'failed', tasks: syntheticFailure(waveId, message).tasks } };
       }
       // Spawn-level failure (ENOENT, etc.) — classify and surface terminally.
       const parsed = syntheticFailure(waveId, message);
       return { stdout: '', terminal: toResult(parsed) };
+    }
+
+    // A runaway agent that blew the output cap was killed — terminal protocol fail.
+    if (run.truncated) {
+      const message = `command output exceeded ${MAX_OUTPUT_BYTES} bytes — process killed`;
+      return { stdout: run.stdout, terminal: { outcome: 'fail-protocol', status: 'failed', tasks: syntheticFailure(waveId, message).tasks } };
     }
 
     if (run.code !== 0) {

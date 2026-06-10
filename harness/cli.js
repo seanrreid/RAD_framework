@@ -26,6 +26,7 @@ import { createGitStateStore, defaultSh } from './adapters/git-state-store.js';
 import { deliverSpine } from './spine.js';
 import { createRunWave } from './adapters/agent/sdk.js';
 import { createCommandAdapter } from './adapters/agent/command.js';
+import { sanitizeErrorMessage } from './adapters/agent/contract.js';
 import { loadMatrix } from './matrix.js';
 
 const SUBCOMMANDS = {
@@ -361,7 +362,9 @@ export async function deliverCommand(argv, ctx) {
       now: () => new Date().toISOString(),
     });
   } catch (err) {
-    process.stderr.write(`rad deliver: unexpected error — ${err.message}\n`);
+    // Sanitize: a deep spine/SDK error could otherwise surface a credential.
+    const safe = sanitizeErrorMessage(err?.message ?? String(err));
+    process.stderr.write(`rad deliver: unexpected error — ${safe}\n`);
     return 1;
   }
 
