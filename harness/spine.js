@@ -28,6 +28,7 @@
 
 import { resolveOutcome } from './matrix.js';
 import { fingerprint } from './fingerprint.js';
+import { resumeFrom } from './events.js';
 
 /** Bounded attempt budget per wave — the hard ceiling. The doom-loop breaker is
  * the early exit; this cap only bites when every attempt fails *differently*. */
@@ -75,8 +76,16 @@ export async function deliverSpine({
   const plan = state.plan(feature);
   const waves = (plan && plan.waves) || [];
 
+  // ── Resume: waves that already advanced on a prior run carry a `wave-complete`
+  // event. Skip them — never re-run runWave or append duplicate attempt/complete
+  // events. Keyed strictly off `wave-complete`, so a wave that crashed mid-run
+  // (attempt logged, never advanced) is NOT skipped and resumes here. ──
+  const completed = resumeFrom(state.history(feature));
+
   // ── DET wave loop — the MATRIX decides what happens next, not a counter. ──
   for (const wave of waves) {
+    if (completed.has(wave.n)) continue;
+
     let lastPrint = null;
     let advanced = false;
 

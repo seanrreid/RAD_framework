@@ -8,4 +8,5 @@ Executor role: architect
 
 | Step | Wave | Task | Status | Commit | Time |
 |------|------|------|--------|--------|------|
-| 1.1 | 1 | Add the resumeFrom fold | complete | (pending) | 2026-06-10T15:55:00Z |
+| 1.1 | 1 | Add the resumeFrom fold | complete | 7cd3062 | 2026-06-10T15:55:00Z |
+| 1.2 | 1 | Skip already-advanced waves in the spine | complete | (pending) | 2026-06-10T16:00:00Z |
