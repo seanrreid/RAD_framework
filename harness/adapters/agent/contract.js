@@ -301,9 +301,9 @@ export function sanitizeErrorMessage(msg) {
 /**
  * Normalize a raw provider usage object into the stable shape the spine records:
  * `{ input, output, total }` (all numbers). Maps the SDK's snake_case token
- * fields (`input_tokens` / `output_tokens`) as well as already-normalized
- * `input` / `output` keys, and derives `total` as input + output when the
- * provider did not supply one.
+ * fields (`input_tokens` / `output_tokens` / `total_tokens`) as well as
+ * already-normalized `input` / `output` / `total` keys, and derives `total` as
+ * input + output when the provider did not supply one.
  *
  * Returns `undefined` when no usable usage is present so callers can OMIT the
  * field entirely — usage is OPTIONAL everywhere downstream.

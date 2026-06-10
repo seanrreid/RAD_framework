@@ -221,3 +221,66 @@ test('(4) buildWavePrompt carries the truncate-outputs frugality reminder', () =
   assert.match(prompt, /Truncate large file\/command outputs/);
   assert.match(prompt, /do not paste entire files or long logs/);
 });
+
+// ── (3c) Resume seeds `spent` from prior usage: budget is a LIFETIME ceiling ──
+test('(3c) token budget is cumulative across resume — prior spend seeds the breaker', async () => {
+  const state = makeFakeState({
+    gateResult: passingGate,
+    plan: { waves: [{ n: 1 }, { n: 2 }] },
+  });
+  // Prior run: wave 1 advanced and already spent 120 tokens (over the 100 budget).
+  state.appended.push(
+    { feature: 'demo', type: 'wave-attempt', data: { wave: 1, outcome: 'success', usage: { input: 80, output: 40, total: 120 } } },
+    { feature: 'demo', type: 'wave-complete', data: { wave: 1 } },
+  );
+
+  let calls = 0;
+  const runWave = async () => {
+    calls += 1;
+    return { outcome: 'success', usage: { input: 10, output: 10, total: 20 } };
+  };
+
+  const result = await deliverSpine({
+    feature: 'demo',
+    state,
+    docs: {},
+    matrix: MATRIX,
+    gates: {},
+    runWave,
+    sh: () => ({ status: 0 }),
+    now: fixedClock(),
+    tokenBudget: 100,
+  });
+
+  // Seeded spend (120) already exceeds the budget, so the resumed run stops at
+  // wave 2 WITHOUT running it — a fresh-start (spent=0) would have let it run.
+  assert.equal(result.stopped, 'token-budget');
+  assert.equal(result.spent, 120);
+  assert.equal(result.wave, 2);
+  assert.equal(calls, 0, 'no further model work once the lifetime budget is spent');
+});
+
+// ── (3d) A non-positive budget disables the breaker (spine API defensiveness) ──
+test('(3d) a negative tokenBudget disables the breaker (does not fire on wave 1)', async () => {
+  const state = makeFakeState({ gateResult: passingGate, plan: { waves: [{ n: 1 }] } });
+  let calls = 0;
+  const runWave = async () => {
+    calls += 1;
+    return { outcome: 'success', usage: { input: 10, output: 10, total: 20 } };
+  };
+
+  const result = await deliverSpine({
+    feature: 'demo',
+    state,
+    docs: {},
+    matrix: MATRIX,
+    gates: {},
+    runWave,
+    sh: () => ({ status: 0 }),
+    now: fixedClock(),
+    tokenBudget: -5, // truthy but non-positive — must be treated as disabled
+  });
+
+  assert.deepEqual(result, { ok: true, waves: 1 });
+  assert.equal(calls, 1, 'the wave ran — a negative budget never arms the breaker');
+});

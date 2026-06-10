@@ -223,7 +223,9 @@ function parseWaveModels(text) {
       continue;
     }
     // A new `##`/`###` heading that is NOT a Wave heading ends the current block.
-    if (/^#{2,}/.test(line.trim())) {
+    // Deeper headings (`####` task subheadings) stay INSIDE the wave so a Model:
+    // line still applies across the wave's tasks.
+    if (/^#{2,3}\s/.test(line.trim())) {
       currentWave = undefined;
       continue;
     }
@@ -380,7 +382,7 @@ export async function deliverCommand(argv, ctx) {
       process.stderr.write('rad deliver: RAD_AGENT_CMD is required when RAD_AGENT=command\n');
       return 1;
     }
-    const adapter = createCommandAdapter({ cmd, repoRoot });
+    const adapter = createCommandAdapter({ cmd, repoRoot, model });
     runWave = (wave) => adapter(wave, planCtx);
   }
 
@@ -388,7 +390,7 @@ export async function deliverCommand(argv, ctx) {
 
   // Optional cumulative token budget. RAD_TOKEN_BUDGET, when a positive integer,
   // arms the spine's budget breaker; unset/invalid/0 leaves it null (disabled).
-  const parsedBudget = Number.parseInt(process.env.RAD_TOKEN_BUDGET ?? '', 10);
+  const parsedBudget = Number.parseInt(process.env.RAD_TOKEN_BUDGET, 10);
   const tokenBudget = Number.isFinite(parsedBudget) && parsedBudget > 0 ? parsedBudget : null;
 
   let result;

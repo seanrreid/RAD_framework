@@ -249,7 +249,7 @@ export function createCommandAdapter({ cmd, repoRoot, model, timeoutMs = 600000 
     // (planCtx.waveModels[n]); fall back to the construction-time default. Only
     // meaningful when `cmd` contains a `{model}` token — otherwise model
     // selection is the configured CLI's own concern and this is a no-op.
-    const effectiveModel = planCtx?.waveModels?.[waveId] ?? model;
+    const effectiveModel = planCtx?.waveModels?.[Number(waveId)] ?? model;
 
     // First attempt.
     const first = await runCommand(prompt, waveId, effectiveModel);

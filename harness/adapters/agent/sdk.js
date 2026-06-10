@@ -97,6 +97,9 @@ export function createRunWave({
       status: parsed.status,
       tasks: parsed.tasks,
     };
+    // `usage` is either undefined or a fully-formed {input,output,total} object
+    // (normalizeUsage never returns an empty/partial object), so a truthy check
+    // is sufficient to decide whether to attach the optional field.
     if (usage) result.usage = usage;
     return result;
   }
@@ -161,7 +164,16 @@ export function createRunWave({
       return { text: fullText, usage };
     })();
 
-    return withTimeout(drain, timeoutMs, abortController);
+    try {
+      return await withTimeout(drain, timeoutMs, abortController);
+    } catch (err) {
+      // The drain closure may have already captured usage from a result message
+      // before throwing (is_error) or being aborted (timeout). Attach it so the
+      // retry layer can carry it into the terminal result and the budget counts
+      // tokens spent on a failed wave (conservative — usage is often absent here).
+      if (usage !== undefined && err && typeof err === 'object') err._usage = usage;
+      throw err;
+    }
   }
 
   /**
@@ -193,6 +205,7 @@ export function createRunWave({
               outcome: 'fail-timeout',
               status: 'failed',
               tasks: syntheticFailure(waveId, safe).tasks,
+              ...(err._usage ? { usage: err._usage } : {}),
             },
           };
         }
@@ -204,7 +217,7 @@ export function createRunWave({
         }
 
         // Transient exhausted, or permanent/model/resource — terminal failure.
-        return { terminal: toResult(syntheticFailure(waveId, safe)) };
+        return { terminal: toResult(syntheticFailure(waveId, safe), err._usage) };
       }
     }
   }
@@ -219,9 +232,10 @@ export function createRunWave({
     const prompt = buildWavePrompt(wave, planCtx);
 
     // Per-wave model tiering: a plan may declare `Model:` under `### Wave N`,
-    // surfaced as planCtx.waveModels[n]. Fall back to the construction-time
-    // (deliver default) model when this wave declares none.
-    const effectiveModel = planCtx?.waveModels?.[waveId] ?? model;
+    // surfaced as planCtx.waveModels[n] (keyed by NUMBER). Coerce waveId to a
+    // number for the lookup so a string wave id still matches; fall back to the
+    // construction-time (deliver default) model when this wave declares none.
+    const effectiveModel = planCtx?.waveModels?.[Number(waveId)] ?? model;
 
     const first = await runWithRetry(prompt, waveId, effectiveModel);
     if (first.terminal) return first.terminal;

@@ -28,7 +28,7 @@
 
 import { resolveOutcome } from './matrix.js';
 import { fingerprint } from './fingerprint.js';
-import { resumeFrom } from './events.js';
+import { resumeFrom, totalUsage } from './events.js';
 
 /** Bounded attempt budget per wave — the hard ceiling. The doom-loop breaker is
  * the early exit; this cap only bites when every attempt fails *differently*. */
@@ -84,7 +84,8 @@ export async function deliverSpine({
   // event. Skip them — never re-run runWave or append duplicate attempt/complete
   // events. Keyed strictly off `wave-complete`, so a wave that crashed mid-run
   // (attempt logged, never advanced) is NOT skipped and resumes here. ──
-  const completed = resumeFrom(state.history(feature));
+  const history = state.history(feature);
+  const completed = resumeFrom(history);
 
   // ── Resume verify (cheap, once): if a prior run already advanced one or more
   // waves, the per-wave gate that guarded THIS run never ran for them. Before
@@ -93,12 +94,17 @@ export async function deliverSpine({
   // broken base. A fresh run (nothing skipped) does not run this. ──
   let resumeVerified = false;
 
-  // ── Token-budget circuit breaker. OPTIONAL: a falsy `tokenBudget` (unset/0)
-  // fully disables it. Otherwise we accumulate each wave's recorded usage
-  // (`result.usage.total`, missing → 0) and, BEFORE starting the next wave,
-  // graceful-abort if cumulative spend has reached/exceeded the budget — a
-  // terminal return in the style of the other `stopped:` paths, never a throw. ──
-  let spent = 0;
+  // ── Token-budget circuit breaker. OPTIONAL: a non-positive `tokenBudget`
+  // (unset/0/negative) fully disables it. Otherwise we accumulate each wave's
+  // recorded usage (`result.usage.total`, missing → 0) and, BEFORE starting the
+  // next wave, graceful-abort if cumulative spend has reached/exceeded the
+  // budget — a terminal return in the style of the other `stopped:` paths.
+  //
+  // Seeded from prior runs' recorded usage so a RESUMED deliver INHERITS earlier
+  // spend: the budget is a lifetime ceiling for the feature, not a fresh
+  // per-invocation allowance (a crash-looping deliver can't blow past it by
+  // resuming). On a fresh run the log carries no wave-attempt usage, so this is 0. ──
+  let spent = totalUsage(history).total;
 
   // ── DET wave loop — the MATRIX decides what happens next, not a counter. ──
   for (const wave of waves) {
@@ -106,7 +112,7 @@ export async function deliverSpine({
 
     // Budget check fires before running THIS wave (and before resume-verify) so
     // an over-budget run stops without doing any further model work.
-    if (tokenBudget && spent >= tokenBudget) {
+    if (tokenBudget > 0 && spent >= tokenBudget) {
       state.append({
         feature,
         type: 'wave-failed',
