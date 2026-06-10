@@ -1,7 +1,7 @@
 # Plan: Cost-Frugality Layer
 Created: 2026-06-10
 Author: architect
-Status: approved
+Status: in-progress
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-06-10T18:28:08.045Z
 Branch: rad/cost-frugality-layer

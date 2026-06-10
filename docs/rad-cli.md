@@ -79,6 +79,7 @@ The runner is chosen by environment variable — there is no config-file loader.
 |---------|--------|---------|---------|
 | `RAD_AGENT` | `command` \| `sdk` | `command` | which adapter drives the wave |
 | `RAD_AGENT_CMD` | any command string | — | the CLI to spawn (command path only) |
+| `RAD_TOKEN_BUDGET` | positive integer | — | per-deliver cumulative token ceiling (cost breaker) |
 
 **Per-path credential requirements:**
 
@@ -114,6 +115,44 @@ RAD_AGENT=sdk node harness/cli.js deliver my-feature --model claude-sonnet-4-6
 
 **Exit codes:** 0 on full completion, 1 on credential/selection failure, gate
 failure, or blocked wave.
+
+#### Cost & frugality (optional)
+
+Two optional, fully backward-compatible knobs keep a deliver from over-spending.
+Both are *opt-in*: absent, the spine behaves exactly as before.
+
+- **`RAD_TOKEN_BUDGET`** — a per-deliver cumulative token ceiling. When set to a
+  positive integer, the spine sums each wave's recorded `usage.total` and, **before
+  starting the next wave**, gracefully stops if the running total has reached or
+  exceeded the budget. The stop is a normal structured terminal — not a throw:
+  `rad deliver` exits 1 and prints `stopped=token-budget spent=<n> budget=<n>`, and a
+  `wave-failed` event with `reason: token-budget` is recorded. Unset, `0`, or
+  non-numeric values leave the breaker disabled (no behavior change). Waves whose
+  adapter emits no usage contribute `0`, so the breaker never trips spuriously.
+
+  ```bash
+  RAD_TOKEN_BUDGET=200000 RAD_AGENT=sdk node harness/cli.js deliver my-feature
+  ```
+
+- **Per-wave `Model:` (plan schema)** — a plan may tier its waves onto cheaper
+  models. Inside a `### Wave N` block, an optional `Model:` line selects the model
+  for that wave only:
+
+  ```markdown
+  ### Wave 1
+  Model: claude-haiku-4-5    # cheap scaffolding wave
+
+  ### Wave 2
+  Model: claude-opus-4-8     # the wave that needs the strong model
+  ```
+
+  Waves without a `Model:` line fall back to the deliver default (`--model`, or
+  `claude-opus-4-8`). The override is honored by both the `sdk` adapter and the
+  `command` adapter when its `RAD_AGENT_CMD` template contains a `{model}` token.
+
+  The wave prompt also carries a standing frugality reminder ("Truncate large
+  file/command outputs — do not paste entire files or long logs") so each wave
+  agent keeps its own context lean.
 
 ---
 
