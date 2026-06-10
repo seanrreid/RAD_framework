@@ -298,6 +298,38 @@ export function sanitizeErrorMessage(msg) {
     .replace(/[A-Za-z0-9_-]{40,}/g, '[REDACTED]');
 }
 
+/**
+ * Normalize a raw provider usage object into the stable shape the spine records:
+ * `{ input, output, total }` (all numbers). Maps the SDK's snake_case token
+ * fields (`input_tokens` / `output_tokens`) as well as already-normalized
+ * `input` / `output` keys, and derives `total` as input + output when the
+ * provider did not supply one.
+ *
+ * Returns `undefined` when no usable usage is present so callers can OMIT the
+ * field entirely — usage is OPTIONAL everywhere downstream.
+ *
+ * @param {unknown} raw - a provider usage object, or nothing
+ * @returns {{ input: number, output: number, total: number } | undefined}
+ */
+export function normalizeUsage(raw) {
+  if (!raw || typeof raw !== 'object') return undefined;
+
+  const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
+  const input = num(raw.input ?? raw.input_tokens);
+  const output = num(raw.output ?? raw.output_tokens);
+  const explicitTotal = num(raw.total ?? raw.total_tokens);
+
+  // Nothing usable — let the caller omit the field.
+  if (input === undefined && output === undefined && explicitTotal === undefined) {
+    return undefined;
+  }
+
+  const inVal = input ?? 0;
+  const outVal = output ?? 0;
+  const total = explicitTotal ?? inVal + outVal;
+  return { input: inVal, output: outVal, total };
+}
+
 // ── Shared resilience helpers (used by every provider adapter in Wave 2) ──
 
 /**

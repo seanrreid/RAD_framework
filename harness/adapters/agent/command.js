@@ -30,6 +30,7 @@ import {
   syntheticFailure,
   sanitizeErrorMessage,
   withTimeout,
+  normalizeUsage,
 } from './contract.js';
 
 /** Env vars that are safe to forward to the child. Secrets are NOT in this set. */
@@ -146,13 +147,40 @@ function spawnOnce(cmd, prompt, repoRoot) {
 export function createCommandAdapter({ cmd, repoRoot, timeoutMs = 600000 } = {}) {
   if (!cmd) throw new Error('createCommandAdapter: cmd is required');
 
-  /** Wrap a parsed `{ status, tasks }` into the full spine-facing result. */
-  function toResult(parsed) {
-    return {
+  /**
+   * Wrap a parsed `{ status, tasks }` into the full spine-facing result. Usage
+   * is OPTIONAL for driven CLIs — most emit none, so when no normalized usage is
+   * supplied the field is OMITTED entirely.
+   */
+  function toResult(parsed, usage) {
+    const result = {
       outcome: resultToOutcome(parsed),
       status: parsed.status,
       tasks: parsed.tasks,
     };
+    if (usage) result.usage = usage;
+    return result;
+  }
+
+  /**
+   * Best-effort usage extraction from a CLI's stdout. Most agent CLIs emit NO
+   * machine-readable usage, in which case this returns undefined and the field
+   * is omitted. A wrapper that DOES know its token counts can emit a single
+   * `RAD_USAGE {json}` line (e.g. `RAD_USAGE {"input_tokens":10,"output_tokens":5}`)
+   * which is normalized to `{ input, output, total }`.
+   *
+   * @param {string} stdout
+   * @returns {{ input: number, output: number, total: number } | undefined}
+   */
+  function extractUsage(stdout) {
+    const match = /^RAD_USAGE\s+(\{.*\})\s*$/m.exec(stdout || '');
+    if (!match) return undefined;
+    try {
+      return normalizeUsage(JSON.parse(match[1]));
+    } catch {
+      // Malformed usage line is non-fatal: usage stays optional, omit it.
+      return undefined;
+    }
   }
 
   /**
@@ -208,7 +236,7 @@ export function createCommandAdapter({ cmd, repoRoot, timeoutMs = 600000 } = {})
     if (first.terminal) return first.terminal;
 
     let block = extractWaveResultBlock(first.stdout);
-    if (block) return toResult(parseWaveResult(block));
+    if (block) return toResult(parseWaveResult(block), extractUsage(first.stdout));
 
     // Missing WAVE_RESULT — re-prompt EXACTLY once, asking specifically for it.
     const reprompt =
@@ -221,7 +249,7 @@ export function createCommandAdapter({ cmd, repoRoot, timeoutMs = 600000 } = {})
     if (second.terminal) return second.terminal;
 
     block = extractWaveResultBlock(second.stdout);
-    if (block) return toResult(parseWaveResult(block));
+    if (block) return toResult(parseWaveResult(block), extractUsage(second.stdout));
 
     // Still no protocol block after one reprompt — terminal protocol failure.
     return {
