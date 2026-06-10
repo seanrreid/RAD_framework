@@ -132,6 +132,34 @@ in the plan doc's `Branch:` header, and never merged piecemeal — the plan doc 
 code reach `default_branch` together via the deliver PR. To use a different prefix,
 set `RAD_BRANCH_PREFIX` (e.g. `RAD_BRANCH_PREFIX=feature/`) in your environment.
 
+### Cost & Frugality
+
+Both knobs are OPTIONAL and backward-compatible — absent, deliver behaves as before.
+
+```
+RAD_TOKEN_BUDGET: <positive integer>   # per-deliver cumulative token ceiling
+```
+
+When set, `/rad-deliver` (the harness spine) sums each wave's recorded token usage
+and, before starting the next wave, stops gracefully once the running total reaches
+or exceeds the budget — a structured `stopped: token-budget` terminal (no throw),
+recorded as a `wave-failed` event with `reason: token-budget`. Unset/0/non-numeric
+disables the breaker. Waves whose adapter reports no usage contribute 0.
+
+**Per-wave model tiering.** A plan may run cheaper waves on smaller models. Inside a
+`### Wave N` block, an optional `Model:` line selects the model for that wave only:
+
+```markdown
+### Wave 1
+Model: claude-haiku-4-5
+
+### Wave 2
+Model: claude-opus-4-8
+```
+
+Waves without a `Model:` line use the deliver default. See `docs/rad-cli.md` for the
+full description and the `RAD_TOKEN_BUDGET` example.
+
 ### PR Labels
 
 ```

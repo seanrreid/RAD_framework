@@ -79,9 +79,50 @@ jq -r 'select(.type=="cycle") | [.date, .feature, (.high|tostring)] | join("\t")
   .agents/findings.jsonl | sort
 ```
 
+### Step 4b: Aggregate token cost from wave-attempt usage
+
+Token cost lives in the per-feature audit log, not the findings log. Each feature
+has its own `.agents/state/<feature>/events.jsonl`, and each `wave-attempt` event
+carries token usage under `data.usage` as `{ input, output, total }`.
+
+Usage is **optional**: older deliveries (and any wave that ran before this layer
+existed) emit `wave-attempt` events with no `data.usage`. Treat a missing or null
+`usage` as `0` (unknown) — never let it break the aggregation.
+
+```bash
+# Discover every per-feature audit log
+for log in .agents/state/*/events.jsonl; do
+  [ -f "$log" ] || continue
+  feature=$(basename "$(dirname "$log")")
+
+  # Cost per feature: sum of wave-attempt total tokens, missing usage -> 0
+  total=$(jq -s '[.[]
+    | select(.type=="wave-attempt")
+    | (.data.usage.total // 0)] | add // 0' "$log")
+  echo "$feature	$total"
+done
+
+# Cost per wave (per wave number) for a single feature, missing usage -> 0
+jq -r 'select(.type=="wave-attempt")
+  | [(.data.wave // .wave // "?" | tostring), (.data.usage.total // 0 | tostring)]
+  | join("\t")' .agents/state/[FEATURE]/events.jsonl \
+  | awk -F'\t' '{sum[$1]+=$2} END {for (w in sum) print w"\t"sum[w]}' \
+  | sort -n
+```
+
+Carry two aggregates into the report:
+
+- **Cost per feature** — the summed `total` tokens across all `wave-attempt`
+  events in that feature's log. A feature whose every event lacks usage reports
+  `0 (unknown)`.
+- **Cost per wave** — `total` tokens grouped by wave number within a feature, so
+  expensive waves stand out. Waves without recorded usage contribute `0`.
+
+If no `.agents/state/*/events.jsonl` files exist, omit the cost section entirely.
+
 ### Step 5: Synthesize and output report
 
-Using the data from Steps 3–4, write the following report. Populate each section
+Using the data from Steps 3–4b, write the following report. Populate each section
 with real numbers and real pattern names — do not leave placeholders.
 
 ```markdown
@@ -112,6 +153,17 @@ NEEDS FIXES FIRST: [N] cycles
 ...
 [If trend is detectable: "Trend: [↓ improving | ↑ increasing | → stable]"]
 
+### Token Cost
+[From Step 4b. Omit this section entirely if no per-feature events.jsonl exists.]
+Cost per feature (total tokens, summed from wave-attempt usage):
+- [feature] — [N] tokens   [or "0 (unknown — no usage recorded)"]
+...
+Cost per wave [for the most recent / most expensive feature]:
+- Wave [n] — [N] tokens
+...
+[Note any feature whose usage is entirely unknown: "[feature]: usage not recorded
+ (pre-dates the cost layer)."]
+
 ### Recommended Focus Areas
 [Top 2–3 patterns that are both frequent and high-severity. Each as one sentence:
  "Address [category] — appears in [N] cycles ([%]) and always blocks architect review."]
@@ -121,7 +173,8 @@ NEEDS FIXES FIRST: [N] cycles
 
 ## Rules
 
-- Never modify `.agents/findings.jsonl` — read only
+- Never modify `.agents/findings.jsonl` or any `.agents/state/*/events.jsonl` — read only
+- Token usage in `wave-attempt` events is optional; treat missing `data.usage` as 0 (unknown)
 - If the file is missing or empty, say so and exit cleanly
 - If fewer than 3 cycles exist, skip pattern analysis and output raw findings
 - Do not invent patterns — only report what the data shows

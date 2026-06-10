@@ -34,6 +34,7 @@ import {
   classifyError,
   backoffWithJitter,
   withTimeout,
+  normalizeUsage,
 } from './contract.js';
 
 /** Env keys forwarded to the SDK subprocess. The API key is added separately. */
@@ -85,13 +86,22 @@ export function createRunWave({
   const delay =
     sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
 
-  /** Wrap a parsed `{ status, tasks }` into the full spine-facing result. */
-  function toResult(parsed) {
-    return {
+  /**
+   * Wrap a parsed `{ status, tasks }` into the full spine-facing result. When a
+   * normalized usage object is supplied it is attached; otherwise the field is
+   * OMITTED (usage is optional everywhere downstream).
+   */
+  function toResult(parsed, usage) {
+    const result = {
       outcome: resultToOutcome(parsed),
       status: parsed.status,
       tasks: parsed.tasks,
     };
+    // `usage` is either undefined or a fully-formed {input,output,total} object
+    // (normalizeUsage never returns an empty/partial object), so a truthy check
+    // is sufficient to decide whether to attach the optional field.
+    if (usage) result.usage = usage;
+    return result;
   }
 
   /**
@@ -103,16 +113,17 @@ export function createRunWave({
    * @param {string} prompt
    * @returns {Promise<{ text: string }>}
    */
-  async function runQueryOnce(prompt) {
+  async function runQueryOnce(prompt, effectiveModel) {
     const abortController = new AbortController();
     let fullText = '';
+    let usage;
 
     const drain = (async () => {
       const sdkQuery = query({
         prompt,
         options: {
           env: buildSdkEnv(apiKey),
-          ...(model ? { model } : {}),
+          ...(effectiveModel ? { model: effectiveModel } : {}),
           ...(repoRoot ? { cwd: repoRoot } : {}),
           maxTurns,
           abortController,
@@ -131,6 +142,11 @@ export function createRunWave({
             }
           }
         } else if (message.type === 'result') {
+          // Token usage rides on the result message (message.usage, with
+          // input_tokens/output_tokens). Normalize to { input, output, total };
+          // absent/unusable usage leaves `usage` undefined (optional field).
+          const normalized = normalizeUsage(message.usage);
+          if (normalized) usage = normalized;
           if (!message.is_error && typeof message.result === 'string') {
             fullText += message.result;
           } else if (message.is_error) {
@@ -145,10 +161,19 @@ export function createRunWave({
           }
         }
       }
-      return { text: fullText };
+      return { text: fullText, usage };
     })();
 
-    return withTimeout(drain, timeoutMs, abortController);
+    try {
+      return await withTimeout(drain, timeoutMs, abortController);
+    } catch (err) {
+      // The drain closure may have already captured usage from a result message
+      // before throwing (is_error) or being aborted (timeout). Attach it so the
+      // retry layer can carry it into the terminal result and the budget counts
+      // tokens spent on a failed wave (conservative — usage is often absent here).
+      if (usage !== undefined && err && typeof err === 'object') err._usage = usage;
+      throw err;
+    }
   }
 
   /**
@@ -158,14 +183,16 @@ export function createRunWave({
    *
    * @param {string} prompt
    * @param {string|number} waveId
+   * @param {string} [effectiveModel] - model id for this wave (per-wave override)
    */
-  async function runWithRetry(prompt, waveId) {
+  async function runWithRetry(prompt, waveId, effectiveModel) {
     let attempt = 0;
     // attempt 0 is the initial call; up to MAX_TRANSIENT_RETRIES retries follow.
     // eslint-disable-next-line no-constant-condition
     while (true) {
       try {
-        return { text: (await runQueryOnce(prompt)).text };
+        const once = await runQueryOnce(prompt, effectiveModel);
+        return { text: once.text, usage: once.usage };
       } catch (err) {
         const bucket = classifyError(err);
         const safe = sanitizeErrorMessage(err?.message ?? String(err));
@@ -178,6 +205,7 @@ export function createRunWave({
               outcome: 'fail-timeout',
               status: 'failed',
               tasks: syntheticFailure(waveId, safe).tasks,
+              ...(err._usage ? { usage: err._usage } : {}),
             },
           };
         }
@@ -189,7 +217,7 @@ export function createRunWave({
         }
 
         // Transient exhausted, or permanent/model/resource — terminal failure.
-        return { terminal: toResult(syntheticFailure(waveId, safe)) };
+        return { terminal: toResult(syntheticFailure(waveId, safe), err._usage) };
       }
     }
   }
@@ -203,11 +231,17 @@ export function createRunWave({
     const waveId = wave.n ?? wave.number ?? wave.id ?? '?';
     const prompt = buildWavePrompt(wave, planCtx);
 
-    const first = await runWithRetry(prompt, waveId);
+    // Per-wave model tiering: a plan may declare `Model:` under `### Wave N`,
+    // surfaced as planCtx.waveModels[n] (keyed by NUMBER). Coerce waveId to a
+    // number for the lookup so a string wave id still matches; fall back to the
+    // construction-time (deliver default) model when this wave declares none.
+    const effectiveModel = planCtx?.waveModels?.[Number(waveId)] ?? model;
+
+    const first = await runWithRetry(prompt, waveId, effectiveModel);
     if (first.terminal) return first.terminal;
 
     let block = extractWaveResultBlock(first.text);
-    if (block) return toResult(parseWaveResult(block));
+    if (block) return toResult(parseWaveResult(block), first.usage);
 
     // Missing WAVE_RESULT — reprompt EXACTLY once for the protocol block.
     const reprompt =
@@ -216,11 +250,11 @@ export function createRunWave({
       'Re-run the wave and end your response with exactly one WAVE_RESULT ... ' +
       'END_WAVE_RESULT block, and nothing after it.';
 
-    const second = await runWithRetry(reprompt, waveId);
+    const second = await runWithRetry(reprompt, waveId, effectiveModel);
     if (second.terminal) return second.terminal;
 
     block = extractWaveResultBlock(second.text);
-    if (block) return toResult(parseWaveResult(block));
+    if (block) return toResult(parseWaveResult(block), second.usage);
 
     return {
       outcome: 'fail-protocol',

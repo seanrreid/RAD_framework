@@ -82,6 +82,17 @@ test('buildWavePrompt — includes the task titles and the branch', () => {
   assert.ok(prompt.includes('Second task title'), 'prompt should include task 2 title');
 });
 
+test('buildWavePrompt — AC#5: includes a frugality/truncate reminder', () => {
+  const wave = { n: 1, type: 'sequential', tasks: [{ title: 'T', file: 'a.js', what: 'do' }] };
+  const planCtx = { feature: 'demo', branch: 'rad/demo', executionLog: '.agents/logs/demo.md' };
+  const prompt = buildWavePrompt(wave, planCtx);
+  assert.ok(/[Tt]runcate/.test(prompt), 'prompt should instruct truncating large outputs');
+  assert.ok(
+    prompt.includes('do not paste entire files'),
+    'prompt should discourage pasting entire files/logs into reasoning',
+  );
+});
+
 // ---------------------------------------------------------------------------
 // parseWaveResult — AC#2 round-trip of a sample WAVE_RESULT block
 // ---------------------------------------------------------------------------

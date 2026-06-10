@@ -28,7 +28,7 @@
 
 import { resolveOutcome } from './matrix.js';
 import { fingerprint } from './fingerprint.js';
-import { resumeFrom } from './events.js';
+import { resumeFrom, totalUsage } from './events.js';
 
 /** Bounded attempt budget per wave — the hard ceiling. The doom-loop breaker is
  * the early exit; this cap only bites when every attempt fails *differently*. */
@@ -52,6 +52,7 @@ const POST_CHECKS = ['check-scope.sh', 'open-pr.sh'];
  * @param {(script: string, feature: string) => { status: number }} args.sh - Bash boundary
  * @param {() => string} args.now - injected clock (ISO timestamp)
  * @param {number} [args.maxAttempts] - per-wave attempt ceiling (defaults to MAX_ATTEMPTS); injectable for tests
+ * @param {number} [args.tokenBudget] - optional cumulative token ceiling; 0/null/undefined disables the breaker (no behavior change)
  * @returns {Promise<Object>} structured terminal result
  */
 export async function deliverSpine({
@@ -64,6 +65,7 @@ export async function deliverSpine({
   sh,
   now,
   maxAttempts = MAX_ATTEMPTS,
+  tokenBudget = null,
 }) {
   // ── DET gate: approval. The human (or proxy) decided earlier; here we ENFORCE
   // it. A blocked gate is a normal outcome — return structured, append nothing
@@ -82,7 +84,8 @@ export async function deliverSpine({
   // event. Skip them — never re-run runWave or append duplicate attempt/complete
   // events. Keyed strictly off `wave-complete`, so a wave that crashed mid-run
   // (attempt logged, never advanced) is NOT skipped and resumes here. ──
-  const completed = resumeFrom(state.history(feature));
+  const history = state.history(feature);
+  const completed = resumeFrom(history);
 
   // ── Resume verify (cheap, once): if a prior run already advanced one or more
   // waves, the per-wave gate that guarded THIS run never ran for them. Before
@@ -91,9 +94,34 @@ export async function deliverSpine({
   // broken base. A fresh run (nothing skipped) does not run this. ──
   let resumeVerified = false;
 
+  // ── Token-budget circuit breaker. OPTIONAL: a non-positive `tokenBudget`
+  // (unset/0/negative) fully disables it. Otherwise we accumulate each wave's
+  // recorded usage (`result.usage.total`, missing → 0) and, BEFORE starting the
+  // next wave, graceful-abort if cumulative spend has reached/exceeded the
+  // budget — a terminal return in the style of the other `stopped:` paths.
+  //
+  // Seeded from prior runs' recorded usage so a RESUMED deliver INHERITS earlier
+  // spend: the budget is a lifetime ceiling for the feature, not a fresh
+  // per-invocation allowance (a crash-looping deliver can't blow past it by
+  // resuming). On a fresh run the log carries no wave-attempt usage, so this is 0. ──
+  let spent = totalUsage(history).total;
+
   // ── DET wave loop — the MATRIX decides what happens next, not a counter. ──
   for (const wave of waves) {
     if (completed.has(wave.n)) continue;
+
+    // Budget check fires before running THIS wave (and before resume-verify) so
+    // an over-budget run stops without doing any further model work.
+    if (tokenBudget > 0 && spent >= tokenBudget) {
+      state.append({
+        feature,
+        type: 'wave-failed',
+        actor: 'harness',
+        ts: now(),
+        data: { wave: wave.n, reason: 'token-budget', spent, budget: tokenBudget },
+      });
+      return { stopped: 'token-budget', ok: false, wave: wave.n, spent, budget: tokenBudget };
+    }
 
     if (completed.size > 0 && !resumeVerified) {
       resumeVerified = true; // run exactly once, before the first non-skipped wave
@@ -138,8 +166,18 @@ export async function deliverSpine({
         type: 'wave-attempt',
         actor: 'harness',
         ts: now(),
-        data: { wave: wave.n, outcome },
+        // Usage rides on the REAL runWave result — record it even when the
+        // per-wave gate demoted `outcome` to fail-tests above (the demoted
+        // `gated` object carries no usage). Usage is OPTIONAL: an adapter that
+        // emits none leaves `result.usage` undefined and the key is included as
+        // undefined, which folds/serializes the same as a legacy event.
+        data: { wave: wave.n, outcome, usage: result.usage },
       });
+
+      // Accumulate this attempt's token spend for the budget breaker. Usage is
+      // OPTIONAL (a command adapter may emit none) — a missing total contributes
+      // 0, never NaN.
+      spent += result.usage?.total ?? 0;
 
       // The MATRIX decides what happens next — never inline retry arithmetic.
       const { action } = resolveOutcome('implement', outcome, matrix);
