@@ -120,9 +120,16 @@ export async function deliverSpine({
         const gate = sh('scripts/check-tests.sh', feature);
         if (gate.status !== 0) {
           outcome = 'fail-tests';
-          // Fingerprint a result that reflects the GATE failure, so repeated
-          // identical gate failures trip the doom-loop breaker rather than loop.
-          gated = { ...result, outcome, gateStatus: gate.status };
+          // Fingerprint STABLE, gate-derived fields — NOT the model's variable
+          // result text. Two consecutive gate failures must hash equally so the
+          // doom-loop breaker trips at the cap instead of burning every attempt
+          // when the model merely rewords its output between identical failures.
+          gated = {
+            outcome,
+            gateStatus: gate.status,
+            categories: ['check-tests'],
+            summary: `check-tests gate failed (status ${gate.status})`,
+          };
         }
       }
 
