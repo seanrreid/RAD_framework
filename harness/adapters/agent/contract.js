@@ -285,3 +285,148 @@ export function sanitizeErrorMessage(msg) {
   return msg.replace(/sk-ant-[A-Za-z0-9_-]{10,}/g, '[REDACTED]')
     .replace(/[A-Za-z0-9_-]{40,}/g, '[REDACTED]');
 }
+
+// ── Shared resilience helpers (used by every provider adapter in Wave 2) ──
+
+/**
+ * Classify a thrown/returned error into a coarse retry bucket. The bucket drives
+ * whether (and how) a provider adapter retries:
+ *   - 'transient'  → safe to retry with backoff (rate-limit / 429 / network / timeout)
+ *   - 'permanent'  → do not retry (auth / permission / not-found)
+ *   - 'model'      → the model produced something unusable (malformed / invalid JSON)
+ *   - 'resource'   → ran out of a hard resource (OOM / token-limit)
+ *
+ * Classification is best-effort and string-based: it inspects an explicit
+ * numeric `status`/`code` when present, then falls back to keyword matching over
+ * the error name + message. Unknown errors default to 'permanent' (fail closed —
+ * we do not retry something we cannot recognise).
+ *
+ * @param {unknown} err
+ * @returns {'transient'|'permanent'|'model'|'resource'}
+ */
+export function classifyError(err) {
+  const status =
+    (err && (err.status ?? err.statusCode ?? err.code)) ?? null;
+  const numericStatus = typeof status === 'number' ? status : null;
+
+  const name = String((err && err.name) || '');
+  const message = String((err && err.message) || err || '');
+  // A non-numeric `code` (e.g. 'ECONNRESET', 'ENOTFOUND') is a string error
+  // identifier — fold it into the keyword haystack so it can be matched.
+  const codeStr =
+    err && typeof err.code === 'string' ? err.code : '';
+  const haystack = `${name} ${message} ${codeStr}`.toLowerCase();
+
+  // Resource exhaustion — a hard ceiling, not a blip. Checked first so a
+  // "token limit" message is never misread as a transient rate limit.
+  if (
+    /\boom\b/.test(haystack) ||
+    haystack.includes('out of memory') ||
+    haystack.includes('token limit') ||
+    haystack.includes('token-limit') ||
+    haystack.includes('context length') ||
+    haystack.includes('maximum context')
+  ) {
+    return 'resource';
+  }
+
+  // Permanent — authentication / authorization / missing resource.
+  if (numericStatus === 401 || numericStatus === 403 || numericStatus === 404) {
+    return 'permanent';
+  }
+  if (
+    haystack.includes('unauthorized') ||
+    haystack.includes('forbidden') ||
+    haystack.includes('permission') ||
+    haystack.includes('authentication') ||
+    haystack.includes('not found') ||
+    haystack.includes('not-found') ||
+    name === 'enoent'
+  ) {
+    return 'permanent';
+  }
+
+  // Transient — rate limits, 429, network blips, timeouts.
+  if (numericStatus === 429 || (numericStatus !== null && numericStatus >= 500)) {
+    return 'transient';
+  }
+  if (
+    haystack.includes('rate limit') ||
+    haystack.includes('rate-limit') ||
+    haystack.includes('ratelimit') ||
+    haystack.includes('429') ||
+    haystack.includes('timeout') ||
+    haystack.includes('timed out') ||
+    haystack.includes('network') ||
+    haystack.includes('socket') ||
+    haystack.includes('econnreset') ||
+    haystack.includes('econnrefused') ||
+    haystack.includes('etimedout') ||
+    haystack.includes('enotfound') ||
+    haystack.includes('eai_again')
+  ) {
+    return 'transient';
+  }
+
+  // Model — the response itself was malformed / unparseable.
+  if (
+    haystack.includes('malformed') ||
+    haystack.includes('invalid json') ||
+    haystack.includes('invalid-json') ||
+    haystack.includes('unexpected token') ||
+    name === 'syntaxerror'
+  ) {
+    return 'model';
+  }
+
+  // Unknown → do not retry.
+  return 'permanent';
+}
+
+/**
+ * Exponential backoff with full jitter, in milliseconds.
+ *
+ * delay = random in [0, base * 2^(attempt-1)], capped at a ceiling. `attempt`
+ * is 1-based (attempt 1 is the first retry). Math.random is called INSIDE the
+ * function — never at module load — so importing this module is deterministic
+ * and side-effect free (testing extension: keep modules deterministic to import).
+ *
+ * @param {number} attempt - 1-based retry attempt number
+ * @returns {number} milliseconds to wait before the next attempt
+ */
+export function backoffWithJitter(attempt) {
+  const BASE_MS = 2000; // ~2s base
+  const CAP_MS = 60000; // never wait more than a minute
+  const n = Number.isFinite(attempt) && attempt > 0 ? Math.floor(attempt) : 1;
+  const exp = Math.min(BASE_MS * 2 ** (n - 1), CAP_MS);
+  // Full jitter: a uniform sample in [0, exp]. Computed at call time.
+  return Math.floor(Math.random() * exp);
+}
+
+/**
+ * Race a promise against a deadline. If `ms` elapses first, abort the supplied
+ * AbortController (so the underlying work can cancel) and reject with a timeout
+ * error whose message classifyError() buckets as 'transient'. The timer is
+ * always cleared so it never keeps the event loop alive.
+ *
+ * @template T
+ * @param {Promise<T>} promise - the in-flight work
+ * @param {number} ms - deadline in milliseconds
+ * @param {AbortController} [abortController] - aborted on timeout, if provided
+ * @returns {Promise<T>}
+ */
+export function withTimeout(promise, ms, abortController) {
+  let timer;
+  const timeout = new Promise((_resolve, reject) => {
+    timer = setTimeout(() => {
+      if (abortController && typeof abortController.abort === 'function') {
+        abortController.abort();
+      }
+      reject(new Error(`wave timed out after ${ms}ms`));
+    }, ms);
+  });
+
+  return Promise.race([promise, timeout]).finally(() => {
+    clearTimeout(timer);
+  });
+}
