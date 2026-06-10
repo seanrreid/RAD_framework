@@ -246,6 +246,36 @@ test('sdk adapter — a fake key value never appears in a thrown/logged string',
 });
 
 // ===========================================================================
+// Per-wave model tiering — AC#2
+// ===========================================================================
+
+test('sdk adapter — a wave with a declared model invokes the query with that model', async () => {
+  const captured = {};
+  const runWave = createRunWave({
+    apiKey: 'sk-ant-fake-key-value-1234567890',
+    model: 'claude-opus-4-8', // deliver default (construction-time)
+    query: fakeQuery(GOOD_RESULT, captured),
+  });
+  // planCtx declares a per-wave override for wave 1.
+  const planCtx = { ...PLAN_CTX, waveModels: { 1: 'claude-haiku-4-5' } };
+  await runWave({ ...WAVE, n: 1 }, planCtx);
+  assert.equal(captured.opts.model, 'claude-haiku-4-5', 'declared per-wave model is used');
+});
+
+test('sdk adapter — a wave without a declared model uses the deliver default', async () => {
+  const captured = {};
+  const runWave = createRunWave({
+    apiKey: 'sk-ant-fake-key-value-1234567890',
+    model: 'claude-opus-4-8', // deliver default (construction-time)
+    query: fakeQuery(GOOD_RESULT, captured),
+  });
+  // waveModels has an entry for wave 2 only; wave 1 must fall back to default.
+  const planCtx = { ...PLAN_CTX, waveModels: { 2: 'claude-haiku-4-5' } };
+  await runWave({ ...WAVE, n: 1 }, planCtx);
+  assert.equal(captured.opts.model, 'claude-opus-4-8', 'falls back to deliver default');
+});
+
+// ===========================================================================
 // deliverCommand adapter selection — AC#4
 // ===========================================================================
 

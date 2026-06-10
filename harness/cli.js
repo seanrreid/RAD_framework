@@ -200,12 +200,48 @@ function subSectionLines(text, name) {
 }
 
 /**
+ * Parse optional per-wave model overrides from the plan doc.
+ *
+ * Convention: an optional `Model:` line inside a `### Wave N` block selects the
+ * model for that wave only (e.g. "Model: claude-haiku-4-5"). Waves without the
+ * line are absent from the returned map, so the deliver default applies. The map
+ * is keyed by wave NUMBER (the integer N from the heading) → model id string.
+ *
+ * This lives in cli.js by design: the per-wave model travels via planCtx, NOT by
+ * editing the plan parser in git-state-store.js.
+ *
+ * @param {string} text - full plan doc text
+ * @returns {Record<number, string>}
+ */
+function parseWaveModels(text) {
+  const waveModels = {};
+  let currentWave;
+  for (const line of text.split('\n')) {
+    const heading = /^###\s+Wave\s+(\d+)\b/.exec(line.trim());
+    if (heading) {
+      currentWave = Number(heading[1]);
+      continue;
+    }
+    // A new `##`/`###` heading that is NOT a Wave heading ends the current block.
+    if (/^#{2,}/.test(line.trim())) {
+      currentWave = undefined;
+      continue;
+    }
+    if (currentWave !== undefined) {
+      const m = /^Model:\s*(.+)$/.exec(line.trim());
+      if (m && m[1].trim() !== '') waveModels[currentWave] = m[1].trim();
+    }
+  }
+  return waveModels;
+}
+
+/**
  * Parse a plan doc text to extract the planCtx fields needed by runWave.
  *
  * @param {string} text - full plan doc text
- * @returns {{ branch: string, acceptanceCriteria: string[], executionNotes: { doNotTouch: string[], keyFiles: string[], reminders: string[] } }}
+ * @returns {{ branch: string, acceptanceCriteria: string[], waveModels: Record<number, string>, executionNotes: { doNotTouch: string[], keyFiles: string[], reminders: string[] } }}
  */
-function parsePlanCtx(text) {
+export function parsePlanCtx(text) {
   // Branch: extract from `Branch: rad/feature` header line
   let branch = '';
   for (const line of text.split('\n')) {
@@ -244,6 +280,7 @@ function parsePlanCtx(text) {
   return {
     branch,
     acceptanceCriteria: acLines,
+    waveModels: parseWaveModels(text),
     executionNotes: { doNotTouch, keyFiles, reminders },
   };
 }

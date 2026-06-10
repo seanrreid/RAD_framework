@@ -110,7 +110,7 @@ export function createRunWave({
    * @param {string} prompt
    * @returns {Promise<{ text: string }>}
    */
-  async function runQueryOnce(prompt) {
+  async function runQueryOnce(prompt, effectiveModel) {
     const abortController = new AbortController();
     let fullText = '';
     let usage;
@@ -120,7 +120,7 @@ export function createRunWave({
         prompt,
         options: {
           env: buildSdkEnv(apiKey),
-          ...(model ? { model } : {}),
+          ...(effectiveModel ? { model: effectiveModel } : {}),
           ...(repoRoot ? { cwd: repoRoot } : {}),
           maxTurns,
           abortController,
@@ -171,14 +171,15 @@ export function createRunWave({
    *
    * @param {string} prompt
    * @param {string|number} waveId
+   * @param {string} [effectiveModel] - model id for this wave (per-wave override)
    */
-  async function runWithRetry(prompt, waveId) {
+  async function runWithRetry(prompt, waveId, effectiveModel) {
     let attempt = 0;
     // attempt 0 is the initial call; up to MAX_TRANSIENT_RETRIES retries follow.
     // eslint-disable-next-line no-constant-condition
     while (true) {
       try {
-        const once = await runQueryOnce(prompt);
+        const once = await runQueryOnce(prompt, effectiveModel);
         return { text: once.text, usage: once.usage };
       } catch (err) {
         const bucket = classifyError(err);
@@ -217,7 +218,12 @@ export function createRunWave({
     const waveId = wave.n ?? wave.number ?? wave.id ?? '?';
     const prompt = buildWavePrompt(wave, planCtx);
 
-    const first = await runWithRetry(prompt, waveId);
+    // Per-wave model tiering: a plan may declare `Model:` under `### Wave N`,
+    // surfaced as planCtx.waveModels[n]. Fall back to the construction-time
+    // (deliver default) model when this wave declares none.
+    const effectiveModel = planCtx?.waveModels?.[waveId] ?? model;
+
+    const first = await runWithRetry(prompt, waveId, effectiveModel);
     if (first.terminal) return first.terminal;
 
     let block = extractWaveResultBlock(first.text);
@@ -230,7 +236,7 @@ export function createRunWave({
       'Re-run the wave and end your response with exactly one WAVE_RESULT ... ' +
       'END_WAVE_RESULT block, and nothing after it.';
 
-    const second = await runWithRetry(reprompt, waveId);
+    const second = await runWithRetry(reprompt, waveId, effectiveModel);
     if (second.terminal) return second.terminal;
 
     block = extractWaveResultBlock(second.text);

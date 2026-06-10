@@ -6,11 +6,39 @@ import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-import { approveCommand } from '../cli.js';
+import { approveCommand, parsePlanCtx } from '../cli.js';
 import { createGitStateStore, defaultSh } from '../adapters/git-state-store.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CLI = join(HERE, '..', 'cli.js');
+
+// ---------------------------------------------------------------------------
+// parsePlanCtx — per-wave model tiering (AC#2)
+// ---------------------------------------------------------------------------
+
+test('parsePlanCtx — a Model: line under ### Wave 2 lands in planCtx.waveModels[2]', () => {
+  const plan = [
+    '# feature',
+    'Branch: rad/feature',
+    '',
+    '## Waves',
+    '',
+    '### Wave 1',
+    'Type: sequential',
+    '',
+    '### Wave 2',
+    'Type: sequential',
+    'Model: claude-haiku-4-5',
+    '',
+    '### Wave 3',
+    'Type: parallel',
+  ].join('\n');
+
+  const ctx = parsePlanCtx(plan);
+  assert.equal(ctx.waveModels[2], 'claude-haiku-4-5', 'wave 2 model is captured');
+  assert.equal(ctx.waveModels[1], undefined, 'wave 1 declares no model');
+  assert.equal(ctx.waveModels[3], undefined, 'wave 3 declares no model');
+});
 
 // ---------------------------------------------------------------------------
 // Fixture helpers
