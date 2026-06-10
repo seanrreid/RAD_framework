@@ -6,8 +6,8 @@ prose commands retain the human-in-the-loop steps and shell out here for recordi
 and execution.
 
 The CLI never calls a model on its own — `rad approve` is pure git/state work;
-`rad deliver` delegates model calls to sub-agents via the Claude Agent SDK but
-does not call the API itself.
+`rad deliver` delegates model calls to a selectable agent adapter (a spawned CLI
+agent or the Claude Agent SDK) but does not call any API itself.
 
 ---
 
@@ -66,26 +66,54 @@ The `/rad-approve` prose command calls this after the architect confirms.
 rad deliver <feature> [--model <model-id>]
 ```
 
-Drives wave execution for an approved plan via the Claude Agent SDK. Reads the
-plan file, constructs per-wave prompts, calls `deliverSpine` with an SDK-backed
-`runWave`, and streams wave output to stdout.
+Drives wave execution for an approved plan. Reads the plan file, constructs
+per-wave prompts, selects an **agent adapter** (see below), calls `deliverSpine`
+with the adapter's `runWave`, and streams wave output to stdout. The plan must be
+in `Status: approved` on its `rad/<feature>` branch tip.
 
-**Prerequisites:**
-- `ANTHROPIC_API_KEY` must be set in the environment
-- The plan must be in `Status: approved` on its `rad/<feature>` branch tip
+#### Adapter selection
+
+The runner is chosen by environment variable — there is no config-file loader.
+
+| Env var | Values | Default | Meaning |
+|---------|--------|---------|---------|
+| `RAD_AGENT` | `command` \| `sdk` | `command` | which adapter drives the wave |
+| `RAD_AGENT_CMD` | any command string | — | the CLI to spawn (command path only) |
+
+**Per-path credential requirements:**
+
+- **`command` (default)** — requires **no** `ANTHROPIC_API_KEY`. Credentials are
+  the configured command's concern. `RAD_AGENT_CMD` **is required**; if unset,
+  `rad deliver` exits 1 with `RAD_AGENT_CMD is required when RAD_AGENT=command`.
+- **`sdk`** — requires `ANTHROPIC_API_KEY`. If unset, `rad deliver` exits 1 with
+  `ANTHROPIC_API_KEY is required`.
+
+An unrecognized `RAD_AGENT` value exits 1 with a clear message.
 
 ```bash
+# Default (command) path — bring your own agent CLI, no API key needed here:
+export RAD_AGENT=command            # (or leave unset)
+export RAD_AGENT_CMD="claude -p"    # or "codex exec", "aider", a wrapper script
+node harness/cli.js deliver my-feature
+
+# SDK path — Anthropic SDK, API key required:
+export RAD_AGENT=sdk
 export ANTHROPIC_API_KEY=sk-ant-...
 node harness/cli.js deliver my-feature
 ```
 
-**Model:** defaults to `claude-opus-4-8`. Override with `--model`:
+See [`rad-wave-contract.md`](./rad-wave-contract.md) for the provider-neutral
+wave contract both adapters honor.
+
+**Model:** `--model` defaults to `claude-opus-4-8` and applies to the **`sdk`**
+path only (the `command` path's model is the configured command's concern):
 
 ```bash
-node harness/cli.js deliver my-feature --model claude-sonnet-4-6
+RAD_AGENT=sdk node harness/cli.js deliver my-feature --model claude-sonnet-4-6
 ```
 
-**Exit codes:** 0 on full completion, 1 on auth failure, gate failure, or blocked wave.
+**Exit codes:** 0 on full completion, 1 on credential/selection failure, gate
+failure, or blocked wave.
 
 ---
 

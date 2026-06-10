@@ -100,6 +100,24 @@ default_branch: main
 `manual` mode: platform scripts print instructions instead of calling CLI tools.
 Run `scripts/detect-platform.sh` to auto-detect from your git remote.
 
+### Agent Adapter
+
+`rad deliver` selects the wave-execution agent via environment variables (no
+config-file loader). Both adapters honor the provider-neutral wave contract in
+`docs/rad-wave-contract.md`.
+
+```
+RAD_AGENT:     command   # command | sdk  (default: command)
+RAD_AGENT_CMD:           # the CLI to spawn, required when RAD_AGENT=command
+```
+
+- `command` (default) — spawns an operator-configured CLI agent
+  (`RAD_AGENT_CMD`, e.g. `claude -p`, `codex exec`, `aider`). Requires **no**
+  `ANTHROPIC_API_KEY`; credentials are the configured command's concern.
+- `sdk` — drives the Claude Agent SDK; requires `ANTHROPIC_API_KEY`.
+
+See `docs/rad-cli.md` for selection details and per-path credential rules.
+
 ### Branch Conventions
 
 One work branch per feature, cradle-to-grave (plan → approval → code). It is the

@@ -13,4 +13,5 @@ Executor role: architect
 | 3 | Wave 2 | Command/driven adapter (the default) | ✓ complete | 3e421cf | 2026-06-10T13:45:00Z |
 | 4 | Wave 2 | SDK adapter (hardened) + runwave.js shim | ✓ complete | 16efa31 | 2026-06-10T13:52:00Z |
 | 5 | Wave 3 | Wire adapter selection into deliverCommand | ✓ complete | 286095d | 2026-06-10T14:05:00Z |
-| 6 | Wave 3 | Tests — contract, both adapters, selection | ✓ complete | PENDING | 2026-06-10T14:20:00Z |
+| 6 | Wave 3 | Tests — contract, both adapters, selection | ✓ complete | 2cb25cd | 2026-06-10T14:20:00Z |
+| 7 | Wave 3 | Document the wave contract and adapter config | ✓ complete | c68f21e | 2026-06-10T14:35:00Z |
