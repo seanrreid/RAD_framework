@@ -138,7 +138,12 @@ export async function deliverSpine({
         type: 'wave-attempt',
         actor: 'harness',
         ts: now(),
-        data: { wave: wave.n, outcome },
+        // Usage rides on the REAL runWave result — record it even when the
+        // per-wave gate demoted `outcome` to fail-tests above (the demoted
+        // `gated` object carries no usage). Usage is OPTIONAL: an adapter that
+        // emits none leaves `result.usage` undefined and the key is included as
+        // undefined, which folds/serializes the same as a legacy event.
+        data: { wave: wave.n, outcome, usage: result.usage },
       });
 
       // The MATRIX decides what happens next — never inline retry arithmetic.

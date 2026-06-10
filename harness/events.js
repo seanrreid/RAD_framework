@@ -167,3 +167,35 @@ export function resumeFrom(history) {
   }
   return completed;
 }
+
+/**
+ * Pure fold over an event history → the summed token usage across all
+ * `wave-attempt` events that carry a `data.usage` object. Usage is OPTIONAL and
+ * ADDITIVE: legacy attempts (and adapters that emit no usage) simply contribute
+ * nothing, so a history with no usage folds to all-zeros without error. Intended
+ * for the insights layer to report per-feature cost.
+ *
+ * @param {Event[]} history - in-memory event array (no I/O performed)
+ * @returns {{ input: number, output: number, total: number }}
+ */
+export function totalUsage(history) {
+  const sum = { input: 0, output: 0, total: 0 };
+  if (!Array.isArray(history)) return sum;
+  const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+  for (const event of history) {
+    if (
+      event &&
+      event.type === 'wave-attempt' &&
+      event.data &&
+      event.data.usage &&
+      typeof event.data.usage === 'object'
+    ) {
+      const u = event.data.usage;
+      sum.input += num(u.input);
+      sum.output += num(u.output);
+      // Prefer an explicit total; fall back to input + output for the event.
+      sum.total += Number.isFinite(u.total) ? u.total : num(u.input) + num(u.output);
+    }
+  }
+  return sum;
+}
