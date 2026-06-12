@@ -1,7 +1,9 @@
 # Plan: Worktree Isolation for the Deliver Spine
 Created: 2026-06-12
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-06-12T13:42:41.192Z
 Branch: rad/worktree-isolation-harness
 
 ## Context
