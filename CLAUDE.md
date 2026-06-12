@@ -160,6 +160,21 @@ Model: claude-opus-4-8
 Waves without a `Model:` line use the deliver default. See `docs/rad-cli.md` for the
 full description and the `RAD_TOKEN_BUDGET` example.
 
+### Worktree Isolation
+
+OPTIONAL and backward-compatible — absent, deliver runs in the main checkout as before.
+
+```
+RAD_WORKTREE:     <any non-empty value>   # opt-in git-worktree isolation for a deliver run
+RAD_WORKTREE_DIR: <directory path>        # optional base dir for the isolated tree
+```
+
+When `RAD_WORKTREE` is set, `/rad-deliver` isolates the run into a git worktree on the
+work branch (create → active → complete-on-success / preserve-on-failure). A
+`.rad-worktree.json` marker guards teardown — the lifecycle refuses to remove an
+unmarked dir. v1 requires the work branch not already be checked out in the main tree.
+Unset/empty = OFF (today's behavior). See `docs/rad-cli.md` for the full lifecycle.
+
 ### PR Labels
 
 ```
