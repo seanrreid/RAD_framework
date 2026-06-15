@@ -8,3 +8,6 @@ Executor role: architect
 
 | Step | Wave | Task | Status | Commit | Time |
 |------|------|------|--------|--------|------|
+| 1.1 | 1 | Build the hook runner module | complete | 81e6836 | 2026-06-15 |
+| 1.2 | 1 | Register hook event types | complete | 34b9339 | 2026-06-15 |
+| 1.3 | 1 | Unit-test the runner | complete | 17a9e26 | 2026-06-15 |
