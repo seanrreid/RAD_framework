@@ -77,7 +77,7 @@
 
 - Never commit secrets, tokens, or credentials
 - Never assume a library exists — only use packages in the package file
-- Never execute /rad-deliver without a plan file with Status: approved on its rad/ branch tip (set by /rad-approve)
+- Never execute /rad-deliver without an `approved` event in `.agents/state/<feature>/events.jsonl` (the gate authority, appended by /rad-approve). The plan doc's `Status: approved` header is a display-only mirror, not the gate.
 -
 
 ---
@@ -205,8 +205,12 @@ Developers and designers plan and deliver but cannot approve their own plans.
 
 ### Approval Rules
 
-A plan is approved when the architect runs `/rad-approve`, which writes
-`Status: approved` to the plan doc on its `rad/` branch tip. There is no plan PR.
+A plan is approved when the architect runs `/rad-approve`, which appends an
+`approved` event to `.agents/state/<feature>/events.jsonl` on its `rad/` branch
+tip. That event is the **sole gate authority** — `/rad-deliver` gates on it via
+the read-only `rad gate <feature> approved` query (see `docs/rad-cli.md`). There
+is no plan PR. `/rad-approve` also writes a `Status: approved` header to the plan
+doc, but that header is a **display-only mirror** of the event, never the gate.
 Approval requires:
 - [ ] Architect review and approval (recorded on the work-branch tip)
 - [ ] All files within declared agent scope (checked by /rad-review)
