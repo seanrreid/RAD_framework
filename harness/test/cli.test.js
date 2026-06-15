@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-import { approveCommand, parsePlanCtx } from '../cli.js';
+import { approveCommand, gateCommand, parsePlanCtx } from '../cli.js';
 import { createGitStateStore, defaultSh } from '../adapters/git-state-store.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -232,5 +232,180 @@ test('AC#3 — non-architect is refused and no event is written', async () => {
       false,
       'events.jsonl must not exist when approval is refused',
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC#1 (gate verb) — `gate <feature> <name>` pass / fail / no-write
+//
+// The on-disk gate path (state.gate → readEvents → evaluateGate) reads the
+// per-feature events.jsonl directly from disk under repoRoot. Like the AC#2
+// approve tests, these invoke the exported gateCommand with an injected
+// `repoRoot` so the seeded temp-repo log is the one evaluated (the CLI's
+// REPO_ROOT is fixed to the harness package, so a shelled-out cwd cannot
+// redirect the on-disk path — only the injected repoRoot does). This still
+// exercises the verb end-to-end: arg parse → state.gate → structured line →
+// exit code.
+//
+// The --stdin path reads fd 0, so its tests shell out to `node cli.js` and pipe
+// JSONL via execFileSync's `input` — repoRoot is irrelevant there.
+//
+// The approved event mirrors recordApproval's persisted shape:
+//   { feature, type: 'approved', actor, role: 'architect', ts }.
+// ---------------------------------------------------------------------------
+
+/** Write a per-feature events.jsonl with the given events (one JSON object per line). */
+function writeEventLog(repoRoot, feature, events) {
+  const stateDir = join(repoRoot, '.agents', 'state', feature);
+  mkdirSync(stateDir, { recursive: true });
+  const file = join(stateDir, 'events.jsonl');
+  writeFileSync(file, events.map((e) => JSON.stringify(e)).join('\n') + '\n', 'utf8');
+  return file;
+}
+
+/** A well-formed approved event carrying the architect role (satisfies the gate). */
+function approvedEvent(feature) {
+  return {
+    feature,
+    type: 'approved',
+    actor: 'architect@example.com',
+    role: 'architect',
+    ts: '2026-06-15T00:00:00.000Z',
+  };
+}
+
+/** Capture the structured stdout line gateCommand writes (read-only assertion). */
+function captureStdout(fn) {
+  const original = process.stdout.write.bind(process.stdout);
+  let captured = '';
+  process.stdout.write = (chunk) => {
+    captured += chunk;
+    return true;
+  };
+  return Promise.resolve(fn())
+    .then((value) => ({ value, stdout: captured }))
+    .finally(() => {
+      process.stdout.write = original;
+    });
+}
+
+/** Invoke `node cli.js gate ...` as a subprocess. Returns { status, stdout, stderr }. */
+function runGateProc(argv, opts = {}) {
+  try {
+    const stdout = execFileSync(process.execPath, [CLI, 'gate', ...argv], {
+      encoding: 'utf8',
+      ...opts,
+    });
+    return { status: 0, stdout, stderr: '' };
+  } catch (err) {
+    return { status: err.status ?? 1, stdout: err.stdout ?? '', stderr: err.stderr ?? '' };
+  }
+}
+
+test('AC#1 (gate) — approved event in the log → exit 0 and passed=true', async () => {
+  await withTempRepo(async (repoRoot) => {
+    writeFileSync(join(repoRoot, 'CLAUDE.md'), '# CLAUDE\n', 'utf8');
+
+    const feature = 'gate-feature';
+    writeEventLog(repoRoot, feature, [approvedEvent(feature)]);
+
+    const { value: code, stdout } = await captureStdout(() =>
+      gateCommand([feature, 'approved'], { repoRoot }),
+    );
+    assert.equal(code, 0, `gate should return 0 when an approved event exists; got ${code}`);
+    assert.ok(stdout.includes('passed=true'), `stdout should report passed=true; got:\n${stdout}`);
+    assert.ok(stdout.includes('source=log'), `stdout should report source=log; got:\n${stdout}`);
+  });
+});
+
+test('AC#1 (gate) — no approved event → non-zero exit and passed=false', async () => {
+  await withTempRepo(async (repoRoot) => {
+    writeFileSync(join(repoRoot, 'CLAUDE.md'), '# CLAUDE\n', 'utf8');
+
+    const feature = 'gate-feature';
+    // A log that exists but holds no approved event — gate must fail closed.
+    writeEventLog(repoRoot, feature, [
+      { feature, type: 'planned', actor: 'dev@example.com', role: 'developer', ts: '2026-06-15T00:00:00.000Z' },
+    ]);
+
+    const { value: code, stdout } = await captureStdout(() =>
+      gateCommand([feature, 'approved'], { repoRoot }),
+    );
+    assert.ok(code !== 0, `gate should return non-zero with no approved event; got ${code}`);
+    assert.ok(stdout.includes('passed=false'), `stdout should report passed=false; got:\n${stdout}`);
+  });
+});
+
+test('AC#1 (gate) — missing log fails closed → non-zero exit', async () => {
+  await withTempRepo(async (repoRoot) => {
+    writeFileSync(join(repoRoot, 'CLAUDE.md'), '# CLAUDE\n', 'utf8');
+
+    const feature = 'gate-feature';
+    // No events.jsonl written at all: absence must never pass the gate.
+    const { value: code, stdout } = await captureStdout(() =>
+      gateCommand([feature, 'approved'], { repoRoot }),
+    );
+    assert.ok(code !== 0, `gate should fail closed when the log is missing; got ${code}`);
+    assert.ok(stdout.includes('passed=false'), `stdout should report passed=false; got:\n${stdout}`);
+  });
+});
+
+test('AC#1 (gate) — writes nothing: log unchanged, no plan doc created', async () => {
+  await withTempRepo(async (repoRoot) => {
+    writeFileSync(join(repoRoot, 'CLAUDE.md'), '# CLAUDE\n', 'utf8');
+
+    const feature = 'gate-feature';
+    const logFile = writeEventLog(repoRoot, feature, [approvedEvent(feature)]);
+    const before = readFileSync(logFile, 'utf8');
+
+    const { value: code } = await captureStdout(() =>
+      gateCommand([feature, 'approved'], { repoRoot }),
+    );
+    assert.equal(code, 0, 'gate should pass for the seeded approved event');
+
+    // The verb is read-only: the event log is byte-for-byte unchanged...
+    const after = readFileSync(logFile, 'utf8');
+    assert.equal(after, before, 'gate must not mutate the event log');
+
+    // ...and no plan doc was created as a side effect.
+    const planFile = join(repoRoot, '.agents', 'plans', `${feature}.md`);
+    assert.equal(existsSync(planFile), false, 'gate must not create a plan doc');
+  });
+});
+
+test('AC#1 (gate) — --stdin path: piped approved event → exit 0 and source=stdin', async () => {
+  await withTempRepo(async (repoRoot) => {
+    writeFileSync(join(repoRoot, 'CLAUDE.md'), '# CLAUDE\n', 'utf8');
+
+    const feature = 'gate-feature';
+    // No on-disk log; the event arrives purely via stdin (JSONL). Shell out so
+    // the verb reads a real fd 0.
+    const piped = JSON.stringify(approvedEvent(feature)) + '\n';
+
+    const { status, stdout } = runGateProc([feature, 'approved', '--stdin'], {
+      cwd: repoRoot,
+      input: piped,
+    });
+    assert.equal(status, 0, `gate --stdin should exit 0 for a piped approved event; got ${status}`);
+    assert.ok(stdout.includes('passed=true'), `stdout should report passed=true; got:\n${stdout}`);
+    assert.ok(stdout.includes('source=stdin'), `stdout should report source=stdin; got:\n${stdout}`);
+
+    // --stdin path writes nothing on disk: no event log materialized.
+    const logFile = join(repoRoot, '.agents', 'state', feature, 'events.jsonl');
+    assert.equal(existsSync(logFile), false, 'gate --stdin must not write an event log');
+  });
+});
+
+test('AC#1 (gate) — --stdin path: empty stdin fails closed → non-zero exit', async () => {
+  await withTempRepo(async (repoRoot) => {
+    writeFileSync(join(repoRoot, 'CLAUDE.md'), '# CLAUDE\n', 'utf8');
+
+    const feature = 'gate-feature';
+    const { status, stdout } = runGateProc([feature, 'approved', '--stdin'], {
+      cwd: repoRoot,
+      input: '',
+    });
+    assert.ok(status !== 0, `gate --stdin should fail closed on empty stdin; got ${status}`);
+    assert.ok(stdout.includes('passed=false'), `stdout should report passed=false; got:\n${stdout}`);
   });
 });
