@@ -29,6 +29,20 @@
 import { resolveOutcome } from './matrix.js';
 import { fingerprint } from './fingerprint.js';
 import { resumeFrom, totalUsage } from './events.js';
+import { OUTCOME_VOCAB } from './hook-runner.js';
+
+/** The fail-closed aborting outcome a veto resolves to when its token is somehow
+ * not a member of the frozen vocabulary. Mirrors the runner's own fallback so an
+ * invalid token NEVER reaches resolveOutcome (an unknown outcome throws in the
+ * matrix). The runner already validates and falls back; we defend here too. */
+const VETO_ABORT_OUTCOME = 'abort-user';
+
+/** Validate a veto outcome against the frozen 7-outcome vocabulary BEFORE it
+ * reaches resolveOutcome. Fail-closed: an unrecognized token becomes
+ * 'abort-user' (which the matrix resolves to `abort`), never an unknown token. */
+function safeVetoOutcome(outcome) {
+  return OUTCOME_VOCAB.has(outcome) ? outcome : VETO_ABORT_OUTCOME;
+}
 
 /** Bounded attempt budget per wave — the hard ceiling. The doom-loop breaker is
  * the early exit; this cap only bites when every attempt fails *differently*. */
@@ -205,27 +219,48 @@ export async function deliverSpine({
     let advanced = false;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-      // ── Hook: pre-wave (veto-capable point; OBSERVE-ONLY this wave). Fired
-      // before runWave. We observe + emit; the veto result is NOT routed into
-      // resolveOutcome — that reroute is Wave 3. TODO(wave3): consume preVeto. ──
+      // ── Hook: pre-wave (veto-capable point). Fired BEFORE runWave. A veto here
+      // aborts the wave without running the agent: route the veto outcome through
+      // the existing matrix and terminate the same way an agent-emitted outcome
+      // would. The veto outcome is validated against the frozen vocabulary first
+      // (fail-closed → 'abort-user') so an unknown token never reaches the matrix.
+      // First-veto-wins is enforced in the runner. ──
       const preVeto = fireHooks(
         runHooks,
         'pre-wave',
         { feature, wave: wave.n, outcome: null },
         { state, feature, now },
-      ).veto; // eslint-disable-line no-unused-vars -- TODO(wave3): route veto
+      ).veto;
+      if (preVeto) {
+        const vetoOutcome = safeVetoOutcome(preVeto.outcome);
+        const provenance = { point: 'pre-wave', hook: preVeto.hook, outcome: vetoOutcome, source: 'hook' };
+        state.append({ feature, type: 'hook-veto', actor: 'harness', ts: now(), data: provenance });
+        const { action } = resolveOutcome('implement', vetoOutcome, matrix);
+        state.append({
+          feature,
+          type: 'wave-failed',
+          actor: 'harness',
+          ts: now(),
+          data: { wave: wave.n, action, outcome: vetoOutcome, source: 'hook', point: 'pre-wave', hook: preVeto.hook },
+        });
+        return { stopped: 'hook-veto', ok: false, wave: wave.n, action, outcome: vetoOutcome, point: 'pre-wave' };
+      }
 
       const result = await runWave(wave);
 
-      // ── Hook: post-wave (veto-capable point; OBSERVE-ONLY this wave). Fired
-      // after the wave result, before the per-wave test gate. Observe + emit only;
-      // TODO(wave3): route a post-wave veto into resolveOutcome. ──
+      // ── Hook: post-wave (veto-capable point). Fired after the wave result,
+      // before the per-wave test gate. A veto here REPLACES the wave's outcome
+      // with the veto outcome and routes it through the existing matrix —
+      // generalizing the check-tests success→fail-tests demotion below to any
+      // fixed-vocabulary outcome. Validated fail-closed first; first-veto-wins is
+      // enforced in the runner. ──
       const postVeto = fireHooks(
         runHooks,
         'post-wave',
         { feature, wave: wave.n, outcome: result.outcome },
         { state, feature, now },
-      ).veto; // eslint-disable-line no-unused-vars -- TODO(wave3): route veto
+      ).veto;
+      let vetoSource = null; // { point, hook } when a post-wave veto drove the outcome
 
       // ── Per-wave test gate. A wave the model thinks succeeded only advances if
       // the cumulative tests are green at THIS point — otherwise it introduced a
@@ -234,7 +269,27 @@ export async function deliverSpine({
       // here instead of advancing a broken base. ──
       let { outcome } = result;
       let gated = result;
-      if (resolveOutcome('implement', outcome, matrix).action === 'advance') {
+      if (postVeto) {
+        // A post-wave veto is authoritative: it REPLACES the model's outcome with
+        // the (validated, fail-closed) veto outcome and routes THAT through the
+        // matrix — exactly generalizing the check-tests demotion to any outcome.
+        // It supersedes the per-wave test gate (the operator has already decided).
+        const vetoOutcome = safeVetoOutcome(postVeto.outcome);
+        vetoSource = { point: 'post-wave', hook: postVeto.hook };
+        state.append({
+          feature,
+          type: 'hook-veto',
+          actor: 'harness',
+          ts: now(),
+          data: { point: 'post-wave', hook: postVeto.hook, outcome: vetoOutcome, source: 'hook' },
+        });
+        outcome = vetoOutcome;
+        gated = {
+          outcome,
+          categories: ['hook-veto'],
+          summary: `post-wave hook veto (${postVeto.hook})`,
+        };
+      } else if (resolveOutcome('implement', outcome, matrix).action === 'advance') {
         const gate = sh('scripts/check-tests.sh', feature);
         if (gate.status !== 0) {
           outcome = 'fail-tests';
@@ -261,7 +316,14 @@ export async function deliverSpine({
         // `gated` object carries no usage). Usage is OPTIONAL: an adapter that
         // emits none leaves `result.usage` undefined and the key is included as
         // undefined, which folds/serializes the same as a legacy event.
-        data: { wave: wave.n, outcome, usage: result.usage },
+        //
+        // Provenance (Task 3.2): when a post-wave veto drove the outcome, tag the
+        // attempt with source/point/hook so a veto-originated outcome is
+        // distinguishable from an agent-emitted one. Absent a veto the shape is
+        // unchanged — no provenance keys are added.
+        data: vetoSource
+          ? { wave: wave.n, outcome, usage: result.usage, source: 'hook', point: vetoSource.point, hook: vetoSource.hook }
+          : { wave: wave.n, outcome, usage: result.usage },
       });
 
       // Accumulate this attempt's token spend for the budget breaker. Usage is
@@ -329,7 +391,9 @@ export async function deliverSpine({
             type: 'wave-failed',
             actor: 'harness',
             ts: now(),
-            data: { wave: wave.n, reason: 'doom-loop' },
+            data: vetoSource
+              ? { wave: wave.n, reason: 'doom-loop', source: 'hook', point: vetoSource.point, hook: vetoSource.hook }
+              : { wave: wave.n, reason: 'doom-loop' },
           });
           return {
             stopped: 'doom-loop',
@@ -356,7 +420,9 @@ export async function deliverSpine({
         type: 'wave-failed',
         actor: 'harness',
         ts: now(),
-        data: { wave: wave.n, action },
+        data: vetoSource
+          ? { wave: wave.n, action, outcome, source: 'hook', point: vetoSource.point, hook: vetoSource.hook }
+          : { wave: wave.n, action },
       });
       return {
         stopped: 'matrix',
