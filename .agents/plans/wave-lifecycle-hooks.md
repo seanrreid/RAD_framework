@@ -1,7 +1,8 @@
 # Plan: Wave-Lifecycle Hooks for the Deliver Spine
 Created: 2026-06-15
 Author: architect
-Status: in-progress
+Status: complete
+Completed-At: 2026-06-15T19:30:00Z
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-06-15T19:09:35.886Z
 Branch: rad/wave-lifecycle-hooks
@@ -66,6 +67,8 @@ No out-of-scope dependencies — all target files are within architect scope.
 | harness/test/hook-runner.test.js | 1-180 | NEW — unit tests: discovery order, observe fail-open, veto fail-closed, vocabulary validation, provenance |
 | harness/test/spine.test.js | 560-710 | Extend — hooks fire per point; veto reroute; backward-compat (no-dir) event-sequence snapshot |
 | scripts/hooks/README.md | 1-120 | NEW — convention dir, 6 points, observe vs veto, invocation contract, ordering, fail semantics, `.sample` example hooks |
+| scripts/hooks/post-wave/10-example-veto.sh.sample | 1-20 | NEW — inert (`.sample`, non-executable) example veto hook referenced by Task 4.1 |
+| scripts/hooks/on-error/10-example-observe.sh.sample | 1-20 | NEW — inert (`.sample`, non-executable) example observe hook referenced by Task 4.1 |
 | CLAUDE.md | 230-250 | Add `### Wave-Lifecycle Hooks` under RAD Configuration |
 
 ## Execution Notes
