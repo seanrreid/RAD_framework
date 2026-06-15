@@ -1,0 +1,20 @@
+#!/bin/sh
+# Sample post-wave hook (veto-capable, fail-closed). INERT: the `.sample`
+# suffix and the absent executable bit both keep the runner from discovering it.
+# To activate: copy without `.sample` into scripts/hooks/post-wave/ and chmod +x.
+#
+# Argv: $1=feature $2=wave $3=post-wave $4=current-outcome
+# Env:  RAD_HOOK_FEATURE RAD_HOOK_WAVE RAD_HOOK_POINT RAD_HOOK_OUTCOME
+#
+# Contract: print exactly one frozen-vocabulary token on stdout and exit 0.
+#   success                                   -> explicit pass, no veto
+#   fail-tests|fail-scope|fail-protocol|...   -> veto with that outcome
+#   abort-user                                -> veto -> abort
+# A non-zero exit, a crash, empty stdout, or an unknown token is a fail-closed
+# veto resolving to abort-user.
+
+if [ -f .block-delivery ]; then
+  echo fail-scope   # veto: route through the matrix as fail-scope
+else
+  echo success      # explicit pass
+fi
