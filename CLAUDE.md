@@ -194,6 +194,34 @@ auth|payment|billing|migration|secret|credential|token
 Set `RAD_HIGH_RISK_PATTERNS` to override the default with your own `|`-separated
 extended-regex alternation. Empty disables the check.
 
+### Wave-Lifecycle Hooks
+
+OPTIONAL and backward-compatible — absent, `/rad-deliver` behaves exactly as
+before. Operator-supplied scripts the deliver spine fires at fixed points in the
+wave loop, for policy, notification, or observation.
+
+```
+RAD_HOOKS_DIR: <directory path>   # convention dir (default: scripts/hooks)
+```
+
+Drop an **executable** script into `<hooksDir>/<point>/`; hooks run in lexical
+filename order. The spine fires six lifecycle points:
+
+- **veto-capable** (`pre-wave`, `post-wave`) — a hook MAY abort or redirect the
+  wave. **Fail-closed**: a crash, non-zero exit, empty stdout, or out-of-vocabulary
+  token is treated as a veto resolving to `abort-user`.
+- **observe-only** (`on-outcome`, `on-retry`, `on-error`, `wave-complete`) — a hook
+  may only watch. **Fail-open**: a failure records a `hook-failed` event but NEVER
+  vetoes and NEVER changes flow.
+
+Veto outcomes reuse the frozen 7-outcome matrix vocabulary (`success | fail-tests
+| fail-scope | fail-protocol | fail-timeout | no-changes | abort-user`) — a hook
+cannot invent a new outcome. With no hooks dir the appended event sequence is
+byte-for-byte identical to today's.
+
+See `scripts/hooks/README.md` for the full invocation contract (argv positions,
+`RAD_HOOK_*` env, stdout veto token, exit-code semantics, first-veto-wins).
+
 ### PR Labels
 
 ```
