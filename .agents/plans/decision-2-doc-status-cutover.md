@@ -1,9 +1,10 @@
 # Plan: Decision 2 — Doc-Status Authority Cutover
 Created: 2026-06-15
 Author: architect
-Status: in-progress
+Status: complete
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-06-15T17:18:27.021Z
+Completed-At: 2026-06-15T17:52:00Z
 Branch: rad/decision-2-doc-status-cutover
 
 ## Context
