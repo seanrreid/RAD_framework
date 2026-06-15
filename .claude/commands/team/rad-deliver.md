@@ -52,7 +52,10 @@ fi
 
 ### Step 2: Verify the plan is approved
 
-The gate reads the plan's own branch tip:
+The gate evaluates the appended `approved` event over the feature's event log
+(`.agents/state/<feature>/events.jsonl`) — the event log is the approval
+authority. The plan-doc `Status:` header is display-only and is not consulted by
+the gate. The check still runs against the plan's own branch tip:
 
 ```bash
 scripts/check-plan-approved.sh "$WORK_BRANCH"

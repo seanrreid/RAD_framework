@@ -237,11 +237,14 @@ Record {architect}'s approval of this plan?
 ### Step 4: Record the approval (delegated to the CLI)
 
 **Do not write the plan-doc Status fields or append the event yourself.** The
-`rad` CLI owns the recording — it both appends the `approved` event to the
-feature's `events.jsonl` (via `recordApproval`) AND writes the plan-doc Status
-header (`Status: approved`, `Approved-By`, `Approved-At`, plus `Recorded-By` and
-`Approval-Evidence` in proxy mode). It performs the same authority checks
-(`scripts/check-role.sh`) described in Step 1, so a refusal here mirrors that gate.
+`rad` CLI owns the recording — it appends the `approved` event to the feature's
+`events.jsonl` (via `recordApproval`), which is the approval **authority** that
+gates `/rad-deliver`. It also writes the plan-doc Status header
+(`Status: approved`, `Approved-By`, `Approved-At`, plus `Recorded-By` and
+`Approval-Evidence` in proxy mode), but that header is now a **display mirror**
+only — no gate reads it; the appended `approved` event is canonical. The CLI
+performs the same authority checks (`scripts/check-role.sh`) described in Step 1,
+so a refusal here mirrors that gate.
 
 Run it from the repo root on the work-branch tip you checked out in Step 2:
 
