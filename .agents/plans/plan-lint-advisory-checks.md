@@ -1,7 +1,7 @@
 # Plan: Plan-Lint Advisory Checks
 Created: 2026-06-12
 Author: architect
-Status: approved
+Status: in-progress
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-06-15T14:54:05.948Z
 Branch: rad/plan-lint-advisory-checks
