@@ -237,6 +237,12 @@ export function createGitStateStore({
     const existing = history(feature);
     // reduce derives the current state; transition validation reads its history.
     reduce(existing); // pure fold (also asserts the history shape)
+    // The hook lifecycle events (hook-observed / hook-veto / hook-failed) are
+    // in-progress observations recorded alongside wave events. They carry a
+    // provenance payload on `event.data` ({ point, hook, outcome, source:'hook' })
+    // and are permitted exactly like wave-attempt/wave-failed — validateTransition
+    // gates illegal MOVES (post-terminal, duplicate approval, …), not a type
+    // allowlist, so these three pass while no other event is loosened.
     validateTransition(event, { history: existing });
 
     // Only reached on a legal transition — now safe to persist.
