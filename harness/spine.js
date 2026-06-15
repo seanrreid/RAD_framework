@@ -39,6 +39,54 @@ const MAX_ATTEMPTS = 3;
  * check-tests is no longer an end post-check — only scope + PR remain. */
 const POST_CHECKS = ['check-scope.sh', 'open-pr.sh'];
 
+/** Neutral no-op hook runner. The default injected `runHooks`: returns the same
+ * empty result an absent hooks dir produces, so wiring hooks into the spine
+ * changes NOTHING when no hooks are configured (AC#1 — backward compat). */
+const NOOP_HOOKS = () => ({ ran: [], veto: null, failures: [] });
+
+/** Neutral no-op hook pre-flight. The default injected `hookPreflight`: does
+ * nothing. With no hooks dir there is nothing to validate, so omitting a real
+ * pre-flight is exactly today's behavior (AC#1 — absent dir changes nothing). */
+const NOOP_PREFLIGHT = () => {};
+
+/**
+ * Fire the hook runner at one lifecycle point and record what it observed.
+ *
+ * OBSERVE-ONLY (this wave): every hook that ran becomes a `hook-observed` event;
+ * every failure becomes a `hook-failed` event. Neither alters wave flow — observe
+ * is fail-open by construction (we only append events). The veto reroute is
+ * Wave 3; the result's `veto` is intentionally NOT routed into resolveOutcome
+ * here. See TODO(wave3) at the call seam.
+ *
+ * @param {Function} runHooks - injected runner: (point, ctx) => { ran, veto, failures }
+ * @param {string} point - lifecycle point name
+ * @param {Object} ctx - { feature, wave, outcome }
+ * @param {Object} args - { state, feature, now } for event stamping
+ * @returns {{ ran: Array, veto: (Object|null), failures: Array }} the runner result (unrouted)
+ */
+function fireHooks(runHooks, point, ctx, { state, feature, now }) {
+  const res = runHooks(point, ctx) || { ran: [], veto: null, failures: [] };
+  for (const entry of res.ran || []) {
+    state.append({
+      feature,
+      type: 'hook-observed',
+      actor: 'harness',
+      ts: now(),
+      data: { point, hook: entry.hook, outcome: entry.outcome, source: 'hook' },
+    });
+  }
+  for (const failure of res.failures || []) {
+    state.append({
+      feature,
+      type: 'hook-failed',
+      actor: 'harness',
+      ts: now(),
+      data: { point, hook: failure.hook, outcome: failure.reason, source: 'hook' },
+    });
+  }
+  return res;
+}
+
 /**
  * Run the deliver spine for one feature.
  *
@@ -53,6 +101,19 @@ const POST_CHECKS = ['check-scope.sh', 'open-pr.sh'];
  * @param {() => string} args.now - injected clock (ISO timestamp)
  * @param {number} [args.maxAttempts] - per-wave attempt ceiling (defaults to MAX_ATTEMPTS); injectable for tests
  * @param {number} [args.tokenBudget] - optional cumulative token ceiling; 0/null/undefined disables the breaker (no behavior change)
+ * @param {(point: string, ctx: Object) => { ran: Array, veto: (Object|null), failures: Array }} [args.runHooks]
+ *   wave-lifecycle hook runner (from createHookRunner). OBSERVE-ONLY in this wave:
+ *   fired at six lifecycle points, its observations/failures are recorded as
+ *   hook-observed / hook-failed events. Defaults to a neutral no-op so that with
+ *   NO hooks dir the appended event sequence is byte-for-byte identical to before
+ *   (AC#1). The veto reroute is Wave 3 — not implemented here.
+ * @param {() => void} [args.hookPreflight] - deliver-start hook directory probe.
+ *   Run ONCE right after `deliver-started`, it discovers/validates the hooks dir
+ *   up front so an unreadable or malformed dir surfaces deterministically/early
+ *   rather than mid-wave. An ABSENT dir is a silent no-op (the common case —
+ *   changes nothing). Reuses the runner's own discovery (no duplicated FS logic);
+ *   defaults to a no-op so omitting it is exactly today's behavior (AC#1). It may
+ *   throw on a malformed dir; the spine lets that surface to the caller.
  * @returns {Promise<Object>} structured terminal result
  */
 export async function deliverSpine({
@@ -66,6 +127,8 @@ export async function deliverSpine({
   now,
   maxAttempts = MAX_ATTEMPTS,
   tokenBudget = null,
+  runHooks = NOOP_HOOKS,
+  hookPreflight = NOOP_PREFLIGHT,
 }) {
   // ── DET gate: approval. The human (or proxy) decided earlier; here we ENFORCE
   // it. A blocked gate is a normal outcome — return structured, append nothing
@@ -76,6 +139,13 @@ export async function deliverSpine({
   }
 
   state.append({ feature, type: 'deliver-started', actor: 'harness', ts: now() });
+
+  // ── Hook pre-flight (Task 2.2). Validate the hooks dir ONCE up front so an
+  // unreadable/malformed dir surfaces deterministically here rather than mid-wave.
+  // Reuses the runner's discovery (injected) — no duplicated FS logic. An ABSENT
+  // dir is a silent no-op (default NOOP_PREFLIGHT): nothing to validate, nothing
+  // changes. A malformed dir is allowed to throw to the caller. ──
+  hookPreflight();
 
   const plan = state.plan(feature);
   const waves = (plan && plan.waves) || [];
@@ -135,7 +205,27 @@ export async function deliverSpine({
     let advanced = false;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      // ── Hook: pre-wave (veto-capable point; OBSERVE-ONLY this wave). Fired
+      // before runWave. We observe + emit; the veto result is NOT routed into
+      // resolveOutcome — that reroute is Wave 3. TODO(wave3): consume preVeto. ──
+      const preVeto = fireHooks(
+        runHooks,
+        'pre-wave',
+        { feature, wave: wave.n, outcome: null },
+        { state, feature, now },
+      ).veto; // eslint-disable-line no-unused-vars -- TODO(wave3): route veto
+
       const result = await runWave(wave);
+
+      // ── Hook: post-wave (veto-capable point; OBSERVE-ONLY this wave). Fired
+      // after the wave result, before the per-wave test gate. Observe + emit only;
+      // TODO(wave3): route a post-wave veto into resolveOutcome. ──
+      const postVeto = fireHooks(
+        runHooks,
+        'post-wave',
+        { feature, wave: wave.n, outcome: result.outcome },
+        { state, feature, now },
+      ).veto; // eslint-disable-line no-unused-vars -- TODO(wave3): route veto
 
       // ── Per-wave test gate. A wave the model thinks succeeded only advances if
       // the cumulative tests are green at THIS point — otherwise it introduced a
@@ -182,7 +272,24 @@ export async function deliverSpine({
       // The MATRIX decides what happens next — never inline retry arithmetic.
       const { action } = resolveOutcome('implement', outcome, matrix);
 
+      // ── Hook: on-outcome (observe-only). Fired after the matrix resolves the
+      // outcome, before the action is dispatched. Observe + emit only. ──
+      fireHooks(
+        runHooks,
+        'on-outcome',
+        { feature, wave: wave.n, outcome },
+        { state, feature, now },
+      );
+
       if (action === 'advance') {
+        // ── Hook: wave-complete (observe-only). Fired in the advance block as the
+        // wave is recorded complete. Observe + emit only. ──
+        fireHooks(
+          runHooks,
+          'wave-complete',
+          { feature, wave: wave.n, outcome },
+          { state, feature, now },
+        );
         state.append({
           feature,
           type: 'wave-complete',
@@ -195,12 +302,28 @@ export async function deliverSpine({
       }
 
       if (action === 'retry' || action === 'revision') {
+        // ── Hook: on-retry (observe-only). Fired in the retry/revision branch.
+        // Observe + emit only. ──
+        fireHooks(
+          runHooks,
+          'on-retry',
+          { feature, wave: wave.n, outcome },
+          { state, feature, now },
+        );
         // Doom-loop breaker: an identical *failure* fingerprint twice in a row
         // means the retry is provably stuck — abort rather than burn the budget.
         // Only failing (retry/revision) outcomes are fingerprinted here, so a
         // genuine success can never trip the breaker (it advances above first).
         const print = fingerprint(gated);
         if (print === lastPrint) {
+          // ── Hook: on-error (observe-only). Fired at this wave-failed terminal
+          // (doom-loop). Observe + emit only. ──
+          fireHooks(
+            runHooks,
+            'on-error',
+            { feature, wave: wave.n, outcome },
+            { state, feature, now },
+          );
           state.append({
             feature,
             type: 'wave-failed',
@@ -220,6 +343,14 @@ export async function deliverSpine({
       }
 
       // 'abort' | 'surface' (and any other declared terminal action).
+      // ── Hook: on-error (observe-only). Fired at this wave-failed terminal
+      // (matrix abort/surface). Observe + emit only. ──
+      fireHooks(
+        runHooks,
+        'on-error',
+        { feature, wave: wave.n, outcome },
+        { state, feature, now },
+      );
       state.append({
         feature,
         type: 'wave-failed',
@@ -238,6 +369,14 @@ export async function deliverSpine({
 
     if (!advanced) {
       // Budget exhausted without an advance (and without a doom-loop trip).
+      // ── Hook: on-error (observe-only). Fired at this wave-failed terminal
+      // (budget-exhausted). Observe + emit only. ──
+      fireHooks(
+        runHooks,
+        'on-error',
+        { feature, wave: wave.n, outcome: null },
+        { state, feature, now },
+      );
       state.append({
         feature,
         type: 'wave-failed',
