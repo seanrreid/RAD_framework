@@ -226,6 +226,7 @@ Approval requires:
 ## Workflow
 
 ```
+Architect:  /rad-epic-decompose → Gate 0: shapes a GitHub epic into per-child stories, writes .agents/epics/ (no plans, no commit)
 Anyone:     /rad-research → consumes PRD/issue, writes .agents/research/
 Architect:  /rad-design   → drafts + generates .claude/agents/ boundaries
 Team:       /rad-plan     → cuts rad/[feature] branch, commits plan (no PR)
@@ -234,5 +235,12 @@ Architect:  /rad-approve  → records approval on the branch tip (Gate 1, no PR)
 Team:       /rad-deliver  → wave execution on the same branch, opens the deliver PR (Gate 2)
 Architect:  PR review     → merge the rad/[feature] branch to default_branch
 ```
+
+`/rad-epic-decompose` is an OPTIONAL Gate-0 shaping step upstream of
+`/rad-research`. It decomposes a GitHub epic into per-child shaping stories,
+writing a discovery artifact to `.agents/epics/epic-[N]-[slug].md` (Status:
+draft). It does not generate plans, research, or deliver, and it never
+auto-commits — the architect reviews, signs off, and commits by hand. See
+`docs/epic-decomposition.md` for when, why, and how to run it.
 
 See `docs/daily-workflow.md` for the full guide.
