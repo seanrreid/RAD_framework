@@ -579,3 +579,195 @@ test('(m) end post-checks run check-scope + open-pr (and no longer check-tests a
   const openPrIdx = shCalls.indexOf('scripts/open-pr.sh');
   assert.ok(!shCalls.slice(openPrIdx).includes('scripts/check-tests.sh'));
 });
+
+// ── Wave 2: lifecycle-hook integration (Tasks 2.1/2.2/2.3) ──────────────────
+
+/**
+ * A spy hook runner. Records each (point, ctx) call and, for the named points,
+ * reports one hook that "ran" (so a hook-observed event is appended) plus an
+ * optional failure (so a hook-failed event is appended). OBSERVE-ONLY: it never
+ * vetoes — the veto reroute is Wave 3.
+ */
+function makeHookSpy({ ranPoints = new Set(), failPoints = new Set() } = {}) {
+  const calls = [];
+  const runHooks = (point, ctx) => {
+    calls.push({ point, ctx });
+    const ran = ranPoints.has(point)
+      ? [{ hook: `hooks/${point}/01.sh`, exit: 0, vetoed: false, outcome: 'success' }]
+      : [];
+    const failures = failPoints.has(point)
+      ? [{ hook: `hooks/${point}/01.sh`, reason: 'exit 1' }]
+      : [];
+    return { point, ran, veto: null, failures };
+  };
+  return { runHooks, calls };
+}
+
+const ALL_POINTS = ['pre-wave', 'post-wave', 'on-outcome', 'on-retry', 'on-error', 'wave-complete'];
+
+test('(w2-a) hooks fire at all six lifecycle points across happy + retry + error runs', async () => {
+  // A single happy-path run exercises pre-wave, post-wave, on-outcome, wave-complete.
+  const happyState = makeFakeState({ gateResult: passingGate, plan: { waves: [{ n: 1 }] } });
+  const happySpy = makeHookSpy({ ranPoints: new Set(ALL_POINTS) });
+  await deliverSpine({
+    feature: 'demo',
+    state: happyState,
+    docs: {},
+    matrix: MATRIX,
+    gates: {},
+    runWave: async () => ({ outcome: 'success' }),
+    sh: () => ({ status: 0 }),
+    now: fixedClock(),
+    runHooks: happySpy.runHooks,
+  });
+  const happyPoints = happySpy.calls.map((c) => c.point);
+  for (const p of ['pre-wave', 'post-wave', 'on-outcome', 'wave-complete']) {
+    assert.ok(happyPoints.includes(p), `happy run fired ${p}`);
+  }
+  // Exactly once each for a single-attempt, single-wave advance.
+  assert.equal(happyPoints.filter((p) => p === 'pre-wave').length, 1);
+  assert.equal(happyPoints.filter((p) => p === 'wave-complete').length, 1);
+  // Each ran hook produced a hook-observed event with the right provenance shape.
+  const observed = happyState.appended.filter((e) => e.type === 'hook-observed');
+  assert.ok(observed.length >= 4);
+  for (const e of observed) {
+    assert.equal(e.data.source, 'hook');
+    assert.ok(ALL_POINTS.includes(e.data.point));
+    assert.ok(typeof e.data.hook === 'string');
+  }
+
+  // A doom-loop run exercises on-retry (attempt 1) and on-error (the abort).
+  const failState = makeFakeState({ gateResult: passingGate, plan: { waves: [{ n: 1 }] } });
+  const failSpy = makeHookSpy({ ranPoints: new Set(ALL_POINTS) });
+  await deliverSpine({
+    feature: 'demo',
+    state: failState,
+    docs: {},
+    matrix: MATRIX,
+    gates: {},
+    runWave: async () => ({ outcome: 'fail-tests', summary: 'identical failure' }),
+    sh: () => ({ status: 0 }),
+    now: fixedClock(),
+    runHooks: failSpy.runHooks,
+  });
+  const failPoints = failSpy.calls.map((c) => c.point);
+  assert.ok(failPoints.includes('on-retry'), 'fail run fired on-retry');
+  assert.ok(failPoints.includes('on-error'), 'fail run fired on-error');
+
+  // Union across both runs covers all six points.
+  const fired = new Set([...happyPoints, ...failPoints]);
+  for (const p of ALL_POINTS) assert.ok(fired.has(p), `some run fired ${p}`);
+});
+
+test('(w2-a2) observe failures are recorded as hook-failed but NEVER alter wave flow (fail-open)', async () => {
+  const state = makeFakeState({ gateResult: passingGate, plan: { waves: [{ n: 1 }] } });
+  // Every observe-only point reports a failure; the happy path must still complete.
+  const spy = makeHookSpy({
+    ranPoints: new Set(ALL_POINTS),
+    failPoints: new Set(['on-outcome', 'wave-complete']),
+  });
+  const result = await deliverSpine({
+    feature: 'demo',
+    state,
+    docs: {},
+    matrix: MATRIX,
+    gates: {},
+    runWave: async () => ({ outcome: 'success' }),
+    sh: () => ({ status: 0 }),
+    now: fixedClock(),
+    runHooks: spy.runHooks,
+  });
+  // Flow is unchanged: the wave still advances and the PR still opens.
+  assert.deepEqual(result, { ok: true, waves: 1 });
+  assert.ok(state.appended.some((e) => e.type === 'wave-complete'));
+  assert.ok(state.appended.some((e) => e.type === 'pr-opened'));
+  // The failures were recorded, not swallowed.
+  const failed = state.appended.filter((e) => e.type === 'hook-failed');
+  assert.ok(failed.length >= 2);
+  for (const e of failed) assert.equal(e.data.source, 'hook');
+});
+
+test('(w2-a3) hookPreflight runs exactly once at deliver-start; a malformed dir surfaces deterministically', async () => {
+  // Pre-flight is invoked once, right after deliver-started.
+  const okState = makeFakeState({ gateResult: passingGate, plan: { waves: [{ n: 1 }] } });
+  let preflightCalls = 0;
+  await deliverSpine({
+    feature: 'demo',
+    state: okState,
+    docs: {},
+    matrix: MATRIX,
+    gates: {},
+    runWave: async () => ({ outcome: 'success' }),
+    sh: () => ({ status: 0 }),
+    now: fixedClock(),
+    hookPreflight: () => { preflightCalls += 1; },
+  });
+  assert.equal(preflightCalls, 1);
+
+  // A malformed hooks dir surfaces early (the spine lets the probe throw to the caller).
+  const badState = makeFakeState({ gateResult: passingGate, plan: { waves: [{ n: 1 }] } });
+  await assert.rejects(
+    deliverSpine({
+      feature: 'demo',
+      state: badState,
+      docs: {},
+      matrix: MATRIX,
+      gates: {},
+      runWave: async () => ({ outcome: 'success' }),
+      sh: () => ({ status: 0 }),
+      now: fixedClock(),
+      hookPreflight: () => { throw new Error('hooks dir unreadable'); },
+    }),
+    /hooks dir unreadable/,
+  );
+  // Surfaced at deliver-start: no wave work happened (no wave-attempt, no pr-opened).
+  assert.ok(!badState.appended.some((e) => e.type === 'wave-attempt'));
+  assert.ok(!badState.appended.some((e) => e.type === 'pr-opened'));
+});
+
+test('(w2-b) BACKWARD-COMPAT SNAPSHOT: default no-op runHooks → event sequence byte-for-byte identical to the happy path (no hook-* events)', async () => {
+  // This is the exact construction of test (b) but with NO runHooks/hookPreflight
+  // injected — the defaults must reproduce the legacy sequence exactly.
+  const state = makeFakeState({ gateResult: passingGate, plan: twoWaves });
+  const runWave = async () => ({ outcome: 'success' });
+  const shCalls = [];
+  const sh = (script, feature) => {
+    shCalls.push({ script, feature });
+    return { status: 0 };
+  };
+  const result = await deliverSpine({
+    feature: 'demo',
+    state,
+    docs: {},
+    matrix: MATRIX,
+    gates: {},
+    runWave,
+    sh,
+    now: fixedClock(),
+  });
+  assert.deepEqual(result, { ok: true, waves: 2 });
+
+  // The sh call order is unchanged.
+  assert.deepEqual(
+    shCalls.map((c) => c.script),
+    [
+      'scripts/check-tests.sh',
+      'scripts/check-tests.sh',
+      'scripts/check-scope.sh',
+      'scripts/open-pr.sh',
+    ],
+  );
+
+  // THE SNAPSHOT: the appended event-type sequence is byte-for-byte the same as
+  // the legacy happy path — no hook-observed / hook-veto / hook-failed appear.
+  const types = state.appended.map((e) => e.type);
+  assert.deepEqual(types, [
+    'deliver-started',
+    'wave-attempt',
+    'wave-complete',
+    'wave-attempt',
+    'wave-complete',
+    'pr-opened',
+  ]);
+  assert.ok(!types.some((t) => t.startsWith('hook-')));
+});
