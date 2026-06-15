@@ -148,6 +148,79 @@ if has_section "Files in Scope"; then
   )
 fi
 
+# ── Per-task File: paths exist (advisory) ─────────────────────────────────────
+# Each `#### Task` block carries a `File:` line in a path:lines form
+# (e.g. harness/cli.js:290-410). Strip the trailing :lines suffix and, for any
+# path that is neither a file nor a directory on disk, warn (never error) naming
+# the task and the missing path. Parity with the Files-in-Scope existence check:
+# a directory counts as existing.
+
+# Strip a trailing :lines suffix from a task File: value (e.g. path:290-410 or
+# path:150 → path). Paths without a :digits suffix pass through unchanged.
+strip_task_file_lines() {
+  case "$1" in
+    *:[0-9]*) echo "${1%:*}" ;;
+    *)        echo "$1" ;;
+  esac
+}
+
+CURRENT_TASK=""
+while IFS= read -r line; do
+  if [[ "$line" =~ ^####\ Task ]]; then
+    CURRENT_TASK=$(echo "$line" | sed 's/^####[[:space:]]*//')
+  elif [[ "$line" =~ ^File: ]]; then
+    file_val=$(echo "$line" | sed 's/^File:[[:space:]]*//' | sed 's/[[:space:]]*$//')
+    file_path=$(strip_task_file_lines "$file_val")
+    [[ -z "$file_path" || "$file_path" == "[path]" ]] && continue
+    if [[ ! -f "$file_path" && ! -d "$file_path" ]]; then
+      WARNINGS+=("Task '${CURRENT_TASK}' references a File: path that does not exist: $file_path")
+    fi
+  fi
+done < "$PLAN_FILE"
+
+# ── High-risk path advisory ───────────────────────────────────────────────────
+# Over the union of Files-in-Scope paths and task `File:` paths, warn (never
+# error) for any path matching a high-risk pattern, advising close architect
+# review. RAD_HIGH_RISK_PATTERNS overrides the generic default (a |-separated
+# extended-regex alternation of generic infra-risk terms).
+RAD_HIGH_RISK_PATTERNS="${RAD_HIGH_RISK_PATTERNS:-auth|payment|billing|migration|secret|credential|token}"
+
+if [[ -n "$RAD_HIGH_RISK_PATTERNS" ]]; then
+  HIGH_RISK_PATHS=()
+
+  # Files-in-Scope table paths (column 2).
+  if has_section "Files in Scope"; then
+    while IFS= read -r path; do
+      path=$(echo "$path" | tr -d '[:space:]')
+      [[ -z "$path" || "$path" == "[path]" || "$path" == "File" ]] && continue
+      HIGH_RISK_PATHS+=("$path")
+    done < <(
+      awk '/^## Files in Scope/{found=1; next} /^## /{found=0} found && /^\|/' "$PLAN_FILE" \
+        | grep -v "^| *File" | grep -v "^|[-| ]*$" \
+        | awk -F'|' '{print $2}'
+    )
+  fi
+
+  # Task File: paths (with the :lines suffix stripped).
+  while IFS= read -r line; do
+    [[ "$line" =~ ^File: ]] || continue
+    file_val=$(echo "$line" | sed 's/^File:[[:space:]]*//' | sed 's/[[:space:]]*$//')
+    file_path=$(strip_task_file_lines "$file_val")
+    [[ -z "$file_path" || "$file_path" == "[path]" ]] && continue
+    HIGH_RISK_PATHS+=("$file_path")
+  done < "$PLAN_FILE"
+
+  # De-dup and warn on any match.
+  if [[ "${#HIGH_RISK_PATHS[@]}" -gt 0 ]]; then
+    while IFS= read -r path; do
+      [[ -z "$path" ]] && continue
+      if echo "$path" | grep -qE "$RAD_HIGH_RISK_PATTERNS"; then
+        WARNINGS+=("High-risk path in scope — flag for close architect review: $path")
+      fi
+    done < <(printf '%s\n' "${HIGH_RISK_PATHS[@]}" | sort -u)
+  fi
+fi
+
 # ── Context budget ────────────────────────────────────────────────────────────
 # Sum line ranges from the Files in Scope table (column 3 = Lines).
 # Range "45-120" → 76 lines. Plain number "150" → 150 lines. Others skipped.

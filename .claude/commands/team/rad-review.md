@@ -50,6 +50,17 @@ scripts/check-scope.sh "$PLAN" "rad/$FEATURE" "$BASE"
 The script outputs each changed file as in-scope or out-of-scope. Include its
 full output in the review report. Any out-of-scope files are HIGH priority.
 
+### Step 2b: Lint advisories
+
+```bash
+scripts/lint-plan.sh "$PLAN"
+```
+
+Run the plan linter against the plan under review and include its full output in
+the review report. These are **advisory only** — they surface plan-quality
+warnings for the architect's attention but do **not** gate the review or block
+architect review. This is separate from the Step 2 scope check.
+
 ### Step 3: Plan fidelity check
 
 For each task in the plan, verify the implementation matches the description:
