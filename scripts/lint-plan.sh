@@ -148,6 +148,31 @@ if has_section "Files in Scope"; then
   )
 fi
 
+# ── Per-task File: paths exist (advisory) ─────────────────────────────────────
+# Each `#### Task` block carries a `File:` line in a path:lines form
+# (e.g. harness/cli.js:290-410). Strip the trailing :lines suffix and, for any
+# path that is neither a file nor a directory on disk, warn (never error) naming
+# the task and the missing path. Parity with the Files-in-Scope existence check:
+# a directory counts as existing.
+
+CURRENT_TASK=""
+while IFS= read -r line; do
+  if [[ "$line" =~ ^####\ Task ]]; then
+    CURRENT_TASK=$(echo "$line" | sed 's/^####[[:space:]]*//')
+  elif [[ "$line" =~ ^File: ]]; then
+    file_val=$(echo "$line" | sed 's/^File:[[:space:]]*//' | sed 's/[[:space:]]*$//')
+    # Strip a trailing :lines suffix (e.g. path:290-410 or path:150).
+    case "$file_val" in
+      *:[0-9]*) file_path="${file_val%:*}" ;;
+      *)        file_path="$file_val" ;;
+    esac
+    [[ -z "$file_path" || "$file_path" == "[path]" ]] && continue
+    if [[ ! -f "$file_path" && ! -d "$file_path" ]]; then
+      WARNINGS+=("Task '${CURRENT_TASK}' references a File: path that does not exist: $file_path")
+    fi
+  fi
+done < "$PLAN_FILE"
+
 # ── Context budget ────────────────────────────────────────────────────────────
 # Sum line ranges from the Files in Scope table (column 3 = Lines).
 # Range "45-120" → 76 lines. Plain number "150" → 150 lines. Others skipped.
