@@ -23,6 +23,7 @@ import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import process from 'node:process';
 
 import { createGitStateStore, defaultSh } from './adapters/git-state-store.js';
+import { makeWorktreeLifecycle } from './adapters/worktree.js';
 import { deliverSpine } from './spine.js';
 import { createRunWave } from './adapters/agent/sdk.js';
 import { createCommandAdapter } from './adapters/agent/command.js';
@@ -393,6 +394,43 @@ export async function deliverCommand(argv, ctx) {
   const parsedBudget = Number.parseInt(process.env.RAD_TOKEN_BUDGET, 10);
   const tokenBudget = Number.isFinite(parsedBudget) && parsedBudget > 0 ? parsedBudget : null;
 
+  // Optional worktree isolation. RAD_WORKTREE follows the env-knob convention:
+  // unset/empty = OFF (exact today's behavior — main checkout, no worktree port,
+  // sh bound to repoRoot); any non-empty value = ON. When ON, the deliver run is
+  // isolated into a git worktree on the work branch so every check-*.sh / open-pr.sh
+  // runs against an isolated tree. RAD_WORKTREE_DIR (optional base dir) is read by
+  // the lifecycle script itself, so we just let it flow through the environment.
+  const worktreeEnabled = isNonEmpty(process.env.RAD_WORKTREE);
+
+  // shCwd is the directory the spine's scripts run in: repoRoot today, the
+  // worktree path when isolation is enabled. Defaults to repoRoot so the OFF
+  // path is byte-for-byte unchanged.
+  let shCwd = repoRoot;
+  let worktree = null;
+  if (worktreeEnabled) {
+    // The lifecycle adapter shells out via the same sh port, pinned to repoRoot so
+    // `git worktree` and the script path resolve against the main checkout.
+    worktree = makeWorktreeLifecycle({
+      sh: (file, args) => sh(file, args, { cwd: repoRoot }),
+      now: () => new Date().toISOString(),
+    });
+    // The work branch is the SAME rad/<feature> branch this deliver runs on. A git
+    // worktree cannot check out a branch already checked out in the main tree, so
+    // `git worktree add <dir> <branch>` will fail with a clear error if the main
+    // checkout is currently on the work branch. v1 surfaces that failure rather
+    // than detaching/relocating: RAD_WORKTREE requires the work branch not be
+    // checked out in the main tree. The plan's `Branch:` header is canonical;
+    // fall back to the rad/<feature> convention when it is absent.
+    const workBranch = isNonEmpty(planCtx.branch) ? planCtx.branch : `rad/${feature}`;
+    try {
+      shCwd = worktree.create(feature, workBranch);
+    } catch (err) {
+      const safe = sanitizeErrorMessage(err?.message ?? String(err));
+      process.stderr.write(`rad deliver: worktree create failed — ${safe}\n`);
+      return 1;
+    }
+  }
+
   let result;
   try {
     result = await deliverSpine({
@@ -402,15 +440,31 @@ export async function deliverCommand(argv, ctx) {
       matrix,
       gates: null,
       runWave,
-      sh: (script, feat) => sh(join(repoRoot, script), [feat], { cwd: repoRoot }),
+      sh: (script, feat) => sh(join(repoRoot, script), [feat], { cwd: shCwd }),
       now: () => new Date().toISOString(),
       tokenBudget,
     });
   } catch (err) {
+    // Unexpected spine throw: still preserve the worktree (so the operator can
+    // inspect it) before rethrowing-as-exit. Cleanup is keyed off the returned
+    // terminal object below for the normal path; this guards the abnormal one.
+    if (worktree) {
+      try { worktree.preserve(feature); } catch { /* preserve is best-effort here */ }
+    }
     // Sanitize: a deep spine/SDK error could otherwise surface a credential.
     const safe = sanitizeErrorMessage(err?.message ?? String(err));
     process.stderr.write(`rad deliver: unexpected error — ${safe}\n`);
     return 1;
+  }
+
+  // Worktree cleanup, keyed off the spine's terminal-result shape: complete (tear
+  // down) on success, preserve (keep for inspection) on any stopped terminal.
+  if (worktree) {
+    if (result.ok) {
+      worktree.complete(feature);
+    } else {
+      worktree.preserve(feature);
+    }
   }
 
   if (result.ok) {
@@ -420,7 +474,8 @@ export async function deliverCommand(argv, ctx) {
     return 0;
   }
 
-  // Structured failure line (machine-greppable).
+  // Structured failure line (machine-greppable). When a worktree was preserved,
+  // surface its path so the operator can find the isolated tree.
   process.stderr.write(
     `rad deliver: failed feature=${feature} stopped=${result.stopped}` +
     (result.wave !== undefined ? ` wave=${result.wave}` : '') +
@@ -428,6 +483,7 @@ export async function deliverCommand(argv, ctx) {
     (result.check ? ` check=${result.check}` : '') +
     (result.spent !== undefined ? ` spent=${result.spent}` : '') +
     (result.budget !== undefined ? ` budget=${result.budget}` : '') +
+    (worktree ? ` worktree=${shCwd}` : '') +
     '\n',
   );
   return 1;

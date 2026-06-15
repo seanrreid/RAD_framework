@@ -154,6 +154,56 @@ Both are *opt-in*: absent, the spine behaves exactly as before.
   file/command outputs — do not paste entire files or long logs") so each wave
   agent keeps its own context lean.
 
+#### Worktree isolation (optional)
+
+`RAD_WORKTREE` opts a deliver run into git-worktree isolation. It is **OFF by
+default and fully backward-compatible**: unset or empty, `rad deliver` behaves
+exactly as before — it runs in the main checkout, constructs no worktree port,
+and binds every `check-*.sh` / `open-pr.sh` to the repo root. Any non-empty value
+turns it ON.
+
+- **`RAD_WORKTREE`** — any non-empty value enables isolation; unset/empty = OFF.
+- **`RAD_WORKTREE_DIR`** — optional base directory for the isolated tree. When
+  set, the worktree lands at `$RAD_WORKTREE_DIR/<feature>`; otherwise it defaults
+  to `../<repo-basename>-rad-worktrees/<feature>` (a sibling of the main checkout).
+
+| variable | values | default | effect |
+| --- | --- | --- | --- |
+| `RAD_WORKTREE` | any non-empty value | — (OFF) | isolate the deliver run into a git worktree |
+| `RAD_WORKTREE_DIR` | a directory path | sibling `../<repo>-rad-worktrees/<feature>` | base dir for the isolated tree |
+
+**Lifecycle.** When ON, the run moves through a **create → active →
+complete/preserve** lifecycle:
+
+1. **create** — `git worktree add` checks out the work branch into the isolated
+   dir, and a `.rad-worktree.json` marker is written at its root (`status:
+   "active"`). The spine's scripts then run against this isolated tree.
+2. **complete (on success)** — when the spine finishes cleanly, the marker is
+   cleared and `git worktree remove` tears the worktree down.
+3. **preserve (on failure)** — when the spine stops on any terminal (gate,
+   doom-loop, post-check, token-budget) or throws, the worktree is **kept** and
+   its marker is rewritten to `status: "preserved"` so you can inspect the
+   isolated tree. The structured failure line surfaces its path as
+   `worktree=<dir>`.
+
+**The marker is a safety interlock.** `remove`/`preserve` refuse to act on any
+directory that does not carry a valid `.rad-worktree.json` marker for the named
+feature. This prevents ever deleting the main checkout or an unrelated worktree.
+The marker stays local and uncommitted (it records execution-environment state,
+never delivery outcomes).
+
+**v1 constraint.** The worktree checks out the *same* `rad/<feature>` work branch
+this deliver runs on. Git cannot check out a branch that is already checked out in
+the main tree, so **the work branch must not be checked out in the main checkout**
+when you enable `RAD_WORKTREE`. If it is, `git worktree add` fails and `rad
+deliver` exits 1 with a clear `worktree create failed` message rather than
+detaching or relocating the branch.
+
+```bash
+RAD_WORKTREE=1 node harness/cli.js deliver my-feature
+RAD_WORKTREE=1 RAD_WORKTREE_DIR=/tmp/rad-trees node harness/cli.js deliver my-feature
+```
+
 ---
 
 ## Smoke testing rad deliver
