@@ -1,7 +1,9 @@
 # Plan: Epic Decompose Command (Gate 0)
 Created: 2026-06-12
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-06-15T14:54:18.606Z
 Branch: rad/epic-decompose-command
 
 ## Context
