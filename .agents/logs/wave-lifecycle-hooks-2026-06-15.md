@@ -17,3 +17,5 @@ Executor role: architect
 | 3.1 | 3 | Veto path through resolveOutcome | complete | 33c71c7 | 2026-06-15 |
 | 3.2 | 3 | Veto provenance in the event log | complete | 33c71c7 | 2026-06-15 |
 | 3.3 | 3 | Veto-path tests | complete | b715261 | 2026-06-15 |
+| 4.1 | 4 | Convention-dir reference + sample hooks | complete | d6a6924 | 2026-06-15 |
+| 4.2 | 4 | CLAUDE.md configuration block | complete | 1a83215 | 2026-06-15 |
