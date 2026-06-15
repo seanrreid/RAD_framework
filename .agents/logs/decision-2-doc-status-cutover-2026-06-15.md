@@ -8,3 +8,5 @@ Executor role: architect
 
 | Step | Wave | Task | Status | Commit | Time |
 |------|------|------|--------|--------|------|
+| 1 | Wave 1 | Read-only gate query verb | ✓ complete | 50205b3 | 2026-06-15T17:30:00Z |
+| 2 | Wave 2 | Rewrite check-plan-approved.sh onto the event log | ✓ complete | 713771e | 2026-06-15T17:40:00Z |
