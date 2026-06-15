@@ -45,9 +45,12 @@ Tests use the `node harness/cli.js` form so they don't depend on a global link.
 rad approve <feature> [--on-behalf-of <name>] [--evidence <text>]
 ```
 
-Records an architect approval. Performs the bootstrap dual-write:
-- Appends an `approved` event to `.agents/state/<feature>/events.jsonl`
-- Writes `Status: approved`, `Approved-By`, `Approved-At` headers to the plan doc
+Records an architect approval:
+- Appends an `approved` event to `.agents/state/<feature>/events.jsonl` — this
+  event is the **sole approval authority**; the gate reads it, not the doc.
+- Writes `Status: approved`, `Approved-By`, `Approved-At` headers to the plan doc.
+  These headers are a **display-only mirror** of the event for humans skimming the
+  plan; nothing gates on them.
 
 The `/rad-approve` prose command calls this after the architect confirms.
 
@@ -57,6 +60,30 @@ The `/rad-approve` prose command calls this after the architect confirms.
   required and captured in the event log
 
 **Exit codes:** 0 on success, 1 on refusal or error.
+
+---
+
+### rad gate
+
+```
+rad gate <feature> <name> [--stdin]
+```
+
+A read-only query that answers "is gate `<name>` satisfied for `<feature>`?" by
+folding `.agents/state/<feature>/events.jsonl`. It records nothing and mutates
+nothing — it only reads the event log. For the `approved` gate this is the single
+source of truth: the `approved` **event** is the sole approval authority, and the
+plan doc's `Status:` header is a display-only mirror that the gate ignores.
+
+`/rad-deliver` uses `rad gate <feature> approved` to decide whether wave execution
+may start; `check-plan-approved.sh` shells out to it as well.
+
+- `--stdin` reads the event log from standard input instead of the on-disk file,
+  for piping or testing against an event stream that is not yet committed.
+
+**Exit codes:** `0` when the gate is satisfied, non-zero when it is not. The query
+**fails closed** — a missing, empty, or unreadable event log is treated as "not
+satisfied" (non-zero), never as a pass.
 
 ---
 
@@ -273,9 +300,11 @@ subprocess — not a top-level `apiKey` parameter (the SDK has no such parameter
 
 ## Known follow-ups
 
-- **Decision 2**: Remove plan-doc `Status:` dual-write from `rad approve`; make
-  `events.jsonl` the sole approval authority. `check-plan-approved.sh` currently
-  reads the doc; the gate rule needs to change first.
+- **Decision 2** (DONE): `events.jsonl` is now the sole approval authority. The
+  read-only `rad gate <feature> approved` verb folds the event log,
+  `check-plan-approved.sh` gates on that event, and the plan doc's `Status:`
+  header is a display-only mirror. `rad approve` still writes the header for human
+  display, but nothing gates on it.
 - **CLI cutovers**: `rad status`, `rad plan`, `rad design` as follow-up increments.
 - **Redundant role check**: `approveCommand` calls `check-role.sh` upfront for UX
   and `recordApproval` calls it again internally. Harmless; clean up post-Decision 2.

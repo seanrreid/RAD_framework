@@ -23,6 +23,7 @@ import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import process from 'node:process';
 
 import { createGitStateStore, defaultSh } from './adapters/git-state-store.js';
+import { evaluateGate } from './gates.js';
 import { makeWorktreeLifecycle } from './adapters/worktree.js';
 import { deliverSpine } from './spine.js';
 import { createRunWave } from './adapters/agent/sdk.js';
@@ -47,6 +48,11 @@ const SUBCOMMANDS = {
     summary: 'Show current state of all rad/ features.',
     usage: 'rad status [--phase <phase>]',
     run: (argv, ctx) => statusCommand(argv, ctx),
+  },
+  gate: {
+    summary: 'Evaluate a named gate over a feature event log (read-only).',
+    usage: 'rad gate <feature> <name> [--stdin]',
+    run: (argv, ctx) => gateCommand(argv, ctx),
   },
 };
 
@@ -496,6 +502,12 @@ export async function deliverCommand(argv, ctx) {
  * in proxy mode also `Recorded-By` and `Approval-Evidence` (inserted after the
  * existing header block if not already present). Preserves all other content.
  *
+ * DISPLAY-ONLY (Decision 2): the plan-doc `Status: approved` header is a HUMAN-
+ * readable mirror, NOT the authority. Authority is the appended `approved` event
+ * (recordApproval → frozen `role` field), evaluated by the pure gate fold
+ * (`rad gate`, state.gate / evaluateGate). The deliver gate reads the event log,
+ * not this header — never re-derive approval authority from this doc-write.
+ *
  * @param {string} planFile - absolute path to the plan doc
  * @param {{ approvedBy: string, approvedAt: string, recordedBy?: string, evidence?: string, proxy: boolean }} fields
  */
@@ -763,6 +775,131 @@ export async function statusCommand(argv, ctx) {
 
   process.stdout.write([header, divider, ...rows, ''].join('\n'));
   return 0;
+}
+
+/**
+ * Hand-rolled argv parser for `gate`. Returns the two positionals (feature,
+ * name) and the optional `--stdin` flag. Throws on unknown flags or extra
+ * positionals so malformed invocations fail loudly rather than mis-parse.
+ *
+ * @param {string[]} argv
+ * @returns {{ feature?: string, name?: string, stdin: boolean }}
+ */
+function parseGateArgs(argv) {
+  let feature;
+  let name;
+  let stdin = false;
+
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg === '--stdin') {
+      stdin = true;
+    } else if (arg.startsWith('--')) {
+      throw new Error(`unknown option '${arg}'`);
+    } else if (feature === undefined) {
+      feature = arg;
+    } else if (name === undefined) {
+      name = arg;
+    } else {
+      throw new Error(`unexpected argument '${arg}'`);
+    }
+  }
+
+  return { feature, name, stdin };
+}
+
+/**
+ * Read all of stdin synchronously and parse it as JSONL into an event history.
+ * Mirrors the store's crash-tolerant readEvents: blank lines skipped, an
+ * unparseable line dropped (never fatal) — so a partially-corrupt branch-tip log
+ * still evaluates over the events it CAN parse. Untrusted input: nothing here
+ * executes or trusts the parsed objects beyond what evaluateGate's pure fold
+ * reads (event type + frozen role); no eval, no prototype merge.
+ *
+ * @returns {import('./events.js').Event[]}
+ */
+function readEventsFromStdin() {
+  const raw = readFileSync(0, 'utf8'); // fd 0 = stdin
+  const events = [];
+  for (const line of raw.split('\n')) {
+    const trimmed = line.trim();
+    if (trimmed === '') continue;
+    try {
+      events.push(JSON.parse(trimmed));
+    } catch {
+      continue;
+    }
+  }
+  return events;
+}
+
+/**
+ * `gate <feature> <name> [--stdin]`.
+ *
+ * Read-only: evaluates the named gate (the existing pure fold) over the
+ * feature's event log and exits 0 when `passed` is true, non-zero otherwise.
+ * Writes nothing — no events appended, no plan-doc mutation, no git writes.
+ *
+ *   - default: reads the local on-disk log via state.gate(feature, name).
+ *   - --stdin: reads a JSONL event log from stdin (e.g. a branch-tip log piped
+ *     in before checkout) and evaluates it via the same exported gate fold
+ *     (evaluateGate), so the predicate is identical to the on-disk path.
+ *
+ * Fails CLOSED: a missing/empty log yields an empty history → the fold reports
+ * `passed: false` → non-zero exit. Absence never passes the gate.
+ *
+ * @param {string[]} argv - args after `gate`
+ * @param {{ repoRoot: string, sh?: typeof defaultSh }} ctx
+ * @returns {Promise<number>}
+ */
+export async function gateCommand(argv, ctx) {
+  const { repoRoot } = ctx;
+  const sh = ctx.sh ?? defaultSh;
+
+  let parsed;
+  try {
+    parsed = parseGateArgs(argv);
+  } catch (err) {
+    process.stderr.write(`rad gate: ${err.message}\n`);
+    process.stderr.write('Usage: rad gate <feature> <name> [--stdin]\n');
+    return 1;
+  }
+
+  const { feature, name, stdin } = parsed;
+
+  if (!isNonEmpty(feature) || !isNonEmpty(name)) {
+    process.stderr.write('rad gate: a feature name and a gate name are required\n');
+    process.stderr.write('Usage: rad gate <feature> <name> [--stdin]\n');
+    return 1;
+  }
+
+  let result;
+  try {
+    if (stdin) {
+      // Feed the piped JSONL through the SAME pure fold the on-disk path uses.
+      result = evaluateGate(name, readEventsFromStdin());
+    } else {
+      const claudeMd = join(repoRoot, 'CLAUDE.md');
+      const state = createGitStateStore({ repoRoot, sh, claudeMd });
+      result = await state.gate(feature, name);
+    }
+  } catch (err) {
+    // Unknown gate name, missing rules, or stdin read failure — fail closed.
+    process.stderr.write(`rad gate: ${err.message}\n`);
+    return 1;
+  }
+
+  // Structured success/result line (machine-greppable single line).
+  const satisfiedBy = result.satisfiedBy
+    ? `${result.satisfiedBy.role}:${result.satisfiedBy.actor}`
+    : 'none';
+  process.stdout.write(
+    `rad gate: feature=${feature} gate=${name} passed=${result.passed} ` +
+    `required-role=${result.requiredRole} satisfied-by=${satisfiedBy} ` +
+    `source=${stdin ? 'stdin' : 'log'}\n`,
+  );
+
+  return result.passed ? 0 : 1;
 }
 
 // Run only when invoked as a script (not when imported by a test).

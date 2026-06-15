@@ -2,85 +2,78 @@
 # check-plan-approved.sh
 # Checks whether a plan has been approved for execution (Lane B model).
 #
-# Under Lane B the plan doc lives on its own work branch (rad/<feature>) until the
-# deliver PR merges, so the branch tip is the canonical source of truth. We read
-# it first, then fall back to the default branch (merged) and the local working
-# tree (current checkout). Approval is set by /rad-approve, which writes
-# `Status: approved` to the plan file on the work-branch tip.
+# Authority lives in the event log, not the plan doc. /rad-approve records an
+# `approved` event (with a frozen architect `role`) into the feature's event log
+# at .agents/state/<feature>/events.jsonl. This script resolves that log from the
+# canonical source — the work branch (rad/<feature>) tip — and feeds it to the
+# pure gate fold (`rad gate <feature> approved --stdin`), mapping its exit code
+# through. The plan-doc `Status:` header is no longer consulted; a doc that says
+# "approved" without a matching approved event does NOT pass (AC#2).
 #
-# Platform-agnostic: uses only `git show` — no gh/glab/PR-merge dependency (the
-# dedicated plan PR no longer exists under Lane B).
+# Resolution order mirrors the old plan-doc logic so the gate works pre-checkout
+# (AC#3 — /rad-deliver Step 2 runs this BEFORE checkout, so the log is read from
+# the branch tip): origin/<work-branch> tip, then origin/<base> (merged), then the
+# local working tree. A missing log at every ref fails CLOSED — absence never
+# passes the gate.
+#
+# Platform-agnostic: uses only `git show` — no gh/glab/PR-merge dependency.
 #
 # Usage: scripts/check-plan-approved.sh rad/<feature> [base-branch]
 #   e.g. scripts/check-plan-approved.sh rad/email-confirmation develop
 #
 # Exit codes:
-#   0 = approved
-#   1 = not approved (pending, rejected, needs-revision, or unknown)
+#   0 = approved (an approved event satisfies the gate at the resolved ref)
+#   1 = not approved (no satisfying event, missing log, or error — fail closed)
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+CLI="$REPO_ROOT/harness/cli.js"
 
 WORK_BRANCH="${1:-}"
 BASE_BRANCH="${2:-$("$SCRIPT_DIR/get-default-branch.sh" 2>/dev/null || echo main)}"
 
 [[ -z "$WORK_BRANCH" ]] && { echo "ERROR: work branch name required (e.g. rad/<feature>)"; exit 1; }
 
-# Strip any prefix (rad/, plan/, deliver/) to get the feature slug → plan file path.
+# Strip any prefix (rad/, plan/, deliver/) to get the feature slug → event-log path.
 FEATURE="${WORK_BRANCH##*/}"
-PLAN_FILE=".agents/plans/${FEATURE}.md"
+EVENTS_FILE=".agents/state/${FEATURE}/events.jsonl"
 
-# Reads file content from stdin; prints the first Status: value as a lowercased token.
-read_status() {
-  grep -E '^Status:' | head -1 | awk '{print $2}' | tr '[:upper:]' '[:lower:]'
-}
-
-resolve_status() {
-  local status
+# Resolve the event log JSONL from the canonical ref and echo it to stdout.
+# Returns 0 (with content on stdout) when a log is found, 1 when none exists at
+# any ref. Tries the work-branch tip first (pre-checkout, branch-tip canonical),
+# then the merged default branch, then the local working tree.
+resolve_events() {
+  local content
 
   # 1. Canonical: the plan's own work-branch tip on origin.
-  status=$(git show "origin/${WORK_BRANCH}:${PLAN_FILE}" 2>/dev/null | read_status || true)
-  [[ -n "$status" ]] && { echo "$status"; return 0; }
-
-  # 2. Merged: the plan doc has landed on the default branch.
-  status=$(git show "origin/${BASE_BRANCH}:${PLAN_FILE}" 2>/dev/null | read_status || true)
-  [[ -n "$status" ]] && { echo "$status"; return 0; }
-
-  # 3. Local working tree (approved but not yet pushed).
-  if [[ -f "$PLAN_FILE" ]]; then
-    status=$(read_status < "$PLAN_FILE" || true)
-    [[ -n "$status" ]] && { echo "$status"; return 0; }
+  if content=$(git show "origin/${WORK_BRANCH}:${EVENTS_FILE}" 2>/dev/null); then
+    printf '%s' "$content"
+    return 0
   fi
 
-  echo ""
+  # 2. Merged: the event log has landed on the default branch.
+  if content=$(git show "origin/${BASE_BRANCH}:${EVENTS_FILE}" 2>/dev/null); then
+    printf '%s' "$content"
+    return 0
+  fi
+
+  # 3. Local working tree (approved but not yet pushed).
+  if [[ -f "$EVENTS_FILE" ]]; then
+    cat "$EVENTS_FILE"
+    return 0
+  fi
+
+  return 1
 }
 
-STATUS=$(resolve_status)
+EVENTS_JSONL=$(resolve_events) || {
+  echo "unknown — no event log found for '${WORK_BRANCH}' (looked on origin/${WORK_BRANCH}, origin/${BASE_BRANCH}, and ${EVENTS_FILE}). Failing closed."
+  exit 1
+}
 
-case "$STATUS" in
-  approved)
-    echo "approved"
-    exit 0
-    ;;
-  rejected)
-    echo "rejected — plan was rejected by the architect. Revise and resubmit."
-    exit 1
-    ;;
-  needs-revision)
-    echo "needs-revision — architect requested changes. Check the plan file for feedback."
-    exit 1
-    ;;
-  pending-review)
-    echo "pending — plan exists but is not yet approved. Architect runs /rad-approve ${FEATURE}."
-    exit 1
-    ;;
-  "")
-    echo "unknown — no plan found for '${WORK_BRANCH}' (looked on origin/${WORK_BRANCH}, origin/${BASE_BRANCH}, and ${PLAN_FILE})."
-    exit 1
-    ;;
-  *)
-    echo "unknown status: ${STATUS}"
-    exit 1
-    ;;
-esac
+# Pipe the resolved JSONL through the pure gate fold. The verb exits 0 when the
+# approved gate is satisfied, non-zero otherwise (including an empty log → fail
+# closed). Map its exit code straight through.
+printf '%s' "$EVENTS_JSONL" | node "$CLI" gate "$FEATURE" approved --stdin
