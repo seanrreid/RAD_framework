@@ -1,7 +1,9 @@
 # Plan: Wave-Lifecycle Hooks for the Deliver Spine
 Created: 2026-06-15
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-06-15T19:09:35.886Z
 Branch: rad/wave-lifecycle-hooks
 
 ## Context
