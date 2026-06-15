@@ -175,6 +175,25 @@ work branch (create → active → complete-on-success / preserve-on-failure). A
 unmarked dir. v1 requires the work branch not already be checked out in the main tree.
 Unset/empty = OFF (today's behavior). See `docs/rad-cli.md` for the full lifecycle.
 
+### Plan Lint — High-Risk Paths
+
+OPTIONAL and backward-compatible — absent, `scripts/lint-plan.sh` uses the built-in default.
+
+```
+RAD_HIGH_RISK_PATTERNS: <|-separated extended-regex alternation>
+```
+
+`scripts/lint-plan.sh` scans the union of Files-in-Scope paths and per-task `File:`
+paths and emits an advisory **warning** (never an error) for any path matching a
+high-risk pattern, flagging it for close architect review. The built-in default is:
+
+```
+auth|payment|billing|migration|secret|credential|token
+```
+
+Set `RAD_HIGH_RISK_PATTERNS` to override the default with your own `|`-separated
+extended-regex alternation. Empty disables the check.
+
 ### PR Labels
 
 ```
