@@ -18,7 +18,7 @@
  * @property {string}  type         - event type, e.g. 'deliver-started' |
  *   'wave-attempt' | 'wave-complete' | 'wave-failed' | 'approved' |
  *   'pr-opened' | 'revision-requested' | 'research-created' | 'plan-created' |
- *   'done'
+ *   'hook-observed' | 'hook-veto' | 'hook-failed' | 'done'
  * @property {string}  actor        - WHO the event is attributed to (human identity)
  * @property {string}  ts           - ISO timestamp, passed in by the caller
  * @property {string} [recordedBy]  - WHO physically ran the command, if not `actor`
@@ -26,6 +26,19 @@
  *   frozen at write-time by recordApproval after check-role.sh confirms the actor
  *   holds the required role). `actor` is the human identity; `role` is the authority.
  * @property {Object} [data]        - event-specific payload
+ */
+
+/**
+ * Provenance payload carried by the three hook lifecycle events
+ * (`hook-observed` | `hook-veto` | `hook-failed`). Recorded on `event.data`, it
+ * names WHERE the signal came from so the audit trail distinguishes an
+ * operator-hook outcome from the wave agent's own outcome.
+ *
+ * @typedef {Object} HookEventData
+ * @property {string} point    - lifecycle point that fired (e.g. 'post-wave')
+ * @property {string} hook     - the hook script path that produced the signal
+ * @property {string} outcome  - the outcome token (one of the fixed vocabulary)
+ * @property {'hook'} source   - provenance tag; always the literal 'hook'
  */
 
 /**
@@ -68,6 +81,11 @@ const PHASE_BY_TYPE = {
   'wave-complete': 'in-progress',
   'wave-failed': 'in-progress',
   'revision-requested': 'in-progress',
+  // Hook lifecycle events observe a wave in flight — same phase as the wave
+  // events they sit beside (consistent with wave-attempt / wave-complete).
+  'hook-observed': 'in-progress',
+  'hook-veto': 'in-progress',
+  'hook-failed': 'in-progress',
   'pr-opened': 'delivered',
   done: 'done',
 };

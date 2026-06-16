@@ -579,3 +579,416 @@ test('(m) end post-checks run check-scope + open-pr (and no longer check-tests a
   const openPrIdx = shCalls.indexOf('scripts/open-pr.sh');
   assert.ok(!shCalls.slice(openPrIdx).includes('scripts/check-tests.sh'));
 });
+
+// ── Wave 2: lifecycle-hook integration (Tasks 2.1/2.2/2.3) ──────────────────
+
+/**
+ * A spy hook runner. Records each (point, ctx) call and, for the named points,
+ * reports one hook that "ran" (so a hook-observed event is appended) plus an
+ * optional failure (so a hook-failed event is appended). OBSERVE-ONLY: it never
+ * vetoes — the veto reroute is Wave 3.
+ */
+function makeHookSpy({ ranPoints = new Set(), failPoints = new Set() } = {}) {
+  const calls = [];
+  const runHooks = (point, ctx) => {
+    calls.push({ point, ctx });
+    const ran = ranPoints.has(point)
+      ? [{ hook: `hooks/${point}/01.sh`, exit: 0, vetoed: false, outcome: 'success' }]
+      : [];
+    const failures = failPoints.has(point)
+      ? [{ hook: `hooks/${point}/01.sh`, reason: 'exit 1' }]
+      : [];
+    return { point, ran, veto: null, failures };
+  };
+  return { runHooks, calls };
+}
+
+const ALL_POINTS = ['pre-wave', 'post-wave', 'on-outcome', 'on-retry', 'on-error', 'wave-complete'];
+
+test('(w2-a) hooks fire at all six lifecycle points across happy + retry + error runs', async () => {
+  // A single happy-path run exercises pre-wave, post-wave, on-outcome, wave-complete.
+  const happyState = makeFakeState({ gateResult: passingGate, plan: { waves: [{ n: 1 }] } });
+  const happySpy = makeHookSpy({ ranPoints: new Set(ALL_POINTS) });
+  await deliverSpine({
+    feature: 'demo',
+    state: happyState,
+    docs: {},
+    matrix: MATRIX,
+    gates: {},
+    runWave: async () => ({ outcome: 'success' }),
+    sh: () => ({ status: 0 }),
+    now: fixedClock(),
+    runHooks: happySpy.runHooks,
+  });
+  const happyPoints = happySpy.calls.map((c) => c.point);
+  for (const p of ['pre-wave', 'post-wave', 'on-outcome', 'wave-complete']) {
+    assert.ok(happyPoints.includes(p), `happy run fired ${p}`);
+  }
+  // Exactly once each for a single-attempt, single-wave advance.
+  assert.equal(happyPoints.filter((p) => p === 'pre-wave').length, 1);
+  assert.equal(happyPoints.filter((p) => p === 'wave-complete').length, 1);
+  // Each ran hook produced a hook-observed event with the right provenance shape.
+  const observed = happyState.appended.filter((e) => e.type === 'hook-observed');
+  assert.ok(observed.length >= 4);
+  for (const e of observed) {
+    assert.equal(e.data.source, 'hook');
+    assert.ok(ALL_POINTS.includes(e.data.point));
+    assert.ok(typeof e.data.hook === 'string');
+  }
+
+  // A doom-loop run exercises on-retry (attempt 1) and on-error (the abort).
+  const failState = makeFakeState({ gateResult: passingGate, plan: { waves: [{ n: 1 }] } });
+  const failSpy = makeHookSpy({ ranPoints: new Set(ALL_POINTS) });
+  await deliverSpine({
+    feature: 'demo',
+    state: failState,
+    docs: {},
+    matrix: MATRIX,
+    gates: {},
+    runWave: async () => ({ outcome: 'fail-tests', summary: 'identical failure' }),
+    sh: () => ({ status: 0 }),
+    now: fixedClock(),
+    runHooks: failSpy.runHooks,
+  });
+  const failPoints = failSpy.calls.map((c) => c.point);
+  assert.ok(failPoints.includes('on-retry'), 'fail run fired on-retry');
+  assert.ok(failPoints.includes('on-error'), 'fail run fired on-error');
+
+  // Union across both runs covers all six points.
+  const fired = new Set([...happyPoints, ...failPoints]);
+  for (const p of ALL_POINTS) assert.ok(fired.has(p), `some run fired ${p}`);
+});
+
+test('(w2-a2) observe failures are recorded as hook-failed but NEVER alter wave flow (fail-open)', async () => {
+  const state = makeFakeState({ gateResult: passingGate, plan: { waves: [{ n: 1 }] } });
+  // Every observe-only point reports a failure; the happy path must still complete.
+  const spy = makeHookSpy({
+    ranPoints: new Set(ALL_POINTS),
+    failPoints: new Set(['on-outcome', 'wave-complete']),
+  });
+  const result = await deliverSpine({
+    feature: 'demo',
+    state,
+    docs: {},
+    matrix: MATRIX,
+    gates: {},
+    runWave: async () => ({ outcome: 'success' }),
+    sh: () => ({ status: 0 }),
+    now: fixedClock(),
+    runHooks: spy.runHooks,
+  });
+  // Flow is unchanged: the wave still advances and the PR still opens.
+  assert.deepEqual(result, { ok: true, waves: 1 });
+  assert.ok(state.appended.some((e) => e.type === 'wave-complete'));
+  assert.ok(state.appended.some((e) => e.type === 'pr-opened'));
+  // The failures were recorded, not swallowed.
+  const failed = state.appended.filter((e) => e.type === 'hook-failed');
+  assert.ok(failed.length >= 2);
+  for (const e of failed) assert.equal(e.data.source, 'hook');
+});
+
+test('(w2-a3) hookPreflight runs exactly once at deliver-start; a malformed dir surfaces deterministically', async () => {
+  // Pre-flight is invoked once, right after deliver-started.
+  const okState = makeFakeState({ gateResult: passingGate, plan: { waves: [{ n: 1 }] } });
+  let preflightCalls = 0;
+  await deliverSpine({
+    feature: 'demo',
+    state: okState,
+    docs: {},
+    matrix: MATRIX,
+    gates: {},
+    runWave: async () => ({ outcome: 'success' }),
+    sh: () => ({ status: 0 }),
+    now: fixedClock(),
+    hookPreflight: () => { preflightCalls += 1; },
+  });
+  assert.equal(preflightCalls, 1);
+
+  // A malformed hooks dir surfaces early (the spine lets the probe throw to the caller).
+  const badState = makeFakeState({ gateResult: passingGate, plan: { waves: [{ n: 1 }] } });
+  await assert.rejects(
+    deliverSpine({
+      feature: 'demo',
+      state: badState,
+      docs: {},
+      matrix: MATRIX,
+      gates: {},
+      runWave: async () => ({ outcome: 'success' }),
+      sh: () => ({ status: 0 }),
+      now: fixedClock(),
+      hookPreflight: () => { throw new Error('hooks dir unreadable'); },
+    }),
+    /hooks dir unreadable/,
+  );
+  // Surfaced at deliver-start: no wave work happened (no wave-attempt, no pr-opened).
+  assert.ok(!badState.appended.some((e) => e.type === 'wave-attempt'));
+  assert.ok(!badState.appended.some((e) => e.type === 'pr-opened'));
+});
+
+test('(w2-b) BACKWARD-COMPAT SNAPSHOT: default no-op runHooks → event sequence byte-for-byte identical to the happy path (no hook-* events)', async () => {
+  // This is the exact construction of test (b) but with NO runHooks/hookPreflight
+  // injected — the defaults must reproduce the legacy sequence exactly.
+  const state = makeFakeState({ gateResult: passingGate, plan: twoWaves });
+  const runWave = async () => ({ outcome: 'success' });
+  const shCalls = [];
+  const sh = (script, feature) => {
+    shCalls.push({ script, feature });
+    return { status: 0 };
+  };
+  const result = await deliverSpine({
+    feature: 'demo',
+    state,
+    docs: {},
+    matrix: MATRIX,
+    gates: {},
+    runWave,
+    sh,
+    now: fixedClock(),
+  });
+  assert.deepEqual(result, { ok: true, waves: 2 });
+
+  // The sh call order is unchanged.
+  assert.deepEqual(
+    shCalls.map((c) => c.script),
+    [
+      'scripts/check-tests.sh',
+      'scripts/check-tests.sh',
+      'scripts/check-scope.sh',
+      'scripts/open-pr.sh',
+    ],
+  );
+
+  // THE SNAPSHOT: the appended event-type sequence is byte-for-byte the same as
+  // the legacy happy path — no hook-observed / hook-veto / hook-failed appear.
+  const types = state.appended.map((e) => e.type);
+  assert.deepEqual(types, [
+    'deliver-started',
+    'wave-attempt',
+    'wave-complete',
+    'wave-attempt',
+    'wave-complete',
+    'pr-opened',
+  ]);
+  assert.ok(!types.some((t) => t.startsWith('hook-')));
+});
+
+// ── Wave 3: veto reroute (Tasks 3.1/3.2/3.3) ────────────────────────────────
+
+/**
+ * A hook runner that returns a veto { hook, outcome } at the named point and a
+ * neutral result everywhere else. Mirrors the runner's own return shape
+ * (veto is { hook, outcome }|null). Records each call for flow assertions.
+ */
+function makeVetoSpy({ point, outcome, hook = `hooks/${point}/01.sh` }) {
+  const calls = [];
+  const runHooks = (p, ctx) => {
+    calls.push({ point: p, ctx });
+    if (p === point) {
+      return {
+        point: p,
+        ran: [{ hook, exit: 0, vetoed: true, outcome }],
+        veto: { hook, outcome },
+        failures: [],
+      };
+    }
+    return { point: p, ran: [], veto: null, failures: [] };
+  };
+  return { runHooks, calls };
+}
+
+test('(w3-a) a post-wave veto reroutes the outcome through the matrix and appends hook-veto', async () => {
+  const state = makeFakeState({ gateResult: passingGate, plan: { waves: [{ n: 1 }] } });
+  // The agent claims success, but a post-wave hook vetoes with fail-scope, which
+  // the matrix resolves to `abort` — so the wave aborts via the existing vocab.
+  const spy = makeVetoSpy({ point: 'post-wave', outcome: 'fail-scope' });
+  const result = await deliverSpine({
+    feature: 'demo',
+    state,
+    docs: {},
+    matrix: MATRIX,
+    gates: {},
+    runWave: async () => ({ outcome: 'success' }),
+    sh: () => ({ status: 0 }),
+    now: fixedClock(),
+    runHooks: spy.runHooks,
+  });
+  // Rerouted per the matrix action for fail-scope (abort), not advanced.
+  assert.equal(result.stopped, 'matrix');
+  assert.equal(result.action, 'abort');
+  assert.equal(result.outcome, 'fail-scope');
+  // A hook-veto event was appended with the right provenance shape.
+  const veto = state.appended.find((e) => e.type === 'hook-veto');
+  assert.ok(veto, 'hook-veto event appended');
+  assert.deepEqual(veto.data, {
+    point: 'post-wave',
+    hook: 'hooks/post-wave/01.sh',
+    outcome: 'fail-scope',
+    source: 'hook',
+  });
+  // The wave never advanced and no PR opened.
+  assert.ok(!state.appended.some((e) => e.type === 'wave-complete'));
+  assert.ok(!state.appended.some((e) => e.type === 'pr-opened'));
+});
+
+test('(w3-b) a pre-wave veto aborts BEFORE runWave — the agent never runs', async () => {
+  const state = makeFakeState({ gateResult: passingGate, plan: { waves: [{ n: 1 }] } });
+  const spy = makeVetoSpy({ point: 'pre-wave', outcome: 'fail-scope' });
+  let runWaveCalls = 0;
+  const runWave = async () => {
+    runWaveCalls += 1;
+    return { outcome: 'success' };
+  };
+  const result = await deliverSpine({
+    feature: 'demo',
+    state,
+    docs: {},
+    matrix: MATRIX,
+    gates: {},
+    runWave,
+    sh: () => ({ status: 0 }),
+    now: fixedClock(),
+    runHooks: spy.runHooks,
+  });
+  // The agent was never invoked.
+  assert.equal(runWaveCalls, 0);
+  assert.equal(result.stopped, 'hook-veto');
+  assert.equal(result.ok, false);
+  assert.equal(result.outcome, 'fail-scope');
+  assert.equal(result.point, 'pre-wave');
+  // hook-veto + wave-failed appended; no wave-attempt (the agent never ran).
+  assert.ok(state.appended.some((e) => e.type === 'hook-veto'));
+  assert.ok(state.appended.some((e) => e.type === 'wave-failed'));
+  assert.ok(!state.appended.some((e) => e.type === 'wave-attempt'));
+  assert.ok(!state.appended.some((e) => e.type === 'pr-opened'));
+});
+
+test('(w3-c) fail-closed: a veto carrying abort-user (the runner crash/invalid fallback) aborts the wave', async () => {
+  const state = makeFakeState({ gateResult: passingGate, plan: { waves: [{ n: 1 }] } });
+  // This is what the runner emits on a hook crash or out-of-vocabulary token.
+  const spy = makeVetoSpy({ point: 'post-wave', outcome: 'abort-user' });
+  const result = await deliverSpine({
+    feature: 'demo',
+    state,
+    docs: {},
+    matrix: MATRIX,
+    gates: {},
+    runWave: async () => ({ outcome: 'success' }),
+    sh: () => ({ status: 0 }),
+    now: fixedClock(),
+    runHooks: spy.runHooks,
+  });
+  // abort-user resolves to `abort` in the matrix → the wave aborts.
+  assert.equal(result.stopped, 'matrix');
+  assert.equal(result.action, 'abort');
+  assert.equal(result.outcome, 'abort-user');
+  assert.ok(!state.appended.some((e) => e.type === 'pr-opened'));
+});
+
+test('(w3-c2) fail-closed defense: an out-of-vocabulary veto token is coerced to abort-user before the matrix', async () => {
+  const state = makeFakeState({ gateResult: passingGate, plan: { waves: [{ n: 1 }] } });
+  // A malformed veto token must NEVER reach resolveOutcome (it would throw on an
+  // unknown outcome). The spine coerces it fail-closed to abort-user.
+  const spy = makeVetoSpy({ point: 'post-wave', outcome: 'not-a-real-outcome' });
+  const result = await deliverSpine({
+    feature: 'demo',
+    state,
+    docs: {},
+    matrix: MATRIX,
+    gates: {},
+    runWave: async () => ({ outcome: 'success' }),
+    sh: () => ({ status: 0 }),
+    now: fixedClock(),
+    runHooks: spy.runHooks,
+  });
+  assert.equal(result.stopped, 'matrix');
+  assert.equal(result.action, 'abort');
+  assert.equal(result.outcome, 'abort-user'); // coerced, not the bad token
+  const veto = state.appended.find((e) => e.type === 'hook-veto');
+  assert.equal(veto.data.outcome, 'abort-user');
+});
+
+test('(w3-d) observe-only points cannot veto — a veto field on on-outcome/wave-complete is ignored, flow unchanged', async () => {
+  const state = makeFakeState({ gateResult: passingGate, plan: { waves: [{ n: 1 }] } });
+  // Both observe-only points "veto" fail-scope; the spine must ignore it entirely.
+  const calls = [];
+  const runHooks = (p, ctx) => {
+    calls.push(p);
+    if (p === 'on-outcome' || p === 'wave-complete') {
+      const hook = `hooks/${p}/01.sh`;
+      return {
+        point: p,
+        ran: [{ hook, exit: 0, vetoed: true, outcome: 'fail-scope' }],
+        veto: { hook, outcome: 'fail-scope' },
+        failures: [],
+      };
+    }
+    return { point: p, ran: [], veto: null, failures: [] };
+  };
+  const result = await deliverSpine({
+    feature: 'demo',
+    state,
+    docs: {},
+    matrix: MATRIX,
+    gates: {},
+    runWave: async () => ({ outcome: 'success' }),
+    sh: () => ({ status: 0 }),
+    now: fixedClock(),
+    runHooks,
+  });
+  // Flow is unchanged: the wave advances and the PR opens — the observe-only
+  // veto field had no effect.
+  assert.deepEqual(result, { ok: true, waves: 1 });
+  assert.ok(state.appended.some((e) => e.type === 'wave-complete'));
+  assert.ok(state.appended.some((e) => e.type === 'pr-opened'));
+  // No hook-veto event was appended from an observe-only point.
+  assert.ok(!state.appended.some((e) => e.type === 'hook-veto'));
+});
+
+test('(w3-e) provenance: a rerouted wave-attempt + wave-failed carry source/point/hook, distinguishable from agent-emitted', async () => {
+  const state = makeFakeState({ gateResult: passingGate, plan: { waves: [{ n: 1 }] } });
+  const spy = makeVetoSpy({ point: 'post-wave', outcome: 'fail-scope' });
+  await deliverSpine({
+    feature: 'demo',
+    state,
+    docs: {},
+    matrix: MATRIX,
+    gates: {},
+    runWave: async () => ({ outcome: 'success' }),
+    sh: () => ({ status: 0 }),
+    now: fixedClock(),
+    runHooks: spy.runHooks,
+  });
+  const attempt = state.appended.find((e) => e.type === 'wave-attempt');
+  assert.equal(attempt.data.source, 'hook');
+  assert.equal(attempt.data.point, 'post-wave');
+  assert.equal(attempt.data.hook, 'hooks/post-wave/01.sh');
+  assert.equal(attempt.data.outcome, 'fail-scope'); // the veto outcome, not success
+
+  const failed = state.appended.find((e) => e.type === 'wave-failed');
+  assert.equal(failed.data.source, 'hook');
+  assert.equal(failed.data.point, 'post-wave');
+  assert.equal(failed.data.hook, 'hooks/post-wave/01.sh');
+});
+
+test('(w3-f) no veto: agent-emitted wave-attempt carries NO provenance keys (distinguishable from a veto)', async () => {
+  const state = makeFakeState({ gateResult: passingGate, plan: { waves: [{ n: 1 }] } });
+  // A hook runner that observes but never vetoes.
+  const spy = makeHookSpy({ ranPoints: new Set(ALL_POINTS) });
+  await deliverSpine({
+    feature: 'demo',
+    state,
+    docs: {},
+    matrix: MATRIX,
+    gates: {},
+    runWave: async () => ({ outcome: 'success' }),
+    sh: () => ({ status: 0 }),
+    now: fixedClock(),
+    runHooks: spy.runHooks,
+  });
+  const attempt = state.appended.find((e) => e.type === 'wave-attempt');
+  // Agent-emitted: no provenance keys present at all.
+  assert.equal(attempt.data.source, undefined);
+  assert.equal(attempt.data.point, undefined);
+  assert.equal(attempt.data.hook, undefined);
+  assert.ok(!state.appended.some((e) => e.type === 'hook-veto'));
+});

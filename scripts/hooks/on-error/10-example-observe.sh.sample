@@ -1,0 +1,13 @@
+#!/bin/sh
+# Sample on-error hook (observe-only, fail-open). INERT: the `.sample` suffix
+# and the absent executable bit both keep the runner from discovering it.
+# To activate: copy without `.sample` into scripts/hooks/on-error/ and chmod +x.
+#
+# Argv: $1=feature $2=wave $3=on-error $4=current-outcome
+# Env:  RAD_HOOK_FEATURE RAD_HOOK_WAVE RAD_HOOK_POINT RAD_HOOK_OUTCOME
+#
+# Observe-only: stdout is ignored and this hook can NEVER veto or change flow.
+# A non-zero exit is recorded as a hook-failed signal but never derails deliver.
+
+echo "wave $2 failed at $3 (outcome=$4) for $1" >> /tmp/rad-hook.log
+exit 0
