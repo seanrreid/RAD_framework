@@ -17,7 +17,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import yaml from 'js-yaml';
+import yaml from './vendor/js-yaml.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
