@@ -49,6 +49,8 @@ hook/spine surface work.
 | harness/matrix.js | 15-42 | Repoint `js-yaml` import → `./vendor/js-yaml.mjs` |
 | harness/package.json | 22 | SDK → `optionalDependencies`; `js-yaml` → `devDependencies` |
 | harness/vendor/js-yaml.mjs | 1 | NEW — vendored 108K ESM bundle, copied from `dist/`, not authored/read |
+| harness/vendor/README.md | 1 | NEW — provenance note (js-yaml 4.1.1 source + regeneration command) |
+| scripts/test-install-harness.sh | 1 | NEW — zero-npm install smoke test |
 
 ## Execution Notes
 
@@ -128,9 +130,11 @@ What: Install into a temp git repo via `install.sh --dir`, then with **no `node_
 Validate: AC#1 — zero-npm gate works post-install; AC#2 — hooks shipped.
 
 ## Tests to Write
-- [ ] Fresh-install smoke check (zero-npm `rad gate` exit 0) — `scripts/test-install-harness.sh` (new) or manual per Task 4.2
-- [ ] Confirm `gates.js`/`matrix.js` load via vendored bundle — covered by existing `harness/test/gates.test.js`, `harness/test/matrix.test.js`
-- [ ] Confirm `cli.js` loads with SDK absent — covered by existing `harness/test/cli.test.js` run without `node_modules/@anthropic-ai`
+<!-- Each line ends with a single real path so check-tests/check-scope can parse it. -->
+- [x] Zero-npm install smoke test (harness shipped sans node_modules, hooks copied, `rad gate` exit 0) — scripts/test-install-harness.sh
+- [x] gates.js loads via the vendored bundle — harness/test/gates.test.js
+- [x] matrix.js loads via the vendored bundle — harness/test/matrix.test.js
+- [x] cli.js loads with the SDK absent — harness/test/cli.test.js
 
 ## Non-Goals
 - Not scaffolding `.agents/state/` or `.agents/epics/` at install time (created at runtime by the harness / `/rad-epic-decompose`).
