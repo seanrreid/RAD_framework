@@ -243,6 +243,7 @@ branch only changes when that final PR merges.
 
 ## See also
 
+- [harness-and-framework.md](harness-and-framework.md) — what RAD *is*: the deterministic harness core vs. the process-framework shell
 - [daily-workflow.md](daily-workflow.md) — the day-to-day command reference
 - [architect-guide.md](architect-guide.md) — setup, scope maps, and approval
 - [plan-pr-guide.md](plan-pr-guide.md) — the plan approval guide
