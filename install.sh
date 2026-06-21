@@ -185,6 +185,24 @@ copy_agents_meta() {
   success ".agents/ structure ready"
 }
 
+copy_harness() {
+  header "Installing harness"
+
+  # harness/ and scripts/hooks/ are framework code — always overwrite on install
+  # and upgrade. EXCLUDE harness/node_modules: it is recreated by `npm install`
+  # in the target and can be hundreds of MB.
+  mkdir -p "$TARGET_DIR/harness"
+  cp -r "$RAD_DIR/harness/." "$TARGET_DIR/harness/"
+  rm -rf "$TARGET_DIR/harness/node_modules"
+  success "Harness → harness/ (node_modules excluded)"
+
+  mkdir -p "$TARGET_DIR/scripts/hooks"
+  cp -r "$RAD_DIR/scripts/hooks/." "$TARGET_DIR/scripts/hooks/"
+  success "Wave-lifecycle hooks → scripts/hooks/"
+  info "harness/cli.js      — zero-npm rad CLI (vendored js-yaml, lazy SDK)"
+  info "scripts/hooks/       — pre/post-wave + on-outcome lifecycle hook dirs"
+}
+
 scaffold_claude_md() {
   header "CLAUDE.md"
 
@@ -314,6 +332,7 @@ main() {
   copy_ai_guardrails
   copy_scripts
   copy_agents_meta
+  copy_harness
   scaffold_claude_md
   detect_and_report_platform
   ensure_deliver_label
