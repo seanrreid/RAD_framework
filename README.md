@@ -186,6 +186,7 @@ your-project/
 | `UPGRADE.md` | Upgrading an existing RAD project to the latest version |
 | `docs/how-it-works.md` | The whole process explained — model, lifecycle, guardrails |
 | `docs/harness-and-framework.md` | What RAD *is* — the harness core vs. the framework shell, grounded in code |
+| `docs/framing-decisions.md` | How RAD positions itself on hooks, loops, context injection, and agent-to-agent orchestration |
 | `docs/daily-workflow.md` | Getting started with the team workflow |
 | `docs/architect-guide.md` | Setting up and maintaining the architecture |
 | `docs/plan-pr-guide.md` | How plan approval works and what to review |
