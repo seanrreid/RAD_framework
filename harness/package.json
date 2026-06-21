@@ -15,8 +15,10 @@
   "scripts": {
     "test": "node --test"
   },
-  "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "latest",
+  "optionalDependencies": {
+    "@anthropic-ai/claude-agent-sdk": "latest"
+  },
+  "devDependencies": {
     "js-yaml": "^4.1.1"
   }
 }
