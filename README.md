@@ -205,3 +205,11 @@ your-project/
 - Dex Horthy — [Advanced Context Engineering](https://youtu.be/rmvDxxNubIg) and [12-Factor Agents](https://www.youtube.com/watch?v=8kMaTybvDUw)
 - Cole Medin — [PIV loop pattern](https://github.com/coleam00/habit-tracker)
 - GSD Framework — [wave execution model](https://github.com/gsd-build/get-shit-done)
+
+---
+
+## License
+
+RAD is open source under the [MIT License](./LICENSE). Use it, fork it, build on
+it — commercially or otherwise. The only requirement is that the copyright notice
+and license text travel with substantial copies.

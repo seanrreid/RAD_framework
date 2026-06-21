@@ -3,6 +3,8 @@
   "version": "0.0.0",
   "private": true,
   "description": "RAD orchestration harness — the deterministic StateStore core (migration step 1).",
+  "license": "MIT",
+  "author": "Sean R Reid (TorchCodeLab)",
   "type": "module",
   "bin": {
     "rad": "./cli.js"
