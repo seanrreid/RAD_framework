@@ -56,7 +56,7 @@ function takes every dependency by injection (`spine.js:133-146`), which is what
 makes it testable without git or a live model.
 
 - Gate check before any work: `spine.js:150-153`
-- The bounded wave loop: `spine.js:193-455`, with bounded retry at `spine.js:221`
+- The bounded wave loop: `spine.js:194-455`, with bounded retry at `spine.js:221`
 - The doom-loop breaker: `spine.js:375-406` — fingerprints identical failures
   (`fingerprint.js`) and aborts on a repeat rather than burning the full retry
   budget. Strictly better than a fixed retry count.
@@ -212,7 +212,7 @@ whole point: **the shell is replaceable; the core is not.**
 | Spine boundaries | `harness/spine.js` | `2-27` |
 | Injected dependencies | `harness/spine.js` | `133-146` |
 | MODEL boundary (IoC seam) | `harness/spine.js` | `249` |
-| Wave loop / bounded retry | `harness/spine.js` | `193-455`, `221` |
+| Wave loop / bounded retry | `harness/spine.js` | `194-455`, `221` |
 | Doom-loop breaker | `harness/spine.js` | `375-406` |
 | Fail-closed veto coercion | `harness/spine.js` | `43-45` |
 | Outcome vocabulary + actions | `harness/matrix.yaml` | `28-35` |
