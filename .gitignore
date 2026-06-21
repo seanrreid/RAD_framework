@@ -1,0 +1,11 @@
+# Personal auto-memory — the canonical store lives in ~/.claude, not the repo.
+# A stray ./memory/ here is a stale fragment; never commit personal session memory.
+memory/
+
+# Secrets — never commit. Keep .env local; document required vars elsewhere.
+.env
+.env.*
+!.env.example
+
+# Node
+node_modules/
