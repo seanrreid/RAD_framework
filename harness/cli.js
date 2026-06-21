@@ -26,7 +26,6 @@ import { createGitStateStore, defaultSh } from './adapters/git-state-store.js';
 import { evaluateGate } from './gates.js';
 import { makeWorktreeLifecycle } from './adapters/worktree.js';
 import { deliverSpine } from './spine.js';
-import { createRunWave } from './adapters/agent/sdk.js';
 import { createCommandAdapter } from './adapters/agent/command.js';
 import { sanitizeErrorMessage } from './adapters/agent/contract.js';
 import { loadMatrix } from './matrix.js';
@@ -378,6 +377,9 @@ export async function deliverCommand(argv, ctx) {
       process.stderr.write('rad deliver: ANTHROPIC_API_KEY is required\n');
       return 1;
     }
+    // Lazy-load the SDK adapter: only the sdk branch imports it, so cli.js (and
+    // the gate/approve/command paths) load with the SDK absent.
+    const { createRunWave } = await import('./adapters/agent/sdk.js');
     const adapter = createRunWave({ apiKey, model, repoRoot });
     // Bind planCtx so deliverSpine's single-argument runWave(wave) call works.
     runWave = (wave) => adapter(wave, planCtx);

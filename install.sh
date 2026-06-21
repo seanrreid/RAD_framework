@@ -129,7 +129,7 @@ copy_commands() {
 
   cp -r "$RAD_DIR/.claude/commands/." "$TARGET_DIR/.claude/commands/"
   success "Commands → .claude/commands/"
-  info "architect/ — rad-design, rad-approve"
+  info "architect/ — rad-design, rad-approve, rad-epic-decompose"
   info "team/      — rad-research, rad-plan, rad-adopt, rad-deliver, rad-review"
   info "shared/    — rad-status, rad-insights"
 }
@@ -139,8 +139,9 @@ copy_skills() {
 
   cp -r "$RAD_DIR/.claude/skills/." "$TARGET_DIR/.claude/skills/"
   success "Skills → .claude/skills/"
-  info "kickoff — /kickoff session-start ritual"
-  info "wrap    — /wrap session-end ritual"
+  info "kickoff   — /kickoff session-start ritual"
+  info "wrap      — /wrap session-end ritual"
+  info "rpi-design — /rpi-design agent-architecture design"
 }
 
 copy_ai_guardrails() {
@@ -183,6 +184,24 @@ copy_agents_meta() {
   fi
 
   success ".agents/ structure ready"
+}
+
+copy_harness() {
+  header "Installing harness"
+
+  # harness/ and scripts/hooks/ are framework code — always overwrite on install
+  # and upgrade. EXCLUDE harness/node_modules: it is recreated by `npm install`
+  # in the target and can be hundreds of MB.
+  mkdir -p "$TARGET_DIR/harness"
+  cp -r "$RAD_DIR/harness/." "$TARGET_DIR/harness/"
+  rm -rf "$TARGET_DIR/harness/node_modules"
+  success "Harness → harness/ (node_modules excluded)"
+
+  mkdir -p "$TARGET_DIR/scripts/hooks"
+  cp -r "$RAD_DIR/scripts/hooks/." "$TARGET_DIR/scripts/hooks/"
+  success "Wave-lifecycle hooks → scripts/hooks/"
+  info "harness/cli.js      — zero-npm rad CLI (vendored js-yaml, lazy SDK)"
+  info "scripts/hooks/       — pre/post-wave + on-outcome lifecycle hook dirs"
 }
 
 scaffold_claude_md() {
@@ -278,7 +297,7 @@ print_next_steps() {
   echo "     (rad:<status> labels are auto-created on first use by scripts/rad-label.sh)"
   echo ""
   echo "  3. Commit the RAD files"
-  echo "     git add .claude/ .agents/ scripts/ CLAUDE.md"
+  echo "     git add .claude/ .agents/ scripts/ harness/ ai/ CLAUDE.md"
   echo "     git commit -m 'chore: install RAD framework'"
   echo ""
   echo "  4. Start the architecture process"
@@ -314,6 +333,7 @@ main() {
   copy_ai_guardrails
   copy_scripts
   copy_agents_meta
+  copy_harness
   scaffold_claude_md
   detect_and_report_platform
   ensure_deliver_label
