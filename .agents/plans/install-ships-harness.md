@@ -1,7 +1,7 @@
 # Plan: Install Ships the Harness
 Created: 2026-06-21
 Author: architect
-Status: approved
+Status: in-progress
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-06-21T19:35:25.095Z
 Branch: rad/install-ships-harness
