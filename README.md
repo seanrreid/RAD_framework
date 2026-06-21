@@ -3,16 +3,26 @@
 ![Rad Logo](./assets/rad_logo.png)
 
 A hybrid agent framework for small teams. Enforces information boundary
-architecture, GSD-style wave execution, and PR-based approval gates.
+architecture, GSD-style wave execution, and event-recorded approval gates.
 
 Built for teams of any size — works with a dedicated architect or with a
 developer playing both roles on smaller projects.
+
+Under the hood, RAD is a **deterministic harness** (the `rad` CLI in `harness/`,
+which folds an append-only event log into gate decisions) wrapped in a **framework
+shell** of slash commands and agent boundaries. The harness owns authority and
+state; the shell owns ergonomics. See `docs/harness-and-framework.md`.
 
 ---
 
 ## How It Works
 
 ```
+                    ── Gate 0 (optional) ──
+                    /rad-epic-decompose [epic #] (architect)
+                    Shapes a GitHub epic into per-child stories
+                    Writes .agents/epics/ — no plans, no commit
+
 ARCHITECT / TEAM                   TEAM
 ────────────────                   ────
 /rad-research [prd or issue]       /rad-plan [feature]
@@ -29,12 +39,13 @@ ARCHITECT / TEAM                   TEAM
 
                     ── Gate 1 ──
                     /rad-approve (architect)
-                    Reviews plan, writes Status: approved to the
-                    rad/[feature] branch tip and pushes it
-                    No PR — approval lives on the branch
+                    Reviews plan, records an `approved` event in
+                    the feature's event log on the rad/[feature]
+                    branch tip and pushes it. No PR — approval
+                    lives in the event log on the branch
 
                                    /rad-deliver [plan-file]
-                                     Checks plan has Status: approved
+                                     Gates on the approved event (`rad gate`)
                                      Runs on the existing rad/[feature] branch
                                      Each wave → fresh sub-agent context
                                      Orchestrator carries only WAVE_RESULT
@@ -55,10 +66,12 @@ ARCHITECT / TEAM                   TEAM
 
 Every feature lives on a single `rad/[feature]` work branch, cradle to grave.
 `/rad-plan` cuts it from the default branch and commits the plan doc to it.
-`/rad-approve` writes `Status: approved` to that branch's tip. `/rad-deliver`
-runs on the same branch and opens the one deliver PR. The plan doc and the code
-reach the default branch together through that single reviewed PR, which keeps
-contributors off the protected default branch. There is no plan PR.
+`/rad-approve` records an `approved` event in the feature's event log
+(`.agents/state/<feature>/events.jsonl`) on that branch's tip — that event is the
+gate authority. `/rad-deliver` runs on the same branch and opens the one deliver
+PR. The plan doc and the code reach the default branch together through that
+single reviewed PR, which keeps contributors off the protected default branch.
+There is no plan PR.
 
 The default branch is whatever you set as `default_branch:` in CLAUDE.md
 (resolved by `scripts/get-default-branch.sh`) — it is never hardcoded.
@@ -68,9 +81,12 @@ The default branch is whatever you set as `default_branch:` in CLAUDE.md
 **Gate 1 — Plan approval** (architect runs `/rad-approve`)
 - One file: `.agents/plans/[feature].md` on the `rad/[feature]` branch
 - Architect reviews the *approach* before code is written
-- `/rad-approve` writes `Status: approved` to the plan doc on the branch tip and
-  pushes that branch — no PR, no merge to the default branch
-- Blocked: `/rad-deliver` checks for `Status: approved` at the branch tip
+- `/rad-approve` records an `approved` event in the feature's event log on the
+  branch tip and pushes that branch — no PR, no merge to the default branch. (It
+  also mirrors `Status: approved` into the plan doc, but that header is display
+  only — the event is the authority.)
+- Blocked: `/rad-deliver` gates on the approved event via `rad gate <feature>
+  approved` at the branch tip
 
 **Gate 2 — Deliver PR** (`rad/[feature]` → default branch)
 - Plan doc and all implementation changes, together
@@ -101,10 +117,10 @@ The plan linter enforces a **context budget** on the Files in Scope table:
 
 | Role | Commands | Responsibility |
 |------|----------|----------------|
-| Architect | All commands | Defines agent boundaries, approves plans, merges PRs |
+| Architect | All commands (incl. `/rad-design`, `/rad-approve`, `/rad-epic-decompose`) | Defines agent boundaries, decomposes epics, approves plans, merges PRs |
 | Developer | `/rad-research`, `/rad-plan`, `/rad-adopt`, `/rad-deliver`, `/rad-review` | Research, plan, and execute within boundaries |
 | Designer | `/rad-research`, `/rad-plan`, `/rad-adopt`, `/rad-deliver` | UI-scoped research, planning, and execution |
-| All roles | `/rad-status`, `/rad-insights`, `/kickoff`, `/wrap` | Team dashboard, review pattern analysis, session start/end rituals |
+| All roles | `/rad-status`, `/rad-insights`, `/kickoff`, `/wrap`, `/rpi-design` | Team dashboard, review pattern analysis, session start/end rituals, agent-architecture scaffolding |
 
 All commands are committed to the project repo. The `architect/` subdirectory
 signals which commands carry architect-level responsibility — enforcement is via
@@ -139,8 +155,9 @@ your-project/
 │   │   └── quality-reviewer.md       ← built-in reviewer (invoked by /rad-review)
 │   └── commands/
 │       ├── architect/
-│       │   ├── rad-approve.md        → /rad-approve   (architect)
-│       │   └── rad-design.md         → /rad-design    (architect)
+│       │   ├── rad-approve.md        → /rad-approve         (architect)
+│       │   ├── rad-design.md         → /rad-design          (architect)
+│       │   └── rad-epic-decompose.md → /rad-epic-decompose  (architect, Gate 0)
 │       ├── team/
 │       │   ├── rad-research.md       → /rad-research  (team)
 │       │   ├── rad-plan.md           → /rad-plan      (team)
@@ -154,11 +171,14 @@ your-project/
 │           └── rad-insights.md       → /rad-insights  (shared)
 │   └── skills/
 │       ├── kickoff/SKILL.md          → /kickoff       (session start ritual)
-│       └── wrap/SKILL.md             → /wrap          (session end ritual)
+│       ├── wrap/SKILL.md             → /wrap          (session end ritual)
+│       └── rpi-design/SKILL.md       → /rpi-design    (agent-architecture scaffolding)
 ├── .agents/
 │   ├── research/                     ← research artifacts (/rad-research output)
 │   ├── architecture/                 ← architecture drafts (/rad-design draft → approved)
+│   ├── epics/                        ← epic shaping stories (/rad-epic-decompose, runtime)
 │   ├── plans/                        ← plan artifacts (Gate 1)
+│   ├── state/<feature>/events.jsonl  ← append-only event log — the gate authority (runtime)
 │   ├── logs/                         ← execution logs per plan
 │   ├── findings.jsonl                ← append-only review findings log (written by /rad-review)
 │   └── findings/README.md            ← findings log schema and query reference
@@ -166,13 +186,15 @@ your-project/
     ├── detect-platform.sh            ← detects git platform from remote
     ├── get-default-branch.sh         ← resolves default_branch from CLAUDE.md
     ├── checkout-plan.sh              ← checks out a plan's rad/[feature] branch
+    ├── fetch-epic.sh                 ← fetches an epic + children for /rad-epic-decompose
     ├── rad-label.sh                  ← applies RAD labels to a PR
     ├── open-pr.sh                    ← platform-agnostic PR creation
-    ├── check-plan-approved.sh        ← checks Status: approved at branch tip
+    ├── check-plan-approved.sh        ← gates on the approved event at the branch tip
     ├── check-role.sh                 ← validates contributor role vs. command
     ├── check-scope.sh                ← validates file changes against agent scope
     ├── check-tests.sh                ← checks for test coverage in deliver output
     ├── lint-plan.sh                  ← validates plan structure + context budget
+    ├── worktree-lifecycle.sh         ← optional git-worktree isolation for a deliver run
     └── rad-status.sh                 ← powers /rad-status dashboard
 ```
 
@@ -186,9 +208,13 @@ your-project/
 | `UPGRADE.md` | Upgrading an existing RAD project to the latest version |
 | `docs/how-it-works.md` | The whole process explained — model, lifecycle, guardrails |
 | `docs/harness-and-framework.md` | What RAD *is* — the harness core vs. the framework shell, grounded in code |
+| `docs/rad-cli.md` | The `rad` CLI — gates, deliver, agent adapters, worktree/budget/hook config |
+| `docs/rad-wave-contract.md` | The provider-neutral wave-execution contract adapters honor |
+| `docs/harness-state-store.md` | The deterministic event-log StateStore at the harness core |
 | `docs/framing-decisions.md` | How RAD positions itself on hooks, loops, context injection, and agent-to-agent orchestration |
 | `docs/daily-workflow.md` | Getting started with the team workflow |
 | `docs/architect-guide.md` | Setting up and maintaining the architecture |
+| `docs/epic-decomposition.md` | When, why, and how to run the Gate-0 `/rad-epic-decompose` step |
 | `docs/plan-pr-guide.md` | How plan approval works and what to review |
 | `docs/wave-execution.md` | How /rad-deliver runs tasks in waves |
 | `docs/platform-support.md` | Git platform configuration and fallbacks |
