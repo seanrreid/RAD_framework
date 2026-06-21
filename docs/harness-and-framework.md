@@ -232,6 +232,7 @@ whole point: **the shell is replaceable; the core is not.**
 
 ## See also
 
+- [framing-decisions.md](framing-decisions.md) — the stances on hooks, loops, and orchestration that flow from this identity
 - [how-it-works.md](how-it-works.md) — the process, in plain language
 - [harness-state-store.md](harness-state-store.md) — the two ports, events, folds
 - [rad-wave-contract.md](rad-wave-contract.md) — the provider-neutral agent contract
