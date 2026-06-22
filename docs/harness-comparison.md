@@ -6,6 +6,7 @@
 > Sources:
 > - [LangChain — The Anatomy of an Agent Harness](https://www.langchain.com/blog/the-anatomy-of-an-agent-harness)
 > - [Addy Osmani — Agent Harness Engineering](https://addyosmani.com/blog/agent-harness-engineering/)
+> - [WorkOS — CASE](https://github.com/workos/case) (closest sibling system; see dedicated section below)
 > - RAD docs: [`harness-and-framework.md`](harness-and-framework.md), [`how-it-works.md`](how-it-works.md)
 
 ---
@@ -138,5 +139,107 @@ have to recover entirely in their own adapter.
 ratchet** — closing the `findings.jsonl` → operating-rules loop so recurring
 failures provably become prevention. That's squarely in RAD's "deterministic,
 auditable" wheelhouse and patches its biggest learning-loop gap.
+
+---
+
+## RAD vs. CASE (workos/case)
+
+The two articles above describe harness *thinking*. CASE is a harness *system* —
+and it is by far RAD's closest sibling. Its thesis: *"Case exists to make
+agent-authored PRs reliable, reviewable, and self-improving."* A deterministic
+TypeScript/Bun executor drives a fixed phase pipeline — `scout → implementer →
+verifier → reviewer → closer → retrospective` — with context isolation per phase,
+file-based evidence gates, append-only event logs, and a retrospective that writes
+learnings back. If RAD and CASE were in a lineup, you'd struggle to tell whose
+design doc was whose.
+
+### How much they've independently converged
+
+Both arrived at the same primitives, separately — strong evidence RAD's core bets
+are right:
+
+- **Deterministic executor over phase transitions** (CASE's Bun executor ≈ RAD's
+  `spine.js`).
+- **Append-only event logs** (`.case/events/` ≈ `harness/events.js`).
+- **Context isolation per phase** (CASE's per-role contexts ≈ RAD's fresh
+  sub-agent per wave).
+- **Identical-failure-fingerprint early abort** — *both* abort on a repeated
+  failure fingerprint rather than burning the retry budget, with a two-cycle
+  revision budget. The most striking convergence.
+- **Provider-agnostic agent** (CASE's `--model` priority chain with per-role
+  overrides ≈ RAD's `runWave` adapters + per-wave `Model:` tiering).
+- **State files separating human intent from machine state** (CASE's `.task.json`
+  ≈ RAD's plan doc + events).
+- **Deliberately bounded to the PR loop** — both explicitly name generic-platform
+  features as non-goals.
+
+### Where CASE is ahead of RAD
+
+**1. The ratchet — CASE built the exact learning loop this doc flags RAD as
+missing.** Its retrospective is a *first-class phase*: it appends tactical
+learnings to `.case/learnings.md` and proposes harness changes under
+`.case/amendments/`, with the explicit philosophy *"when agents struggle, fix the
+harness,"* not the output repo. This is precisely the "ratchet" recommended above.
+RAD's `findings.jsonl` + `/rad-insights` *observe trends*; CASE *closes the loop*
+back into its own guardrails.
+
+**2. Evidence discipline as a machine gate.** CASE's gates require concrete
+artifacts captured from *real run output* — `ca mark-tested` from actual test
+output, plus a dedicated `verifier` role with intentionally "fresher" context that
+tests user-facing scenarios before the closer opens a PR. RAD's `check-tests.sh`
+only confirms named tests *exist on disk*. CASE proves they *ran and passed*; RAD
+proves they're *present*.
+
+**3. Product completeness / DX.** One command — `ca 1234` (GitHub) or `ca DX-1234`
+(Linear) — auto-detects the tracker, fetches the issue, runs baseline
+verification, and dispatches the pipeline. Compiled single binary. RAD is more
+assembly-required: slash commands, shell scripts, CLAUDE.md config.
+
+### Where RAD is ahead of CASE
+
+**1. Formal determinism rigor.** RAD's claims go further: gates are **pure folds**,
+authority is **frozen into the event at write-time**, record-time validation makes
+**invalid histories unrepresentable**, and the stop matrix has **no default
+fallthrough**. CASE is deterministic and resumable, but doesn't claim the same
+gate-algebra hardening.
+
+**2. Human judgment gated up-front.** The deepest divergence. CASE's pipeline is
+**autonomous** — scout and implementer run before a human necessarily weighs in;
+the human mostly meets the work at the *PR boundary* (steering via `ca --agent` is
+optional). RAD inserts **Gate 1 (plan approval) before any code is written** — a
+human architect signs off on *intent and approach* first. For high-risk or
+regulated work, approving the *plan* beats reviewing the *diff*. CASE's reviewer is
+an agent; RAD's approver is a person.
+
+**3. Multi-role team model.** RAD has role gating (architect / developer /
+designer), proxy approval with an honest `actor` vs `recordedBy` audit trail, and
+"developers can't approve their own plans." CASE reads as a *solo developer driving
+an agent*. RAD's governance answers *"who approved this?"*; CASE's answers *"what
+evidence exists?"*
+
+**4. Zero-dependency portability.** RAD's guardrails are bash 3.2+ shell scripts
+with no runtime install, plus a `manual` platform mode needing no `gh`/`glab`. CASE
+requires **Bun ≥ 1.0** and is bound to **GitHub/Linear** (though its compiled
+binary is a cleaner single-artifact distribution).
+
+### Synthesis
+
+CASE and RAD are the same *kind* of thing — a deterministic, context-isolated,
+evidence-gated, provider-neutral harness bounded to the PR loop — built to nearly
+identical primitives. The split is about **who the harness serves**:
+
+- **CASE** is an *autonomous pipeline with a built-in self-improvement loop*,
+  optimized for a developer pointing an agent at an issue. Ahead on the ratchet,
+  evidence discipline, and DX.
+- **RAD** is a *governance-and-roles harness with human judgment gated up-front*,
+  optimized for a team that must prove who approved what. Ahead on formal gate
+  determinism, up-front human oversight, role/team modeling, and zero-install
+  portability.
+
+The pointed takeaway: **CASE shipped the exact thing recommended above** — a
+deterministic ratchet that feeds failures back into the guardrails. That
+recommendation is no longer theoretical; CASE's `learnings.md` + `amendments/`
+split is a concrete template for closing RAD's `findings.jsonl` → operating-rules
+loop.
 </content>
 </invoke>
