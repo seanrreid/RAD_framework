@@ -60,16 +60,18 @@ Reads the research artifact and writes an architecture draft to
 - Scope and output contracts for every agent
 - The scope map ready for `CLAUDE.md`
 
-Review the draft and edit it directly. Adjust role assignments, tighten scope
-boundaries, add constraints. When satisfied, change `Status: draft` to
-`Status: approved` and re-run:
+Review the draft inline. `/rad-design` presents the hierarchy and asks to
+**approve / edit / cancel** — one invocation, no separate re-run:
+- **approve** — flips `Status: draft → approved` and, in the same run, generates
+  all `.claude/agents/*.md` files in parallel and prints the Agent Scope Map block
+  to paste into `CLAUDE.md`.
+- **edit** — adjust role assignments, tighten scope boundaries, add constraints;
+  the draft is revised and re-presented.
+- **cancel** — leave it as a draft and stop; re-run `/rad-design [slug]` later to
+  resume.
 
-```
-/rad-design [slug]
-```
-
-This generates all `.claude/agents/*.md` files in parallel and prints the
-Agent Scope Map block to paste into `CLAUDE.md`.
+No manual `Status` edit is required. (Editing `Status: approved` by hand still
+works — a pre-existing approved artifact generates directly on the next invocation.)
 
 ### 3. Update CLAUDE.md
 

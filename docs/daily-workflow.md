@@ -61,10 +61,17 @@ domain sensitivity — and writes `.agents/research/[slug].md`.
 ```
 
 Reads the research artifact and drafts the agent hierarchy to
-`.agents/architecture/[slug].md` with `Status: draft`. Review the draft,
-edit role assignments or scope boundaries as needed, then change the status
-to `approved` and re-run `/rad-design [slug]` to generate the agent files
-directly into `.claude/agents/`.
+`.agents/architecture/[slug].md` (`Status: draft`), then presents it inline and
+asks to **approve / edit / cancel** — all in one invocation:
+- **approve** — flips the status to `approved` and generates the agent files into
+  `.claude/agents/` in the same run. No manual edit, no re-run.
+- **edit** — adjust role assignments or scope boundaries; the draft is revised and
+  shown again.
+- **cancel** — leave it as a draft and stop; re-run `/rad-design [slug]` later to
+  resume.
+
+(Editing `Status: approved` by hand still works — a pre-existing approved artifact
+generates directly on the next invocation.)
 
 Commit everything — the generated agents are the architecture:
 

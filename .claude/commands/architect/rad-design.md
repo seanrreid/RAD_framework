@@ -1,9 +1,9 @@
 ---
 description: >
   ARCHITECT ONLY. Consume a research artifact and produce the project's agent
-  architecture. Run once after /rad-research to generate .agents/architecture/[slug].md
-  (Status: draft). Review and approve the draft, then re-run to generate
-  .claude/agents/ files and the CLAUDE.md scope map.
+  architecture. Run after /rad-research: it designs the agent hierarchy, presents
+  it for inline approval, and on approval generates the .claude/agents/ files and
+  the CLAUDE.md scope map — all in one invocation. No separate re-run required.
 ---
 
 # /rad-design
@@ -11,9 +11,16 @@ description: >
 Consume a RAD research artifact and generate the agent architecture for the
 project. This is the A in Research/Architect/Deliver.
 
-Runs in two modes depending on artifact state:
-- **Draft mode** — research artifact exists, no approved architecture yet
-- **Generate mode** — architecture artifact exists with `Status: approved`
+**One invocation, inline approval.** The command designs the agent hierarchy,
+shows it to you, and asks to approve / edit / cancel. On approval it flips the
+artifact to `approved` and proceeds straight to generation in the same run — the
+review gate is preserved (you always see the boundaries before any agent file is
+written), but the old "edit Status, then re-type the command" ceremony is gone.
+
+Two entry paths share the same generation logic:
+- **Design & Approve** — no approved architecture yet: design → inline approve → generate
+- **Generate** — an already-`approved` artifact exists: re-running just (re)generates,
+  idempotently. Manual `Status: approved` edits still work via this path.
 
 ## Input
 
@@ -28,13 +35,15 @@ project to design.
 
 Check for `.agents/architecture/[slug].md`:
 
-- **File does not exist** → run Draft mode
-- **File exists, Status: draft** → stop and print review instructions (see below)
-- **File exists, Status: approved** → run Generate mode
+- **File exists, Status: approved** → skip to **Generate** (idempotent re-run)
+- **Otherwise** (file missing, or Status: draft) → run **Design & Approve**
+
+Design & Approve flows directly into Generate once you approve — it is one
+continuous run, not two commands.
 
 ---
 
-## Draft Mode
+## Design & Approve
 
 ### Step 1: Read the research artifact
 
@@ -120,34 +129,51 @@ Research: .agents/research/[slug].md
 [anything the architect should consider before approving — gaps, risks, open questions]
 ```
 
-### Step 4: Print review instructions
+### Step 4: Present the design for inline approval
+
+The artifact is written with `Status: draft`. Do **not** stop and ask the architect
+to re-run — present the design inline and gate here. Render the hierarchy tree, the
+Scope Map table, and the Notes section, then ask:
 
 ```
-Architecture draft written: .agents/architecture/[slug].md
+Architecture drafted: .agents/architecture/[slug].md
 
-Review the agent hierarchy and definitions. Edit the file directly if anything
-needs to change — roles, scope, output contracts, model assignments.
+[Agent Hierarchy tree]
 
-When satisfied, change:
-  Status: draft
-to:
-  Status: approved
+[Scope Map table]
 
-Then re-run:
-  /rad-design [slug]
+[Notes]
 
-This will generate the .claude/agents/ files and CLAUDE.md scope map.
+Approve this agent architecture?
+  approve → flip Status to approved and generate the .claude/agents/ files now
+  edit    → tell me what to change (roles, scope, contracts, models); I revise and re-ask
+  cancel  → leave it as draft and stop (re-run /rad-design [slug] later to resume)
 ```
+
+This inline prompt **is** the review gate — the architect sees every boundary before
+any agent file exists. The judgment is preserved; only the re-run ceremony is removed.
+
+- **edit** → apply the requested changes to `.agents/architecture/[slug].md`, then
+  re-render Step 4 and ask again. Loop until approve or cancel.
+- **cancel** → leave `Status: draft` untouched and stop. A later `/rad-design [slug]`
+  re-enters Design & Approve from the existing draft.
+- **approve** → set the artifact's `Status: draft` → `Status: approved`, then continue
+  **immediately** into Generate below (Step 5) in the same run. Do not ask the architect
+  to re-invoke the command.
 
 ---
 
-## Generate Mode
+## Generate
 
-### Step 1: Read the approved architecture artifact
+Reached two ways: inline after **approve** above (same run), or standalone when
+`/rad-design [slug]` is invoked against an already-`approved` artifact. The logic is
+identical either way.
+
+### Step 5: Read the approved architecture artifact
 
 Read `.agents/architecture/[slug].md` directly. Extract every agent definition.
 
-### Step 2: Spawn parallel file-generation sub-agents
+### Step 6: Spawn parallel file-generation sub-agents
 
 For each agent in the architecture, spawn one sub-agent using model
 `claude-haiku-4-5-20251001`. Run all sub-agents in parallel.
@@ -198,7 +224,7 @@ Body sections (use exactly these headings):
 
 Wait for all sub-agents to complete before proceeding.
 
-### Step 3: Generate the CLAUDE.md scope map
+### Step 7: Generate the CLAUDE.md scope map
 
 Read the current `CLAUDE.md`. Find the `### Agent Scope Map` section.
 
@@ -219,7 +245,7 @@ Paste this into CLAUDE.md under '### Agent Scope Map', replacing the existing ta
 
 Do not write to CLAUDE.md directly — the architect pastes it in.
 
-### Step 4: Print installation summary
+### Step 8: Print installation summary
 
 ```
 Agent files generated: [N]
@@ -243,10 +269,11 @@ Next steps:
 
 ## Rules
 
-- Never run in Draft mode if an approved architecture artifact exists
-- Never run in Generate mode if Status is not `approved` — print review instructions instead
+- If an approved architecture artifact already exists, skip straight to Generate — never re-run Design & Approve over it
+- Never enter Generate (Step 5+) until the architect has approved — either inline (the Step 4 approve prompt) or via a pre-existing `Status: approved` artifact. The inline approval is the review gate; do not bypass it
+- The inline approve/edit/cancel prompt is the ONLY place the command stops for the architect — never dead-end on "edit Status and re-run"
 - Never write to CLAUDE.md directly — print the scope map block for the architect to paste
-- Never ask questions during Generate mode — resolve ambiguity from the architecture artifact
+- Once approved, resolve any remaining ambiguity from the architecture artifact — do not re-ask questions already settled in Design & Approve
 - Context tool files must have `model: claude-haiku-4-5-20251001`
 - Orchestrator files must have `model: claude-sonnet-4-6`
 - Every generated agent file must have at least 3 rules in its Rules section
