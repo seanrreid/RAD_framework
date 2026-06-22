@@ -113,12 +113,37 @@ test('recordApproval (human path) still invokes check-role.sh — policy path do
 
     store.recordApproval({ feature: 'demo', actor: 'architect', recordedBy: 'dev', ts: 't0' });
 
-    const calledRoleCheck = shCalls.some((c) => /check-role\.sh$/.test(c.file));
-    assert.equal(calledRoleCheck, true, 'human path must still invoke check-role.sh');
+    const roleCall = shCalls.find((c) => /check-role\.sh$/.test(c.file));
+    assert.ok(roleCall, 'human path must still invoke check-role.sh');
+    // Authority is verified for the architect role, against the actor identity.
+    assert.equal(roleCall.args[0], 'architect', 'check-role.sh must be asked for the architect role');
+    assert.equal(roleCall.args[roleCall.args.length - 1], 'architect', 'check-role.sh must be passed the actor identity');
     // And its event has human provenance, distinct from the policy path.
     const ev = store.history('demo')[0];
     assert.equal(ev.actor, 'architect');
     assert.equal(ev.role, 'architect');
     assert.notEqual(ev.recordedBy, 'policy');
+  });
+});
+
+// ── A failing role check on the human path REJECTS the approval (no event lands) ─
+test('recordApproval (human path) is rejected when check-role.sh returns non-zero', async () => {
+  await withTempRepo((repoRoot) => {
+    const shCalls = [];
+    // Injected sh: check-role.sh fails (actor does not hold the architect role).
+    const sh = (file, args, opts) => {
+      shCalls.push({ file, args, opts });
+      if (/check-role\.sh$/.test(file)) return { status: 1, stdout: 'not an architect', stderr: '' };
+      return { status: 0, stdout: '', stderr: '' };
+    };
+    const store = createGitStateStore({ repoRoot, sh });
+
+    // The role check fails ⇒ recordApproval must throw and NOT record an event.
+    assert.throws(
+      () => store.recordApproval({ feature: 'demo', actor: 'mallory', recordedBy: 'mallory', ts: 't0' }),
+      /role check failed/,
+      'a failed role check must reject the approval',
+    );
+    assert.equal(store.history('demo').length, 0, 'no approved event may be recorded when the role check fails');
   });
 });

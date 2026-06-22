@@ -172,9 +172,42 @@ t_tests_config_not_cleared() {
   echo "✓ AC#4c: tests/ and config/ are NOT auto-cleared under a docs/CSS allowlist"
 }
 
+# ── Rule 4: scope drift — branch changes a file OUTSIDE declared scope ⇒ not-low ─
+# The low.md plan declares docs/guide.md + styles/main.css (all-low). But the work
+# branch also edits config/app.conf, which is NOT in the declared scope. Even though
+# every DECLARED path is low, the out-of-scope change must force not-low.
+t_scope_drift_not_low() {
+  branch_edit rad/drift docs/guide.md '# guide v2' config/app.conf 'key=drift'
+
+  ( export RAD_LOW_RISK_PATTERNS='\.md$|\.css$'; run_classify ".agents/plans/low.md" "rad/drift"
+    [[ "$CLASSIFY_CODE" -eq 1 ]] || fail "AC: out-of-scope change should be not-low (got $CLASSIFY_CODE): $CLASSIFY_OUT"
+    printf '%s\n' "$CLASSIFY_OUT" | grep -q "scope drift" \
+      || fail "AC: not-low verdict did not cite scope drift: $CLASSIFY_OUT"
+  ) || exit 1
+  echo "✓ AC#scope-drift: a change outside the declared scope ⇒ not-low"
+}
+
+# ── Rule 1 (fail-closed): an empty changed-file set vs base ⇒ not-low ───────────
+# A work branch with no commits diverging from main produces an empty diff. An empty
+# diff is ambiguous (wrong base / no commits) and must NOT auto-clear.
+t_empty_diff_not_low() {
+  # Branch off main with NO commits — its diff vs main is empty.
+  git -C "$REPO" checkout -q main
+  git -C "$REPO" checkout -q -B rad/empty main
+
+  ( export RAD_LOW_RISK_PATTERNS='\.md$|\.css$'; run_classify ".agents/plans/low.md" "rad/empty"
+    [[ "$CLASSIFY_CODE" -eq 1 ]] || fail "AC: empty diff should be not-low (got $CLASSIFY_CODE): $CLASSIFY_OUT"
+    printf '%s\n' "$CLASSIFY_OUT" | grep -q "no changed files detected" \
+      || fail "AC: not-low verdict did not cite the empty changed-file set: $CLASSIFY_OUT"
+  ) || exit 1
+  echo "✓ AC#empty-diff: an empty changed-file set ⇒ not-low (fail closed)"
+}
+
 t_off_when_unset
 t_low_when_all_inert
 t_high_wins_ties
 t_not_low_when_outside_allowlist
 t_tests_config_not_cleared
+t_scope_drift_not_low
+t_empty_diff_not_low
 echo "ALL PASS"

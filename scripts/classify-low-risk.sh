@@ -87,13 +87,17 @@ CHANGED_FILES=$(
   if [[ -n "$WORK_BRANCH" ]]; then
     git diff --name-only "origin/$BASE_BRANCH"..."$WORK_BRANCH" 2>/dev/null \
       || git diff --name-only "$BASE_BRANCH"..."$WORK_BRANCH" 2>/dev/null \
-      || git diff --name-only "$BASE_BRANCH".."$WORK_BRANCH" 2>/dev/null
+      || git diff --name-only "$BASE_BRANCH"..."$WORK_BRANCH" 2>/dev/null
   else
     git diff --name-only "origin/$BASE_BRANCH"...HEAD 2>/dev/null \
       || git diff --name-only "$BASE_BRANCH"...HEAD 2>/dev/null \
-      || git diff --name-only "$BASE_BRANCH"..HEAD 2>/dev/null
+      || git diff --name-only "$BASE_BRANCH"...HEAD 2>/dev/null
   fi
 ) || not_low "could not compute git diff vs $BASE_BRANCH — ambiguous, failing closed"
+
+# An empty changed-file set is ambiguous (wrong base, no commits on the branch).
+# A diff that resolves to nothing must NOT auto-clear — fail closed.
+[[ -z "${CHANGED_FILES//[[:space:]]/}" ]] && not_low "no changed files detected vs base — ambiguous, failing closed"
 
 while IFS= read -r file; do
   [[ -z "$file" ]] && continue

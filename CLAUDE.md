@@ -231,6 +231,10 @@ or trust and always warrant human judgment. Set `RAD_LOW_RISK_PATTERNS` to overr
 the default with your own `|`-separated extended-regex alternation; keep it tight.
 Empty/unset disables severity routing entirely.
 
+`RAD_LOW_RISK_PATTERNS` is a **TRUSTED operator input**: a broad pattern (e.g. `.*`)
+auto-clears every non-high-risk, in-scope plan, bypassing human approval — so keep it
+tight and specific. This is a documented trust boundary, not a guarded one.
+
 ### Wave-Lifecycle Hooks
 
 OPTIONAL and backward-compatible — absent, `/rad-deliver` behaves exactly as
