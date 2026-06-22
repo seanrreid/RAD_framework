@@ -274,6 +274,13 @@ Approval requires:
 | spine-mapper | context-tool | harness/spine.js, matrix.js, matrix.yaml | architect |
 | hook-runtime-orchestrator | role-orchestrator | nothing | architect |
 | hook-surface-mapper | context-tool | contract.js, events writer, scripts/** | architect |
+| severity-approval-parent-orchestrator | parent-orchestrator | nothing | architect |
+| gate-authority-orchestrator | role-orchestrator | nothing | architect |
+| gate-authority-mapper | context-tool | harness/gates.js, gates.yaml, events.js, approve/deliver gate-check sites | architect |
+| severity-classifier-orchestrator | role-orchestrator | nothing | architect |
+| classifier-surface-mapper | context-tool | scripts/check-scope.sh, lint-plan.sh, CLAUDE.md RAD config, .env.example | architect |
+| audit-surface-orchestrator | role-orchestrator | nothing | developer |
+| audit-surface-mapper | context-tool | rad-insights skill, kickoff skill, events.js read side | developer |
 
 ---
 
