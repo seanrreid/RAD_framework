@@ -194,6 +194,43 @@ auth|payment|billing|migration|secret|credential|token
 Set `RAD_HIGH_RISK_PATTERNS` to override the default with your own `|`-separated
 extended-regex alternation. Empty disables the check.
 
+### Severity Routing — Low-Risk Allowlist
+
+OPTIONAL and backward-compatible — absent, severity routing is OFF and every plan
+takes the normal human-approval path.
+
+```
+RAD_LOW_RISK_PATTERNS: <|-separated extended-regex alternation>
+```
+
+`scripts/classify-low-risk.sh` computes a deterministic, **fail-closed** auto-clear
+verdict over the union of a plan's Files-in-Scope and per-task `File:` paths (the
+same path set the high-risk advisory reasons over). It uses the same matcher as
+`scripts/lint-plan.sh` — one source of truth in `scripts/lib/plan-paths.sh`.
+
+A plan is classified **low** (exit 0, auto-clearable) **iff all** of the following hold:
+
+- `RAD_LOW_RISK_PATTERNS` is non-empty, **and**
+- every touched path matches `RAD_LOW_RISK_PATTERNS`, **and**
+- **no** touched path matches `RAD_HIGH_RISK_PATTERNS` (**high-risk wins ties**), **and**
+- the declared scope is unchanged vs the working git diff (no out-of-scope drift).
+
+Anything else — empty/unset allowlist, any non-matching path, any high-risk match,
+any scope drift, or any ambiguity (e.g. an undetectable diff) — yields **not-low**
+(non-zero exit). The router never auto-clears on uncertainty.
+
+The built-in default allowlist is **inert-by-type only**:
+
+```
+css|scss|\.(png|jpe?g|gif|svg|webp|woff2?|ttf|otf|eot)$|\.md$|^docs/
+```
+
+That is: stylesheets, image/font assets, and docs. **Tests, config, lockfiles, and
+CI are deliberately EXCLUDED from the default** — changes to them can alter behavior
+or trust and always warrant human judgment. Set `RAD_LOW_RISK_PATTERNS` to override
+the default with your own `|`-separated extended-regex alternation; keep it tight.
+Empty/unset disables severity routing entirely.
+
 ### Wave-Lifecycle Hooks
 
 OPTIONAL and backward-compatible — absent, `/rad-deliver` behaves exactly as
