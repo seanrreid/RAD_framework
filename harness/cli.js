@@ -656,6 +656,15 @@ export async function approveCommand(argv, ctx) {
 
   const store = createGitStateStore({ repoRoot, sh, claudeMd });
 
+  // `--evidence` is only meaningful alongside `--on-behalf-of` (proxy mode). This
+  // combination check runs BEFORE the auto-clear classifier so a LOW plan cannot
+  // silently take the policy path and discard supplied evidence — the same error
+  // the human path raises, regardless of the classifier verdict.
+  if (!isNonEmpty(onBehalfOf) && isNonEmpty(evidence)) {
+    process.stderr.write('rad approve: --evidence is only valid with --on-behalf-of\n');
+    return 1;
+  }
+
   // ── Severity-routed auto-clear (pre-branch) ───────────────────────────────
   // BEFORE the human-approval path, ask the deterministic classifier whether
   // this plan's scope is provably LOW risk (auto-clearable). The classifier is
@@ -668,6 +677,13 @@ export async function approveCommand(argv, ctx) {
     if (verdict.low) {
       const ts = new Date().toISOString();
       const scope = store.plan(feature)?.files ?? [];
+      // The classifier cleared a non-empty scope; if the plan parser here disagrees
+      // and yields nothing, the parsers diverge — fail closed rather than write a
+      // corrupt audit event with an empty scope.
+      if (scope.length === 0) {
+        process.stderr.write('rad approve: classifier cleared this plan but no in-scope files were parsed — refusing to record an empty-scope policy approval\n');
+        return 1;
+      }
       try {
         store.recordPolicyApproval({
           feature,

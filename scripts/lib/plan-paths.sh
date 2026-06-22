@@ -28,7 +28,7 @@ plan_files_in_scope() {
     | grep -v "^| *File" | grep -v "^|[-| ]*$" \
     | awk -F'|' '{print $2}' \
     | while IFS= read -r path; do
-        path=$(echo "$path" | tr -d '[:space:]`')
+        path=$(echo "$path" | tr -d '`' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
         [[ -z "$path" || "$path" == "[path]" || "$path" == "File" ]] && continue
         echo "$path"
       done
@@ -41,7 +41,7 @@ plan_task_files() {
   local plan_file="$1"
   local line file_val file_path
   while IFS= read -r line; do
-    [[ "$line" =~ ^File: ]] || continue
+    [[ "$line" == File:* ]] || continue
     file_val=$(echo "$line" | sed 's/^File:[[:space:]]*//' | sed 's/[[:space:]]*$//')
     file_path=$(strip_task_file_lines "$file_val")
     [[ -z "$file_path" || "$file_path" == "[path]" ]] && continue
