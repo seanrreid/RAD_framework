@@ -8,3 +8,5 @@ Executor role: architect
 
 | Step | Wave | Task | Status | Commit | Time |
 |------|------|------|--------|--------|------|
+| 1 | Wave 1 | Deterministic low-risk classifier | ✓ complete | de9902f | 2026-06-22 |
+| 2 | Wave 1 | Document the RAD_LOW_RISK_PATTERNS config surface | ✓ complete | a2e42d9 | 2026-06-22 |
