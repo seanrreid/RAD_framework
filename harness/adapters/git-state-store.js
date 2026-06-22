@@ -187,7 +187,8 @@ function parsePlan(text) {
  *   - sh:       injectable shell-out helper (defaults to execFileSync-based)
  *   - claudeMd: path to CLAUDE.md for check-role.sh (defaults to <repoRoot>/CLAUDE.md)
  * @returns {import('../events.js').StateStore & {
- *   recordApproval: (a: { feature: string, actor: string, recordedBy?: string, ts?: string, evidence?: Object }) => void
+ *   recordApproval: (a: { feature: string, actor: string, recordedBy?: string, ts?: string, evidence?: Object }) => void,
+ *   recordPolicyApproval: (a: { feature: string, patterns?: string[], scope?: string[], ts?: string }) => void
  * }}
  */
 export function createGitStateStore({
@@ -383,6 +384,48 @@ export function createGitStateStore({
     append(event);
   }
 
+  /**
+   * Policy / auto-clear approval (severity-routed gate). Records an `approved`
+   * event whose authority is the architect's config-time allowlist plus the
+   * caller's deterministic classifier verdict — NOT a runtime identity check.
+   *
+   * This path deliberately branches AROUND check-role.sh: the actor is a
+   * machine identity ('severity-gate'), so a runtime role check on it is both
+   * meaningless and wrong. Authority is established at config time (the
+   * operator's allowlist) and frozen into provenance here. The event is
+   * otherwise IDENTICAL in shape to a human approval — `role: 'architect'` is
+   * frozen by policy — so the pure event-fold in gates.js evaluateGate accepts
+   * it exactly like a human one. The `data` payload (recordedBy:'policy',
+   * matched patterns, scope set) is what distinguishes it in the audit trail.
+   *
+   * Frugality / fail-closed note: the deterministic verdict is the CALLER's
+   * responsibility. This function does not classify; it records a decision the
+   * caller has already made. It never relaxes the human path's check-role gate.
+   *
+   * @param {{ feature: string, patterns?: string[], scope?: string[], ts?: string }} a
+   *   - patterns: the matched low-risk patterns that cleared the change
+   *   - scope:    the scope set (e.g. files in scope) the verdict covered
+   */
+  function recordPolicyApproval({ feature, patterns, scope, ts } = {}) {
+    if (!feature) throw new Error('recordPolicyApproval: feature is required');
+
+    /** @type {import('../events.js').Event} */
+    const event = {
+      feature,
+      type: 'approved',
+      actor: 'severity-gate',
+      role: 'architect',
+      recordedBy: 'policy',
+      ts: ts ?? new Date().toISOString(),
+      data: {
+        patterns: patterns ?? [],
+        scope: scope ?? [],
+      },
+    };
+
+    append(event);
+  }
+
   return {
     append,
     history,
@@ -391,6 +434,7 @@ export function createGitStateStore({
     gate,
     list,
     recordApproval,
+    recordPolicyApproval,
   };
 }
 
