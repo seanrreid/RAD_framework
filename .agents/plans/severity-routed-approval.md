@@ -41,12 +41,29 @@ out-of-scope dependencies.
 |------|-------|--------|
 | scripts/classify-low-risk.sh | 1-90 | NEW — the deterministic predicate (all-low AND none-high AND scope-unchanged; fail-closed; empty=OFF); emits verdict + matched patterns |
 | scripts/lint-plan.sh | 181-222 | Factor the path-union + regex-match into a shared helper so the classifier reuses it (no parallel matcher) |
+| scripts/lib/plan-paths.sh | 1-40 | NEW — the shared path-union + regex-match helper factored out of lint-plan.sh; one source of truth reused by the classifier |
 | CLAUDE.md | 178-205 | Add a "Severity Routing — Low-Risk Allowlist" config block mirroring High-Risk Paths |
 | .env.example | 37-46 | Document `RAD_LOW_RISK_PATTERNS` |
 | harness/adapters/git-state-store.js | 356-392 | Add the policy-approval write path to recordApproval (authority from classifier+config, NOT per-actor check-role; provenance + frozen role) |
 | harness/cli.js | 584-703 | Wire the classifier into approveCommand: low-risk verdict → policy write; else today's human flow. Deliver gate-check untouched |
 | .claude/commands/shared/rad-insights.md | 165-178 | Add an "Auto-Cleared Changes" section counting recordedBy:policy events |
 | .claude/skills/kickoff/SKILL.md | 46-60 | Add the "N auto-cleared since last session" line |
+| .agents/research/severity-routed-approval.md | 1-78 | Design-phase artifact — carried on the cradle-to-grave branch; reviewed at design approval, not modified by implementation waves |
+| .agents/architecture/severity-routed-approval.md | 1-141 | Design-phase artifact — the approved agent architecture; carried on-branch |
+| .claude/agents/severity-approval-parent-orchestrator.md | 1-57 | Design-phase artifact — generated agent |
+| .claude/agents/gate-authority-orchestrator.md | 1-44 | Design-phase artifact — generated agent |
+| .claude/agents/gate-authority-mapper.md | 1-29 | Design-phase artifact — generated agent |
+| .claude/agents/severity-classifier-orchestrator.md | 1-53 | Design-phase artifact — generated agent |
+| .claude/agents/classifier-surface-mapper.md | 1-50 | Design-phase artifact — generated agent |
+| .claude/agents/audit-surface-orchestrator.md | 1-62 | Design-phase artifact — generated agent |
+| .claude/agents/audit-surface-mapper.md | 1-45 | Design-phase artifact — generated agent |
+
+> **Note on budget:** the rows below the implementation files are **design-phase artifacts**
+> (the approved architecture + generated agents) committed earlier on this cradle-to-grave
+> branch. They are not loaded or modified by the implementation waves; they appear here only
+> so the scope check accounts for everything the single deliver PR carries. This inflates the
+> advisory line budget but reflects reality. (Friction noted as a follow-up: check-scope diffs
+> the whole branch vs main, so it sees design-phase commits on a cradle-to-grave branch.)
 
 ## Execution Notes
 
@@ -110,8 +127,8 @@ What: After the active-plans report, add a line "Auto-cleared: N changes since l
 Validate: AC#5 — kickoff surfaces the auto-clear count at session start.
 
 ## Tests to Write
-- [ ] scripts/test-classify-low-risk.sh — predicate unit tests: empty=OFF; all-low ⇒ low; any high-risk path ⇒ not-low (high wins ties); scope-changed ⇒ not-low; tests/config NOT auto-cleared by default (AC#1, AC#2, AC#4).
-- [ ] harness/test policy-approval test — recordApproval policy path writes the correct provenance + frozen role and does NOT call check-role; `evaluateGate` passes on the resulting event (AC#2, AC#3).
+- [ ] Predicate unit tests (empty=OFF; all-low ⇒ low; any high-risk path ⇒ not-low, high wins ties; scope-changed ⇒ not-low; tests/config NOT auto-cleared by default; AC#1, AC#2, AC#4) — scripts/test-classify-low-risk.sh
+- [ ] Policy-approval provenance test (recordApproval policy path writes correct provenance + frozen role and does NOT call check-role; `evaluateGate` passes on the resulting event; AC#2, AC#3) — harness/test/policy-approval.test.js
 
 ## Non-Goals
 - No LLM severity classifier; no role-based clearing; no structural detectors (v2); no quorum/tiered authority (parked) — carried from #37.
