@@ -1,7 +1,9 @@
 # Plan: Severity-Routed Approval (v1)
 Created: 2026-06-22
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-06-22T18:15:04.910Z
 Branch: rad/severity-routed-approval
 
 ## Context
