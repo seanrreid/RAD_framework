@@ -9,3 +9,6 @@ memory/
 
 # Node
 node_modules/
+
+# macOS Finder metadata — never useful in the repo.
+.DS_Store
