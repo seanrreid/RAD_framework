@@ -10,3 +10,4 @@ Executor role: architect
 |------|------|------|--------|--------|------|
 | 1 | Wave 1 | Deterministic low-risk classifier | ✓ complete | de9902f | 2026-06-22 |
 | 2 | Wave 1 | Document the RAD_LOW_RISK_PATTERNS config surface | ✓ complete | a2e42d9 | 2026-06-22 |
+| 3 | Wave 2 | Policy-approval write path in recordApproval | ✓ complete | d4aa76b | 2026-06-22 |
