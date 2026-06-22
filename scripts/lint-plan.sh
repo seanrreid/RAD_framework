@@ -10,6 +10,10 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/plan-paths.sh
+. "$SCRIPT_DIR/lib/plan-paths.sh"
+
 PLAN_FILE="${1:-}"
 [[ -z "$PLAN_FILE" ]] && { echo "ERROR: plan file path required"; exit 1; }
 [[ ! -f "$PLAN_FILE" ]] && { echo "ERROR: plan file not found: $PLAN_FILE"; exit 1; }
@@ -155,14 +159,7 @@ fi
 # the task and the missing path. Parity with the Files-in-Scope existence check:
 # a directory counts as existing.
 
-# Strip a trailing :lines suffix from a task File: value (e.g. path:290-410 or
-# path:150 → path). Paths without a :digits suffix pass through unchanged.
-strip_task_file_lines() {
-  case "$1" in
-    *:[0-9]*) echo "${1%:*}" ;;
-    *)        echo "$1" ;;
-  esac
-}
+# strip_task_file_lines is provided by lib/plan-paths.sh (single source of truth).
 
 CURRENT_TASK=""
 while IFS= read -r line; do
@@ -186,39 +183,13 @@ done < "$PLAN_FILE"
 RAD_HIGH_RISK_PATTERNS="${RAD_HIGH_RISK_PATTERNS:-auth|payment|billing|migration|secret|credential|token}"
 
 if [[ -n "$RAD_HIGH_RISK_PATTERNS" ]]; then
-  HIGH_RISK_PATHS=()
-
-  # Files-in-Scope table paths (column 2).
-  if has_section "Files in Scope"; then
-    while IFS= read -r path; do
-      path=$(echo "$path" | tr -d '[:space:]')
-      [[ -z "$path" || "$path" == "[path]" || "$path" == "File" ]] && continue
-      HIGH_RISK_PATHS+=("$path")
-    done < <(
-      awk '/^## Files in Scope/{found=1; next} /^## /{found=0} found && /^\|/' "$PLAN_FILE" \
-        | grep -v "^| *File" | grep -v "^|[-| ]*$" \
-        | awk -F'|' '{print $2}'
-    )
-  fi
-
-  # Task File: paths (with the :lines suffix stripped).
-  while IFS= read -r line; do
-    [[ "$line" =~ ^File: ]] || continue
-    file_val=$(echo "$line" | sed 's/^File:[[:space:]]*//' | sed 's/[[:space:]]*$//')
-    file_path=$(strip_task_file_lines "$file_val")
-    [[ -z "$file_path" || "$file_path" == "[path]" ]] && continue
-    HIGH_RISK_PATHS+=("$file_path")
-  done < "$PLAN_FILE"
-
-  # De-dup and warn on any match.
-  if [[ "${#HIGH_RISK_PATHS[@]}" -gt 0 ]]; then
-    while IFS= read -r path; do
-      [[ -z "$path" ]] && continue
-      if echo "$path" | grep -qE "$RAD_HIGH_RISK_PATTERNS"; then
-        WARNINGS+=("High-risk path in scope — flag for close architect review: $path")
-      fi
-    done < <(printf '%s\n' "${HIGH_RISK_PATHS[@]}" | sort -u)
-  fi
+  # Union of Files-in-Scope and task File: paths (de-duped) via the shared helper.
+  while IFS= read -r path; do
+    [[ -z "$path" ]] && continue
+    if path_matches "$path" "$RAD_HIGH_RISK_PATTERNS"; then
+      WARNINGS+=("High-risk path in scope — flag for close architect review: $path")
+    fi
+  done < <(plan_scope_paths "$PLAN_FILE")
 fi
 
 # ── Context budget ────────────────────────────────────────────────────────────
