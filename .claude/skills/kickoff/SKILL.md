@@ -56,6 +56,17 @@ Group what it returns by status and surface the actionable ones first:
 
 Skip silently if there are no plans.
 
+**Auto-clear count.** The severity-routed approval gate records each policy
+auto-clear as an `approved` event with `recordedBy === 'policy'` in the per-feature
+audit logs. Count them across the feature event logs and surface one line —
+`Auto-cleared: N changes since last session` — in the report below. Skip silently
+if the count is zero or no event logs exist.
+
+```bash
+jq -r 'select(.type=="approved" and .recordedBy=="policy")' \
+  .agents/state/*/events.jsonl 2>/dev/null | jq -s 'length'
+```
+
 ### 4. (Optional) Triage open issues
 
 If a platform CLI is available (`gh` or `glab`), list a few open issues so the
@@ -75,6 +86,8 @@ Summarize in this shape, then ask what to focus on:
 - ⏳ {feature} — pending architect approval
 - ✓ {feature} — approved, ready to deliver
 - ▶ {feature} — in progress on rad/{feature}
+
+Auto-cleared: {N} changes since last session   {omit this line entirely if N is 0}
 
 ## Suggested focus
 {the most actionable item — an approved plan to deliver, or a pending one to approve}

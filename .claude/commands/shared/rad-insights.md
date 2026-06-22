@@ -171,6 +171,48 @@ Cost per wave [for the most recent / most expensive feature]:
 
 ---
 
+### Step 6: Report auto-cleared changes
+
+The severity-routed approval gate records each policy auto-clear as an `approved`
+event with `recordedBy === 'policy'` in the per-feature audit log
+`.agents/state/<feature>/events.jsonl`. This reuses the existing event read path —
+`harness/events.js` `reduce(history)` surfaces `recordedBy` in its approvals array,
+so counting auto-clears = counting `approved` events whose `recordedBy` is
+`'policy'`. The matched allowlist pattern that cleared the change lives in
+`event.data.patterns`.
+
+Count those events across every feature log and group them by matched pattern:
+
+```bash
+# All policy auto-clears across every feature, grouped by matched pattern
+jq -r 'select(.type=="approved" and .recordedBy=="policy")
+  | (.data.patterns // ["(unspecified)"])[]' .agents/state/*/events.jsonl 2>/dev/null \
+  | sort | uniq -c | sort -rn
+
+# Total auto-clear count
+jq -r 'select(.type=="approved" and .recordedBy=="policy")' \
+  .agents/state/*/events.jsonl 2>/dev/null | jq -s 'length'
+```
+
+If no `.agents/state/*/events.jsonl` files exist, or no policy auto-clears are
+recorded, omit this section entirely.
+
+Add the following to the report, after **Recommended Focus Areas**:
+
+```markdown
+### Auto-Cleared Changes
+[Total count of policy auto-clears across all features. Then a per-pattern breakdown,
+ ranked by count descending:]
+Auto-cleared by the severity gate: [N] change(s)
+- `[pattern]` — [N] clear(s)
+...
+[Simple trend, if ≥ 2 cycles of history are available: compare the auto-clear count
+ in the most recent cycles to earlier ones and state it in one line:
+ "Trend: [↑ more auto-clears | ↓ fewer auto-clears | → stable]"]
+```
+
+---
+
 ## Rules
 
 - Never modify `.agents/findings.jsonl` or any `.agents/state/*/events.jsonl` — read only

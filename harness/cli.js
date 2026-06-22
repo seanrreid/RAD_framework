@@ -549,9 +549,52 @@ function writePlanStatus(planFile, fields) {
   if (fields.proxy) {
     upsert('Recorded-By', fields.recordedBy);
     upsert('Approval-Evidence', fields.evidence);
+  } else if (isNonEmpty(fields.recordedBy)) {
+    // Non-proxy mirror of the recorder (e.g. the severity-gate policy path, where
+    // recordedBy='policy'). Direct human approval omits it (recorder == approver).
+    upsert('Recorded-By', fields.recordedBy);
   }
 
   writeFileSync(planFile, lines.join('\n'), 'utf8');
+}
+
+/**
+ * Run the deterministic severity classifier (scripts/classify-low-risk.sh) over
+ * a plan file. Returns `{ low, patterns }`.
+ *
+ * FAIL-CLOSED: the verdict is LOW only on an exit code of exactly 0. Any
+ * non-zero exit (not-low, usage error, unset allowlist) OR a spawn failure
+ * (script missing / not executable) yields `{ low: false }` — the caller falls
+ * through to the human-approval path. We never auto-clear on uncertainty.
+ *
+ * `patterns` is parsed from the script's `low-risk patterns: <value>` stdout
+ * line so the policy event can record WHY the change cleared. It is best-effort
+ * audit metadata only; it never affects the low/not-low decision.
+ *
+ * @param {string} repoRoot
+ * @param {string} planFile - absolute path to the plan doc being approved
+ * @param {typeof defaultSh} sh - injectable shell-out helper
+ * @returns {{ low: boolean, patterns: string[] }}
+ */
+function classifyLowRisk(repoRoot, planFile, sh) {
+  const script = join(repoRoot, 'scripts', 'classify-low-risk.sh');
+  if (!existsSync(script)) return { low: false, patterns: [] };
+
+  const res = sh(script, [planFile], { cwd: repoRoot });
+  if (res.status !== 0) return { low: false, patterns: [] };
+
+  // Parse `low-risk patterns: <value>` from stdout (best-effort audit metadata).
+  let patterns = [];
+  for (const line of (res.stdout || '').split('\n')) {
+    const m = /^low-risk patterns:\s*(.+)$/.exec(line.trim());
+    if (m && m[1].trim() !== '<unset>') {
+      patterns = m[1]
+        .split('|')
+        .map((p) => p.trim())
+        .filter((p) => p.length > 0);
+    }
+  }
+  return { low: true, patterns };
 }
 
 /**
@@ -605,6 +648,49 @@ export async function approveCommand(argv, ctx) {
   const claudeMd = join(repoRoot, 'CLAUDE.md');
   const roleScript = join(repoRoot, 'scripts', 'check-role.sh');
 
+  const planFile = join(repoRoot, '.agents', 'plans', `${feature}.md`);
+  if (!existsSync(planFile)) {
+    process.stderr.write(`rad approve: no plan doc at .agents/plans/${feature}.md\n`);
+    return 1;
+  }
+
+  const store = createGitStateStore({ repoRoot, sh, claudeMd });
+
+  // ── Severity-routed auto-clear (pre-branch) ───────────────────────────────
+  // BEFORE the human-approval path, ask the deterministic classifier whether
+  // this plan's scope is provably LOW risk (auto-clearable). The classifier is
+  // fail-closed: only an exit code of 0 (LOW) takes the policy path; any
+  // non-zero exit, a spawn failure, or an unset allowlist falls through to the
+  // UNCHANGED human path below. Proxy-mode (--on-behalf-of) is an explicit human
+  // judgment already in hand, so it never auto-clears.
+  if (!isNonEmpty(onBehalfOf)) {
+    const verdict = classifyLowRisk(repoRoot, planFile, sh);
+    if (verdict.low) {
+      const ts = new Date().toISOString();
+      const scope = store.plan(feature)?.files ?? [];
+      try {
+        store.recordPolicyApproval({
+          feature,
+          patterns: verdict.patterns,
+          scope,
+          ts,
+        });
+      } catch (err) {
+        process.stderr.write(`rad approve: cannot record policy approval — ${err.message}\n`);
+        return 1;
+      }
+      writePlanStatus(planFile, {
+        approvedBy: 'severity-gate',
+        approvedAt: ts,
+        recordedBy: 'policy',
+      });
+      process.stdout.write(
+        `rad approve: ok feature=${feature} status=approved approved-by=severity-gate recorded-by=policy approved-at=${ts} auto-clear=true reason=low-risk\n`,
+      );
+      return 0;
+    }
+  }
+
   // Resolve the running git user (the recorder).
   const userResult = sh('git', ['config', 'user.email'], { cwd: repoRoot });
   const runningUser = (userResult.stdout || '').trim();
@@ -655,14 +741,7 @@ export async function approveCommand(argv, ctx) {
   // the verified role token into the event's `role` field at write-time.
   const actor = approvedBy;
 
-  const planFile = join(repoRoot, '.agents', 'plans', `${feature}.md`);
-  if (!existsSync(planFile)) {
-    process.stderr.write(`rad approve: no plan doc at .agents/plans/${feature}.md\n`);
-    return 1;
-  }
-
   const ts = new Date().toISOString();
-  const store = createGitStateStore({ repoRoot, sh, claudeMd });
 
   // Dual-write (a): append the `approved` event. recordApproval validates the
   // transition before writing — an illegal move (e.g. already approved) throws.
