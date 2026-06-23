@@ -53,6 +53,16 @@ const SUBCOMMANDS = {
     usage: 'rad gate <feature> <name> [--stdin]',
     run: (argv, ctx) => gateCommand(argv, ctx),
   },
+  'owner-claim': {
+    summary: 'Claim the single-writer lock on a feature (records who holds it).',
+    usage: 'rad owner-claim <feature>',
+    run: (argv, ctx) => ownerClaimCommand(argv, ctx),
+  },
+  'owner-release': {
+    summary: 'Release the single-writer lock on a feature (clears the holder).',
+    usage: 'rad owner-release <feature>',
+    run: (argv, ctx) => ownerReleaseCommand(argv, ctx),
+  },
 };
 
 /** The harness package root (where cli.js lives). */
@@ -1044,6 +1054,113 @@ export async function gateCommand(argv, ctx) {
   );
 
   return result.passed ? 0 : 1;
+}
+
+/**
+ * Hand-rolled argv parser for the ownership verbs. Returns the positional
+ * feature. Throws on unknown flags or extra positionals so malformed invocations
+ * fail loudly rather than mis-parse.
+ *
+ * @param {string[]} argv
+ * @returns {{ feature?: string }}
+ */
+function parseOwnerArgs(argv) {
+  let feature;
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg.startsWith('--')) {
+      throw new Error(`unknown option '${arg}'`);
+    } else if (feature === undefined) {
+      feature = arg;
+    } else {
+      throw new Error(`unexpected argument '${arg}'`);
+    }
+  }
+  return { feature };
+}
+
+/**
+ * `owner-claim <feature>`.
+ *
+ * Claims the single-writer lock on a feature: appends an `owner-claimed` event
+ * whose holder provenance (the resolving git identity) is frozen ONCE at
+ * write-time by the store. The branch IS the lock — claiming records WHO holds
+ * it. Pure git/state work: no model call, no PR, no push. This appends an event
+ * the existing fold/reduce already accumulates; it adds NO gate branch.
+ *
+ * @param {string[]} argv - args after `owner-claim`
+ * @param {{ repoRoot: string, sh?: typeof defaultSh }} ctx
+ * @returns {Promise<number>}
+ */
+export async function ownerClaimCommand(argv, ctx) {
+  return ownerVerb(argv, ctx, 'claim');
+}
+
+/**
+ * `owner-release <feature>`.
+ *
+ * Releases the single-writer lock: appends an `owner-released` event, clearing
+ * the holder the most recent `owner-claimed` established. Symmetric to
+ * owner-claim. Pure git/state work; adds NO gate branch.
+ *
+ * @param {string[]} argv - args after `owner-release`
+ * @param {{ repoRoot: string, sh?: typeof defaultSh }} ctx
+ * @returns {Promise<number>}
+ */
+export async function ownerReleaseCommand(argv, ctx) {
+  return ownerVerb(argv, ctx, 'release');
+}
+
+/**
+ * Shared body for the two ownership verbs. `which` selects claim vs release; the
+ * two paths are byte-for-byte symmetric apart from the store writer and the
+ * structured output token.
+ *
+ * @param {string[]} argv
+ * @param {{ repoRoot: string, sh?: typeof defaultSh }} ctx
+ * @param {'claim'|'release'} which
+ * @returns {Promise<number>}
+ */
+async function ownerVerb(argv, ctx, which) {
+  const { repoRoot } = ctx;
+  const sh = ctx.sh ?? defaultSh;
+  const verb = which === 'claim' ? 'owner-claim' : 'owner-release';
+
+  let parsed;
+  try {
+    parsed = parseOwnerArgs(argv);
+  } catch (err) {
+    process.stderr.write(`rad ${verb}: ${err.message}\n`);
+    process.stderr.write(`Usage: rad ${verb} <feature>\n`);
+    return 1;
+  }
+
+  const { feature } = parsed;
+  if (!isNonEmpty(feature)) {
+    process.stderr.write(`rad ${verb}: a feature name is required\n`);
+    process.stderr.write(`Usage: rad ${verb} <feature>\n`);
+    return 1;
+  }
+
+  const claudeMd = join(repoRoot, 'CLAUDE.md');
+  const store = createGitStateStore({ repoRoot, sh, claudeMd });
+
+  let result;
+  try {
+    result =
+      which === 'claim'
+        ? store.recordOwnerClaimed({ feature })
+        : store.recordOwnerReleased({ feature });
+  } catch (err) {
+    process.stderr.write(`rad ${verb}: cannot record ${which} — ${err.message}\n`);
+    return 1;
+  }
+
+  // Structured success line (machine-greppable single line).
+  process.stdout.write(
+    `rad ${verb}: ok feature=${feature} action=${which} holder=${result.holder} at=${result.ts}\n`,
+  );
+  return 0;
 }
 
 // Run only when invoked as a script (not when imported by a test).

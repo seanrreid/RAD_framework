@@ -79,6 +79,11 @@ function isSafeFeature(feature) {
   return typeof feature === 'string' && /^[a-z0-9][a-z0-9-]*$/.test(feature);
 }
 
+/** True when a string is present and not whitespace-only. */
+function isNonEmptyString(s) {
+  return typeof s === 'string' && s.trim() !== '';
+}
+
 /** Throw on any feature that is not a safe slug. */
 function assertSafeFeature(feature) {
   if (!isSafeFeature(feature)) {
@@ -426,6 +431,94 @@ export function createGitStateStore({
     append(event);
   }
 
+  /**
+   * Resolve the running git identity (user.email) at write-time. This is the
+   * provenance frozen into an ownership event — the actor who physically holds
+   * (or releases) the single-writer lock. Mirrors how cli.js resolves the runner
+   * for recordApproval (the recorder). Throws (refuse before writing) when no git
+   * identity is configured, since an ownership event with no holder is useless.
+   *
+   * @returns {string} the resolved git user.email
+   */
+  function resolveGitIdentity() {
+    const res = sh('git', ['config', 'user.email'], { cwd: repoRoot });
+    const identity = (res.stdout || '').trim();
+    if (!identity) {
+      throw new Error(
+        'cannot determine git user.email — set your git identity before claiming/releasing the lock',
+      );
+    }
+    return identity;
+  }
+
+  /**
+   * Record a single-writer LOCK CLAIM. The branch IS the lock: claiming records
+   * WHO holds it as an `owner-claimed` event whose holder provenance is frozen
+   * ONCE at write-time (the resolved git identity), mirroring recordApproval's
+   * write-time freeze. The holder is carried in `event.data` (the data-only
+   * ownership-event contract in events.js — these types establish no phase and
+   * carry no outcome).
+   *
+   * This is NOT a gate: it appends an event the existing fold/reduce already
+   * accumulates. No branch is added to evaluateGate; the lock is expressed purely
+   * as appended events. `append` validates the transition before writing, so a
+   * claim on a terminal feature (delivered/done) throws and nothing is written.
+   *
+   * @param {{ feature: string, actor?: string, ts?: string }} a
+   *   - actor: optional explicit holder identity; defaults to the resolved git user
+   * @returns {{ holder: string, ts: string }} the frozen holder + timestamp
+   */
+  function recordOwnerClaimed({ feature, actor, ts } = {}) {
+    if (!feature) throw new Error('recordOwnerClaimed: feature is required');
+    assertSafeFeature(feature);
+
+    // Freeze the holder identity ONCE at write-time.
+    const holder = isNonEmptyString(actor) ? actor : resolveGitIdentity();
+    const stampedTs = ts ?? new Date().toISOString();
+
+    /** @type {import('../events.js').Event} */
+    const event = {
+      feature,
+      type: 'owner-claimed',
+      actor: holder,
+      ts: stampedTs,
+      data: { holder },
+    };
+
+    append(event);
+    return { holder, ts: stampedTs };
+  }
+
+  /**
+   * Record a single-writer LOCK RELEASE. Appends an `owner-released` event whose
+   * releaser provenance is frozen ONCE at write-time, clearing the lock the most
+   * recent `owner-claimed` established. Symmetric to recordOwnerClaimed; same
+   * data-only contract, same write-time freeze, same no-new-gate-branch rule.
+   *
+   * @param {{ feature: string, actor?: string, ts?: string }} a
+   *   - actor: optional explicit releaser identity; defaults to the resolved git user
+   * @returns {{ holder: string, ts: string }} the frozen releaser + timestamp
+   */
+  function recordOwnerReleased({ feature, actor, ts } = {}) {
+    if (!feature) throw new Error('recordOwnerReleased: feature is required');
+    assertSafeFeature(feature);
+
+    const holder = isNonEmptyString(actor) ? actor : resolveGitIdentity();
+    const stampedTs = ts ?? new Date().toISOString();
+
+    /** @type {import('../events.js').Event} */
+    const event = {
+      feature,
+      type: 'owner-released',
+      actor: holder,
+      ts: stampedTs,
+      data: { holder },
+    };
+
+    append(event);
+    return { holder, ts: stampedTs };
+  }
+
   return {
     append,
     history,
@@ -435,6 +528,8 @@ export function createGitStateStore({
     list,
     recordApproval,
     recordPolicyApproval,
+    recordOwnerClaimed,
+    recordOwnerReleased,
   };
 }
 
