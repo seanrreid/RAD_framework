@@ -1,7 +1,7 @@
 # Plan: Approval-Authority Recording
 Created: 2026-06-23
 Author: architect
-Status: approved
+Status: in-progress
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-06-23T19:18:42.711Z
 Recorded-By: sean@torchcodelab.com
