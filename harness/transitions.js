@@ -91,24 +91,41 @@ export function validateTransition(event, currentState) {
     }
   }
 
-  // (d) A duplicate approved would silently shadow an earlier authority.
+  // (d) A duplicate approved would silently shadow an earlier authority — but a
+  // RE-attestation after a plan edit is legitimate. Block a second `approved`
+  // ONLY when its plan fingerprint EQUALS the most recent prior approved's
+  // fingerprint (a true duplicate); ALLOW it when the fingerprints differ (the
+  // approver is re-attesting a changed plan body). Fail-closed for the legacy
+  // case: if EITHER fingerprint is absent/undefined, preserve today's behavior
+  // and block — we cannot prove the bodies differ, so we treat it as a duplicate.
   if (event.type === 'approved') {
-    const alreadyApproved = history.some((e) => e.type === 'approved');
-    if (alreadyApproved) {
-      throw new TransitionError(
-        'Cannot append a duplicate approved event — an approval already exists',
-        { event, rule: 'duplicate-approved' },
-      );
+    const priorApproved = history.filter((e) => e.type === 'approved');
+    if (priorApproved.length > 0) {
+      const prior = priorApproved[priorApproved.length - 1];
+      const priorFp = prior.data && prior.data.fingerprint;
+      const nextFp = event.data && event.data.fingerprint;
+      const differs =
+        priorFp !== undefined && nextFp !== undefined && nextFp !== priorFp;
+      if (!differs) {
+        throw new TransitionError(
+          'Cannot append a duplicate approved event — an approval already exists',
+          { event, rule: 'duplicate-approved' },
+        );
+      }
     }
   }
 
-  // (e) An approved event must carry a frozen role — recordApproval is the one
-  // canonical constructor of approved events and always stamps role at write-time.
-  // A role-less approved event means write-time authority was bypassed (e.g. a
-  // direct append() call) — reject it as an illegal transition.
-  if (event.type === 'approved' && !event.role) {
+  // (e) An approved or architecture-approved event must carry a frozen role —
+  // recordApproval / recordArchitectureApproved are the canonical constructors and
+  // always stamp role at write-time. A role-less such event means write-time
+  // authority was bypassed (e.g. a direct append() call) — reject it as an illegal
+  // transition.
+  if (
+    (event.type === 'approved' || event.type === 'architecture-approved') &&
+    !event.role
+  ) {
     throw new TransitionError(
-      'Cannot append an approved event without a frozen role — use recordApproval, which verifies and stamps the role at write-time',
+      `Cannot append an ${event.type} event without a frozen role — use the record* constructor, which verifies and stamps the role at write-time`,
       { event, rule: 'approved-missing-role' },
     );
   }

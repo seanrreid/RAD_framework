@@ -24,6 +24,7 @@ import process from 'node:process';
 
 import { createGitStateStore, defaultSh } from './adapters/git-state-store.js';
 import { evaluateGate } from './gates.js';
+import { planFingerprint } from './plan-fingerprint.js';
 import { makeWorktreeLifecycle } from './adapters/worktree.js';
 import { deliverSpine } from './spine.js';
 import { createCommandAdapter } from './adapters/agent/command.js';
@@ -62,6 +63,16 @@ const SUBCOMMANDS = {
     summary: 'Release the single-writer lock on a feature (clears the holder).',
     usage: 'rad owner-release <feature>',
     run: (argv, ctx) => ownerReleaseCommand(argv, ctx),
+  },
+  'plan-fingerprint': {
+    summary: 'Print the SHA-256 fingerprint of a plan doc body (read-only).',
+    usage: 'rad plan-fingerprint <planFile>',
+    run: (argv, ctx) => planFingerprintCommand(argv, ctx),
+  },
+  'architecture-approve': {
+    summary: 'Record a frozen architecture-approved audit event for a slug.',
+    usage: 'rad architecture-approve <slug> [--on-behalf-of <name>] [--evidence <text>]',
+    run: (argv, ctx) => architectureApproveCommand(argv, ctx),
   },
 };
 
@@ -699,11 +710,18 @@ export async function approveCommand(argv, ctx) {
 
   const store = createGitStateStore({ repoRoot, sh, claudeMd });
 
+  // Read the plan doc once: the `Branch:` header (for the best-effort sync push)
+  // and the body fingerprint (stamped onto the approved event so the gate-read
+  // boundary can detect a post-approval edit).
+  const planText = readFileSync(planFile, 'utf8');
   // Resolve the work branch the same way deliver does: the plan doc's `Branch:`
   // header is canonical; fall back to the rad/<feature> convention when absent.
   // Used only by the best-effort RAD_SYNC push after a successful record.
-  const planBranch = parsePlanCtx(readFileSync(planFile, 'utf8')).branch;
+  const planBranch = parsePlanCtx(planText).branch;
   const workBranch = isNonEmpty(planBranch) ? planBranch : `rad/${feature}`;
+  // Fingerprint of the approved plan body (mutable header excluded by construction);
+  // attested into the approved event's data so a later edit can fail the gate closed.
+  const planHash = planFingerprint(planText).hash;
 
   // `--evidence` is only meaningful alongside `--on-behalf-of` (proxy mode). This
   // combination check runs BEFORE the auto-clear classifier so a LOW plan cannot
@@ -820,6 +838,7 @@ export async function approveCommand(argv, ctx) {
       recordedBy,
       ts,
       evidence: proxy ? evidence : undefined,
+      fingerprint: planHash,
     });
   } catch (err) {
     process.stderr.write(`rad approve: cannot record approval — ${err.message}\n`);
@@ -849,6 +868,140 @@ export async function approveCommand(argv, ctx) {
   } else {
     process.stdout.write(
       `rad approve: ok feature=${feature} status=approved approved-by=${approvedBy} approved-at=${ts} proxy=false\n`,
+    );
+  }
+  return 0;
+}
+
+/**
+ * `plan-fingerprint <planFile>`.
+ *
+ * Read-only: prints the SHA-256 fingerprint of a plan doc's body (the mutable
+ * header is excluded by construction in planFingerprint) to stdout and exits 0.
+ * The gate-read boundary (scripts/check-plan-approved.sh) shells out to this so
+ * the hash has a SINGLE source of truth (harness/plan-fingerprint.js) — the bash
+ * boundary never reimplements the digest. No model call, no PR, no push.
+ *
+ * @param {string[]} argv - args after `plan-fingerprint`
+ * @param {{ repoRoot: string }} ctx
+ * @returns {Promise<number>}
+ */
+export async function planFingerprintCommand(argv, ctx) {
+  const [planFile, ...rest] = argv;
+  if (!isNonEmpty(planFile) || rest.length > 0) {
+    process.stderr.write('rad plan-fingerprint: exactly one <planFile> is required\n');
+    process.stderr.write('Usage: rad plan-fingerprint <planFile>\n');
+    return 1;
+  }
+  let planText;
+  try {
+    planText = readFileSync(planFile, 'utf8');
+  } catch (err) {
+    process.stderr.write(`rad plan-fingerprint: cannot read '${planFile}' — ${err.message}\n`);
+    return 1;
+  }
+  process.stdout.write(`${planFingerprint(planText).hash}\n`);
+  return 0;
+}
+
+/**
+ * `architecture-approve <slug> [--on-behalf-of <name>] [--evidence <text>]`.
+ *
+ * Records the frozen `architecture-approved` audit event (to the reserved
+ * `_architecture` project log) attesting that /rad-design's agent architecture
+ * was signed off by an architect. The store role-checks the architect identity
+ * (onBehalfOf) at write-time and freezes the role token into the event.
+ *
+ * Proxy handling mirrors `approve`:
+ *   - Direct mode (no --on-behalf-of): the running git user is the architect
+ *     whose authority is frozen; the store role-checks them. recordedBy = runner.
+ *   - Proxy mode (--on-behalf-of <name> + required --evidence): <name> is the
+ *     architect (role-checked by the store); recordedBy = the running user.
+ *
+ * Pure git/state work: no model call, no PR, no push.
+ *
+ * @param {string[]} argv - args after `architecture-approve`
+ * @param {{ repoRoot: string, sh?: typeof defaultSh }} ctx
+ * @returns {Promise<number>}
+ */
+export async function architectureApproveCommand(argv, ctx) {
+  const { repoRoot } = ctx;
+  const sh = ctx.sh ?? defaultSh;
+
+  let parsed;
+  try {
+    // Reuse the approve parser: same positional + --on-behalf-of/--evidence shape.
+    parsed = parseApproveArgs(argv);
+  } catch (err) {
+    process.stderr.write(`rad architecture-approve: ${err.message}\n`);
+    process.stderr.write('Usage: rad architecture-approve <slug> [--on-behalf-of <name>] [--evidence <text>]\n');
+    return 1;
+  }
+
+  const { feature: slug, onBehalfOf, evidence } = parsed;
+
+  if (!isNonEmpty(slug)) {
+    process.stderr.write('rad architecture-approve: a slug is required\n');
+    process.stderr.write('Usage: rad architecture-approve <slug> [--on-behalf-of <name>] [--evidence <text>]\n');
+    return 1;
+  }
+
+  // `--evidence` is only meaningful in proxy mode, mirroring approve.
+  if (!isNonEmpty(onBehalfOf) && isNonEmpty(evidence)) {
+    process.stderr.write('rad architecture-approve: --evidence is only valid with --on-behalf-of\n');
+    return 1;
+  }
+
+  const claudeMd = join(repoRoot, 'CLAUDE.md');
+  const store = createGitStateStore({ repoRoot, sh, claudeMd });
+
+  // Resolve the running git user (the recorder).
+  const userResult = sh('git', ['config', 'user.email'], { cwd: repoRoot });
+  const runningUser = (userResult.stdout || '').trim();
+  if (!isNonEmpty(runningUser)) {
+    process.stderr.write('rad architecture-approve: cannot determine git user.email — set your git identity first\n');
+    return 1;
+  }
+
+  // architect identity (role-checked by the store) and recorder provenance.
+  let architect;
+  let recordedBy;
+  let proxy = false;
+  if (isNonEmpty(onBehalfOf)) {
+    proxy = true;
+    if (!isNonEmpty(evidence)) {
+      process.stderr.write('rad architecture-approve: --on-behalf-of requires --evidence (cite where the architect approved)\n');
+      return 1;
+    }
+    architect = onBehalfOf;
+    recordedBy = runningUser;
+  } else {
+    architect = runningUser;
+    recordedBy = runningUser;
+  }
+
+  const ts = new Date().toISOString();
+
+  try {
+    store.recordArchitectureApproved({
+      slug,
+      onBehalfOf: architect,
+      recordedBy,
+      evidence: proxy ? evidence : undefined,
+      ts,
+    });
+  } catch (err) {
+    process.stderr.write(`rad architecture-approve: cannot record architecture approval — ${err.message}\n`);
+    return 1;
+  }
+
+  if (proxy) {
+    process.stdout.write(
+      `rad architecture-approve: ok slug=${slug} approved-by=${architect} recorded-by=${recordedBy} approved-at=${ts} proxy=true\n`,
+    );
+  } else {
+    process.stdout.write(
+      `rad architecture-approve: ok slug=${slug} approved-by=${architect} approved-at=${ts} proxy=false\n`,
     );
   }
   return 0;

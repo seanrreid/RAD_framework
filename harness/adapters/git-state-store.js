@@ -76,7 +76,13 @@ function defaultSh(file, args = [], opts = {}) {
  * traversal. Mirrors the `rad/<feature>` branch grammar the scripts enforce.
  */
 function isSafeFeature(feature) {
-  return typeof feature === 'string' && /^[a-z0-9][a-z0-9-]*$/.test(feature);
+  if (typeof feature !== 'string') return false;
+  // `_architecture` is the single reserved, non-feature project log (a fixed
+  // literal, NOT a loosened regex) — its events.jsonl records architecture-review
+  // sign-offs that belong to no one feature. Admit it as an EXPLICIT exception so
+  // the base grammar stays fail-closed (no leading-underscore slugs in general).
+  if (feature === '_architecture') return true;
+  return /^[a-z0-9][a-z0-9-]*$/.test(feature);
 }
 
 /** True when a string is present and not whitespace-only. */
@@ -192,8 +198,9 @@ function parsePlan(text) {
  *   - sh:       injectable shell-out helper (defaults to execFileSync-based)
  *   - claudeMd: path to CLAUDE.md for check-role.sh (defaults to <repoRoot>/CLAUDE.md)
  * @returns {import('../events.js').StateStore & {
- *   recordApproval: (a: { feature: string, actor: string, recordedBy?: string, ts?: string, evidence?: Object }) => void,
- *   recordPolicyApproval: (a: { feature: string, patterns?: string[], scope?: string[], ts?: string }) => void
+ *   recordApproval: (a: { feature: string, actor: string, recordedBy?: string, ts?: string, evidence?: Object, fingerprint?: string }) => void,
+ *   recordPolicyApproval: (a: { feature: string, patterns?: string[], scope?: string[], ts?: string }) => void,
+ *   recordArchitectureApproved: (a: { slug: string, onBehalfOf: string, recordedBy?: string, evidence?: Object, ts?: string }) => void
  * }}
  */
 export function createGitStateStore({
@@ -357,9 +364,15 @@ export function createGitStateStore({
    * The verified role is frozen into the event's `role` field so gate() reads
    * authority from the immutable log — no repeat shell-outs required at read time.
    *
-   * @param {{ feature: string, actor: string, requiredRole?: string, recordedBy?: string, ts?: string, evidence?: Object }} a
+   * The optional `fingerprint` (a hash of the approved plan body, from
+   * harness/plan-fingerprint.js) is attested into the event's `data` when
+   * provided — it records WHICH plan body this approval covers, enabling the
+   * re-attestation transition rule to distinguish a true duplicate from a
+   * legitimate re-approval after a plan edit. It is data-only (the fold ignores it).
+   *
+   * @param {{ feature: string, actor: string, requiredRole?: string, recordedBy?: string, ts?: string, evidence?: Object, fingerprint?: string }} a
    */
-  function recordApproval({ feature, actor, requiredRole = 'architect', recordedBy, ts, evidence } = {}) {
+  function recordApproval({ feature, actor, requiredRole = 'architect', recordedBy, ts, evidence, fingerprint } = {}) {
     if (!feature) throw new Error('recordApproval: feature is required');
     if (!actor) throw new Error('recordApproval: actor is required');
 
@@ -384,7 +397,12 @@ export function createGitStateStore({
       ts: ts ?? new Date().toISOString(),
     };
     if (recordedBy !== undefined) event.recordedBy = recordedBy;
-    if (evidence !== undefined) event.data = { evidence };
+    // Attach data only for the fields actually provided, so a bare approval
+    // carries no undefined-valued keys (the public shape is the key's ABSENCE).
+    const data = {};
+    if (evidence !== undefined) data.evidence = evidence;
+    if (fingerprint !== undefined) data.fingerprint = fingerprint;
+    if (Object.keys(data).length > 0) event.data = data;
 
     append(event);
   }
@@ -427,6 +445,69 @@ export function createGitStateStore({
         scope: scope ?? [],
       },
     };
+
+    append(event);
+  }
+
+  /**
+   * Architecture-review sign-off (audit-only). Records an `architecture-approved`
+   * event into the single reserved `_architecture` project log — it belongs to no
+   * one feature, so its `feature` is the fixed literal `'_architecture'` (admitted
+   * by isSafeFeature's explicit exception). The event establishes no phase and
+   * carries no outcome (audit-only; see events.js) — it has NO rule in gates.yaml
+   * and never gates deliver.
+   *
+   * Write-time authority mirrors recordApproval exactly: check-role.sh is invoked
+   * ONCE against the `onBehalfOf` architect identity (NOT the physical runner / git
+   * machine identity), and the verified role is frozen into the event's `role`
+   * field. On a non-zero exit the call throws and nothing is written. The physical
+   * runner is preserved as `recordedBy` for the audit trail.
+   *
+   * @param {{ slug: string, onBehalfOf: string, requiredRole?: string, recordedBy?: string, evidence?: Object, ts?: string }} a
+   *   - slug:       the feature/work slug the architecture review covers (recorded in data)
+   *   - onBehalfOf: the architect identity whose authority is being frozen (role-checked)
+   *   - recordedBy: who physically ran it (proxy provenance); defaults to onBehalfOf
+   */
+  function recordArchitectureApproved({
+    slug,
+    onBehalfOf,
+    requiredRole = 'architect',
+    recordedBy,
+    evidence,
+    ts,
+  } = {}) {
+    if (!slug) throw new Error('recordArchitectureApproved: slug is required');
+    if (!onBehalfOf) {
+      throw new Error('recordArchitectureApproved: onBehalfOf is required');
+    }
+
+    // Verify role at write-time against the architect identity (onBehalfOf) — in
+    // proxy mode the physical runner is not the one being checked. Refuse before
+    // writing anything on a failed check.
+    const roleScript = join(repoRoot, 'scripts', 'check-role.sh');
+    const roleCheck = sh(roleScript, [requiredRole, claudeMdPath, onBehalfOf], {
+      cwd: repoRoot,
+    });
+    if (roleCheck.status !== 0) {
+      throw new Error(
+        `recordArchitectureApproved: role check failed — actor '${onBehalfOf}' does not hold role '${requiredRole}': ` +
+          `${(roleCheck.stdout || roleCheck.stderr || '').trim()}`,
+      );
+    }
+
+    const data = { slug };
+    if (evidence !== undefined) data.evidence = evidence;
+
+    /** @type {import('../events.js').Event} */
+    const event = {
+      feature: '_architecture',
+      type: 'architecture-approved',
+      actor: onBehalfOf,
+      role: requiredRole,
+      ts: ts ?? new Date().toISOString(),
+      data,
+    };
+    event.recordedBy = recordedBy !== undefined ? recordedBy : onBehalfOf;
 
     append(event);
   }
@@ -528,6 +609,7 @@ export function createGitStateStore({
     list,
     recordApproval,
     recordPolicyApproval,
+    recordArchitectureApproved,
     recordOwnerClaimed,
     recordOwnerReleased,
   };

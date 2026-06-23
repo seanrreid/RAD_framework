@@ -157,9 +157,20 @@ any agent file exists. The judgment is preserved; only the re-run ceremony is re
   re-render Step 4 and ask again. Loop until approve or cancel.
 - **cancel** → leave `Status: draft` untouched and stop. A later `/rad-design [slug]`
   re-enters Design & Approve from the existing draft.
-- **approve** → set the artifact's `Status: draft` → `Status: approved`, then continue
-  **immediately** into Generate below (Step 5) in the same run. Do not ask the architect
-  to re-invoke the command.
+- **approve** → set the artifact's `Status: draft` → `Status: approved`, then record the
+  authority as a frozen audit event by running:
+
+  ```bash
+  node harness/cli.js architecture-approve [slug]
+  ```
+
+  In proxy mode (recording an approval the architect gave out-of-band), pass
+  `--on-behalf-of <architect-name> --evidence "<where they approved>"`. This appends a
+  frozen `architecture-approved` event to the reserved `_architecture` project log; the
+  store role-checks the architect identity at write-time. The `Status: approved` header is
+  now a **display mirror** of that event — the event is the authority, exactly as with plan
+  approval. Then continue **immediately** into Generate below (Step 5) in the same run. Do
+  not ask the architect to re-invoke the command.
 
 ---
 
