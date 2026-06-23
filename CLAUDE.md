@@ -322,6 +322,11 @@ Approval requires:
 | classifier-surface-mapper | context-tool | scripts/check-scope.sh, lint-plan.sh, CLAUDE.md RAD config, .env.example | architect |
 | audit-surface-orchestrator | role-orchestrator | nothing | developer |
 | audit-surface-mapper | context-tool | rad-insights skill, kickoff skill, events.js read side | developer |
+| portable-memory-parent-orchestrator | parent-orchestrator | nothing | architect |
+| sync-transport-orchestrator | role-orchestrator | nothing | architect |
+| sync-surface-mapper | context-tool | rad-approve/deliver verb sites, git-vs-host-CLI invocation, detect-platform.sh + mirror scripts, CLAUDE.md RAD config, .env.example | architect |
+| event-fold-orchestrator | role-orchestrator | nothing | architect |
+| event-fold-mapper | context-tool | harness/gates.js, events.js, gates.yaml, branch-tip read sites | architect |
 
 ---
 
