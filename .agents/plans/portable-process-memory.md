@@ -1,7 +1,10 @@
 # Plan: Portable / Semi-Centralized Process Memory
 Created: 2026-06-23
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-06-23T17:45:45.858Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/portable-process-memory
 
 ## Context
