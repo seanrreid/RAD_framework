@@ -149,6 +149,33 @@ function isNonEmpty(s) {
 }
 
 /**
+ * Best-effort branch publish for portable process memory.
+ *
+ * GATED on RAD_SYNC (the same env-knob convention as RAD_WORKTREE / RAD_TOKEN_BUDGET):
+ * unset/empty short-circuits at the TOP — NO push, NO behavior change (AC#5
+ * byte-for-byte). When set, shells out to scripts/git-sync.sh push <workBranch>,
+ * which is itself offline-fail-safe (exits 0 even on push failure). We additionally
+ * guard here so a non-zero status or a spawn failure from the helper NEVER fails the
+ * calling verb — the local commit has already landed; the remote catches up later.
+ * Plain git only; credentials are inherited by the helper, never prompted or stored.
+ *
+ * @param {string} repoRoot
+ * @param {string} workBranch - the rad/<feature> work branch to publish
+ * @param {typeof defaultSh} sh - injectable shell-out helper
+ */
+function bestEffortSyncPush(repoRoot, workBranch, sh) {
+  if (!isNonEmpty(process.env.RAD_SYNC)) return; // OFF: byte-for-byte today.
+  const script = join(repoRoot, 'scripts', 'git-sync.sh');
+  if (!existsSync(script)) return; // helper absent — nothing to do, never fail.
+  try {
+    sh(script, ['push', workBranch], { cwd: repoRoot });
+  } catch {
+    // Best-effort: a spawn failure must never block the verb. The helper already
+    // exits 0 on a failed push; this guards the spawn boundary itself.
+  }
+}
+
+/**
  * Hand-rolled argv parser for `deliver`. Returns the positional feature and the
  * optional `--model <id>` value. Throws on a flag that is missing its value or
  * on extra positionals so malformed invocations fail loudly.
@@ -476,6 +503,12 @@ export async function deliverCommand(argv, ctx) {
   }
 
   if (result.ok) {
+    // Best-effort publish (RAD_SYNC-gated): deliver recorded wave events on the
+    // work-branch tip; push it so the process memory is portable across machines.
+    // Never fails the verb (offline-fail-safe). Branch resolved as in the worktree
+    // block: plan's `Branch:` header is canonical, else rad/<feature>.
+    const workBranch = isNonEmpty(planCtx.branch) ? planCtx.branch : `rad/${feature}`;
+    bestEffortSyncPush(repoRoot, workBranch, sh);
     process.stdout.write(
       `rad deliver: ok feature=${feature} waves=${result.waves} status=complete\n`,
     );
@@ -656,6 +689,12 @@ export async function approveCommand(argv, ctx) {
 
   const store = createGitStateStore({ repoRoot, sh, claudeMd });
 
+  // Resolve the work branch the same way deliver does: the plan doc's `Branch:`
+  // header is canonical; fall back to the rad/<feature> convention when absent.
+  // Used only by the best-effort RAD_SYNC push after a successful record.
+  const planBranch = parsePlanCtx(readFileSync(planFile, 'utf8')).branch;
+  const workBranch = isNonEmpty(planBranch) ? planBranch : `rad/${feature}`;
+
   // `--evidence` is only meaningful alongside `--on-behalf-of` (proxy mode). This
   // combination check runs BEFORE the auto-clear classifier so a LOW plan cannot
   // silently take the policy path and discard supplied evidence — the same error
@@ -700,6 +739,9 @@ export async function approveCommand(argv, ctx) {
         approvedAt: ts,
         recordedBy: 'policy',
       });
+      // Best-effort publish (RAD_SYNC-gated): the approval event has landed locally;
+      // push it so another machine's deliver gate can honor it. Never fails the verb.
+      bestEffortSyncPush(repoRoot, workBranch, sh);
       process.stdout.write(
         `rad approve: ok feature=${feature} status=approved approved-by=severity-gate recorded-by=policy approved-at=${ts} auto-clear=true reason=low-risk\n`,
       );
@@ -783,6 +825,11 @@ export async function approveCommand(argv, ctx) {
     evidence,
     proxy,
   });
+
+  // Best-effort publish (RAD_SYNC-gated): the approved event has landed locally;
+  // push the work-branch tip so a deliver gate on another machine honors it.
+  // Never fails the verb (offline-fail-safe).
+  bestEffortSyncPush(repoRoot, workBranch, sh);
 
   // Structured success line (machine-greppable single line).
   if (proxy) {
