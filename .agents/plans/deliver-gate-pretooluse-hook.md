@@ -39,8 +39,12 @@ no new authority.
    (no false block, exit 0).
 3. The hook **passes through** (never blocks) for non-`rad-deliver` tool calls and for an
    argument-less `/rad-deliver` (the listing case — no plan/feature provided).
-4. **Fail-closed on ambiguity:** if the feature slug cannot be resolved from the
-   invocation payload, the hook **blocks** (never silently allows).
+4. **Fail-closed on ambiguity OR the hook's own error:** if the feature slug cannot be
+   resolved, OR the hook itself errors (malformed input, missing `node`/dependency, the
+   gate query failing to run), the hook **blocks** (deny) — never silently allows. NB: the
+   Claude Code hook harness is **fail-OPEN** (a crash / invalid JSON / an exit code other
+   than 0 or 2 lets the tool proceed), so the script must explicitly emit deny on **every**
+   error path; a bare non-zero exit is NOT a block.
 5. The hook reuses the existing deterministic gate (`scripts/check-plan-approved.sh`) and
    introduces **no new authority** — `harness/gates.js` and the event schema are untouched.
 
@@ -74,10 +78,12 @@ out-of-scope dependencies.
 - scripts/hooks/README.md — the existing hook doc whose "session-boundary vs in-spine" distinction must stay crisp.
 
 ### Reminders
-- The hook parses JSON from stdin (Claude Code PreToolUse contract). Use Node (`.mjs`) for native JSON; shell to `check-plan-approved.sh` for the gate — do not reimplement the fold.
-- Fail-closed is the whole point: any error, unresolved slug, or non-zero gate ⇒ block. Only an explicit approved (exit 0) or a non-deliver/empty-args call passes.
+- The hook parses JSON from stdin (VERIFIED PreToolUse contract: `tool_name`, `tool_input.skill_name`, `tool_input.skill_args`). Use Node (`.mjs`) for native JSON; shell to `check-plan-approved.sh` for the gate — do not reimplement the fold.
+- **The harness is FAIL-OPEN.** A crash, invalid output, or any exit code ≠ 0,2 lets the deliver proceed. So `set -e`/bare non-zero = fail-OPEN — a trap. The script must convert *every* error path to `exit 2`. Default-deny on any uncertainty; only an explicit approved/pass-through reaches `exit 0`.
+- Block with `exit 2` + stderr (not the JSON form; never both).
+- Fail-closed is the whole point: unapproved gate, unresolved slug, OR internal error ⇒ `exit 2`. Only an explicit approved, a non-Skill/non-rad-deliver tool, or empty-args passes.
 - Validate the extracted slug against the existing safe pattern (`^[a-z0-9][a-z0-9-]*$`) before interpolating into a branch name or shell call.
-- Interactive-session only: PreToolUse does not fire in autonomous/CI runWave — that path still relies on the spine's in-band gate. Document, don't try to cover it here.
+- Interactive PreToolUse fires for BOTH user-typed `/rad-deliver` (after expansion) and a model/autonomous-loop-initiated Skill call — which is why PreToolUse/Skill is chosen over UserPromptExpansion (the latter would miss model-initiated calls, the exact threat #35 names). It still does not fire in non-interactive CI runWave — that path relies on the spine's in-band gate. Document, don't try to cover it here.
 
 ## Wave Plan
 
@@ -86,8 +92,9 @@ Tasks in this wave can run in parallel (distinct files; the registration only re
 
 #### Task 1.1: PreToolUse hook script
 File: scripts/deliver-gate-hook.mjs:1-90
-What: New ESM Node script. Read the full PreToolUse JSON from stdin. If the tool is the `team:rad-deliver` Skill invocation, extract the plan path / feature slug from the tool input (handle both a `.agents/plans/<slug>.md` path and a bare feature name); resolve `rad/<slug>`; validate the slug against `^[a-z0-9][a-z0-9-]*$`; shell to `scripts/check-plan-approved.sh rad/<slug>`. **Block fail-closed** (emit a deny decision + non-zero exit with a clear stderr reason) when the gate is unapproved OR the slug cannot be resolved. **Pass** (exit 0, no output) for non-deliver tools, for an argument-less `/rad-deliver` (listing), and when the gate returns approved.
-Validate: AC#1, AC#2, AC#3, AC#4 — confirmed by the Wave 2 tests driving synthetic payloads.
+What: New ESM Node script. Read the full PreToolUse JSON from stdin (VERIFIED contract: top-level `tool_name`; for a Skill call, `tool_input.skill_name` + `tool_input.skill_args`). If `tool_name === "Skill"` and `tool_input.skill_name` is the rad-deliver skill (match `rad-deliver`, namespace-tolerant), extract the plan path / feature slug from `tool_input.skill_args` (handle both a `.agents/plans/<slug>.md` path and a bare feature name); resolve `rad/<slug>`; validate the slug against `^[a-z0-9][a-z0-9-]*$`; shell to `scripts/check-plan-approved.sh rad/<slug>`. **Block** when the gate is unapproved, the slug cannot be resolved, OR the script hits any internal error. **Pass** (exit 0, no output) for non-Skill tools, non-rad-deliver skills, an argument-less invocation (listing), and an approved gate.
+  BLOCK MECHANISM (VERIFIED): exit `2` with a clear stderr reason — pick the exit-2 form, not the JSON form, and never both. **Fail-OPEN harness caveat (load-bearing):** the harness treats a crash / invalid output / any exit code ≠ 0,2 as *non-blocking*. Therefore do NOT rely on `set -e` or a bare non-zero exit — wrap the whole body so EVERY error path (bad JSON, missing dep, gate-query spawn failure, unresolved slug) converts to `exit 2`. The default/fallthrough on any uncertainty is `exit 2`, and only an explicit approved/pass-through reaches `exit 0`.
+Validate: AC#1, AC#2, AC#3, AC#4 — confirmed by the Wave 2 tests driving synthetic payloads (including an induced internal-error case that must still block).
 
 #### Task 1.2: Register the hook in settings.json
 File: .claude/settings.json:1-8
@@ -99,8 +106,8 @@ Depends on: Wave 1 complete (hook script + registration exist)
 
 #### Task 2.1: Hook tests
 File: harness/test/deliver-gate-hook.test.js:1-1
-What: NEW `node:test` suite that spawns `scripts/deliver-gate-hook.mjs` with synthetic PreToolUse JSON on stdin (use the `withTempRepo` pattern + an event log for approved/unapproved states). Cases: unapproved deliver → non-zero/deny (AC#1); approved deliver → exit 0 (AC#2); non-deliver Skill tool and empty-args deliver → exit 0 (AC#3); unresolvable/invalid slug → non-zero/deny (AC#4). Mirror the existing harness/test style.
-Validate: AC#1, AC#2, AC#3, AC#4 — each case asserted; all pass under `node --test`.
+What: NEW `node:test` suite that spawns `scripts/deliver-gate-hook.mjs` with synthetic PreToolUse JSON on stdin (use the `withTempRepo` pattern + an event log for approved/unapproved states). Cases: unapproved deliver → exit 2 (AC#1); approved deliver → exit 0 (AC#2); non-Skill tool, non-rad-deliver skill, and empty-args deliver → exit 0 (AC#3); unresolvable/invalid slug → exit 2 (AC#4); **induced internal error** (malformed JSON on stdin) → exit 2, proving fail-closed despite the fail-open harness (AC#4). Assert on exit code 2 specifically (not just "non-zero"), since the harness only treats 2 as a block. Mirror the existing harness/test style.
+Validate: AC#1, AC#2, AC#3, AC#4 — each case asserted (incl. the internal-error block); all pass under `node --test`.
 
 #### Task 2.2: Documentation + rule annotation
 File: scripts/hooks/README.md:1-121
@@ -129,7 +136,7 @@ None — all touched surfaces are within the architect-only gate-enforcement sco
 
 ## Issue Gaps
 <!-- Mandatory: assumptions the architect should verify. -->
-- **Exact Claude Code PreToolUse JSON contract (verify at deliver).** Assumed: the hook receives JSON on stdin with the tool name and the Skill input (skill id + arguments); a `team:rad-deliver` call carries the plan path / feature in its input; blocking is achieved via a non-zero exit (stderr surfaced) and/or a `permissionDecision: deny` JSON output. The deliver wave must confirm the precise field names and block mechanism against the installed Claude Code hooks docs and adjust the script accordingly. The tests pin the script's behavior independent of this.
-- **Matcher granularity.** Assumed the PreToolUse matcher targets the Skill tool and the *script* filters for `team:rad-deliver` (so other Skills pass through). If Claude Code supports matching a specific skill id directly in settings.json, the deliver wave may tighten the matcher there instead — behavior-equivalent.
-- **Slug source.** Assumed the slug comes from a `.agents/plans/<slug>.md` path argument; the script also accepts a bare feature name. If `/rad-deliver` is ever invoked with neither, that is the AC#3 listing case → pass.
+- **Claude Code PreToolUse JSON contract — VERIFIED 2026-06-23** (via claude-code-guide, against code.claude.com/docs/en/hooks.md). Stdin: top-level `tool_name`, `tool_input`; for a Skill call `tool_input.skill_name` + `tool_input.skill_args`. Block = `exit 2` + stderr, OR exit-0 JSON `hookSpecificOutput.permissionDecision: "deny"` — never both (exit 2 wins / JSON ignored when exiting 2). **Harness is fail-OPEN**: crash / invalid JSON / exit ≠ 0,2 ⇒ tool proceeds. No longer an assumption; baked into Task 1.1 and AC#4.
+- **Interception point — DECIDED: PreToolUse / matcher `Skill`.** `UserPromptExpansion` (matcher = command name) fires earlier but ONLY for user-typed `/rad-deliver`; it would miss a model/autonomous-loop-initiated Skill call — the exact threat #35 names. PreToolUse/Skill catches both. The script filters for the rad-deliver skill name (namespace-tolerant) so other skills pass through.
+- **Slug source.** Slug comes from `tool_input.skill_args` — a `.agents/plans/<slug>.md` path or a bare feature name; neither present = the AC#3 listing case → pass.
 - **Bash-direct invocation is intentionally uncovered** in v1 (the Skill boundary only). Flagged as a known limitation; the spine's in-band gate still catches it.
