@@ -55,6 +55,14 @@ and `event-fold-orchestrator`/`event-fold-mapper` (fold). No out-of-scope agents
 | scripts/check-plan-approved.sh | 47-69 | Before resolving events from the branch tip, fetch the tip (gated by `RAD_SYNC`); reuse the existing platform-agnostic `git show origin/<branch>` idiom |
 | scripts/checkout-plan.sh | 40-54 | Divergence tripwire: when local tip ≠ `origin` tip on a write path, refuse and surface the conflicting holder instead of `pull --ff-only` failing opaquely |
 | harness/cli.js | 307-349, 627-798 | Wire sync into `approveCommand`/`deliverCommand` (push after record, fetch before gate-read); add `owner-claim`/`owner-release` subcommands; surface divergence refusal to the user |
+| harness/test/portable-process-memory.test.js | 1-1 | NEW test file (project convention is `harness/test/`, not `__tests__/`) — covers AC#1–5 |
+| .agents/research/portable-process-memory.md | 1-1 | Research artifact (`/rad-research` output) shipping with the feature |
+| .agents/architecture/portable-process-memory.md | 1-1 | Architecture artifact (`/rad-design` output) shipping with the feature |
+| .claude/agents/portable-memory-parent-orchestrator.md | 1-1 | Generated agent definition for this feature |
+| .claude/agents/sync-transport-orchestrator.md | 1-1 | Generated agent definition for this feature |
+| .claude/agents/sync-surface-mapper.md | 1-1 | Generated agent definition for this feature |
+| .claude/agents/event-fold-orchestrator.md | 1-1 | Generated agent definition for this feature |
+| .claude/agents/event-fold-mapper.md | 1-1 | Generated agent definition for this feature |
 
 ## Execution Notes
 
@@ -125,16 +133,16 @@ Validate: AC#4 — diverged tip refuses and names the holder; non-diverged tip p
 Depends on: Wave 3 complete
 
 #### Task 4.1: Test coverage
-File: harness/__tests__/portable-process-memory.test.js:1-1
+File: harness/test/portable-process-memory.test.js:1-1
 What: Add tests for the five ACs (push best-effort/offline, fetch-on-read honors remote approval, ownership lock fold + `evaluateGate` purity, divergence refusal surfaces holder, `RAD_SYNC` unset = byte-for-byte today). Match the existing harness test layout/runner.
 Validate: AC#1, AC#2, AC#3, AC#4, AC#5 — each AC has at least one passing test.
 
 ## Tests to Write
-- [ ] Push is best-effort: simulated offline push fails but the verb still succeeds — harness/__tests__/portable-process-memory.test.js
-- [ ] Fetch-on-read honors a remote-recorded approval — harness/__tests__/portable-process-memory.test.js
-- [ ] `owner-claimed`/`owner-released` fold as a lock; `evaluateGate` output unchanged (purity) — harness/__tests__/portable-process-memory.test.js
-- [ ] Divergence tripwire refuses a write and surfaces the holder — harness/__tests__/portable-process-memory.test.js
-- [ ] `RAD_SYNC` unset → no push, no fetch, no new events (byte-for-byte) — harness/__tests__/portable-process-memory.test.js
+- [ ] Push is best-effort: simulated offline push fails but the verb still succeeds — harness/test/portable-process-memory.test.js
+- [ ] Fetch-on-read honors a remote-recorded approval — harness/test/portable-process-memory.test.js
+- [ ] `owner-claimed`/`owner-released` fold as a lock; `evaluateGate` output unchanged (purity) — harness/test/portable-process-memory.test.js
+- [ ] Divergence tripwire refuses a write and surfaces the holder — harness/test/portable-process-memory.test.js
+- [ ] `RAD_SYNC` unset → no push, no fetch, no new events (byte-for-byte) — harness/test/portable-process-memory.test.js
 
 ## Non-Goals
 - No host-API (gh/glab) calls on the sync path — plain git only; the mirror/display layer is untouched.
