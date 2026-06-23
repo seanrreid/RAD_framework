@@ -112,6 +112,32 @@ echo "wave $2 failed at $3 (outcome=$4) for $1" >> /tmp/rad-hook.log
 exit 0
 ```
 
+## Not to be confused with — the session-boundary deliver gate
+
+The hooks documented above are **in-spine, in-wave** hooks: the deliver spine
+fires them at the six lifecycle points inside the wave loop, and the
+veto-capable ones can redirect a wave through the matrix.
+
+A separate, unrelated layer is the **PreToolUse deliver gate**
+(`scripts/deliver-gate-hook.mjs`, registered in `.claude/settings.json` as a
+`PreToolUse` matcher on the `Skill` tool). It is a **session-boundary intercept**:
+before Claude Code runs a `/rad-deliver` Skill call, this hook blocks the call
+**fail-closed via exit 2** when there is no `approved` event for the feature.
+Contrast the two:
+
+| | PreToolUse deliver gate | Wave-lifecycle hooks (this file) |
+|---|---|---|
+| Layer | session boundary (before a Skill call runs) | inside the deliver spine's wave loop |
+| Trigger | a `/rad-deliver` Skill invocation | each wave reaching a lifecycle point |
+| Mechanism | exit 2 = block / exit 0 = allow | first-veto-wins token / observe-only |
+| Scope | the single decision "may this deliver start?" | the per-wave 6-point veto/observe contract |
+
+The PreToolUse gate **reuses the existing approval gate**
+(`scripts/check-plan-approved.sh`) and adds **no new authority** — it only
+deterministically enforces, at the tool boundary, the same approved-event gate
+the spine already honors. It is not one of the six lifecycle points and is not
+configured under `RAD_HOOKS_DIR`.
+
 ## Backward-compatibility guarantee
 
 With no hooks directory (or an empty one) the runner returns a neutral result

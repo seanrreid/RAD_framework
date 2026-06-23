@@ -77,7 +77,7 @@
 
 - Never commit secrets, tokens, or credentials
 - Never assume a library exists — only use packages in the package file
-- Never execute /rad-deliver without an `approved` event in `.agents/state/<feature>/events.jsonl` (the gate authority, appended by /rad-approve). The plan doc's `Status: approved` header is a display-only mirror, not the gate.
+- Never execute /rad-deliver without an `approved` event in `.agents/state/<feature>/events.jsonl` (the gate authority, appended by /rad-approve). The plan doc's `Status: approved` header is a display-only mirror, not the gate. This rule is now ALSO deterministically enforced by a PreToolUse hook (`scripts/deliver-gate-hook.mjs`, registered in `.claude/settings.json`) that blocks an unapproved /rad-deliver Skill call fail-closed (exit 2) — not prose alone.
 -
 
 ---
