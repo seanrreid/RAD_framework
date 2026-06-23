@@ -350,6 +350,11 @@ Approval requires:
 | sync-surface-mapper | context-tool | rad-approve/deliver verb sites, git-vs-host-CLI invocation, detect-platform.sh + mirror scripts, CLAUDE.md RAD config, .env.example | architect |
 | event-fold-orchestrator | role-orchestrator | nothing | architect |
 | event-fold-mapper | context-tool | harness/gates.js, events.js, gates.yaml, branch-tip read sites | architect |
+| approval-authority-parent-orchestrator | parent-orchestrator | nothing | architect |
+| approval-event-model-orchestrator | role-orchestrator | nothing | architect |
+| approval-event-mapper | context-tool | harness/events.js, transitions.js, gates.js, gates.yaml, adapters/git-state-store.js (recordApproval) | architect |
+| approval-command-integration-orchestrator | role-orchestrator | nothing | architect |
+| approval-command-mapper | context-tool | .claude/commands/architect/rad-design.md + rad-approve.md, harness/cli.js, check-plan-approved.sh | architect |
 
 ---
 
