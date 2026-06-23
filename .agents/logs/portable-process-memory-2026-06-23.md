@@ -13,3 +13,5 @@ Executor role: architect
 | 1.3 | 1 | Ownership event types | complete | 329ec77 | 2026-06-23 |
 | 2.1 | 2 | Push-on-write | complete | 9f08465 | 2026-06-23 |
 | 2.2 | 2 | Fetch-tip-on-read | complete | d323d9e | 2026-06-23 |
+| 3.1 | 3 | Ownership claim/release + lock fold | complete | 6eef9c7 | 2026-06-23 |
+| 3.2 | 3 | Fail-closed divergence tripwire | complete | 71610fc | 2026-06-23 |
