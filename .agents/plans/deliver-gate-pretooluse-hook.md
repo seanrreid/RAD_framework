@@ -1,7 +1,14 @@
 # Plan: Deliver-Gate PreToolUse Hook
 Created: 2026-06-23
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-06-23T18:28:25.071Z
+Recorded-By: sean@torchcodelab.com
+Re-reviewed: 2026-06-23 — architect re-reviewed the post-approval refinement (verified
+  PreToolUse contract; AC#4 tightened for the fail-open harness; new internal-error test).
+  RAD records approval as a single frozen event and blocks a duplicate `approved`, so the
+  standing 18:28 approval event remains the authority and now covers this refined plan.
 Branch: rad/deliver-gate-pretooluse-hook
 Adopted-From: https://github.com/seanrreid/RAD_framework/issues/35
 Issue-Title: Deterministically enforce the deliver gate with a PreToolUse harness hook
