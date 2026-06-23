@@ -64,6 +64,15 @@ out-of-scope dependencies.
 | scripts/check-plan-approved.sh | 47-90 | After `resolve_events`, compute the current plan's hash via `node harness/cli.js plan-fingerprint`, extract the latest `approved` event's stored fingerprint, **fail closed** on mismatch; pass through when equal — before piping to `rad gate` |
 | .claude/commands/architect/rad-design.md | 152-162 | Step 4 inline-approve: after the `Status` flip, call `node harness/cli.js architecture-approve <slug>` (proxy-aware) to write the audit event; `Status` documented as a display mirror |
 | .claude/commands/architect/rad-approve.md | 237-254 | Note that approval stamps a plan fingerprint (and re-running re-attests an edited plan); keep the proxy (`--on-behalf-of`/`recordedBy`) behavior |
+| harness/test/approval-authority-recording.test.js | 1-1 | NEW test file covering AC#1–5 |
+| .agents/research/approval-authority-recording.md | 1-1 | Research artifact (`/rad-research` output) shipping with the feature |
+| .agents/architecture/approval-authority-recording.md | 1-1 | Architecture artifact (`/rad-design` output) shipping with the feature |
+| .claude/agents/approval-authority-parent-orchestrator.md | 1-1 | Generated agent definition for this feature |
+| .claude/agents/approval-event-model-orchestrator.md | 1-1 | Generated agent definition for this feature |
+| .claude/agents/approval-event-mapper.md | 1-1 | Generated agent definition for this feature |
+| .claude/agents/approval-command-integration-orchestrator.md | 1-1 | Generated agent definition for this feature |
+| .claude/agents/approval-command-mapper.md | 1-1 | Generated agent definition for this feature |
+| CLAUDE.md | 348-358 | Agent Scope Map rows for this feature's 5 agents |
 
 ## Execution Notes
 
