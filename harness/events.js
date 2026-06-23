@@ -19,11 +19,20 @@
  *   'wave-attempt' | 'wave-complete' | 'wave-failed' | 'approved' |
  *   'pr-opened' | 'revision-requested' | 'research-created' | 'plan-created' |
  *   'hook-observed' | 'hook-veto' | 'hook-failed' | 'done' |
- *   'owner-claimed' | 'owner-released'.
+ *   'owner-claimed' | 'owner-released' | 'architecture-approved'.
  *   `owner-claimed` / `owner-released` are DATA-ONLY ownership events: they
  *   establish NO phase (absent from PHASE_BY_TYPE) and carry no outcome (never
  *   routed through resolveOutcome). Their provenance (who claimed/released) is
  *   carried in `event.data` by later waves; the model only recognizes the types.
+ *   `architecture-approved` is an AUDIT-ONLY event with the same shape: it
+ *   establishes NO phase (absent from PHASE_BY_TYPE) and carries no outcome — it
+ *   records that an architecture review signed off, with no effect on the fold.
+ *   It is NOT the deliver gate (that remains the `approved` event); it is a
+ *   separate audit signal and has no rule in gates.yaml.
+ *
+ *   The `approved` event's `data` MAY carry an optional `fingerprint` field (a
+ *   string hash of the plan body, from harness/plan-fingerprint.js) attesting to
+ *   WHICH plan body was approved. The fold does not read it; it is data-only.
  * @property {string}  actor        - WHO the event is attributed to (human identity)
  * @property {string}  ts           - ISO timestamp, passed in by the caller
  * @property {string} [recordedBy]  - WHO physically ran the command, if not `actor`
@@ -93,6 +102,9 @@ const PHASE_BY_TYPE = {
   'hook-failed': 'in-progress',
   'pr-opened': 'delivered',
   done: 'done',
+  // `architecture-approved` is audit-only: like owner-claimed/owner-released it
+  // is DELIBERATELY ABSENT from PHASE_BY_TYPE so it establishes no phase and the
+  // fold is unaffected. (Listed here in a comment, not as a key, on purpose.)
 };
 
 /** Phase ordering — earliest first; later phases dominate in the fold. */
