@@ -159,3 +159,7 @@ None — all touched surfaces are within the architect-only agent scope for this
 - **Backward-compat regression:** a missed `RAD_SYNC` guard could change default behavior. Mitigation: AC#5 byte-for-byte test; guard at the top of every new hook.
 - **Offline false-failure:** a push error must never surface as a verb failure. Mitigation: helper exits 0 on push failure (AC#1); covered by test.
 - **Credential surprise:** relying on inherited git credentials means clear messaging when absent; v1 scopes only error-messaging, not credential management.
+
+## Session Notes
+
+- 2026-06-23: Full cycle research→design→plan→approve→deliver in one session. Delivered all 4 waves (8 tasks) + tests. ACs covered: AC#1 (push best-effort/offline), AC#2 (fetch-on-read honors remote approval), AC#3 (ownership lock fold + evaluateGate purity), AC#4 (fail-closed divergence tripwire), AC#5 (RAD_SYNC unset = byte-for-byte) — all 5 covered, none deferred. Concerns: none (all tasks `complete`). Invariants held: `harness/gates.js` untouched; matrix/spine/transitions untouched; 186/186 tests green. Deliver-time fixups: corrected test dir convention (`harness/test/`, not `__tests__/`) and declared `/rad-design` artifacts in Files-in-Scope (check-scope only auto-allows .agents/{logs,plans,state}). Deferred to v2 (Non-Goals): soft user-following recall store + Elastic-style procedural counters; stale-lock release policy (timeout/force-claim); on-by-default sync. Next: architect review + merge of PR #43.
