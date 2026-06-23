@@ -8,3 +8,6 @@ Executor role: architect
 
 | Step | Wave | Task | Status | Commit | Time |
 |------|------|------|--------|--------|------|
+| 1.1 | 1 | Plain-git transport helper | complete | fc2c59d | 2026-06-23 |
+| 1.2 | 1 | RAD_SYNC config surface | complete | 7a04473 | 2026-06-23 |
+| 1.3 | 1 | Ownership event types | complete | 329ec77 | 2026-06-23 |
