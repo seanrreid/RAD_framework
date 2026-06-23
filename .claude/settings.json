@@ -4,5 +4,18 @@
       "$defaults",
       "Edit(.claude/commands/*)"
     ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Skill",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node scripts/deliver-gate-hook.mjs"
+          }
+        ]
+      }
+    ]
   }
 }
