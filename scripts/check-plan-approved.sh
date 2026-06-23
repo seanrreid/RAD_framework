@@ -68,6 +68,17 @@ resolve_events() {
   return 1
 }
 
+# Portable process memory (RAD_SYNC-gated): before resolving the event log from
+# the branch tip, fetch origin/<work-branch> so an approval recorded on ANOTHER
+# machine is honored here without a manual pull. GATED on RAD_SYNC — unset/empty
+# short-circuits, so with RAD_SYNC off there is NO fetch and behavior is identical
+# to today (AC#5). Best-effort: fetch failure (offline / no remote ref) must never
+# block the gate-read, which already falls back to merged/local refs and fails
+# closed on a truly missing log. Plain git only; credentials are inherited.
+if [[ -n "${RAD_SYNC:-}" ]]; then
+  "$SCRIPT_DIR/git-sync.sh" fetch-tip "$WORK_BRANCH" >/dev/null 2>&1 || true
+fi
+
 EVENTS_JSONL=$(resolve_events) || {
   echo "unknown — no event log found for '${WORK_BRANCH}' (looked on origin/${WORK_BRANCH}, origin/${BASE_BRANCH}, and ${EVENTS_FILE}). Failing closed."
   exit 1

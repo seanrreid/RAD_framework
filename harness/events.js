@@ -18,7 +18,12 @@
  * @property {string}  type         - event type, e.g. 'deliver-started' |
  *   'wave-attempt' | 'wave-complete' | 'wave-failed' | 'approved' |
  *   'pr-opened' | 'revision-requested' | 'research-created' | 'plan-created' |
- *   'hook-observed' | 'hook-veto' | 'hook-failed' | 'done'
+ *   'hook-observed' | 'hook-veto' | 'hook-failed' | 'done' |
+ *   'owner-claimed' | 'owner-released'.
+ *   `owner-claimed` / `owner-released` are DATA-ONLY ownership events: they
+ *   establish NO phase (absent from PHASE_BY_TYPE) and carry no outcome (never
+ *   routed through resolveOutcome). Their provenance (who claimed/released) is
+ *   carried in `event.data` by later waves; the model only recognizes the types.
  * @property {string}  actor        - WHO the event is attributed to (human identity)
  * @property {string}  ts           - ISO timestamp, passed in by the caller
  * @property {string} [recordedBy]  - WHO physically ran the command, if not `actor`

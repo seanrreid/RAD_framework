@@ -175,6 +175,29 @@ work branch (create → active → complete-on-success / preserve-on-failure). A
 unmarked dir. v1 requires the work branch not already be checked out in the main tree.
 Unset/empty = OFF (today's behavior). See `docs/rad-cli.md` for the full lifecycle.
 
+### Portable Sync
+
+OPTIONAL and backward-compatible — absent, sync is OFF and the verbs behave exactly
+as before (no push, no fetch, no new events — byte-for-byte today's behavior).
+
+```
+RAD_SYNC: <any non-empty value>   # opt-in plain-git sync folded into the rad verbs
+```
+
+When `RAD_SYNC` is set, the state-mutating verbs (`rad approve`/`deliver`) fold **plain
+git** transport into their flow: a best-effort `git push` of the work-branch tip after a
+state write, and a `git fetch` of the tip before a gate-read so an approval recorded on
+another machine is honored. Transport is **plain git only** (`git push`/`git fetch`) — never
+the host API (`gh`/`glab`), which keeps it platform-agnostic; the host-API mirror/display
+layer is untouched. Auth is **inherited** from the user's existing git credentials — RAD
+never prompts for or stores them. Sync is **offline-fail-safe**: the local commit always
+lands, the push is best-effort (a failed push never blocks or fails the verb), and a
+**fail-closed divergence tripwire** refuses a write on a diverged tip and surfaces the
+conflicting holder (recorded via `owner-claimed`/`owner-released` events) rather than
+auto-merging. The gate fold (`harness/gates.js`) stays pure — all transport attaches at the
+CLI/script boundary, never inside the fold. Unset/empty = OFF. See
+`.agents/plans/portable-process-memory.md` for the full design.
+
 ### Plan Lint — High-Risk Paths
 
 OPTIONAL and backward-compatible — absent, `scripts/lint-plan.sh` uses the built-in default.
@@ -322,6 +345,11 @@ Approval requires:
 | classifier-surface-mapper | context-tool | scripts/check-scope.sh, lint-plan.sh, CLAUDE.md RAD config, .env.example | architect |
 | audit-surface-orchestrator | role-orchestrator | nothing | developer |
 | audit-surface-mapper | context-tool | rad-insights skill, kickoff skill, events.js read side | developer |
+| portable-memory-parent-orchestrator | parent-orchestrator | nothing | architect |
+| sync-transport-orchestrator | role-orchestrator | nothing | architect |
+| sync-surface-mapper | context-tool | rad-approve/deliver verb sites, git-vs-host-CLI invocation, detect-platform.sh + mirror scripts, CLAUDE.md RAD config, .env.example | architect |
+| event-fold-orchestrator | role-orchestrator | nothing | architect |
+| event-fold-mapper | context-tool | harness/gates.js, events.js, gates.yaml, branch-tip read sites | architect |
 
 ---
 

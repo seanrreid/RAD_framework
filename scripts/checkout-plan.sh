@@ -45,6 +45,44 @@ fi
 # Switch to the branch: existing local branch, or a fresh tracking branch from origin.
 git checkout "$BRANCH" 2>/dev/null || git checkout -b "$BRANCH" --track "origin/$BRANCH"
 
+# ── Fail-closed divergence tripwire (write-path) ──────────────────────────────
+# Before the fast-forward pull, detect divergence explicitly so we can REFUSE
+# with a clear message that NAMES THE LOCK HOLDER rather than letting ff-only
+# fail opaquely. Divergence = local tip is NOT an ancestor of origin/<branch>
+# (a force-push or conflicting commits — no clean fast-forward). A clean
+# (fast-forwardable / in-sync) tip is NOT diverged and proceeds UNCHANGED below.
+LOCAL_TIP=$(git rev-parse "$BRANCH" 2>/dev/null || echo "")
+REMOTE_TIP=$(git rev-parse "origin/$BRANCH" 2>/dev/null || echo "")
+if [[ -n "$LOCAL_TIP" && -n "$REMOTE_TIP" && "$LOCAL_TIP" != "$REMOTE_TIP" ]] \
+   && ! git merge-base --is-ancestor "$LOCAL_TIP" "$REMOTE_TIP" 2>/dev/null; then
+  # Diverged. Name the conflicting holder from the most recent owner-claimed
+  # event not followed by an owner-released (the branch-as-lock holder).
+  FEATURE="${BRANCH#"$PREFIX"}"
+  HOLDER=""
+  EVENTS_LOG=".agents/state/${FEATURE}/events.jsonl"
+  if [[ -f "$EVENTS_LOG" ]]; then
+    # Walk the log: track the latest owner-claimed holder; clear it on a later
+    # owner-released. Plain tools only — no jq dependency. The holder is the
+    # value of the event's data.holder field.
+    while IFS= read -r line; do
+      case "$line" in
+        *'"type":"owner-claimed"'*)
+          HOLDER=$(printf '%s\n' "$line" | sed -n 's/.*"holder":"\([^"]*\)".*/\1/p') ;;
+        *'"type":"owner-released"'*)
+          HOLDER="" ;;
+      esac
+    done < "$EVENTS_LOG"
+  fi
+  echo "✗ Refusing: local '$BRANCH' has diverged from origin (force-push or conflicting commits)." >&2
+  if [[ -n "$HOLDER" ]]; then
+    echo "  Another machine holds a diverged tip — lock held by: $HOLDER" >&2
+  else
+    echo "  Another machine holds a diverged tip." >&2
+  fi
+  echo "  Resolve or reset to origin/$BRANCH (after coordinating with the holder), then re-run." >&2
+  exit 1
+fi
+
 # Ensure we're exactly at the remote tip. ff-only fails loudly on divergence
 # (e.g. a force-push) rather than silently leaving us on stale content.
 if ! git pull --ff-only origin "$BRANCH"; then
