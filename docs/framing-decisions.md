@@ -171,3 +171,4 @@ write the change inside a wave.
 - [rad-wave-contract.md](rad-wave-contract.md) — the bounded agent contract (Decisions 2 & 4)
 - [`scripts/hooks/README.md`](../scripts/hooks/README.md) — the hook invocation contract (Decision 1)
 - [harness-state-store.md](harness-state-store.md) — events and pure folds (Decision 3's determinism)
+- [references.md](references.md) — external sources reviewed against RAD; the running input these stances are tested against

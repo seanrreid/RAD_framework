@@ -212,6 +212,7 @@ your-project/
 | `docs/rad-wave-contract.md` | The provider-neutral wave-execution contract adapters honor |
 | `docs/harness-state-store.md` | The deterministic event-log StateStore at the harness core |
 | `docs/framing-decisions.md` | How RAD positions itself on hooks, loops, context injection, and agent-to-agent orchestration |
+| `docs/references.md` | Annotated log of external sources reviewed against RAD, the takeaways, and issues they generated |
 | `docs/daily-workflow.md` | Getting started with the team workflow |
 | `docs/architect-guide.md` | Setting up and maintaining the architecture |
 | `docs/epic-decomposition.md` | When, why, and how to run the Gate-0 `/rad-epic-decompose` step |
