@@ -4,7 +4,7 @@ Status: discovery (pre-research)
 Created: 2026-06-29
 Author: architect
 Companion: [`harness-design-long-running-apps.md`](harness-design-long-running-apps.md) (principle #5)
-Tracking issue: _(filed — see cross-link in this doc's footer)_
+Tracking issue: [#52](https://github.com/seanrreid/RAD_framework/issues/52)
 
 ---
 
