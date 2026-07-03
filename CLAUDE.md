@@ -61,8 +61,10 @@
 
 ## Coding Conventions
 
--
--
+- Every behavior change ships a test in the same commit — new scripts get a co-located `test-<name>.sh` fixture; harness changes extend `harness/test/*.test.js`; a task with no testable surface says so explicitly in its Validate field
+- Functions stay under ~40 lines with intent-revealing names; magic values become named constants at the top of the file; comments state constraints, not narration
+- Never swallow errors: every catch/`|| true` either rethrows, exits non-zero, or logs the reason with context; fail-closed is the default at every gate or check boundary
+- Edge cases are named in the task's Validate field before implementation (empty input, missing field, zero/negative, non-array) and each gets an explicit test case
 
 ---
 

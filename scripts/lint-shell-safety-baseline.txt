@@ -1,0 +1,11 @@
+# lint-shell-safety.sh baseline — ratchet, not an allowlist.
+# Frozen from the actual lint run on 2026-07-03. Violations in these files
+# warn (⚠ baseline:) instead of failing; NEW files must ship guarded.
+# Remove an entry once its file gains a regex/case guard — the lint prints
+# "⚠ stale baseline:" when an entry is no longer needed.
+check-events-append-only.sh   # unguarded: $BASE_REF, $HEAD_REF into git rev-parse/diff
+check-plan-approved.sh        # unguarded: $WORK_BRANCH, $BASE_BRANCH into git show
+check-scope.sh                # unguarded: $DELIVER_BRANCH, $BASE_BRANCH into git diff
+classify-low-risk.sh          # unguarded: $WORK_BRANCH, $BASE_BRANCH into git diff
+rad-status.sh                 # unguarded: $feature, $PREFIX into git show/branch
+worktree-lifecycle.sh         # unguarded: $dir into git worktree add
