@@ -1,7 +1,8 @@
 # Plan: Review Conventions
 Created: 2026-07-03
 Author: architect
-Status: in-progress
+Status: complete
+Completed-At: 2026-07-03T17:50:00Z
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-07-03T17:26:46.152Z
 Recorded-By: sean@torchcodelab.com
