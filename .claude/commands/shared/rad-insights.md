@@ -67,6 +67,52 @@ jq -r 'select(.type=="finding") | .reviewer' .agents/findings.jsonl \
   | sort | uniq -c | sort -rn
 ```
 
+### Step 3b: Findings Recurrence — convention/lint suggestions
+
+A category that keeps recurring across review cycles is a signal the project is
+missing a convention (or a lint rule) that would prevent it. This step turns the
+Step 3 category counts into **suggestions only** — every output is framed
+"suggestion — apply via PR; never auto-applied". This skill NEVER edits
+`CLAUDE.md` or `scripts/lint-plan.sh` itself.
+
+**Threshold.** Resolved from `RAD_FINDINGS_THRESHOLD` with `Number.parseInt`
+semantics: unset, `0`, NaN (non-numeric), or negative all fall back to the
+default `5`.
+
+```bash
+t=$(node -e 'const n = Number.parseInt(process.env.RAD_FINDINGS_THRESHOLD ?? "", 10);
+process.stdout.write(String(Number.isNaN(n) || n <= 0 ? 5 : n))')
+
+# Every category with count >= threshold (all priorities), descending
+jq -r 'select(.type=="finding") | .category' .agents/findings.jsonl \
+  | sort | uniq -c | sort -rn | awk -v t="$t" '$1 >= t { print $1 "\t" $2 }'
+```
+
+For **each** category the filter emits, produce one suggestion block containing
+EITHER a ready-to-paste `## Coding Conventions` bullet for `CLAUDE.md` OR a
+described lint rule (prose only — do not write lint code), targeted at the
+category. Examples of the mapping:
+
+- `testing` → convention bullet about test-coverage expectations for changed behavior
+- `code-clarity` → convention bullet about naming/function-size/comment expectations
+- `security` → convention bullet about input handling and secret hygiene, or a
+  described lint rule flagging risky patterns
+- `error-handling` → convention bullet about error propagation vs swallowing
+- `correctness` → convention bullet about edge-case/validation expectations
+
+Suggestion block format (repeat per category):
+
+```markdown
+#### Recurring: [category] — [N] findings (threshold: [t])
+Suggested `## Coding Conventions` bullet for CLAUDE.md:
+- [one concrete, checkable convention line targeting the category]
+[OR: Suggested lint rule (described, not implemented): [one-sentence rule description]]
+> Suggestion — apply via PR; never auto-applied.
+```
+
+If no category reaches the threshold, state "No category meets the recurrence
+threshold ([t])" and emit no blocks.
+
 ### Step 4: Compute cycle outcomes and trajectory
 
 ```bash
@@ -237,6 +283,13 @@ Cycles analyzed: [N]  |  Date range: [earliest date] → [latest date]
 [If fewer than 3 patterns: "Not enough cycles for reliable pattern detection.
   Findings so far: [list raw findings]"]
 
+### Findings Recurrence
+[From Step 3b. Threshold: [t] (RAD_FINDINGS_THRESHOLD, default 5).]
+[One suggestion block per category with count >= threshold, using the Step 3b
+ block format — each carries the "Suggestion — apply via PR; never auto-applied"
+ framing verbatim.]
+[If none reach the threshold: "No category meets the recurrence threshold ([t])."]
+
 ### Hotspot Files
 [Top files by total finding count. Omit if fewer than 2 cycles.]
 - [file path] — [N] findings ([category breakdown])
@@ -345,6 +398,10 @@ Auto-cleared by the severity gate: [N] change(s)
   never re-implement those folds in jq or shell
 - All-zero reliability counts are the "no wave data yet" path, not an error — render
   the zeros text from the template and move on
+- Findings Recurrence (Step 3b) outputs are suggestions only — never edit CLAUDE.md
+  or scripts/lint-plan.sh from this skill; every block must carry the
+  "Suggestion — apply via PR; never auto-applied" framing
+- RAD_FINDINGS_THRESHOLD parses via Number.parseInt; unset/0/NaN/negative → default 5
 - If the file is missing or empty, say so and exit cleanly
 - If fewer than 3 cycles exist, skip pattern analysis and output raw findings
 - Do not invent patterns — only report what the data shows
