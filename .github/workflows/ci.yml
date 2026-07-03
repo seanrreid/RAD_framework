@@ -73,6 +73,13 @@ jobs:
       - uses: actions/checkout@v4
       - run: scripts/lint-agent-files.sh
 
+  # All PRs — shell-safety lint over scripts/ (fail-closed; baseline-gated warnings).
+  shell-safety-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: scripts/lint-shell-safety.sh
+
   # Deliver PRs only — approval integrity at the PR head (ancestry +
   # fingerprint + gate + authenticity, with an advisory-only ownership check).
   # Ordinary PRs: the job-level `if` skips non-rad/ branches entirely (skipped
