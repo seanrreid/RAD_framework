@@ -367,6 +367,8 @@ Approval requires:
 | integrity-surface-mapper | context-tool | gates.js, events.js, plan-fingerprint.js, git-state-store.js recordApproval, git-sync.sh, events.jsonl samples | architect |
 | convention-lints-orchestrator | role-orchestrator | nothing | architect |
 | lint-surface-mapper | context-tool | lint-plan.sh, check-scope.sh, lib/plan-paths.sh, .claude/agents samples, CLAUDE.md scope map | architect |
+| quality-reviewer | reviewer | current diff or specified files, CLAUDE.md conventions | architect, developer, designer |
+| accessibility-reviewer | reviewer | current diff or specified files, CLAUDE.md stack info | architect, developer, designer |
 
 ---
 

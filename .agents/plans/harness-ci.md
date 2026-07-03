@@ -4,7 +4,7 @@ Author: architect
 Status: complete
 Completed-At: 2026-07-03T16:20:00Z
 Approved-By: sean@torchcodelab.com
-Approved-At: 2026-07-03T15:29:10.196Z
+Approved-At: 2026-07-03T16:06:38.316Z
 Recorded-By: sean@torchcodelab.com
 Branch: rad/harness-ci
 
@@ -55,6 +55,7 @@ No out-of-scope dependencies — all three domains are architect-owned.
 | .github/workflows/ci.yml | 1-110 | NEW — Layer-1 test jobs + check jobs; deliver-PR detection (rad/ branch with plan, clean skip otherwise); annotations for advisories; tail wave adds scope/plan-lint jobs |
 | .env.example | 66-75 | Document new CI env knobs (architect-identity override for authenticity check) in the commented-block style |
 | docs/rad-cli.md | +40 | New "CI checks" section: each script's contract, local invocation, runner-neutral wiring, branch-protection prerequisite |
+| CLAUDE.md | 358-360 | Scope-map reconciliation: add rows for quality-reviewer and accessibility-reviewer (pre-existing drift surfaced by the new lint; architect-directed 2026-07-03) |
 
 ## Execution Notes
 
