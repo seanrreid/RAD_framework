@@ -298,6 +298,113 @@ subprocess — not a top-level `apiKey` parameter (the SDK has no such parameter
 
 ---
 
+## CI checks
+
+The CI layer is **scripts-first and runner-neutral**: every check is a
+standalone script under `scripts/`, callable locally with the exact command
+lines below. GitHub Actions is the default thin wrapper —
+`.github/workflows/ci.yml` contains zero check logic, only checkout + invoke —
+and any other CI platform wraps the same scripts the same way.
+
+**Adopter prerequisite — branch protection.** The authenticity check verifies
+*who authored* the approval commit; it cannot stop a rewritten branch from
+presenting a forged history. Protect `rad/*` branches on your host (no
+force-push, required reviews) — that protection is the substrate beneath the
+authenticity check, not something these scripts replace.
+
+### check-approval-integrity.sh
+
+```
+scripts/check-approval-integrity.sh <work-branch> [base-branch]
+```
+
+Deliver-PR integrity check over a feature's approval authority. Verifies, at
+the PR head, that the recorded approval is REAL, CURRENT, and AUTHENTIC:
+
+- **Ancestry** — the commit that introduced the gating (latest) `approved`
+  event in `.agents/state/<feature>/events.jsonl` must be an ancestor of HEAD.
+- **Fingerprint + gate** — the approved event's `data.fingerprint` must equal
+  the current `rad plan-fingerprint` of the plan doc, then the events JSONL
+  must satisfy the pure gate fold (`rad gate <feature> approved --stdin`).
+  Legacy events with **no stored fingerprint warn but PASS** — a deliberate
+  narrow fail-open mirroring `check-plan-approved.sh`.
+- **Authenticity** — the introducing commit's git author email must match the
+  architect identity parsed from CLAUDE.md Role Assignments.
+  `RAD_ARCHITECT_OVERRIDE` wins when set (see `.env.example`).
+- **Ownership** — advisory ONLY: a stale `owner-claimed` with no later
+  `owner-released` prints an `advisory:` line. **Never affects the exit code**
+  — CI surfaces these lines as warning annotations, nothing more.
+
+`base-branch` defaults to the detected default branch (fallback `main`). All
+ambiguity (missing plan, missing log, unparseable event, undeterminable
+ancestry) **fails closed**.
+
+```bash
+scripts/check-approval-integrity.sh rad/email-confirmation main
+```
+
+**Exit codes:** `0` = approval integrity verified, `1` = check failed (or any
+ambiguity — fail closed), `2` = usage error.
+
+### check-events-append-only.sh
+
+```
+scripts/check-events-append-only.sh <base-ref> [head-ref]
+```
+
+All-PR check: the RAD event logs (`.agents/state/*/events.jsonl`, including
+the reserved `.agents/state/_architecture/events.jsonl`) are append-only audit
+trails. For every event log touched in `git diff <base>...<head>`:
+
+- FAIL if the diff removes or modifies any existing line;
+- every ADDED line must parse as JSON and carry non-empty string fields
+  `feature`, `type`, `actor`, `ts`.
+
+Files outside `.agents/state/**/events.jsonl` are ignored; no relevant changes
+→ exit 0 with a "no event-log changes" notice. Unresolvable refs **fail
+closed**. `head-ref` defaults to `HEAD`.
+
+```bash
+scripts/check-events-append-only.sh origin/main
+```
+
+**Exit codes:** `0` = pass (append-only, all added events well-formed — or
+nothing to check), `1` = fail (rewrite/deletion detected, malformed event, or
+error — fail closed), `2` = usage error.
+
+### lint-agent-files.sh
+
+```
+scripts/lint-agent-files.sh [claude-md] [agents-dir]
+```
+
+All-PR repo-convention lint over the agent definitions. **Read-only** — it
+reports drift, never rewrites anything (reconciling scope-map drift is the
+architect's call). Two parts:
+
+- **Frontmatter lint** — every `<agents-dir>/*.md` must open with YAML
+  frontmatter carrying non-empty `name`, `description`, `model`, `tools`;
+  `name` must equal the filename minus `.md`; context tools (tools drawn from
+  {Read, Grep, Glob}) must use a `claude-haiku` model, must not list Task, and
+  their description must start with "MUST BE USED" or "Use PROACTIVELY".
+  Files without a `roles:` field are RAD-external utility agents — basic
+  frontmatter is linted, but they are exempt from the context-tool rules and
+  the scope-map bijection.
+- **Scope-map sync** — every `### Agent Scope Map` table row in CLAUDE.md must
+  have a matching agent file, and every agent file with `roles:` must have a
+  table row.
+
+Defaults: `CLAUDE.md` and `.claude/agents`.
+
+```bash
+scripts/lint-agent-files.sh
+```
+
+**Exit codes:** `0` = clean, `1` = one or more violations (each reported with
+file + reason), `2` = usage error (CLAUDE.md or agents dir not found).
+
+---
+
 ## Known follow-ups
 
 - **Decision 2** (DONE): `events.jsonl` is now the sole approval authority. The
