@@ -1,7 +1,8 @@
 # Plan: Harness CI
 Created: 2026-07-03
 Author: architect
-Status: in-progress
+Status: complete
+Completed-At: 2026-07-03T16:20:00Z
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-07-03T15:29:10.196Z
 Recorded-By: sean@torchcodelab.com
@@ -124,9 +125,9 @@ What: Extend the deliver-PR job to run `scripts/check-scope.sh <plan> <branch> <
 Validate: AC#9 — an out-of-scope fixture branch fails the job; a plan-touching PR shows lint output without failing.
 
 ## Tests to Write
-- [ ] scripts/test-check-approval-integrity.sh — fixture repo: approved+ancestor pass; unapproved fail; tampered fingerprint fail; non-architect author fail; proxy-approval pass; stale owner-claimed advisory-not-fail
-- [ ] scripts/test-check-events-append-only.sh — pure append pass; modified line fail; deleted line fail; malformed JSON append fail; non-events file untouched
-- [ ] scripts/test-lint-agent-files.sh — clean tree pass; missing frontmatter field fail; context tool with Task fail; scope-map drift (extra row / missing row) fail
+- [x] fixture repo: approved+ancestor pass; unapproved fail; tampered fingerprint fail; non-architect author fail; proxy-approval pass; stale owner-claimed advisory-not-fail — scripts/test-check-approval-integrity.sh
+- [x] pure append pass; modified line fail; deleted line fail; malformed JSON append fail; non-events file untouched — scripts/test-check-events-append-only.sh
+- [x] clean tree pass; missing frontmatter field fail; context tool with Task fail; scope-map drift (extra row / missing row) fail — scripts/test-lint-agent-files.sh
 
 ## Non-Goals
 - No changes to the gate fold, events writer, fingerprint computation, or any harness/ module — CI is strictly a caller.
