@@ -120,9 +120,107 @@ Carry two aggregates into the report:
 
 If no `.agents/state/*/events.jsonl` files exist, omit the cost section entirely.
 
+### Step 4c: Fold wave reliability from the event logs
+
+Reliability metrics come from the same per-feature audit logs as Step 4b, but the
+counting logic is NOT re-implemented here — it lives in the pure read helpers
+exported by `harness/events.js` (`outcomeCounts`, `failReasonCounts`,
+`retryCounts`, `hookVetoCounts`, `totalUsage`). That module is the single source
+of truth for these folds; import it, never rewrite the counts in jq.
+
+`harness/events.js` is ESM, so use `node --input-type=module -e` (top-level
+`await import` works there and relative specifiers resolve against the cwd —
+run this from the repo root). `RAD_STATE_DIR` (default `.agents/state`) exists
+only so the same script is testable against a fixture dir:
+
+```bash
+node --input-type=module -e '
+import { readFileSync, readdirSync, existsSync } from "node:fs";
+import { join } from "node:path";
+const { outcomeCounts, failReasonCounts, retryCounts, hookVetoCounts, totalUsage } =
+  await import("./harness/events.js");
+
+const stateDir = process.env.RAD_STATE_DIR || ".agents/state";
+const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+
+const features = existsSync(stateDir)
+  ? readdirSync(stateDir, { withFileTypes: true })
+      .filter((d) => d.isDirectory())
+      .map((d) => d.name)
+      .filter((f) => existsSync(join(stateDir, f, "events.jsonl")))
+      .sort()
+  : [];
+
+const agg = {
+  outcomes: outcomeCounts([]),
+  failReasons: failReasonCounts([]),
+  retries: { total: 0, retriedWaves: 0 },
+  hookVetoes: hookVetoCounts([]),
+  usage: totalUsage([]),
+};
+const perFeature = {};
+
+for (const feature of features) {
+  const history = readFileSync(join(stateDir, feature, "events.jsonl"), "utf8")
+    .split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  const outcomes = outcomeCounts(history);
+  const failReasons = failReasonCounts(history);
+  const retries = retryCounts(history);
+  const vetoes = hookVetoCounts(history);
+  const usage = totalUsage(history);
+  // Per-wave token spend from wave-attempt data.usage (missing usage -> 0),
+  // mirroring the totalUsage total-vs-input+output preference per event.
+  const spendPerWave = {};
+  for (const e of history) {
+    if (!e || e.type !== "wave-attempt" || !e.data) continue;
+    const w = typeof e.data.wave === "number" && Number.isFinite(e.data.wave) ? String(e.data.wave) : "?";
+    const u = e.data.usage && typeof e.data.usage === "object" ? e.data.usage : null;
+    const t = u ? (Number.isFinite(u.total) ? u.total : num(u.input) + num(u.output)) : 0;
+    spendPerWave[w] = (spendPerWave[w] || 0) + t;
+  }
+  perFeature[feature] = { outcomes, failReasons, retries, hookVetoes: vetoes, usage, spendPerWave };
+
+  for (const k of Object.keys(agg.outcomes)) agg.outcomes[k] += outcomes[k];
+  agg.failReasons.total += failReasons.total;
+  for (const [r, n] of Object.entries(failReasons.reasons))
+    agg.failReasons.reasons[r] = (agg.failReasons.reasons[r] || 0) + n;
+  agg.retries.total += retries.total;
+  agg.retries.retriedWaves += retries.retriedWaves;
+  agg.hookVetoes.vetoes += vetoes.vetoes;
+  agg.hookVetoes.vetoedAttempts += vetoes.vetoedAttempts;
+  agg.usage.input += usage.input; agg.usage.output += usage.output; agg.usage.total += usage.total;
+}
+
+const noWaveData = agg.outcomes.total === 0 && agg.retries.total === 0 &&
+  agg.failReasons.total === 0 && agg.hookVetoes.vetoes === 0 && agg.hookVetoes.vetoedAttempts === 0;
+console.log(JSON.stringify({ noWaveData, aggregate: agg, perFeature }, null, 2));
+'
+```
+
+Reading the output:
+
+- **`aggregate.outcomes`** — `wave-complete` events keyed by the frozen 7-outcome
+  vocabulary (`success | fail-tests | fail-scope | fail-protocol | fail-timeout |
+  no-changes | abort-user`), plus `unknown` (missing/out-of-vocabulary outcome —
+  the current spine records `wave-complete` without one) and `total`. Success
+  rate = `success / total` when `total > 0`.
+- **`aggregate.failReasons`** — `wave-failed` events grouped by free-form
+  `data.reason` (`token-budget`, `doom-loop`, …); a missing reason buckets as
+  `unknown`.
+- **`aggregate.retries`** — `wave-attempt` totals; `retriedWaves` counts waves
+  seen with more than one attempt (per-wave detail is in `perFeature`).
+- **`aggregate.hookVetoes`** — `hook-veto` events (`vetoes`) and hook-provenance
+  attempts (`vetoedAttempts`) — kept separate, never summed (a post-wave veto
+  emits both; adding them would double-count).
+- **`perFeature[*].spendPerWave`** — per-wave token spend within each feature;
+  waves without recorded usage contribute `0`.
+- **`noWaveData: true`** — no wave events exist anywhere. This is the EXPECTED
+  state today: committed event logs contain only `approved` events, so a fresh
+  clone renders the zeros path (see the Reliability template below), not an error.
+
 ### Step 5: Synthesize and output report
 
-Using the data from Steps 3–4b, write the following report. Populate each section
+Using the data from Steps 3–4c, write the following report. Populate each section
 with real numbers and real pattern names — do not leave placeholders.
 
 ```markdown
@@ -163,6 +261,31 @@ Cost per wave [for the most recent / most expensive feature]:
 ...
 [Note any feature whose usage is entirely unknown: "[feature]: usage not recorded
  (pre-dates the cost layer)."]
+
+### Reliability
+[From Step 4c. Omit this section entirely if no per-feature events.jsonl exists.]
+[If the fold reports noWaveData: true, render EXACTLY this zeros path and nothing else
+ in the section — this is the normal state on a fresh clone, since committed event
+ logs contain only approved events:]
+No wave data yet — the committed event logs contain only approval events.
+Reliability metrics will populate after the first /rad-deliver run records
+wave-attempt / wave-complete / wave-failed events.
+
+[Otherwise, populate from the aggregate (and perFeature where noted):]
+Wave success rate: [success]/[total] wave-complete events ([Y]%)
+Outcome distribution (frozen 7-outcome vocabulary):
+- success: [N]  fail-tests: [N]  fail-scope: [N]  fail-protocol: [N]
+- fail-timeout: [N]  no-changes: [N]  abort-user: [N]  unknown: [N]
+Retry frequency: [total] wave attempts; [retriedWaves] wave(s) needed more than
+one attempt [call out the worst per-wave attempt counts from perFeature]
+Failure reasons ([total] wave-failed event(s)):
+- [reason] — [N]
+...
+Hook vetoes: [vetoes] veto event(s); [vetoedAttempts] hook-provenance attempt(s)
+[reported separately — never summed]
+Token spend per wave [for features with recorded usage; 0 = usage not recorded]:
+- [feature] / Wave [n] — [N] tokens
+...
 
 ### Recommended Focus Areas
 [Top 2–3 patterns that are both frequent and high-severity. Each as one sentence:
@@ -217,6 +340,11 @@ Auto-cleared by the severity gate: [N] change(s)
 
 - Never modify `.agents/findings.jsonl` or any `.agents/state/*/events.jsonl` — read only
 - Token usage in `wave-attempt` events is optional; treat missing `data.usage` as 0 (unknown)
+- Reliability counts (Step 4c) MUST come from the `harness/events.js` read helpers
+  (`outcomeCounts`, `failReasonCounts`, `retryCounts`, `hookVetoCounts`, `totalUsage`) —
+  never re-implement those folds in jq or shell
+- All-zero reliability counts are the "no wave data yet" path, not an error — render
+  the zeros text from the template and move on
 - If the file is missing or empty, say so and exit cleanly
 - If fewer than 3 cycles exist, skip pattern analysis and output raw findings
 - Do not invent patterns — only report what the data shows
