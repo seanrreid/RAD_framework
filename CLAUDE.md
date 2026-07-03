@@ -355,6 +355,11 @@ Approval requires:
 | approval-event-mapper | context-tool | harness/events.js, transitions.js, gates.js, gates.yaml, adapters/git-state-store.js (recordApproval) | architect |
 | approval-command-integration-orchestrator | role-orchestrator | nothing | architect |
 | approval-command-mapper | context-tool | .claude/commands/architect/rad-design.md + rad-approve.md, harness/cli.js, check-plan-approved.sh | architect |
+| insights-feedback-parent-orchestrator | parent-orchestrator | nothing | developer |
+| event-metrics-orchestrator | role-orchestrator | nothing | developer |
+| event-metrics-mapper | context-tool | harness/events.js read side, spine outcome/usage record sites, gates.yaml vocab, .agents/state/*/events.jsonl samples | developer |
+| findings-loop-orchestrator | role-orchestrator | nothing | developer |
+| findings-surface-mapper | context-tool | .agents/findings.jsonl samples, rad-insights + wrap skills, CLAUDE.md conventions, lint-plan.sh | developer |
 
 ---
 
