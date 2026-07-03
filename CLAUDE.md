@@ -360,6 +360,13 @@ Approval requires:
 | event-metrics-mapper | context-tool | harness/events.js read side, spine outcome/usage record sites, gates.yaml vocab, .agents/state/*/events.jsonl samples | developer |
 | findings-loop-orchestrator | role-orchestrator | nothing | developer |
 | findings-surface-mapper | context-tool | .agents/findings.jsonl samples, rad-insights + wrap skills, CLAUDE.md conventions, lint-plan.sh | developer |
+| harness-ci-parent-orchestrator | parent-orchestrator | nothing | architect |
+| ci-wiring-orchestrator | role-orchestrator | nothing | architect |
+| ci-surface-mapper | context-tool | scripts/*.sh conventions, deliver-gate-hook.mjs, platform scripts, harness test entries | architect |
+| integrity-checks-orchestrator | role-orchestrator | nothing | architect |
+| integrity-surface-mapper | context-tool | gates.js, events.js, plan-fingerprint.js, git-state-store.js recordApproval, git-sync.sh, events.jsonl samples | architect |
+| convention-lints-orchestrator | role-orchestrator | nothing | architect |
+| lint-surface-mapper | context-tool | lint-plan.sh, check-scope.sh, lib/plan-paths.sh, .claude/agents samples, CLAUDE.md scope map | architect |
 
 ---
 
