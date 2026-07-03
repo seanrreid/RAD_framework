@@ -8,3 +8,4 @@ Executor role: architect
 
 | Step | Wave | Task | Status | Commit | Time |
 |------|------|------|--------|--------|------|
+| 1 | Wave 1 | Shell-safety lint + baseline + fixture test | ✓ complete | 43546d0 | 17:34 |
