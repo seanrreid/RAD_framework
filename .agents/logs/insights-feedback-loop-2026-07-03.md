@@ -8,3 +8,4 @@ Executor role: architect
 
 | Step | Wave | Task | Status | Commit | Time |
 |------|------|------|--------|--------|------|
+| 1 | Wave 1 | events.js read helpers + unit tests | ✓ complete | fc1dd0d | 16:43 |
