@@ -88,6 +88,24 @@ git commit -m "wrap([feature]): session reconciliation note"
 git push origin "rad/[feature-name]"
 ```
 
+### 4b. Recurring-findings check (read-only)
+
+Before emitting the summary, compute which finding categories recur at or above
+the threshold. Same resolution and count as `/rad-insights` Step 3b — read-only,
+no writes:
+
+```bash
+t=$(node -e 'const n = Number.parseInt(process.env.RAD_FINDINGS_THRESHOLD ?? "", 10);
+process.stdout.write(String(Number.isNaN(n) || n <= 0 ? 5 : n))')
+
+# Every category with count >= threshold (all priorities), descending
+jq -r 'select(.type=="finding") | .category' .agents/findings.jsonl \
+  | sort | uniq -c | sort -rn | awk -v t="$t" '$1 >= t { print $2 }'
+```
+
+Skip silently if `.agents/findings.jsonl` is missing or empty, or if the filter
+emits nothing.
+
 ### 5. Output the session summary
 
 ```
@@ -107,6 +125,10 @@ git push origin "rad/[feature-name]"
 ## Concerns flagged
 - {done_with_concerns items from delivery, or "none"}
 
+[Include the next line ONLY if Step 4b emitted at least one category; otherwise
+ omit it entirely — not an empty line, not "none".]
+Recurring findings: {category list from Step 4b} — run /rad-insights for suggested conventions
+
 ## Next session
 - {the obvious next step}
 
@@ -125,4 +147,7 @@ ending — never commit silently.
 - Never commit to the default branch
 - Append to `## Notes`, never rewrite history in it — build a timeline
 - Flag uncommitted changes; commit only with confirmation
+- The recurring-findings line is threshold-gated and read-only over
+  `.agents/findings.jsonl` — /wrap never writes findings or edits conventions;
+  when no category meets the threshold, omit the line entirely
 - Keep the summary scannable

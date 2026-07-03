@@ -234,3 +234,126 @@ export function totalUsage(history) {
   }
   return sum;
 }
+
+// ── Insights read helpers (appended; pure folds, no I/O) ─────────────────────
+// The outcome vocabulary is the frozen 7-outcome set owned by matrix.yaml and
+// mirrored by hook-runner.js. We IMPORT hook-runner's exported set rather than
+// duplicating it, so the vocabulary has exactly two declarations repo-wide
+// (matrix.yaml + hook-runner.js) and this module can never drift from them.
+// hook-runner.js has no module-scope side effects, so the import stays pure.
+import { OUTCOME_VOCAB } from './hook-runner.js';
+
+/**
+ * Pure fold over an event history → counts of `wave-complete` events keyed by
+ * `data.outcome` across the frozen 7-outcome vocabulary (success | fail-tests |
+ * fail-scope | fail-protocol | fail-timeout | no-changes | abort-user), plus an
+ * `unknown` bucket and a `total`. Outcome is OPTIONAL on the wire: the current
+ * spine records `wave-complete` with `data: { wave }` only, so a missing or
+ * out-of-vocabulary outcome is BUCKETED AS `unknown` (never skipped, never
+ * thrown) — the total always equals the number of wave-complete events seen.
+ * Intended for the insights layer to report per-feature reliability.
+ *
+ * @param {Event[]} history - in-memory event array (no I/O performed)
+ * @returns {{ success: number, 'fail-tests': number, 'fail-scope': number,
+ *   'fail-protocol': number, 'fail-timeout': number, 'no-changes': number,
+ *   'abort-user': number, unknown: number, total: number }}
+ */
+export function outcomeCounts(history) {
+  const counts = {};
+  for (const outcome of OUTCOME_VOCAB) counts[outcome] = 0;
+  counts.unknown = 0;
+  counts.total = 0;
+  if (!Array.isArray(history)) return counts;
+  for (const event of history) {
+    if (!event || event.type !== 'wave-complete') continue;
+    counts.total += 1;
+    const outcome = event.data && typeof event.data.outcome === 'string' ? event.data.outcome : null;
+    if (outcome !== null && OUTCOME_VOCAB.has(outcome)) {
+      counts[outcome] += 1;
+    } else {
+      counts.unknown += 1;
+    }
+  }
+  return counts;
+}
+
+/**
+ * Pure fold over an event history → counts of `wave-failed` events keyed by
+ * `data.reason`, plus a `total`. Reasons are FREE-FORM keys as recorded by the
+ * spine (`token-budget`, `doom-loop`, `budget-exhausted`, hook reasons, …) —
+ * this fold does not validate them against any vocabulary. Reason is OPTIONAL
+ * on the wire: the matrix abort/surface terminal records `data: { wave, action }`
+ * with no reason, so a missing or non-string reason is BUCKETED AS `unknown` —
+ * the total always equals the number of wave-failed events seen.
+ *
+ * @param {Event[]} history - in-memory event array (no I/O performed)
+ * @returns {{ total: number, reasons: Object<string, number> }}
+ */
+export function failReasonCounts(history) {
+  const counts = { total: 0, reasons: {} };
+  if (!Array.isArray(history)) return counts;
+  for (const event of history) {
+    if (!event || event.type !== 'wave-failed') continue;
+    counts.total += 1;
+    const reason =
+      event.data && typeof event.data.reason === 'string' && event.data.reason !== ''
+        ? event.data.reason
+        : 'unknown';
+    counts.reasons[reason] = (counts.reasons[reason] || 0) + 1;
+  }
+  return counts;
+}
+
+/**
+ * Pure fold over an event history → per-wave `wave-attempt` counts. `perWave`
+ * is keyed by `String(data.wave)`; `total` counts EVERY wave-attempt event
+ * (legacy attempts with a missing or non-numeric `data.wave` still count toward
+ * the total but establish no per-wave key); `retriedWaves` is the number of
+ * waves observed with more than one attempt. A history with no attempts folds
+ * to the zeroed shape without error.
+ *
+ * @param {Event[]} history - in-memory event array (no I/O performed)
+ * @returns {{ total: number, retriedWaves: number, perWave: Object<string, number> }}
+ */
+export function retryCounts(history) {
+  const out = { total: 0, retriedWaves: 0, perWave: {} };
+  if (!Array.isArray(history)) return out;
+  for (const event of history) {
+    if (!event || event.type !== 'wave-attempt') continue;
+    out.total += 1;
+    const wave = event.data ? event.data.wave : undefined;
+    if (typeof wave === 'number' && Number.isFinite(wave)) {
+      const key = String(wave);
+      out.perWave[key] = (out.perWave[key] || 0) + 1;
+    }
+  }
+  out.retriedWaves = Object.values(out.perWave).filter((n) => n > 1).length;
+  return out;
+}
+
+/**
+ * Pure fold over an event history → hook-veto activity. `vetoes` counts
+ * `hook-veto` events (the runner's dedicated veto record). `vetoedAttempts`
+ * SEPARATELY counts `wave-attempt` events carrying hook-veto provenance
+ * (`data.source === 'hook'`, per the spine's post-wave veto tagging with
+ * source/point/hook) — they are NOT folded into `vetoes`, because a post-wave
+ * veto emits BOTH a hook-veto event and a provenance-tagged attempt, and
+ * folding them together would double-count. Provenance fields are OPTIONAL:
+ * untagged attempts contribute nothing.
+ *
+ * @param {Event[]} history - in-memory event array (no I/O performed)
+ * @returns {{ vetoes: number, vetoedAttempts: number }}
+ */
+export function hookVetoCounts(history) {
+  const out = { vetoes: 0, vetoedAttempts: 0 };
+  if (!Array.isArray(history)) return out;
+  for (const event of history) {
+    if (!event) continue;
+    if (event.type === 'hook-veto') {
+      out.vetoes += 1;
+    } else if (event.type === 'wave-attempt' && event.data && event.data.source === 'hook') {
+      out.vetoedAttempts += 1;
+    }
+  }
+  return out;
+}
