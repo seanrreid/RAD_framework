@@ -105,3 +105,44 @@ jobs:
             esac
             printf '%s\n' "$line"
           done
+      - name: Check plan scope
+        if: steps.detect.outputs.skip != 'true'
+        # Fail-closed: a non-zero exit (out-of-scope files, usage error) fails
+        # the job and blocks merge. The work branch is passed origin-prefixed
+        # because the PR checkout is a detached merge ref — the bare branch
+        # name would not resolve and the script's diff would come up empty.
+        run: scripts/check-scope.sh ".agents/plans/${GITHUB_HEAD_REF#rad/}.md" "origin/${{ github.head_ref }}" "${{ github.base_ref }}"
+
+  # All PRs touching .agents/plans/** — plan lint (ADVISORY, never gates merge).
+  # continue-on-error keeps the job green on lint failure; findings surface as
+  # warning annotations only.
+  plan-lint:
+    runs-on: ubuntu-latest
+    steps:
+      # fetch-depth: 0 — the changed-plan detection diffs against the PR base
+      # sha, which a shallow clone may not contain.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Lint changed plan files
+        continue-on-error: true
+        # The diff|grep detection and re-emit loop are output plumbing, not
+        # check logic: the lint itself is scripts/lint-plan.sh, runnable
+        # locally with the same command line.
+        run: |
+          changed=$(git diff --name-only "${{ github.event.pull_request.base.sha }}"...HEAD -- '.agents/plans/*.md')
+          if [ -z "$changed" ]; then
+            echo "notice: no plan files changed vs base — skipping plan lint"
+            exit 0
+          fi
+          rc=0
+          for plan in $changed; do
+            [ -f "$plan" ] || continue   # deleted plan — nothing to lint
+            echo "linting $plan"
+            if ! out=$(scripts/lint-plan.sh "$plan" 2>&1); then rc=1; fi
+            printf '%s\n' "$out"
+            printf '%s\n' "$out" | while IFS= read -r line; do
+              [ -n "$line" ] && echo "::warning file=$plan::$line"
+            done
+          done
+          exit "$rc"

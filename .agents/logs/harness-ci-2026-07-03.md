@@ -13,3 +13,4 @@ Executor role: architect
 | 3 | Wave 1 | Agent-file lint + scope-map sync script | ✓ complete | 4900285 | 15:42 |
 | 4 | Wave 2 | CI workflow (Layer 1 + integrity checks) | ✓ complete | c0cbc5c | 11:48 |
 | 5 | Wave 2 | Config + docs | ✓ complete | (this commit) | 11:52 |
+| 6 | Wave 3 | Wire scope check (blocking) and plan lint (advisory) into CI | ✓ complete | (this commit) | 12:20 |
