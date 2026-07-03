@@ -1,0 +1,107 @@
+# RAD CI — thin GitHub Actions wrapper over the repo's standalone check scripts.
+#
+# Design invariant: ZERO check logic lives in this YAML. Every job is
+# checkout + invoke; the checks themselves are scripts/*.sh and the harness
+# test suite, all runnable locally with the exact command lines below. Other
+# CI platforms wrap the same scripts. See docs/rad-cli.md → "CI checks".
+name: RAD CI
+
+on:
+  pull_request:
+
+jobs:
+  # Layer 1 — harness unit/integration suite (node --test).
+  harness-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      # Full install (NOT --omit=optional): the adapter tests import
+      # @anthropic-ai/claude-agent-sdk directly, so omitting the optional SDK
+      # breaks test/agent-adapters.test.js and test/cost.test.js.
+      # Verified locally: `npm ci --prefix harness && npm test --prefix harness`.
+      - run: npm ci --prefix harness
+      - run: npm test --prefix harness
+
+  # Layer 1 — shell self-tests for every scripts/test-*.sh.
+  script-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run scripts/test-*.sh
+        run: |
+          failed=0
+          for t in scripts/test-*.sh; do
+            if out=$(bash "$t" 2>&1); then
+              echo "PASS $t"
+            else
+              echo "FAIL $t"
+              echo "$out"
+              failed=1
+            fi
+          done
+          exit "$failed"
+
+  # All PRs — event logs are append-only audit trails (fail-closed).
+  events-append-only:
+    runs-on: ubuntu-latest
+    steps:
+      # fetch-depth: 0 — the check diffs against the PR base sha, which a
+      # shallow clone may not contain. Full history costs extra fetch time on
+      # large repos; accepted so the diff range is always resolvable.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: scripts/check-events-append-only.sh "${{ github.event.pull_request.base.sha }}"
+
+  # All PRs — agent frontmatter lint + CLAUDE.md scope-map sync (fail-closed).
+  # KNOWN: this job currently fails on pre-existing scope-map drift in the
+  # real tree; the drift reconciliation lands before merge. Wired fail-closed
+  # anyway per AC#6 — the lint must gate, not advise.
+  agent-file-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: scripts/lint-agent-files.sh
+
+  # Deliver PRs only — approval integrity at the PR head (ancestry +
+  # fingerprint + gate + authenticity, with an advisory-only ownership check).
+  # Ordinary PRs: the job-level `if` skips non-rad/ branches entirely (skipped
+  # reads as success), and the detect step below emits an explicit skip notice
+  # for rad/ branches that carry no plan file.
+  deliver-integrity:
+    runs-on: ubuntu-latest
+    if: startsWith(github.head_ref, 'rad/')
+    steps:
+      # fetch-depth: 0 — ancestry (merge-base --is-ancestor) and the
+      # origin/<work-branch> events-log resolution need full history; a
+      # shallow clone would fail closed on an undeterminable ancestry.
+      # Costs a full fetch; accepted for correctness.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Detect deliver PR (rad/ branch + matching plan file)
+        id: detect
+        run: |
+          feature="${GITHUB_HEAD_REF#rad/}"
+          if [ -f ".agents/plans/${feature}.md" ]; then
+            echo "deliver PR detected: plan .agents/plans/${feature}.md exists for branch ${GITHUB_HEAD_REF}"
+          else
+            echo "notice: branch ${GITHUB_HEAD_REF} has no plan file .agents/plans/${feature}.md — not a deliver PR; skipping approval-integrity check"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Check approval integrity
+        if: steps.detect.outputs.skip != 'true'
+        # The re-emit loop below is output plumbing, not check logic: it
+        # surfaces the script's "advisory:" ownership lines as GitHub warning
+        # annotations. pipefail preserves the script's exit code unchanged.
+        run: |
+          set -o pipefail
+          scripts/check-approval-integrity.sh "${{ github.head_ref }}" "${{ github.base_ref }}" 2>&1 | while IFS= read -r line; do
+            case "$line" in
+              advisory:*) echo "::warning::$line" ;;
+            esac
+            printf '%s\n' "$line"
+          done

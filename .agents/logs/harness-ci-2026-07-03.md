@@ -11,3 +11,4 @@ Executor role: architect
 | 1 | Wave 1 | Approval-integrity check script | ✓ complete | 4a6fed0 | 15:36 |
 | 2 | Wave 1 | Events append-only check script | ✓ complete | 3ed7db8 | 15:38 |
 | 3 | Wave 1 | Agent-file lint + scope-map sync script | ✓ complete | 4900285 | 15:42 |
+| 4 | Wave 2 | CI workflow (Layer 1 + integrity checks) | ✓ complete | (this commit) | 11:48 |
