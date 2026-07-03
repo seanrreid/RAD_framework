@@ -9,4 +9,4 @@ Executor role: architect
 | Step | Wave | Task | Status | Commit | Time |
 |------|------|------|--------|--------|------|
 | 1 | Wave 1 | Shell-safety lint + baseline + fixture test | ✓ complete | 363cd7b | 17:34 |
-| 2 | Wave 1 | CLAUDE.md convention bullets | ✓ complete | pending | 17:36 |
+| 2 | Wave 1 | CLAUDE.md convention bullets | ✓ complete | 137dc14 | 17:36 |
