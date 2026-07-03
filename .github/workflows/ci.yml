@@ -23,6 +23,13 @@ jobs:
       # breaks test/agent-adapters.test.js and test/cost.test.js.
       # Verified locally: `npm ci --prefix harness && npm test --prefix harness`.
       - run: npm ci --prefix harness
+      # The approve-path test fixtures read the runner's real git identity
+      # (harness/test/cli.test.js derives the expected actor from
+      # `git config user.email`); GitHub runners ship with none, so set one.
+      - name: Set git identity for test fixtures
+        run: |
+          git config --global user.name "RAD CI"
+          git config --global user.email "ci@rad-ci.local"
       - run: npm test --prefix harness
 
   # Layer 1 — shell self-tests for every scripts/test-*.sh.
