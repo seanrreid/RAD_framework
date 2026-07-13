@@ -22,6 +22,29 @@ Each entry follows the same shape:
 
 ## Agent harness analyses
 
+### Cosmos — Augment Code's Agentic SDLC Platform
+- **Source:** Augment Code — [augmentcode.com/blog/cosmos-now-in-public-preview](https://www.augmentcode.com/blog/cosmos-now-in-public-preview)
+- **Reviewed:** 2026-07-13
+- **Takeaway:** A hosted "operating system for agentic software development" that
+  independently converges on RAD's shape: persistent process memory, staged human
+  checkpoints (its three checkpoints map ~1:1 onto RAD Gates 0–2), specialized
+  per-stage agents, model agnosticism, and environment isolation. Load-bearing
+  difference: Cosmos *sells* the substrate (vendor-hosted Knowledge Base, Event Bus,
+  Agent Runtime); RAD's bet is plain git the operator owns. RAD's gates are also
+  *enforced* (fail-closed event authority + hook) where Cosmos's read as workflow
+  convention. Genuinely new relative to RAD: the soft-knowledge Learning Flywheel
+  (already RAD's deferred portable-memory half), dynamic model routing via Prism
+  (declined — RAD keeps model choice declared in the approved plan, auditable at
+  Gate 1), and a recall-not-precision deep-review framing (open Gate-2 candidate).
+  Steal-with-modification: default-on worktree isolation for `/rad-deliver`, not
+  VMs. Full breakdown: [cosmos-vs-rad.md](cosmos-vs-rad.md).
+- **Issues:** [#59](https://github.com/seanrreid/RAD_framework/issues/59)
+  (deliver-PR review digest — recall-oriented Gate-2 surface),
+  [#60](https://github.com/seanrreid/RAD_framework/issues/60) (plan-time
+  reliability readout from events.jsonl),
+  [#61](https://github.com/seanrreid/RAD_framework/issues/61) (worktree
+  isolation default-on for /rad-deliver).
+
 ### Hidden Technical Debt in Agent Harnesses
 - **Source:** Lee Hanchung — [leehanchung.github.io/blogs/2026/05/08/hidden-technical-debt-agent-harness](https://leehanchung.github.io/blogs/2026/05/08/hidden-technical-debt-agent-harness/)
 - **Reviewed:** 2026-06-24
