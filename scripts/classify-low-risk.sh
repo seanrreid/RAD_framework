@@ -5,6 +5,9 @@
 # can route around human approval only when no judgment is needed.
 #
 # Verdict is LOW iff ALL of the following hold:
+#   0. NO touched path is self-protected RAD machinery (the literal set in
+#      lib/plan-paths.sh — never operator-tunable, checked before any
+#      operator-pattern rule).
 #   1. RAD_LOW_RISK_PATTERNS is non-empty.
 #   2. Every touched path matches RAD_LOW_RISK_PATTERNS.
 #   3. NO touched path matches RAD_HIGH_RISK_PATTERNS (high-risk wins ties).
@@ -61,6 +64,19 @@ not_low() {
 # ── Declared scope set (the touched-path universe) ────────────────────────────
 SCOPE_PATHS=$(plan_scope_paths "$PLAN_FILE")
 [[ -z "$SCOPE_PATHS" ]] && not_low "plan declares no paths in scope"
+
+# ── Rule 0: self-protected paths (RAD machinery) are never auto-clearable ─────
+# Runs regardless of RAD_LOW_RISK_PATTERNS / RAD_HIGH_RISK_PATTERNS (including
+# empty) — the self-protected set is a literal in lib/plan-paths.sh, not routed
+# through any env var, so no operator pattern can loosen it. First match wins,
+# and it is reported BEFORE any high-risk tie so the verdict names the
+# strongest rule.
+while IFS= read -r path; do
+  [[ -z "$path" ]] && continue
+  if path_is_self_protected "$path"; then
+    not_low "self-protected path (RAD machinery): $path"
+  fi
+done <<< "$SCOPE_PATHS"
 
 # ── Rules 2 & 3: every path low, no path high (high wins ties) ────────────────
 NON_LOW=""

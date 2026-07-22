@@ -2,6 +2,8 @@
 # test-classify-low-risk.sh
 # Predicate unit tests for classify-low-risk.sh — the deterministic, fail-closed
 # severity router. A plan is LOW (auto-clearable, exit 0) iff ALL hold:
+#   0. NO touched path is self-protected RAD machinery (lib/plan-paths.sh
+#      literal — never operator-tunable).
 #   1. RAD_LOW_RISK_PATTERNS is non-empty.
 #   2. Every touched path matches RAD_LOW_RISK_PATTERNS.
 #   3. NO touched path matches RAD_HIGH_RISK_PATTERNS (high wins ties).
@@ -26,7 +28,8 @@ fail() { echo "✗ $1"; exit 1; }
 
 REPO="$TMP/repo"
 mkdir -p "$REPO/scripts/lib" "$REPO/.agents/plans" "$REPO/docs" "$REPO/styles" \
-         "$REPO/src/auth" "$REPO/tests" "$REPO/config"
+         "$REPO/src/auth" "$REPO/tests" "$REPO/config" \
+         "$REPO/harness" "$REPO/.agents/state/demo"
 cp "$HERE/classify-low-risk.sh" "$HERE/get-default-branch.sh" "$REPO/scripts/"
 cp "$HERE/lib/plan-paths.sh" "$REPO/scripts/lib/"
 printf '**Name:** t\ndefault_branch: main\n' > "$REPO/CLAUDE.md"
@@ -37,6 +40,8 @@ printf '.a{color:red}\n'   > "$REPO/styles/main.css"
 printf 'export const x=1\n' > "$REPO/src/auth/login.js"
 printf 'test("x",()=>{})\n' > "$REPO/tests/unit.test.js"
 printf 'key=val\n'         > "$REPO/config/app.conf"
+printf 'module.exports={}\n' > "$REPO/harness/gates.js"
+printf '{}\n'              > "$REPO/.agents/state/demo/events.jsonl"
 
 # write_plan <out> <scope-rows> — minimal plan with the given Files-in-Scope rows.
 write_plan() {
@@ -63,6 +68,9 @@ write_plan "$REPO/.agents/plans/low.md"          "$(printf '| docs/guide.md | 1 
 write_plan "$REPO/.agents/plans/high.md"         "$(printf '| docs/guide.md | 1 | x |\n| src/auth/login.js | 1 | x |')"
 write_plan "$REPO/.agents/plans/outside.md"      "$(printf '| docs/guide.md | 1 | x |\n| config/app.conf | 1 | x |')"
 write_plan "$REPO/.agents/plans/tests-config.md" "$(printf '| tests/unit.test.js | 1 | x |\n| config/app.conf | 1 | x |')"
+write_plan "$REPO/.agents/plans/selfprot-harness.md"  "| harness/gates.js | 1 | x |"
+write_plan "$REPO/.agents/plans/selfprot-scripts.md"  "| scripts/classify-low-risk.sh | 1 | x |"
+write_plan "$REPO/.agents/plans/selfprot-state.md"    "| .agents/state/demo/events.jsonl | 1 | x |"
 
 git -C "$REPO" init -q
 git -C "$REPO" config user.email "t@t.t"
@@ -203,6 +211,59 @@ t_empty_diff_not_low() {
   echo "✓ AC#empty-diff: an empty changed-file set ⇒ not-low (fail closed)"
 }
 
+# ── Rule 0: self-protected RAD machinery ⇒ not-low, even under a '.*' allowlist ─
+# The self-protected set is a literal in lib/plan-paths.sh — no operator pattern
+# (broad allowlist, emptied high-risk set) can loosen it.
+t_self_protected_not_low() {
+  # (a) harness/gates.js under the broadest possible allowlist.
+  branch_edit rad/selfprot-a harness/gates.js 'module.exports={v:2}'
+
+  ( export RAD_LOW_RISK_PATTERNS='.*'; run_classify ".agents/plans/selfprot-harness.md" "rad/selfprot-a"
+    [[ "$CLASSIFY_CODE" -eq 1 ]] || fail "AC#1: harness/gates.js should be not-low under '.*' (got $CLASSIFY_CODE): $CLASSIFY_OUT"
+    printf '%s\n' "$CLASSIFY_OUT" | grep -q "self-protected" \
+      || fail "AC#1: not-low verdict did not cite the self-protected rule: $CLASSIFY_OUT"
+  ) || exit 1
+  echo "✓ AC#self-protected-a: harness/gates.js ⇒ not-low even under a '.*' allowlist"
+
+  # (b) scripts/classify-low-risk.sh with the high-risk set emptied — rule 0
+  # must fire regardless of RAD_HIGH_RISK_PATTERNS. Rule 0 reasons over the
+  # DECLARED scope and precedes rule 4, so the branch edits a neutral file
+  # (editing the classifier itself would clobber the script under test).
+  branch_edit rad/selfprot-b docs/guide.md '# guide selfprot-b'
+
+  ( export RAD_LOW_RISK_PATTERNS='.*'; export RAD_HIGH_RISK_PATTERNS=""
+    run_classify ".agents/plans/selfprot-scripts.md" "rad/selfprot-b"
+    [[ "$CLASSIFY_CODE" -eq 1 ]] || fail "AC#1: scripts/ should be not-low with empty high-risk set (got $CLASSIFY_CODE): $CLASSIFY_OUT"
+    printf '%s\n' "$CLASSIFY_OUT" | grep -q "self-protected path (RAD machinery): scripts/classify-low-risk.sh" \
+      || fail "AC#1: not-low verdict did not name the self-protected scripts/ path: $CLASSIFY_OUT"
+  ) || exit 1
+  echo "✓ AC#self-protected-b: scripts/ ⇒ not-low even with RAD_HIGH_RISK_PATTERNS emptied"
+
+  # (c) .agents/state/ — the event-log authority itself.
+  branch_edit rad/selfprot-c .agents/state/demo/events.jsonl '{"v":2}'
+
+  ( export RAD_LOW_RISK_PATTERNS='.*'; run_classify ".agents/plans/selfprot-state.md" "rad/selfprot-c"
+    [[ "$CLASSIFY_CODE" -eq 1 ]] || fail "AC#1: .agents/state/ should be not-low (got $CLASSIFY_CODE): $CLASSIFY_OUT"
+    printf '%s\n' "$CLASSIFY_OUT" | grep -q "self-protected path (RAD machinery): .agents/state/demo/events.jsonl" \
+      || fail "AC#1: not-low verdict did not name the self-protected state path: $CLASSIFY_OUT"
+  ) || exit 1
+  echo "✓ AC#self-protected-c: .agents/state/ ⇒ not-low"
+}
+
+# ── Rule 0 regression: a docs-only plan under the documented default allowlist ──
+# Rule 0 must not disturb the normal LOW path for genuinely inert scopes.
+t_self_protected_docs_regression() {
+  branch_edit rad/selfprot-docs docs/guide.md '# guide v3'
+
+  ( export RAD_LOW_RISK_PATTERNS='css|scss|\.(png|jpe?g|gif|svg|webp|woff2?|ttf|otf|eot)$|\.md$|^docs/'
+    run_classify ".agents/plans/off.md" "rad/selfprot-docs"
+    [[ "$CLASSIFY_CODE" -eq 0 ]] || fail "AC#4: docs-only plan should still be LOW (got $CLASSIFY_CODE): $CLASSIFY_OUT"
+    printf '%s\n' "$CLASSIFY_OUT" | grep -q "verdict: low" \
+      || fail "AC#4: docs-only plan did not print low verdict: $CLASSIFY_OUT"
+  ) || exit 1
+  echo "✓ AC#self-protected-d: docs-only plan under the default allowlist ⇒ still LOW"
+}
+
 t_off_when_unset
 t_low_when_all_inert
 t_high_wins_ties
@@ -210,4 +271,6 @@ t_not_low_when_outside_allowlist
 t_tests_config_not_cleared
 t_scope_drift_not_low
 t_empty_diff_not_low
+t_self_protected_not_low
+t_self_protected_docs_regression
 echo "ALL PASS"
