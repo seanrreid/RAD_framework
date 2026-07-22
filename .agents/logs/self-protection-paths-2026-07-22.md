@@ -12,4 +12,4 @@ Executor role: architect
 | 2 | Wave 2 | Rule 0 in the classifier + tests | ✓ complete | f07234d | 2026-07-22T14:35:00Z |
 | 3 | Wave 2 | Unconditional advisory in the lint + tests | ✓ complete | cd0635f | 2026-07-22T14:42:00Z |
 | 4 | Wave 3 | Documentation — CLAUDE.md | ✓ complete | 4f00c91 | 2026-07-22T15:05:00Z |
-| 5 | Wave 3 | Documentation — .env.example | ✓ complete | pending | 2026-07-22T15:10:00Z |
+| 5 | Wave 3 | Documentation — .env.example | ✓ complete | 193ba3d | 2026-07-22T15:10:00Z |
