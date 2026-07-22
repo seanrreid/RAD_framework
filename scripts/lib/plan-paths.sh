@@ -70,3 +70,17 @@ path_matches() {
   [[ -z "$pattern" ]] && return 1
   echo "$path" | grep -qE "$pattern"
 }
+
+# RAD's self-protected path set: the harness's own control surfaces. This set
+# is deliberately NOT operator-tunable — a literal, never routed through an
+# env var — so a plan cannot loosen the guard that classifies it. Additions
+# require a reviewed commit to this file.
+readonly RAD_SELF_PROTECTED_PATTERN='^harness/|^scripts/|^\.claude/|^\.agents/state/|(^|/)gates\.ya?ml$|(^|/)matrix\.ya?ml$'
+
+# path_is_self_protected <path>
+# True (exit 0) iff <path> falls inside the self-protected set. Delegates to
+# path_matches with the literal constant, which is non-empty by construction —
+# this check can never resolve to OFF.
+path_is_self_protected() {
+  path_matches "$1" "$RAD_SELF_PROTECTED_PATTERN"
+}
