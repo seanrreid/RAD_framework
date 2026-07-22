@@ -9,4 +9,4 @@ Executor role: architect
 | Step | Wave | Task | Status | Commit | Time |
 |------|------|------|--------|--------|------|
 | 1 | Wave 1 | Self-protected pattern + matcher in the shared lib | ✓ complete | 698cb1e | 2026-07-22T14:12:00Z |
-| 2 | Wave 2 | Rule 0 in the classifier + tests | ✓ complete | pending | 2026-07-22T14:35:00Z |
+| 2 | Wave 2 | Rule 0 in the classifier + tests | ✓ complete | f07234d | 2026-07-22T14:35:00Z |
