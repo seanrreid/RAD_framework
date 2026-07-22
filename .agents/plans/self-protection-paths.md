@@ -1,7 +1,7 @@
 # Plan: Self-Protection Paths
 Created: 2026-07-22
 Author: architect
-Status: approved
+Status: in-progress
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-07-22T13:57:31.545Z
 Recorded-By: sean@torchcodelab.com
