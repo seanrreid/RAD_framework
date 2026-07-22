@@ -1,7 +1,10 @@
 # Plan: Self-Protection Paths
 Created: 2026-07-22
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-07-22T13:57:31.545Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/self-protection-paths
 Adopted-From: https://github.com/seanrreid/RAD_framework/issues/73
 Issue-Title: Self-protection: RAD's own harness/gate/script paths are unconditionally high-risk — no auto-clear path may ever clear a change to itself
