@@ -260,6 +260,27 @@ Empty/unset disables severity routing entirely.
 auto-clears every non-high-risk, in-scope plan, bypassing human approval — so keep it
 tight and specific. This is a documented trust boundary, not a guarded one.
 
+### Self-Protected Paths
+
+NOT optional and NOT configurable — unlike the neighboring knobs, this set is
+built in. A path set covering RAD's own machinery is **always** treated as
+high-risk:
+
+```
+^harness/|^scripts/|^\.claude/|^\.agents/state/|(^|/)gates\.ya?ml$|(^|/)matrix\.ya?ml$
+```
+
+`scripts/classify-low-risk.sh` refuses to classify any plan touching a
+self-protected path as **low** BEFORE consulting the operator patterns — the
+refusal wins over any `RAD_LOW_RISK_PATTERNS`, including `.*` — and
+`scripts/lint-plan.sh` always emits an advisory warning for such a path
+regardless of `RAD_HIGH_RISK_PATTERNS`. Rationale: no auto-clear path may ever
+clear a change to itself (trust inversion; #73).
+
+The set lives as a literal (`RAD_SELF_PROTECTED_PATTERN`) in
+`scripts/lib/plan-paths.sh`; changing it requires a reviewed commit — there is
+deliberately no env var.
+
 ### Wave-Lifecycle Hooks
 
 OPTIONAL and backward-compatible — absent, `/rad-deliver` behaves exactly as
