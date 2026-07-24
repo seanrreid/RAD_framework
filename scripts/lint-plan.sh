@@ -192,6 +192,19 @@ if [[ -n "$RAD_HIGH_RISK_PATTERNS" ]]; then
   done < <(plan_scope_paths "$PLAN_FILE")
 fi
 
+# ── Self-protected path advisory ──────────────────────────────────────────────
+# Over the same path union, warn (never error) for any path inside RAD's
+# self-protected set (lib/plan-paths.sh literal — harness/, scripts/, .claude/,
+# .agents/state/, gates.yaml, matrix.yaml). Deliberately NOT gated on
+# RAD_HIGH_RISK_PATTERNS: the set is not operator-tunable, so this advisory
+# fires regardless of any pattern override.
+while IFS= read -r path; do
+  [[ -z "$path" ]] && continue
+  if path_is_self_protected "$path"; then
+    WARNINGS+=("self-protected path (RAD machinery — never auto-clearable): $path")
+  fi
+done < <(plan_scope_paths "$PLAN_FILE")
+
 # ── Context budget ────────────────────────────────────────────────────────────
 # Sum line ranges from the Files in Scope table (column 3 = Lines).
 # Range "45-120" → 76 lines. Plain number "150" → 150 lines. Others skipped.

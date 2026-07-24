@@ -3,6 +3,7 @@
 # Dedicated regression tests for lint-plan.sh's advisory (warning) behavior:
 #   - missing task `File:` path advisory
 #   - high-risk path advisory + RAD_HIGH_RISK_PATTERNS override
+#   - self-protected path advisory (unconditional, never env-gated)
 #   - warnings-only plans still exit 0
 # Self-contained (no external harness): writes temp fixture plans, runs the real
 # lint-plan.sh, and asserts on output/exit code. Runs under bash 3.2+ (set -u safe).
@@ -166,7 +167,50 @@ t_exit_zero_invariance() {
   echo "✓ AC#5: otherwise-valid plan with only the new advisories still exits 0"
 }
 
+# ── AC#2: self-protected path advisory fires unconditionally ────────────────────
+t_self_protected_advisory() {
+  # harness/gates.js is real, on-disk, matches no high-risk default token, and
+  # sits squarely in the self-protected set.
+  local plan="$TMP/self-protected.md"
+  write_plan "$plan" "| harness/gates.js | 1-2 | x |" "harness/gates.js:1-10"
+
+  # (a) Default env → advisory present, exit 0.
+  ( unset RAD_HIGH_RISK_PATTERNS; run_lint "$plan"
+    printf '%s\n' "$LINT_OUT" | grep -q "self-protected path (RAD machinery — never auto-clearable): harness/gates.js" \
+      || fail "AC#2: default env did not emit the self-protected advisory"
+    [[ "$LINT_CODE" -eq 0 ]] || fail "AC#2: self-protected plan exited $LINT_CODE (expected 0)"
+  ) || exit 1
+  echo "✓ AC#2d: self-protected path emits the advisory under the default env"
+
+  # (b) A high-risk override that matches nothing → advisory still fires.
+  ( export RAD_HIGH_RISK_PATTERNS="zzz-nomatch"; run_lint "$plan"
+    printf '%s\n' "$LINT_OUT" | grep -q "self-protected path (RAD machinery — never auto-clearable): harness/gates.js" \
+      || fail "AC#2: no-match RAD_HIGH_RISK_PATTERNS suppressed the self-protected advisory"
+    [[ "$LINT_CODE" -eq 0 ]] || fail "AC#2: self-protected plan exited $LINT_CODE (expected 0)"
+  ) || exit 1
+  echo "✓ AC#2e: self-protected advisory fires with a no-match RAD_HIGH_RISK_PATTERNS override"
+
+  # (c) An emptied high-risk set → advisory still fires (not gated on the env).
+  ( export RAD_HIGH_RISK_PATTERNS=""; run_lint "$plan"
+    printf '%s\n' "$LINT_OUT" | grep -q "self-protected path (RAD machinery — never auto-clearable): harness/gates.js" \
+      || fail "AC#2: empty RAD_HIGH_RISK_PATTERNS suppressed the self-protected advisory"
+    [[ "$LINT_CODE" -eq 0 ]] || fail "AC#2: self-protected plan exited $LINT_CODE (expected 0)"
+  ) || exit 1
+  echo "✓ AC#2f: self-protected advisory fires with RAD_HIGH_RISK_PATTERNS emptied"
+
+  # (d) Docs-only plan → no self-protected advisory, exit 0.
+  local plan2="$TMP/docs-only.md"
+  write_plan "$plan2" "| docs/rad-cli.md | 1-2 | x |" "docs/rad-cli.md:1-10"
+  ( unset RAD_HIGH_RISK_PATTERNS; run_lint "$plan2"
+    printf '%s\n' "$LINT_OUT" | grep -q "self-protected path" \
+      && fail "AC#2: docs-only plan wrongly emitted a self-protected advisory" || true
+    [[ "$LINT_CODE" -eq 0 ]] || fail "AC#2: docs-only plan exited $LINT_CODE (expected 0)"
+  ) || exit 1
+  echo "✓ AC#2g: docs-only plan emits no self-protected advisory"
+}
+
 t_missing_task_file
 t_high_risk_advisory
 t_exit_zero_invariance
+t_self_protected_advisory
 echo "ALL PASS"
