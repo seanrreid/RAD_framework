@@ -1,7 +1,10 @@
 # Plan: Premise-Freshness Lint
 Created: 2026-07-24
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-07-24T13:36:44.436Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/premise-freshness-lint
 
 ## Context
