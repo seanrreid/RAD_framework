@@ -71,6 +71,11 @@ write_plan "$REPO/.agents/plans/tests-config.md" "$(printf '| tests/unit.test.js
 write_plan "$REPO/.agents/plans/selfprot-harness.md"  "| harness/gates.js | 1 | x |"
 write_plan "$REPO/.agents/plans/selfprot-scripts.md"  "| scripts/classify-low-risk.sh | 1 | x |"
 write_plan "$REPO/.agents/plans/selfprot-state.md"    "| .agents/state/demo/events.jsonl | 1 | x |"
+# Freshness (rule 0.5) fixtures. src/ghost.js is deliberately NOT created below,
+# so it is absent on origin/main; src/created.js is declared `new file` (exempt).
+write_plan "$REPO/.agents/plans/fresh-present.md" "$(printf '| docs/guide.md | 1 | x |\n| styles/main.css | 1 | x |')"
+write_plan "$REPO/.agents/plans/stale.md"         "$(printf '| docs/guide.md | 1 | x |\n| src/ghost.js | 1 | x |')"
+write_plan "$REPO/.agents/plans/created.md"       "$(printf '| docs/guide.md | 1 | x |\n| src/created.js | new file | Create |')"
 
 git -C "$REPO" init -q
 git -C "$REPO" config user.email "t@t.t"
@@ -78,6 +83,13 @@ git -C "$REPO" config user.name "t"
 git -C "$REPO" checkout -q -b main
 git -C "$REPO" add -A
 git -C "$REPO" commit -q -m "baseline (sources + plans)"
+
+# Publish the baseline to a bare origin so origin/main resolves and carries every
+# baseline path — the stale-premise rule (rule 0.5) queries origin/$BASE_BRANCH.
+# Paths NOT in the baseline (e.g. src/ghost.js) are therefore absent on origin.
+git init -q --bare "$TMP/origin.git"
+git -C "$REPO" remote add origin "$TMP/origin.git"
+git -C "$REPO" push -q origin main
 
 # run_classify <plan-rel-path> <work-branch>
 # Run the real classifier inside the fixture repo against a work branch. Captures
@@ -264,6 +276,47 @@ t_self_protected_docs_regression() {
   echo "✓ AC#self-protected-d: docs-only plan under the default allowlist ⇒ still LOW"
 }
 
+# ── Rule 0.5 (freshness): all declared paths present on base + low ⇒ still LOW ──
+t_fresh_present_still_low() {
+  branch_edit rad/fresh-present docs/guide.md '# guide v2' styles/main.css '.a{color:green}'
+
+  ( export RAD_LOW_RISK_PATTERNS='\.md$|\.css$'; run_classify ".agents/plans/fresh-present.md" "rad/fresh-present"
+    [[ "$CLASSIFY_CODE" -eq 0 ]] || fail "AC#freshness: all-present low plan should be LOW (got $CLASSIFY_CODE): $CLASSIFY_OUT"
+    printf '%s\n' "$CLASSIFY_OUT" | grep -q "verdict: low" \
+      || fail "AC#freshness: all-present low plan did not print low verdict: $CLASSIFY_OUT"
+    printf '%s\n' "$CLASSIFY_OUT" | grep -q "stale premise" \
+      && fail "AC#freshness: all-present plan wrongly cited a stale premise" || true
+  ) || exit 1
+  echo "✓ AC#freshness-present: all declared paths present on base ⇒ still LOW"
+}
+
+# ── AC#3: a declared path absent on the base ref ⇒ not-low naming it ────────────
+t_stale_path_not_low() {
+  branch_edit rad/stale docs/guide.md '# guide v2'
+
+  # A broad allowlist would otherwise clear it — rule 0.5 must fire FIRST.
+  ( export RAD_LOW_RISK_PATTERNS='.*'; run_classify ".agents/plans/stale.md" "rad/stale"
+    [[ "$CLASSIFY_CODE" -eq 1 ]] || fail "AC#3: a stale (absent) path should be not-low (got $CLASSIFY_CODE): $CLASSIFY_OUT"
+    printf '%s\n' "$CLASSIFY_OUT" | grep -q "stale premise: src/ghost.js absent on origin/main" \
+      || fail "AC#3: not-low verdict did not name the stale path: $CLASSIFY_OUT"
+  ) || exit 1
+  echo "✓ AC#3: a declared path absent on origin/main ⇒ not-low naming it"
+}
+
+# ── AC#4: a create-exempt (`new file`) path stays eligible (not flagged stale) ──
+t_created_not_stale() {
+  branch_edit rad/created docs/guide.md '# guide v2' src/created.js 'export const c=1'
+
+  ( export RAD_LOW_RISK_PATTERNS='\.md$|^docs/|\.js$'; run_classify ".agents/plans/created.md" "rad/created"
+    printf '%s\n' "$CLASSIFY_OUT" | grep -q "stale premise" \
+      && fail "AC#4: a create-exempt (new file) path was wrongly flagged stale: $CLASSIFY_OUT" || true
+    [[ "$CLASSIFY_CODE" -eq 0 ]] || fail "AC#4: created-file plan should be LOW (got $CLASSIFY_CODE): $CLASSIFY_OUT"
+    printf '%s\n' "$CLASSIFY_OUT" | grep -q "verdict: low" \
+      || fail "AC#4: created-file plan did not print low verdict: $CLASSIFY_OUT"
+  ) || exit 1
+  echo "✓ AC#4: a Files-in-Scope 'new file' path stays eligible (not flagged stale)"
+}
+
 t_off_when_unset
 t_low_when_all_inert
 t_high_wins_ties
@@ -273,4 +326,7 @@ t_scope_drift_not_low
 t_empty_diff_not_low
 t_self_protected_not_low
 t_self_protected_docs_regression
+t_fresh_present_still_low
+t_stale_path_not_low
+t_created_not_stale
 echo "ALL PASS"

@@ -78,6 +78,32 @@ while IFS= read -r path; do
   fi
 done <<< "$SCOPE_PATHS"
 
+# ── Rule 0.5: stale premise — declared paths must exist on the base ref ────────
+# Over the union of cited `path:line` anchors, per-task File: paths, and
+# Files-in-Scope entries — MINUS the paths this plan creates (create-exempt) — a
+# path absent on origin/$BASE_BRANCH means the plan is anchored to removed/renamed
+# code and is never auto-clearable. Existence only (no line-number check). Queries
+# the locally-known ref — NO implicit fetch. Fail-closed: an unresolvable base ref
+# is ambiguous → not-low. Runs before the low/high pattern rules so the verdict
+# names the strongest reason (self-protected still wins, above).
+FRESHNESS_PATHS=$(
+  {
+    plan_cited_anchors "$PLAN_FILE"
+    plan_task_files "$PLAN_FILE"
+    plan_files_in_scope "$PLAN_FILE"
+  } | grep -v '^$' | sort -u | grep -Fxv -f <(plan_created_paths "$PLAN_FILE")
+) || true
+FRESHNESS_REF="origin/$BASE_BRANCH"
+while IFS= read -r path; do
+  [[ -z "$path" ]] && continue
+  freshness_rc=0
+  path_exists_on_ref "$path" "$FRESHNESS_REF" || freshness_rc=$?
+  case "$freshness_rc" in
+    1) not_low "stale premise: $path absent on $FRESHNESS_REF" ;;
+    2) not_low "stale premise: base ref $FRESHNESS_REF unresolvable (fail-closed)" ;;
+  esac
+done <<< "$FRESHNESS_PATHS"
+
 # ── Rules 2 & 3: every path low, no path high (high wins ties) ────────────────
 NON_LOW=""
 HIGH=""
