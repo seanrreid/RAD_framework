@@ -205,6 +205,32 @@ while IFS= read -r path; do
   fi
 done < <(plan_scope_paths "$PLAN_FILE")
 
+# ── Premise-freshness advisory ────────────────────────────────────────────────
+# Over the union of cited `path:line` anchors, per-task File: paths, and
+# Files-in-Scope entries — MINUS the paths this plan creates (create-exempt: they
+# don't yet exist on the base by design) — warn (never error) for any path absent
+# on origin/<default_branch>: a plan anchored to removed/renamed code. Existence
+# only; line numbers are never verified. Queries the locally-known ref — NO
+# implicit fetch. Fail-closed: an unresolvable base ref yields ONE advisory that
+# freshness could not be verified, and the per-path scan is skipped (no spam).
+FRESHNESS_BASE=$("$SCRIPT_DIR/get-default-branch.sh" 2>/dev/null || echo main)
+FRESHNESS_REF="origin/$FRESHNESS_BASE"
+while IFS= read -r path; do
+  [[ -z "$path" ]] && continue
+  freshness_rc=0
+  path_exists_on_ref "$path" "$FRESHNESS_REF" || freshness_rc=$?
+  case "$freshness_rc" in
+    1) WARNINGS+=("stale premise: $path not found on $FRESHNESS_REF — plan may be written against removed/renamed code") ;;
+    2) WARNINGS+=("freshness not verified: base ref $FRESHNESS_REF unresolvable"); break ;;
+  esac
+done < <(
+  {
+    plan_cited_anchors "$PLAN_FILE"
+    plan_task_files "$PLAN_FILE"
+    plan_files_in_scope "$PLAN_FILE"
+  } | grep -v '^$' | sort -u | grep -Fxv -f <(plan_created_paths "$PLAN_FILE")
+)
+
 # ── Context budget ────────────────────────────────────────────────────────────
 # Sum line ranges from the Files in Scope table (column 3 = Lines).
 # Range "45-120" → 76 lines. Plain number "150" → 150 lines. Others skipped.

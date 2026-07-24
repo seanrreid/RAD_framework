@@ -209,8 +209,125 @@ t_self_protected_advisory() {
   echo "✓ AC#2g: docs-only plan emits no self-protected advisory"
 }
 
+# ── Git-backed premise-freshness fixtures ──────────────────────────────────────
+# The freshness advisory queries origin/<default_branch>, so these cases need a
+# real repo with an origin remote (mirrors test-classify-low-risk.sh's fixture).
+# Plans are SYNTHETIC (built here), never the real repo's plans — kept hermetic.
+FRESH_OUT=""
+FRESH_CODE=0
+run_lint_in_repo() {
+  local repo="$1" plan="$2"
+  set +e
+  FRESH_OUT=$( cd "$repo" && bash scripts/lint-plan.sh "$plan" 2>&1 )
+  FRESH_CODE=$?
+  set -e
+}
+
+# copy_scripts <repo> — drop lint-plan.sh, get-default-branch.sh, and the lib
+# into a fixture repo so the freshness check runs against that repo's origin.
+copy_scripts() {
+  local repo="$1"
+  mkdir -p "$repo/scripts/lib"
+  cp "$HERE/lint-plan.sh" "$HERE/get-default-branch.sh" "$repo/scripts/"
+  cp "$HERE/lib/plan-paths.sh" "$repo/scripts/lib/"
+  printf '**Name:** t\ndefault_branch: main\n' > "$repo/CLAUDE.md"
+}
+
+# GREPO: baseline pushed to a bare origin, so origin/main resolves and carries
+# src/app.js. Absent paths (src/removed.js, src/brandnew.js) are NOT on origin.
+GREPO="$TMP/frepo"
+setup_freshness_fixture() {
+  mkdir -p "$GREPO/src" "$GREPO/.agents/plans"
+  copy_scripts "$GREPO"
+  printf 'export const app=1\n' > "$GREPO/src/app.js"
+  git -C "$GREPO" init -q
+  git -C "$GREPO" config user.email t@t.t
+  git -C "$GREPO" config user.name t
+  git -C "$GREPO" checkout -q -b main
+  git -C "$GREPO" add -A
+  git -C "$GREPO" commit -q -m baseline
+  git init -q --bare "$TMP/origin.git"
+  git -C "$GREPO" remote add origin "$TMP/origin.git"
+  git -C "$GREPO" push -q origin main
+}
+
+# NOREPO: a git repo with NO origin remote → origin/main is unresolvable.
+NOREPO="$TMP/norepo"
+setup_noorigin_fixture() {
+  mkdir -p "$NOREPO/src" "$NOREPO/.agents/plans"
+  copy_scripts "$NOREPO"
+  printf 'export const app=1\n' > "$NOREPO/src/app.js"
+  git -C "$NOREPO" init -q
+  git -C "$NOREPO" config user.email t@t.t
+  git -C "$NOREPO" config user.name t
+  git -C "$NOREPO" checkout -q -b main
+  git -C "$NOREPO" add -A
+  git -C "$NOREPO" commit -q -m baseline
+}
+
+# ── AC#2/AC#6: present path on base → no stale warning; absent path → warning ────
+t_freshness_present_and_absent() {
+  # (a) All cited paths exist on origin/main → NO stale-premise warning, exit 0.
+  write_plan "$GREPO/.agents/plans/present.md" "| src/app.js | 1-2 | x |" "src/app.js:1-10"
+  run_lint_in_repo "$GREPO" ".agents/plans/present.md"
+  printf '%s\n' "$FRESH_OUT" | grep -q "stale premise" \
+    && fail "AC#2: a plan whose paths all exist on origin wrongly emitted a stale-premise warning" || true
+  printf '%s\n' "$FRESH_OUT" | grep -q "freshness not verified" \
+    && fail "AC#2: resolvable base ref wrongly reported freshness-not-verified" || true
+  [[ "$FRESH_CODE" -eq 0 ]] || fail "AC#2: present-path plan exited $FRESH_CODE (expected 0)"
+  echo "✓ AC#2a: a plan citing only paths present on origin emits no freshness warning"
+
+  # (b) A task File: anchor absent on origin/main → stale-premise warning naming
+  # the path (line suffix stripped → AC#6), exit 0 preserved.
+  write_plan "$GREPO/.agents/plans/absent.md" "| src/app.js | 1-2 | x |" "src/removed.js:120"
+  run_lint_in_repo "$GREPO" ".agents/plans/absent.md"
+  printf '%s\n' "$FRESH_OUT" | grep -q "stale premise: src/removed.js not found on origin/main" \
+    || fail "AC#2: absent path did not emit the stale-premise advisory naming it: $FRESH_OUT"
+  printf '%s\n' "$FRESH_OUT" | grep -q "stale premise: src/removed.js:120" \
+    && fail "AC#6: stale-premise advisory leaked the :line suffix (existence only)" || true
+  [[ "$FRESH_CODE" -eq 0 ]] || fail "AC#2: absent-path plan exited $FRESH_CODE (expected 0)"
+  echo "✓ AC#2b/AC#6: absent path warns naming the path with the :line stripped, exit 0"
+}
+
+# ── AC#4: a path the plan CREATES (Files-in-Scope `new file`) is exempt ─────────
+t_freshness_created_exempt() {
+  # src/brandnew.js is absent on origin but declared `new file` → create-exempt,
+  # so it must NOT be flagged stale. src/app.js (present) keeps the plan clean.
+  write_plan "$GREPO/.agents/plans/created.md" \
+    "$(printf '| src/app.js | 1-2 | x |\n| src/brandnew.js | new file | Create |')" "src/app.js:5"
+  run_lint_in_repo "$GREPO" ".agents/plans/created.md"
+  printf '%s\n' "$FRESH_OUT" | grep -q "stale premise: src/brandnew.js" \
+    && fail "AC#4: a create-exempt (new file) path was wrongly flagged stale" || true
+  printf '%s\n' "$FRESH_OUT" | grep -q "stale premise" \
+    && fail "AC#4: created-exempt plan emitted an unexpected stale-premise warning: $FRESH_OUT" || true
+  [[ "$FRESH_CODE" -eq 0 ]] || fail "AC#4: created-exempt plan exited $FRESH_CODE (expected 0)"
+  echo "✓ AC#4: a Files-in-Scope 'new file' path is exempt from the freshness check"
+}
+
+# ── AC#5: unresolvable base ref → ONE advisory (fail-closed), exit 0 ────────────
+t_freshness_unresolvable_ref() {
+  write_plan "$NOREPO/.agents/plans/noorigin.md" "| src/app.js | 1-2 | x |" "src/removed.js:9"
+  run_lint_in_repo "$NOREPO" ".agents/plans/noorigin.md"
+  printf '%s\n' "$FRESH_OUT" | grep -q "freshness not verified: base ref origin/main unresolvable" \
+    || fail "AC#5: unresolvable base ref did not emit the freshness-not-verified advisory: $FRESH_OUT"
+  # Fail-closed advisory must appear exactly once (no per-path spam).
+  local n
+  n=$(printf '%s\n' "$FRESH_OUT" | grep -c "freshness not verified")
+  [[ "$n" -eq 1 ]] || fail "AC#5: freshness-not-verified advisory appeared $n times (expected exactly 1)"
+  # With the ref unresolvable, no per-path stale-premise warnings should fire.
+  printf '%s\n' "$FRESH_OUT" | grep -q "stale premise" \
+    && fail "AC#5: per-path stale-premise warnings leaked despite an unresolvable ref" || true
+  [[ "$FRESH_CODE" -eq 0 ]] || fail "AC#5: unresolvable-ref plan exited $FRESH_CODE (expected 0)"
+  echo "✓ AC#5: unresolvable base ref → single freshness advisory, exit 0 (fail-closed)"
+}
+
 t_missing_task_file
 t_high_risk_advisory
 t_exit_zero_invariance
 t_self_protected_advisory
+setup_freshness_fixture
+setup_noorigin_fixture
+t_freshness_present_and_absent
+t_freshness_created_exempt
+t_freshness_unresolvable_ref
 echo "ALL PASS"
