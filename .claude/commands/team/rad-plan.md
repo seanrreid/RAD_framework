@@ -126,6 +126,15 @@ Branch: rad/[feature-slug]
 |------|-------|--------|
 | [path] | [start-end] | [what changes] |
 
+## Program Design
+<!-- OPTIONAL. Recommended for large/medium plans; skippable for small ones
+     (1–2 waves, no high-risk path). Capture the three artifacts before delivery:
+       1. Key type/method signatures the change introduces or alters
+       2. A call-stack / control-flow sketch of how the pieces connect
+       3. A file-tree diff of files added / moved / deleted
+     The linter greps for this `## Program Design` header and advises (never
+     errors) when a large plan omits it. -->
+
 ## Execution Notes
 
 ### Do Not Touch
@@ -180,6 +189,10 @@ Depends on: Wave 1 complete
 - Max 3 tasks per wave. If more needed, add another wave.
 - Max 5 waves total. If more needed, split into two plans.
 - Every task's `Validate:` field must cite a specific `AC#N` — no floating tasks.
+
+The optional `## Program Design` section (signatures, a call-stack sketch, and a
+file-tree diff) is recommended for large/medium plans and skippable for small ones
+(1–2 waves, no high-risk path).
 
 ### Step 4: Save the plan
 
