@@ -20,13 +20,13 @@ Owns the hook runner module, the operator config surface, and event-log integrat
 
 ## Scope
 
-**Inside:** the new hook runner module (invocation logic, process lifecycle), scripts/hooks config surface and discovery, events.jsonl emission for hook outcomes, the relationship to existing post-checks (check-tests.sh, check-scope.sh, open-pr.sh, lint-plan.sh), and hook class taxonomy (observe vs veto).
+**Inside:** the new hook runner module (invocation logic, process lifecycle), scripts/hooks config surface and discovery, events.jsonl emission for hook outcomes, the relationship to existing post-checks (check-tests-present.sh, check-scope.sh, open-pr.sh, lint-plan.sh), and hook class taxonomy (observe vs veto).
 
 **Outside:** spine wave-loop control flow, matrix resolution and wave iteration logic (those belong to spine-integration-orchestrator), plan parsing and task dispatch, and operator CLI parsing.
 
 ## Tool Call Order
 
-1. Call hook-surface-mapper first via Task to read the event-log schema, inspect how post-checks are currently invoked (e.g., check-tests.sh exit semantics), identify the scripts/hooks config directory pattern, and report dedup notes on existing events. Reason: the runner must mirror the existing script-invocation pattern to ensure determinism and avoid duplicating check-tests.sh outcomes or introducing conflicting event emissions.
+1. Call hook-surface-mapper first via Task to read the event-log schema, inspect how post-checks are currently invoked (e.g., check-tests-present.sh exit semantics), identify the scripts/hooks config directory pattern, and report dedup notes on existing events. Reason: the runner must mirror the existing script-invocation pattern to ensure determinism and avoid duplicating check-tests-present.sh outcomes or introducing conflicting event emissions.
 
 ## Output Format
 
