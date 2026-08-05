@@ -153,7 +153,7 @@ test('resume idempotency: crash after wave 2 → only waves >= 3 run, no duplica
     matrix: MATRIX,
     gates: {},
     runWave,
-    sh: () => ({ status: 0 }), // check-tests + post-checks all green
+    sh: () => ({ status: 0 }), // check-tests-present + post-checks all exit 0
     now: fixedClock(),
   });
 
@@ -225,10 +225,10 @@ test('resume idempotency: re-running an already fully-complete plan appends no n
   assert.deepEqual(result, { ok: true, waves: 2 });
   assert.equal(runWaveCalls, 0, 'all waves already complete — runWave never called');
   // Every wave hits the skip `continue` before the resume-verify block, so the
-  // cumulative check-tests gate must never run when all waves are complete.
+  // cumulative check-tests-present gate must never run when all waves are complete.
   assert.ok(
-    !shCalls.includes('scripts/check-tests.sh'),
-    'check-tests must not run when all waves are already complete',
+    !shCalls.includes('scripts/check-tests-present.sh'),
+    'check-tests-present must not run when all waves are already complete',
   );
 
   // No new wave-attempt or wave-complete events appended (resume-verify and the
