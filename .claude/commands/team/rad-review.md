@@ -103,7 +103,7 @@ should be addressed before merge.
 ### Step 5: Test coverage check
 
 ```bash
-scripts/check-tests.sh "$PLAN"
+scripts/check-tests-present.sh "$PLAN"
 ```
 
 Include the script output in the review report. Missing test files are HIGH

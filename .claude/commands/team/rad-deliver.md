@@ -301,13 +301,15 @@ Run deterministic checks before opening the PR:
 ```bash
 BASE=$(scripts/get-default-branch.sh)
 scripts/check-scope.sh .agents/plans/[feature].md "rad/[feature]" "$BASE"
-scripts/check-tests.sh .agents/plans/[feature].md
+scripts/check-tests-present.sh .agents/plans/[feature].md
 ```
 
 If `check-scope.sh` fails, stop and surface the out-of-scope files to the
 architect — do not open the PR until resolved.
 
-If `check-tests.sh` fails, write the missing test files before proceeding.
+If `check-tests-present.sh` fails, one or more test files promised by the plan
+are absent from disk — the check reports missing files, not failing tests. Write
+the missing test files before proceeding.
 
 ### Step 9: Update plan status to complete
 
