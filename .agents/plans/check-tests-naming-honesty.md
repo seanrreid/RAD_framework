@@ -1,7 +1,7 @@
 # Plan: check-tests Naming Honesty
 Created: 2026-08-05
 Author: architect
-Status: approved
+Status: in-progress
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-08-05T14:08:37.900Z
 Recorded-By: sean@torchcodelab.com
