@@ -113,14 +113,14 @@ EOF
   echo "✓ #4: table-pipe grep filters intact; check-role resolves + filters placeholder"
 }
 
-# ── #7: check-tests.sh resolves a backtick-wrapped test path ──────────────────
+# ── #7: check-tests-present.sh resolves a backtick-wrapped test path ──────────
 t7() {
   local present="$TMP/p7-present.md" missing="$TMP/p7-missing.md"
   printf '## Tests to Write\n- [ ] t — `%s`\n' "$HERE/get-default-branch.sh" > "$present"
   printf '## Tests to Write\n- [ ] t — `scripts/does-not-exist-xyz.sh`\n'      > "$missing"
-  bash "$HERE/check-tests.sh" "$present" >/dev/null 2>&1 || fail "#7: backtick-wrapped existing path not resolved (reported missing)"
-  bash "$HERE/check-tests.sh" "$missing" >/dev/null 2>&1 && fail "#7: missing backtick path wrongly reported present" || true
-  echo "✓ #7: check-tests resolves backtick-wrapped paths (present + missing)"
+  bash "$HERE/check-tests-present.sh" "$present" >/dev/null 2>&1 || fail "#7: backtick-wrapped existing path not resolved (reported missing)"
+  bash "$HERE/check-tests-present.sh" "$missing" >/dev/null 2>&1 && fail "#7: missing backtick path wrongly reported present" || true
+  echo "✓ #7: check-tests-present resolves backtick-wrapped paths (present + missing)"
 }
 
 t3
