@@ -16,3 +16,6 @@ Executor role: architect
 | 6 | Wave 3 | Correct the hook-runner exemplar references | ✓ complete | 733015f | 2026-08-05T14:33:00Z |
 | 7 | Wave 3 | README | ✓ complete | 88401c0 | 2026-08-05T14:36:00Z |
 | 8 | Wave 3 | How-it-works doc | ✓ complete | 4c09deb | 2026-08-05T14:39:00Z |
+| 9 | Wave 4 | Harness state-store doc | ✓ complete | 04366d6 | 2026-08-05T15:18:00Z |
+| 10 | Wave 4 | Harness audit doc | ✓ complete | a4d483b | 2026-08-05T15:20:00Z |
+| 11 | Wave 4 | Command specs | ✓ complete | 7675dc3 | 2026-08-05T15:22:00Z |
