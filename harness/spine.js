@@ -48,9 +48,10 @@ function safeVetoOutcome(outcome) {
  * the early exit; this cap only bites when every attempt fails *differently*. */
 const MAX_ATTEMPTS = 3;
 
-/** Post-check guardrails, run in order after all waves. The test gate now runs
- * per-wave (a regression blocks AT the introducing wave, not at the end), so
- * check-tests is no longer an end post-check — only scope + PR remain. */
+/** Post-check guardrails, run in order after all waves. The test-PRESENCE gate
+ * now runs per-wave (a promised-but-absent test file blocks AT the wave that
+ * promised it, not at the end), so check-tests-present is no longer an end
+ * post-check — only scope + PR remain. */
 const POST_CHECKS = ['check-scope.sh', 'open-pr.sh'];
 
 /** Neutral no-op hook runner. The default injected `runHooks`: returns the same
@@ -173,9 +174,12 @@ export async function deliverSpine({
 
   // ── Resume verify (cheap, once): if a prior run already advanced one or more
   // waves, the per-wave gate that guarded THIS run never ran for them. Before
-  // touching the first non-skipped wave, run ONE cumulative test gate to confirm
-  // the prior work is still green. If it is broken, escalate — don't build on a
-  // broken base. A fresh run (nothing skipped) does not run this. ──
+  // touching the first non-skipped wave, run ONE cumulative test-PRESENCE check
+  // to confirm every test file the plan promised so far exists on disk. If one
+  // is absent, escalate — don't build on a base with unwritten tests. Nothing
+  // here executes a test, so this says nothing about whether the prior work
+  // behaves correctly; execution-based verification does not exist yet (see
+  // issue #89). A fresh run (nothing skipped) does not run this. ──
   let resumeVerified = false;
 
   // ── Token-budget circuit breaker. OPTIONAL: a non-positive `tokenBudget`
@@ -209,7 +213,7 @@ export async function deliverSpine({
 
     if (completed.size > 0 && !resumeVerified) {
       resumeVerified = true; // run exactly once, before the first non-skipped wave
-      const verify = sh('scripts/check-tests.sh', feature);
+      const verify = sh('scripts/check-tests-present.sh', feature);
       if (verify.status !== 0) {
         return { stopped: 'resume-verify', ok: false };
       }
@@ -249,11 +253,11 @@ export async function deliverSpine({
       const result = await runWave(wave);
 
       // ── Hook: post-wave (veto-capable point). Fired after the wave result,
-      // before the per-wave test gate. A veto here REPLACES the wave's outcome
-      // with the veto outcome and routes it through the existing matrix —
-      // generalizing the check-tests success→fail-tests demotion below to any
-      // fixed-vocabulary outcome. Validated fail-closed first; first-veto-wins is
-      // enforced in the runner. ──
+      // before the per-wave test-presence gate. A veto here REPLACES the wave's
+      // outcome with the veto outcome and routes it through the existing matrix —
+      // generalizing the check-tests-present success→fail-tests demotion below to
+      // any fixed-vocabulary outcome. Validated fail-closed first; first-veto-wins
+      // is enforced in the runner. ──
       const postVeto = fireHooks(
         runHooks,
         'post-wave',
@@ -262,18 +266,26 @@ export async function deliverSpine({
       ).veto;
       let vetoSource = null; // { point, hook } when a post-wave veto drove the outcome
 
-      // ── Per-wave test gate. A wave the model thinks succeeded only advances if
-      // the cumulative tests are green at THIS point — otherwise it introduced a
-      // regression. DEMOTE it to fail-tests so the existing retry/revision path
-      // (bounded budget + doom-loop fingerprint) handles it; the wave then blocks
-      // here instead of advancing a broken base. ──
+      // ── Per-wave test-PRESENCE gate. A wave the model thinks succeeded only
+      // advances if every test file the plan promised exists on disk at THIS
+      // point — otherwise the wave claimed test work it never wrote. DEMOTE it to
+      // fail-tests so the existing retry/revision path (bounded budget +
+      // doom-loop fingerprint) handles it; the wave then blocks here instead of
+      // advancing on an unwritten test.
+      //
+      // The guarantee is narrow, and worth stating plainly: a wave does not
+      // advance if a promised test file is ABSENT. The gate never executes a test
+      // and never consults a test runner, so a present-but-empty or outright
+      // failing test satisfies it. Execution-based verification does not exist
+      // yet (see issue #89). ──
       let { outcome } = result;
       let gated = result;
       if (postVeto) {
         // A post-wave veto is authoritative: it REPLACES the model's outcome with
         // the (validated, fail-closed) veto outcome and routes THAT through the
-        // matrix — exactly generalizing the check-tests demotion to any outcome.
-        // It supersedes the per-wave test gate (the operator has already decided).
+        // matrix — exactly generalizing the check-tests-present demotion to any
+        // outcome. It supersedes the per-wave test-presence gate (the operator has
+        // already decided).
         const vetoOutcome = safeVetoOutcome(postVeto.outcome);
         vetoSource = { point: 'post-wave', hook: postVeto.hook };
         state.append({
@@ -290,7 +302,7 @@ export async function deliverSpine({
           summary: `post-wave hook veto (${postVeto.hook})`,
         };
       } else if (resolveOutcome('implement', outcome, matrix).action === 'advance') {
-        const gate = sh('scripts/check-tests.sh', feature);
+        const gate = sh('scripts/check-tests-present.sh', feature);
         if (gate.status !== 0) {
           outcome = 'fail-tests';
           // Fingerprint STABLE, gate-derived fields — NOT the model's variable
