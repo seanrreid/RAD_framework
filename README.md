@@ -192,7 +192,7 @@ your-project/
     ├── check-plan-approved.sh        ← gates on the approved event at the branch tip
     ├── check-role.sh                 ← validates contributor role vs. command
     ├── check-scope.sh                ← validates file changes against agent scope
-    ├── check-tests.sh                ← checks for test coverage in deliver output
+    ├── check-tests-present.sh        ← checks promised test files exist on disk (does not run them)
     ├── lint-plan.sh                  ← validates plan structure + context budget
     ├── worktree-lifecycle.sh         ← optional git-worktree isolation for a deliver run
     └── rad-status.sh                 ← powers /rad-status dashboard
