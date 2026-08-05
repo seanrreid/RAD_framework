@@ -86,13 +86,14 @@ test('(b) happy path → all waves advance, post-checks called in order, pr-open
   });
   assert.deepEqual(result, { ok: true, waves: 2 });
 
-  // check-tests now runs per-wave (once per advancing wave), then the end
-  // post-checks are scope + open-pr only — check-tests is no longer at the end.
+  // The test-presence gate now runs per-wave (once per advancing wave), then the
+  // end post-checks are scope + open-pr only — check-tests-present is no longer
+  // at the end.
   assert.deepEqual(
     shCalls.map((c) => c.script),
     [
-      'scripts/check-tests.sh', // wave 1 gate
-      'scripts/check-tests.sh', // wave 2 gate
+      'scripts/check-tests-present.sh', // wave 1 gate
+      'scripts/check-tests-present.sh', // wave 2 gate
       'scripts/check-scope.sh', // end post-check
       'scripts/open-pr.sh', // end post-check
     ],
@@ -114,7 +115,7 @@ test('(b) happy path → all waves advance, post-checks called in order, pr-open
 test('(b2) a failing end post-check (check-scope) halts before pr-opened', async () => {
   const state = makeFakeState({ gateResult: passingGate, plan: { waves: [{ n: 1 }] } });
   const runWave = async () => ({ outcome: 'success' });
-  // Per-wave check-tests passes (status 0); the end check-scope post-check fails.
+  // The per-wave presence gate passes (status 0); the end check-scope post-check fails.
   const sh = (script) => (script.endsWith('check-scope.sh') ? { status: 1 } : { status: 0 });
   const result = await deliverSpine({
     feature: 'demo',
@@ -316,7 +317,7 @@ test('(i) empty waves array behaves like null plan', async () => {
   assert.deepEqual(result, { ok: true, waves: 0 });
 });
 
-test('(j) per-wave gate: runWave advances but check-tests fails → wave NOT recorded complete, re-enters matrix (fail-tests → revision)', async () => {
+test('(j) per-wave gate: runWave advances but check-tests-present fails → wave NOT recorded complete, re-enters matrix (fail-tests → revision)', async () => {
   const state = makeFakeState({ gateResult: passingGate, plan: { waves: [{ n: 1 }] } });
   // runWave always claims success; the per-wave gate fails identically each time,
   // so the wave is demoted to fail-tests (→ revision) and never advances. The
@@ -328,9 +329,9 @@ test('(j) per-wave gate: runWave advances but check-tests fails → wave NOT rec
   };
   let gateCalls = 0;
   const sh = (script) => {
-    if (script.endsWith('check-tests.sh')) {
+    if (script.endsWith('check-tests-present.sh')) {
       gateCalls += 1;
-      return { status: 1 }; // regression at this wave
+      return { status: 1 }; // a promised test file is absent at this wave
     }
     return { status: 0 };
   };
@@ -369,7 +370,7 @@ test('(j2) per-wave gate doom-loop is model-variance-proof: gate fails identical
   const runWave = async () => ({ outcome: 'success', summary: `reworded ${i++}` });
   let gateCalls = 0;
   const sh = (script) => {
-    if (script.endsWith('check-tests.sh')) {
+    if (script.endsWith('check-tests-present.sh')) {
       gateCalls += 1;
       return { status: 1 }; // identical gate failure each attempt
     }
@@ -390,7 +391,7 @@ test('(j2) per-wave gate doom-loop is model-variance-proof: gate fails identical
   assert.equal(gateCalls, 2); // aborted after 2, not all 3 (budget) attempts
 });
 
-test('(k) resume verify: cumulative check-tests runs exactly once before the first non-skipped wave; failing it returns stopped:resume-verify', async () => {
+test('(k) resume verify: the cumulative presence check runs exactly once before the first non-skipped wave; failing it returns stopped:resume-verify', async () => {
   // History seeded with wave-complete for waves 1 and 2 → resume; wave 3 pending.
   const plan = { waves: [{ n: 1 }, { n: 2 }, { n: 3 }] };
   const state = makeFakeState({ gateResult: passingGate, plan });
@@ -406,9 +407,9 @@ test('(k) resume verify: cumulative check-tests runs exactly once before the fir
   };
   let cumulativeChecks = 0;
   const sh = (script) => {
-    if (script.endsWith('check-tests.sh')) {
+    if (script.endsWith('check-tests-present.sh')) {
       cumulativeChecks += 1;
-      return { status: 1 }; // prior cumulative work is broken
+      return { status: 1 }; // a test file promised by prior waves is absent
     }
     return { status: 0 };
   };
@@ -444,7 +445,7 @@ test('(k2) resume verify passes once, then wave 3 runs and the spine completes',
   };
   const checkTestsCalls = [];
   const sh = (script) => {
-    if (script.endsWith('check-tests.sh')) checkTestsCalls.push(script);
+    if (script.endsWith('check-tests-present.sh')) checkTestsCalls.push(script);
     return { status: 0 };
   };
   const result = await deliverSpine({
@@ -459,7 +460,7 @@ test('(k2) resume verify passes once, then wave 3 runs and the spine completes',
   });
   assert.deepEqual(result, { ok: true, waves: 3 });
   assert.equal(runWaveCalls, 1); // only the single non-skipped wave (3) ran
-  // check-tests fired twice: once for the resume verify, once for wave 3's gate.
+  // check-tests-present fired twice: once for the resume verify, once for wave 3's gate.
   assert.equal(checkTestsCalls.length, 2);
 });
 
@@ -468,7 +469,7 @@ test('(l) fresh run: nothing skipped → no cumulative resume-verify gate (only 
   const runWave = async () => ({ outcome: 'success' });
   const checkTestsCalls = [];
   const sh = (script) => {
-    if (script.endsWith('check-tests.sh')) checkTestsCalls.push(script);
+    if (script.endsWith('check-tests-present.sh')) checkTestsCalls.push(script);
     return { status: 0 };
   };
   const result = await deliverSpine({
@@ -482,7 +483,7 @@ test('(l) fresh run: nothing skipped → no cumulative resume-verify gate (only 
     now: fixedClock(),
   });
   assert.deepEqual(result, { ok: true, waves: 1 });
-  // Exactly one check-tests call: the single wave's per-wave gate. No extra
+  // Exactly one check-tests-present call: the single wave's per-wave gate. No extra
   // cumulative verify, because nothing was skipped.
   assert.equal(checkTestsCalls.length, 1);
 });
@@ -553,7 +554,7 @@ test('(n3) AC#3 token-budget tolerates missing usage (no NaN) and never trips wh
   assert.deepEqual(result, { ok: true, waves: 2 });
 });
 
-test('(m) end post-checks run check-scope + open-pr (and no longer check-tests at the end)', async () => {
+test('(m) end post-checks run check-scope + open-pr (and no longer check-tests-present at the end)', async () => {
   const state = makeFakeState({ gateResult: passingGate, plan: { waves: [{ n: 1 }] } });
   const runWave = async () => ({ outcome: 'success' });
   const shCalls = [];
@@ -572,12 +573,12 @@ test('(m) end post-checks run check-scope + open-pr (and no longer check-tests a
     now: fixedClock(),
   });
   assert.deepEqual(result, { ok: true, waves: 1 });
-  // The two end post-checks are scope then open-pr; check-tests is NOT among them.
+  // The two end post-checks are scope then open-pr; check-tests-present is NOT among them.
   const endChecks = shCalls.slice(-2);
   assert.deepEqual(endChecks, ['scripts/check-scope.sh', 'scripts/open-pr.sh']);
-  // check-tests appears only as the per-wave gate, never after open-pr.
+  // check-tests-present appears only as the per-wave gate, never after open-pr.
   const openPrIdx = shCalls.indexOf('scripts/open-pr.sh');
-  assert.ok(!shCalls.slice(openPrIdx).includes('scripts/check-tests.sh'));
+  assert.ok(!shCalls.slice(openPrIdx).includes('scripts/check-tests-present.sh'));
 });
 
 // ── Wave 2: lifecycle-hook integration (Tasks 2.1/2.2/2.3) ──────────────────
@@ -751,8 +752,8 @@ test('(w2-b) BACKWARD-COMPAT SNAPSHOT: default no-op runHooks → event sequence
   assert.deepEqual(
     shCalls.map((c) => c.script),
     [
-      'scripts/check-tests.sh',
-      'scripts/check-tests.sh',
+      'scripts/check-tests-present.sh',
+      'scripts/check-tests-present.sh',
       'scripts/check-scope.sh',
       'scripts/open-pr.sh',
     ],
