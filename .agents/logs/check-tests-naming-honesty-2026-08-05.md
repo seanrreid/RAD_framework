@@ -23,3 +23,4 @@ Executor role: architect
 | 13 | Deviation A | Discovery doc reference (architect-approved, out of Files in Scope) | ✓ complete | e5f4cd9 | 2026-08-05T15:44:00Z |
 | 14 | Deviation B | settings.local.json permission allowlist (architect-approved, overrides Do Not Touch) | ⚠ done_with_concerns | — (untracked, globally gitignored) | 2026-08-05T15:48:00Z |
 | 15 | Wave 2 | Task 2.3 — dedicated test + stale-reference guard (deferred to tail) | ✓ complete | ac13ce5 | 2026-08-05T15:56:00Z |
+| 16 | Wave 2 | Task 2.3 follow-up — scope the guard to tracked files (git grep) | ✓ complete | 93b52b2 | 2026-08-05T16:09:00Z |
