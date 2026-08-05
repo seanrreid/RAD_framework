@@ -19,3 +19,7 @@ Executor role: architect
 | 9 | Wave 4 | Harness state-store doc | ✓ complete | 04366d6 | 2026-08-05T15:18:00Z |
 | 10 | Wave 4 | Harness audit doc | ✓ complete | a4d483b | 2026-08-05T15:20:00Z |
 | 11 | Wave 4 | Command specs | ✓ complete | 7675dc3 | 2026-08-05T15:22:00Z |
+| 12 | Wave 5 | Agent definitions | ✓ complete | 1480134 | 2026-08-05T15:30:00Z |
+| 13 | Deviation A | Discovery doc reference (architect-approved, out of Files in Scope) | ✓ complete | e5f4cd9 | 2026-08-05T15:44:00Z |
+| 14 | Deviation B | settings.local.json permission allowlist (architect-approved, overrides Do Not Touch) | ⚠ done_with_concerns | — (untracked, globally gitignored) | 2026-08-05T15:48:00Z |
+| 15 | Wave 2 | Task 2.3 — dedicated test + stale-reference guard (deferred to tail) | ✓ complete | ac13ce5 | 2026-08-05T15:56:00Z |
