@@ -5,7 +5,7 @@
 #       unresolvable, empty-section, and backtick-wrapped path cases, each
 #       asserting an explicit exit code.
 #   (b) A stale-reference guard: the pre-rename BARE FILENAME must not reappear
-#       in any live surface — bare, so a reference by filename alone is caught,
+#       in any TRACKED file — bare, so a reference by filename alone is caught,
 #       not just the full scripts/ path. Historical records (plans/, .agents/)
 #       keep their references on purpose and are excluded.
 # Self-contained (no external harness): builds temp fixture plans, runs the real
@@ -93,27 +93,38 @@ echo "✓ A5: backtick-wrapped paths resolve (present → 0, missing → 1)"
 # has "-present" between the stem and the ".sh".
 STALE_REF="check-tests"".sh"
 
+# TRACKED FILES ONLY. This guard enforces a property of the REPOSITORY, so it may
+# only inspect what the repository tracks. Walking the working tree let it fail on
+# gitignored, per-machine files (e.g. .claude/settings.local.json) that no commit
+# can ever fix — a failure no contributor could remedy.
+#
+# `git grep` is the enumeration: it searches exactly the tracked set that
+# `git ls-files` lists, but in ONE process with grep's own exit codes intact
+# (0 = match, 1 = no match, >1 = error). Piping `git ls-files` into `xargs grep`
+# was rejected because xargs collapses grep's "no match" into its own exit 123,
+# which would destroy the fail-closed non-1 handling below. Outside a git repo
+# git grep exits 128, which lands in the fail-closed branch — correct.
+#
 # Excluded on purpose: plans/ and .agents/ are historical records that
-# intentionally retain the pre-rename name; .git/ and node_modules/ are not source.
+# intentionally retain the pre-rename name. .git/ and node_modules/ need no
+# exclusion — neither is tracked, so git grep never sees them.
 guard_stale_reference() {
   local hits code
   set +e
-  hits=$(cd "$ROOT" && grep -rn --binary-files=without-match \
-    --exclude-dir=plans --exclude-dir=.agents --exclude-dir=.git \
-    --exclude-dir=node_modules \
-    -F "$STALE_REF" .)
+  hits=$(cd "$ROOT" && git grep -nI -F "$STALE_REF" \
+    -- ':(exclude)plans/' ':(exclude).agents/')
   code=$?
   set -e
 
   case "$code" in
-    1) echo "✓ B1: no live surface references the pre-rename name ($STALE_REF)" ;;
+    1) echo "✓ B1: no tracked file references the pre-rename name ($STALE_REF)" ;;
     0)
-      echo "✗ B1: pre-rename name '$STALE_REF' found in live surface(s):"
+      echo "✗ B1: pre-rename name '$STALE_REF' found in tracked file(s):"
       printf '%s\n' "$hits" | sed 's/^/    /'
       echo "  Rename these references to check-tests-present.sh."
       exit 1
       ;;
-    *) fail "B1: grep failed (exit $code) — guard could not run, treating as failure" ;;
+    *) fail "B1: git grep failed (exit $code) — guard could not run, treating as failure" ;;
   esac
 }
 
