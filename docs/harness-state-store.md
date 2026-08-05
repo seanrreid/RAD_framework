@@ -333,9 +333,9 @@ await pipeline(plan.waves, async (wave) => {
 })
 
 // ── DET post-checks: existing bash guardrails (asset b), called by path, unchanged ──
-sh('scripts/check-scope.sh',  feature)     // exit code = pass/fail
-sh('scripts/check-tests.sh',  feature)
-sh('scripts/open-pr.sh',      feature)
+sh('scripts/check-scope.sh',          feature)     // exit code = pass/fail
+sh('scripts/check-tests-present.sh',  feature)
+sh('scripts/open-pr.sh',              feature)
 state.append({ feature, type: 'pr-opened', actor: whoami(), ts: now() })
 ```
 
