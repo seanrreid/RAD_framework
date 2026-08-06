@@ -1,7 +1,10 @@
 # Plan: Per-Wave Back-Pressure Contract
 Created: 2026-08-06
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-08-06T15:01:36.335Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/wave-back-pressure
 Adopted-From: https://github.com/seanrreid/RAD_framework/issues/89
 Issue-Title: Per-wave back-pressure contract: make wave self-verification a deterministic, event-recorded fact
@@ -58,6 +61,13 @@ Full analysis, four design decision points, and their recommendations:
 6. `docs/rad-wave-contract.md` documents `usage` and the `tasks[]` pass-through as
    contract fields; both adapters emit them, and a malformed or absent `tasks` degrades to
    omission — never `fail-protocol`.
+7. A declared verification command that exceeds a named timeout constant is killed and
+   reported distinctly from ordinary failure; the spine maps it to the existing
+   `fail-timeout` outcome (`surface`), never `fail-tests`. A wedged command cannot hang the
+   deliver indefinitely.
+8. `priorFailure` capture is fail-open: a capture failure logs its reason with context and
+   the next attempt proceeds with today's `priorFailure`-absent prompt. It never blocks,
+   fails, or retries the wave.
 
 ## Agent Scope
 
@@ -113,9 +123,10 @@ points and recommendations. These are the assumptions the plan adds on top:
 - **Open Question 2 (composition when a wave declares no `Verify:` but its tasks do)
    is sidestepped**, not answered: per-task declaration is out of scope, so no composition
    rule is needed. If per-task `Verify:` is added later, that plan owns the rule.
-- **Open Question 3 (timeout) is deferred.** `check-verify.sh` inherits whatever timeout
-   the `sh` port already applies; no declarable per-command timeout is added. Flagged as a
-   follow-up rather than silently assumed away.
+- **Open Question 3 (timeout) is answered, not deferred** (changed at approval review,
+   2026-08-06). `check-verify.sh` enforces its own timeout at a named constant and maps
+   expiry to the existing `fail-timeout` outcome. A *declarable* per-command timeout is
+   still out of scope — the constant is fixed in code, not in the plan grammar.
 - **Open Question 4 (`RAD_WORKTREE` interaction) is assumed handled by cwd inheritance** —
    `check-verify.sh` runs through the same `sh` port the other scripts use, which already
    resolves to the worktree checkout when isolation is active. Task 3.2 should assert this
@@ -150,8 +161,10 @@ buildWavePrompt(wave, planCtx, priorFailure?: PriorFailure): string
 ```bash
 # scripts/check-verify.sh — new
 scripts/check-verify.sh <feature> <command>
-#   exit 0   = command passed; output discarded
+#   exit 0        = command passed; output discarded
 #   exit non-zero = command failed; bounded excerpt on stdout
+#   exit <timeout status, distinct> = killed at the timeout constant
+#                                     → spine maps to fail-timeout (surface)
 ```
 
 ### 2. Control-flow sketch
@@ -306,9 +319,14 @@ exactly that wave's command.
 File: scripts/check-verify.sh
 What: Execute the declared command under the adapters' allow-listed-env treatment, capture
 output bounded by a named constant, and pass the command's exit code through. Keeps
-arbitrary execution out of `spine.js`, keeps the `sh` port shape unchanged.
-Validate: AC#2 — a passing command exits 0 with output discarded; a failing command exits
-non-zero with a bounded excerpt on stdout.
+arbitrary execution out of `spine.js`, keeps the `sh` port shape unchanged. **Enforce a
+timeout at a named constant**: a command exceeding it is killed and reported distinctly
+from ordinary failure, so a wedged process cannot hang the deliver indefinitely — the
+spine maps that case to the existing `fail-timeout` outcome (`matrix.yaml:33` → `surface`),
+not `fail-tests`, because a retry cannot fix a hang.
+Validate: AC#2, AC#7 — a passing command exits 0 with output discarded; a failing command
+exits non-zero with a bounded excerpt on stdout; a command exceeding the timeout is killed
+and reports the distinct timeout status rather than hanging.
 
 #### Task 3.3: Spine invokes verification and records the result
 File: harness/spine.js:300-345
@@ -341,9 +359,15 @@ Validate: AC#4 — absent `priorFailure` renders today's prompt byte-for-byte; p
 File: harness/spine.js:360-410
 What: In the retry/revision branch, build `priorFailure` from the failing attempt's
 verification excerpt and the blocking task's reported status, and carry it into the next
-iteration. Does not alter the doom-loop breaker or `MAX_ATTEMPTS`.
-Validate: AC#4 — attempt 2's prompt contains attempt 1's failure context; the doom-loop
-fingerprint logic is untouched.
+iteration. Does not alter the doom-loop breaker or `MAX_ATTEMPTS`. **Capture is fail-OPEN**:
+this is prompt enrichment, not a gate, so a capture failure logs its reason with context and
+degrades to today's `priorFailure`-absent prompt — it never blocks, fails, or retries the
+wave. This is the deliberate exception to CLAUDE.md's fail-closed default, which governs
+gate and check boundaries; stating it explicitly so the exception is a decision rather than
+an accident.
+Validate: AC#4, AC#8 — attempt 2's prompt contains attempt 1's failure context; the
+doom-loop fingerprint logic is untouched; a forced capture failure still runs attempt 2 with
+today's prompt and records the reason.
 
 ### Wave 5 — sequential
 Depends on: Wave 4 complete
@@ -359,8 +383,10 @@ absent-declaration parity case.
 #### Task 5.2: `scripts/test-check-verify.sh`
 File: scripts/test-check-verify.sh
 What: Behavior cases with explicit exit codes: passing command, failing command, output
-exceeding the truncation cap, missing command, and a command that writes to stderr only.
-Validate: AC#2 — five cases with asserted exit codes and bounded output.
+exceeding the truncation cap, missing command, a command that writes to stderr only, and a
+command that exceeds the timeout.
+Validate: AC#2, AC#7 — six cases with asserted exit codes and bounded output, including the
+timeout case asserting the distinct timeout status.
 
 #### Task 5.3: Document the `Verify:` line
 File: CLAUDE.md:1, harness/test/agent-contract.test.js
@@ -378,6 +404,9 @@ absent-declaration guarantee; contract tests cover pass-through and malformed in
 - [ ] `tasks` pass-through and malformed-block degradation — harness/test/agent-contract.test.js
 - [ ] `parseWaveVerify` parses a declared line and omits absent waves — harness/test/cli.test.js
 - [ ] check-verify.sh behavior cases with explicit exit codes — scripts/test-check-verify.sh
+- [ ] A command exceeding the timeout is killed and reports the timeout status — scripts/test-check-verify.sh
+- [ ] Timeout expiry maps to fail-timeout, not fail-tests — harness/test/spine.test.js
+- [ ] Forced priorFailure capture failure still runs attempt 2 and logs the reason — harness/test/spine.test.js
 
 ## Non-Goals
 - Per-task verification granularity — the gate runs per wave; per-task is research D1(a), rejected.
