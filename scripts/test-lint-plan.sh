@@ -38,8 +38,15 @@ run_lint() {
 # Args: $1 = output path
 #       $2 = Files-in-Scope data rows (table body, may be empty)
 #       $3 = task File: line value (path:lines form, may be empty to omit)
+#       $4 = wave count (optional, default 1). When >1, extra minimal `### Wave N`
+#            blocks are emitted (each with one AC-citing task) so the fixture can
+#            exercise the "large plan (>=3 waves)" advisory branch.
+#       $5 = program_design (optional, default false). When "true", a
+#            `## Program Design` section is emitted so has_section finds it.
 write_plan() {
   local out="$1" scope_rows="$2" task_file="$3"
+  local wave_count="${4:-1}" program_design="${5:-false}"
+  local w
   {
     cat <<'EOF'
 # Plan: advisory-test
@@ -70,14 +77,25 @@ EOF
 ## Execution Notes
 ### Do Not Touch
 - None
-
-## Wave Plan
-### Wave 1 — sequential
-#### Task 1.1: do the thing
 EOF
+    # Optional Program Design section (heading + a token line). Presence is all
+    # the linter checks; contents are never validated.
+    if [[ "$program_design" == "true" ]]; then
+      printf '\n## Program Design\nsignatures, call-stack sketch, file-tree diff\n'
+    fi
+    # Wave 1 is always emitted and carries the optional task File: line.
+    printf '\n## Wave Plan\n'
+    printf '### Wave 1 — sequential\n'
+    printf '#### Task 1.1: do the thing\n'
     [[ -n "$task_file" ]] && printf 'File: %s\n' "$task_file"
+    printf 'Validate: AC#1 — x\n'
+    # Additional minimal waves for the >=3-wave "large plan" cases.
+    for (( w = 2; w <= wave_count; w++ )); do
+      printf '### Wave %d — sequential\n' "$w"
+      printf '#### Task %d.1: do the thing\n' "$w"
+      printf 'Validate: AC#1 — x\n'
+    done
     cat <<'EOF'
-Validate: AC#1 — x
 
 ## Tests to Write
 - [ ] t — scripts/test-lint-plan.sh
@@ -321,10 +339,69 @@ t_freshness_unresolvable_ref() {
   echo "✓ AC#5: unresolvable base ref → single freshness advisory, exit 0 (fail-closed)"
 }
 
+# ── Program Design section advisory ─────────────────────────────────────────────
+# "Large" = WAVE_COUNT >= 3 OR at least one high-risk path in scope. A large plan
+# with no ## Program Design section warns (never errors); a small plan, or a large
+# plan that has the section, stays silent. Exit code is 0 in every case.
+PD_ADVISORY="no ## Program Design section"
+
+t_program_design_advisory() {
+  # (a) Large via a high-risk path (1 wave), no Program Design → advisory, exit 0.
+  local plan="$TMP/pd-high-risk.md"
+  write_plan "$plan" "| $REAL_PATH | 1-2 | x |" "src/auth/login.js:1-20"
+  ( unset RAD_HIGH_RISK_PATTERNS; run_lint "$plan"
+    printf '%s\n' "$LINT_OUT" | grep -q "$PD_ADVISORY" \
+      || fail "PD(a): high-risk large plan without Program Design did not warn"
+    [[ "$LINT_CODE" -eq 0 ]] || fail "PD(a): exited $LINT_CODE (expected 0)"
+  ) || exit 1
+  echo "✓ PD(a): large-via-high-risk plan missing Program Design warns, exit 0"
+
+  # (b) Large via >=3 waves (non-high-risk paths), no Program Design → advisory.
+  local plan2="$TMP/pd-three-waves.md"
+  write_plan "$plan2" "| $REAL_PATH | 1-2 | x |" "$REAL_PATH:1-10" 3
+  ( unset RAD_HIGH_RISK_PATTERNS; run_lint "$plan2"
+    printf '%s\n' "$LINT_OUT" | grep -q "$PD_ADVISORY" \
+      || fail "PD(b): 3-wave large plan without Program Design did not warn"
+    [[ "$LINT_CODE" -eq 0 ]] || fail "PD(b): exited $LINT_CODE (expected 0)"
+  ) || exit 1
+  echo "✓ PD(b): large-via-3-waves plan missing Program Design warns, exit 0"
+
+  # (c) Small: 1 wave, non-high-risk real path, no Program Design → silent.
+  local plan3="$TMP/pd-small.md"
+  write_plan "$plan3" "| $REAL_PATH | 1-2 | x |" "$REAL_PATH:1-10"
+  ( unset RAD_HIGH_RISK_PATTERNS; run_lint "$plan3"
+    printf '%s\n' "$LINT_OUT" | grep -q "$PD_ADVISORY" \
+      && fail "PD(c): small plan wrongly emitted the Program Design advisory" || true
+    [[ "$LINT_CODE" -eq 0 ]] || fail "PD(c): exited $LINT_CODE (expected 0)"
+  ) || exit 1
+  echo "✓ PD(c): small plan missing Program Design stays silent, exit 0"
+
+  # (d) Large (3 waves) WITH a Program Design section → silent.
+  local plan4="$TMP/pd-present.md"
+  write_plan "$plan4" "| $REAL_PATH | 1-2 | x |" "$REAL_PATH:1-10" 3 true
+  ( unset RAD_HIGH_RISK_PATTERNS; run_lint "$plan4"
+    printf '%s\n' "$LINT_OUT" | grep -q "$PD_ADVISORY" \
+      && fail "PD(d): large plan WITH Program Design still emitted the advisory" || true
+    [[ "$LINT_CODE" -eq 0 ]] || fail "PD(d): exited $LINT_CODE (expected 0)"
+  ) || exit 1
+  echo "✓ PD(d): large plan with Program Design present stays silent, exit 0"
+
+  # (e) Boundary: exactly 2 waves, non-high-risk, no Program Design → silent.
+  local plan5="$TMP/pd-two-waves.md"
+  write_plan "$plan5" "| $REAL_PATH | 1-2 | x |" "$REAL_PATH:1-10" 2
+  ( unset RAD_HIGH_RISK_PATTERNS; run_lint "$plan5"
+    printf '%s\n' "$LINT_OUT" | grep -q "$PD_ADVISORY" \
+      && fail "PD(e): 2-wave plan wrongly emitted the Program Design advisory" || true
+    [[ "$LINT_CODE" -eq 0 ]] || fail "PD(e): exited $LINT_CODE (expected 0)"
+  ) || exit 1
+  echo "✓ PD(e): exactly-2-waves plan missing Program Design stays silent (boundary), exit 0"
+}
+
 t_missing_task_file
 t_high_risk_advisory
 t_exit_zero_invariance
 t_self_protected_advisory
+t_program_design_advisory
 setup_freshness_fixture
 setup_noorigin_fixture
 t_freshness_present_and_absent

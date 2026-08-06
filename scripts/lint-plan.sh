@@ -182,14 +182,26 @@ done < "$PLAN_FILE"
 # extended-regex alternation of generic infra-risk terms).
 RAD_HIGH_RISK_PATTERNS="${RAD_HIGH_RISK_PATTERNS:-auth|payment|billing|migration|secret|credential|token}"
 
+HIGH_RISK_HIT=false
 if [[ -n "$RAD_HIGH_RISK_PATTERNS" ]]; then
   # Union of Files-in-Scope and task File: paths (de-duped) via the shared helper.
   while IFS= read -r path; do
     [[ -z "$path" ]] && continue
     if path_matches "$path" "$RAD_HIGH_RISK_PATTERNS"; then
       WARNINGS+=("High-risk path in scope — flag for close architect review: $path")
+      HIGH_RISK_HIT=true
     fi
   done < <(plan_scope_paths "$PLAN_FILE")
+fi
+
+# ── Program Design section advisory ───────────────────────────────────────────
+# A "large" plan (>=3 waves, or at least one high-risk path in scope) is advised
+# to carry a ## Program Design section (signatures, a call-stack sketch, and a
+# file-tree diff) before delivery. Presence-check only — the section's contents
+# are never validated. WARNING only; the exit code is unaffected. Program Design
+# is deliberately NOT in REQUIRED_SECTIONS: omitting it is advisory, never an error.
+if { [ "$WAVE_COUNT" -ge 3 ] || $HIGH_RISK_HIT; } && ! has_section "Program Design"; then
+  WARNINGS+=("large plan (>=3 waves or high-risk path) has no ## Program Design section — capture signatures, a call-stack sketch, and a file-tree diff before delivery")
 fi
 
 # ── Self-protected path advisory ──────────────────────────────────────────────
