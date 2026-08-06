@@ -94,6 +94,8 @@ the architect can weigh it. No agents were called. No out-of-scope agent depende
 | .claude/agents/spine-integration-orchestrator.md | 17, 41 | Renamed script |
 | .claude/agents/hook-surface-mapper.md | 17, 19, 23, 31 | Renamed script |
 | .claude/agents/hook-runtime-orchestrator.md | 23, 29 | Renamed script |
+| scripts/check-tests-present.sh | new | The `git mv` **destination** of `scripts/check-tests.sh` (row 1). Declared here as its own path because `check-scope.sh` reads only this column — a rename target named solely in a Change cell reads as drift (#99). Added by re-approval, 2026-08-06; no change to delivered intent. |
+| docs/discovery-interactive-evaluation.md | 1 | Bare stale `check-tests.sh` reference that no task owned — an authoring gap in this plan. Renamed with architect approval during delivery; recorded here by re-approval, 2026-08-06. |
 
 ## Execution Notes
 
