@@ -18,7 +18,7 @@ forms a judgment without ever exercising the artifact:
 | 2 / 2b | scope (`check-scope.sh`), lint advisories |
 | 3 / 3b | plan fidelity, Acceptance-Criteria coverage |
 | 4 / 4b | `quality-reviewer` / `accessibility-reviewer` — both read changed files |
-| 5 | `check-tests.sh` — test-file **presence**, not execution |
+| 5 | `check-tests-present.sh` — test-file **presence**, not execution |
 | 5b | guardrails checklist over the diff |
 
 Anthropic's harness-design case study (principle #5) found that an evaluator

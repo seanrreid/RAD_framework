@@ -14,7 +14,7 @@ Orchestrates hook insertion points in the deliver spine (harness/spine.js wave-l
 
 - Locate hook insertion points (pre-wave, post-wave, on-outcome, on-retry, on-error, wave-complete) via spine-mapper Task call, returning file:line anchors and their position relative to resolveOutcome calls.
 - Specify how an observe+veto hook emits an outcome and re-enters resolveOutcome, constrained to fixed matrix vocabulary (success, fail-tests, fail-scope, fail-protocol, fail-timeout, no-changes, abort-user).
-- Generalize the existing check-tests.sh per-wave veto hook pattern rather than duplicating hardcoded per-wave logic.
+- Generalize the existing check-tests-present.sh per-wave veto hook pattern rather than duplicating hardcoded per-wave logic.
 - Return bounded summaries only—max 40 lines per deliverable—with clear file:line anchors for each insertion point and matrix seam.
 - Delegate all file inspection to spine-mapper or hook-runtime-orchestrator; never read source files directly.
 
@@ -38,6 +38,6 @@ The set of hook insertion points with file:line anchors, the observe+veto intera
 
 - Never read files outside the declared scope—delegate to spine-mapper Task or other orchestrators.
 - A veto hook may only emit an outcome from the fixed matrix vocabulary: success, fail-tests, fail-scope, fail-protocol, fail-timeout, no-changes, abort-user. Never invent outcomes.
-- Generalize the existing check-tests.sh per-wave veto rather than duplicating hardcoded per-wave logic.
+- Generalize the existing check-tests-present.sh per-wave veto rather than duplicating hardcoded per-wave logic.
 - Hooks are deterministic operator scripts—never propose model-driven steering or runtime intelligence.
 - Outcomes emitted by hooks must flow through resolveOutcome and respect the matrix vocabulary; no out-of-band state changes.

@@ -154,7 +154,7 @@ rules. You can run any of them by hand.
 | `check-plan-approved.sh` | A plan is `approved` at its branch tip before delivery (platform-agnostic) |
 | `check-role.sh` | The runner (or a named `--on-behalf-of` identity) holds the required role |
 | `check-scope.sh` | Every changed file is declared in the plan's Files-in-Scope / Tests-to-Write |
-| `check-tests.sh` | Every test listed in Tests-to-Write exists on disk |
+| `check-tests-present.sh` | Every test listed in Tests-to-Write exists on disk |
 | `lint-plan.sh` | Plan structure: required sections, AC present, wave/task limits, context budget |
 | `rad-label.sh` | Mirrors a plan's status onto its issue/PR as a `rad:<status>` label (best-effort) |
 | `rad-status.sh` | The board — aggregates plans from `rad/` branch tips |
@@ -197,7 +197,9 @@ and assert the behavior or the exact arguments it produces. Tests are written to
 run under **bash 3.2** (macOS stock) as well as bash 4+, so they avoid
 associative arrays, `${var,,}`, GNU-only `grep`/`find` extensions, and unguarded
 empty-array expansion under `set -u`. A plan's `## Tests to Write` names the test
-file(s); `check-tests.sh` confirms they exist before the deliver PR opens.
+file(s); `check-tests-present.sh` confirms those files exist on disk before the
+deliver PR opens — presence only. It never runs them, so it cannot tell you the
+tests pass; execution-based verification is tracked as issue #89.
 
 ---
 

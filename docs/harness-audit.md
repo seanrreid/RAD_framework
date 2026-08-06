@@ -221,7 +221,7 @@ individually invokable for mid-flow / existing-repo / one-off cases.
 Prototype **`rad-deliver` as a `Workflow` spine** (migration step 1): `pipeline()`
 over waves, `agent()` per task with the `WAVE_RESULT` schema, deterministic
 retry/gate/log, and the existing `scripts/*.sh` (checkout, check-scope,
-check-tests, open-pr) called via `Bash`. This proves the DET/MODEL split on the
+check-tests-present, open-pr) called via `Bash`. This proves the DET/MODEL split on the
 highest-value, most-fragile command before committing to the full migration.
 **Blocked on open question #1 only if it touches branch tips or the state machine.**
 </content>

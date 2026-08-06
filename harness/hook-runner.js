@@ -3,9 +3,9 @@
  *
  * A pure, injectable factory. It discovers operator-supplied hook scripts under
  * `<hooksDir>/<point>/` and runs them — in lexical filename order — via an
- * injected `sh` helper (the same shape `scripts/check-tests.sh` is invoked
- * with: argv + exit code as pass/fail). Hooks NEVER touch child_process here;
- * the runner shells out only through the injected `sh`, which keeps tests
+ * injected `sh` helper (the same shape `scripts/check-tests-present.sh` is
+ * invoked with: argv + exit code as pass/fail). Hooks NEVER touch child_process
+ * here; the runner shells out only through the injected `sh`, which keeps tests
  * hermetic. This module never reads the wave prompt and never mutates flow on
  * its own — it returns a structured result the spine consumes.
  *
@@ -156,8 +156,9 @@ export function createHookRunner({
     const scripts = discover(hooksDir, point);
     if (scripts.length === 0) return result;
 
-    // Context passed to each hook as positional argv (mirrors check-tests.sh's
-    // $1=feature) plus RAD_HOOK_* env for hooks that prefer named inputs.
+    // Context passed to each hook as positional argv (mirrors
+    // check-tests-present.sh's $1=feature) plus RAD_HOOK_* env for hooks that
+    // prefer named inputs.
     const feature = ctx.feature ?? '';
     const wave = ctx.wave ?? '';
     const current = ctx.outcome ?? '';

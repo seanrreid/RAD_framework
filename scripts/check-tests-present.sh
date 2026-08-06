@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# check-tests.sh
+# check-tests-present.sh
 # Verifies that every test file listed in a plan's "Tests to Write" section
-# has been created on disk.
+# EXISTS ON DISK. This is a presence check only: it never runs a test, never
+# invokes a test runner, and knows nothing about whether the tests pass.
+# A file containing zero assertions satisfies this check.
 #
-# Usage: scripts/check-tests.sh <plan-file>
+# Usage: scripts/check-tests-present.sh <plan-file>
 #
 # Exit codes:
 #   0 = all test files present
