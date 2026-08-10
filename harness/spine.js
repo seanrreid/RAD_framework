@@ -123,7 +123,12 @@ function fireHooks(runHooks, point, ctx, { state, feature, now }) {
  * @param {Object} args.docs - ArtifactStore (read/write); unused branches reserved
  * @param {Object} args.matrix - a pre-loaded stop-condition matrix
  * @param {Object} args.gates - the loaded gate policy (passed through for parity)
- * @param {(wave: Object) => Promise<{ outcome: string }>} args.runWave - MODEL boundary
+ * @param {(wave: Object, attemptCtx: { attempt: number, priorFailure: (Object|null) }) => Promise<{ outcome: string }>} args.runWave
+ *   MODEL boundary. The second argument is ADDITIVE attempt context: the 1-based
+ *   `attempt` number and the previous attempt's captured `priorFailure` (null on
+ *   the first attempt, and whenever capture degraded). A runWave/adapter that
+ *   IGNORES it behaves exactly as it did before it existed — the spine's control
+ *   flow does not depend on the callee reading it.
  * @param {(script: string, feature: string) => { status: number }} args.sh - Bash boundary
  * @param {() => string} args.now - injected clock (ISO timestamp)
  * @param {number} [args.maxAttempts] - per-wave attempt ceiling (defaults to MAX_ATTEMPTS); injectable for tests
@@ -242,6 +247,11 @@ export async function deliverSpine({
 
     let lastPrint = null;
     let advanced = false;
+    // Back-pressure (issue #90): the previous attempt's captured failure, fed to
+    // the NEXT attempt so a retry differs by more than model nondeterminism.
+    // Scoped per wave and null on the first attempt — a retry that carries no
+    // capture is exactly today's behavior.
+    let priorFailure = null;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       // ── Hook: pre-wave (veto-capable point). Fired BEFORE runWave. A veto here
@@ -271,7 +281,9 @@ export async function deliverSpine({
         return { stopped: 'hook-veto', ok: false, wave: wave.n, action, outcome: vetoOutcome, point: 'pre-wave' };
       }
 
-      const result = await runWave(wave);
+      // ADDITIVE second argument: attempt context. A runWave that ignores it is
+      // unchanged; one that reads it can make attempt N+1 differ from attempt N.
+      const result = await runWave(wave, { attempt, priorFailure });
 
       // ── Hook: post-wave (veto-capable point). Fired after the wave result,
       // before the per-wave test-presence gate. A veto here REPLACES the wave's

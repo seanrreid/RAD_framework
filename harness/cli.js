@@ -475,8 +475,12 @@ export async function deliverCommand(argv, ctx) {
     // the gate/approve/command paths) load with the SDK absent.
     const { createRunWave } = await import('./adapters/agent/sdk.js');
     const adapter = createRunWave({ apiKey, model, repoRoot });
-    // Bind planCtx so deliverSpine's single-argument runWave(wave) call works.
-    runWave = (wave) => adapter(wave, planCtx);
+    // Bind planCtx so deliverSpine's runWave(wave, attemptCtx) call works. The
+    // spine's SECOND argument ({ attempt, priorFailure }) is folded into the
+    // per-call plan context, which is how it reaches buildWavePrompt without
+    // changing the adapter's (wave, planCtx) signature. Additive: on a first
+    // attempt priorFailure is null and the rendered prompt is today's, verbatim.
+    runWave = (wave, attemptCtx) => adapter(wave, { ...planCtx, ...attemptCtx });
   } else {
     // Command path (default): no ANTHROPIC_API_KEY required — credentials are
     // the configured command's concern. RAD_AGENT_CMD is mandatory here.
@@ -486,7 +490,9 @@ export async function deliverCommand(argv, ctx) {
       return 1;
     }
     const adapter = createCommandAdapter({ cmd, repoRoot, model });
-    runWave = (wave) => adapter(wave, planCtx);
+    // Same attempt-context fold as the sdk branch above — both adapters take
+    // (wave, planCtx), so the spine's second argument rides in the plan context.
+    runWave = (wave, attemptCtx) => adapter(wave, { ...planCtx, ...attemptCtx });
   }
 
   const matrix = loadMatrix();
