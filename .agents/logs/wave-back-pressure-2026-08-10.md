@@ -277,3 +277,71 @@ is that the timeout PATH is testable without a ten-minute wait.
    `toWaveResult(p).outcome === resultToOutcome(p)` across seven shapes. If the architect
    intended the literal reading, that is a behavior change to `resultToOutcome` — out of scope
    here and deliberately not made.
+
+## Wave 5 — test coverage and documentation
+
+| Step | Wave | Task | Status | Commit |
+|------|------|------|--------|--------|
+| 13 | Wave 5 | Spine and CLI test coverage | ✓ complete | ce3b8ab |
+| 14 | Wave 5 | `scripts/test-check-verify.sh` | ✓ complete | 12c200b |
+| 15 | Wave 5 | Document the `Verify:` line | ✓ complete (concerns) | ca6feb8 |
+
+Harness suite **218 → 239** (+21). `test-check-verify.sh` runs in ~2s (the timeout case
+uses `RAD_VERIFY_TIMEOUT_SECONDS=1`, never the 600s default) and is committed `100755`.
+No test failed on first run against Waves 1-4 — no implementation was changed to make a
+test pass.
+
+Wave 5 also closed the two documentation gaps the orchestrator routed to it:
+`RAD_VERIFY_TIMEOUT_SECONDS` is now documented in CLAUDE.md's RAD Configuration block, and
+`capture-failed` is documented in `events.js` — in the `Event` typedef union and in the
+deliberate-absence comment beside `PHASE_BY_TYPE`, with **no new map key**, so the fold is
+untouched.
+
+### Second discrepancy raised and ruled on: `buildWavePrompt` signature
+
+The plan's Program Design specifies `buildWavePrompt(wave, planCtx, priorFailure?)`.
+Wave 4 shipped `buildWavePrompt(wave, planCtx)`, reading `planCtx.priorFailure`.
+
+Ruling: **shipped is correct.** The provider-neutral contract defines the adapter as
+`adapter(wave, planCtx)` — two arguments — and `cli.js` binds
+`runWave = (wave, attemptCtx) => adapter(wave, { ...planCtx, ...attemptCtx })`. A third
+positional argument would have widened the contract that `docs/rad-wave-contract.md`
+defines. This is the **second** Program Design signature that proved inaccurate (the first
+being `check-verify.sh <feature> <command>`); in both cases the wave resolved in favor of
+the real constraint, which was right.
+
+The AC#6 "never fail-protocol" conflict Wave 5 re-raised was already ruled on in Wave 1;
+the tests encode the ratified reading.
+
+## Gate 2 — final state
+
+| Check | Result |
+|---|---|
+| Harness suite | **239/239 pass** (216 baseline) |
+| Shell suites | all 15 PASS |
+| Scope gate | **PASS** — 14 files, all within declared scope |
+| Tests-present gate | PASS — 10 test files |
+| Approval integrity | PASS after **two** rebases (fingerprint, gate, authenticity) |
+| Frozen surfaces | `gates.js`, `matrix.yaml`, `check-tests-present.sh` — zero diff |
+| Outcome vocabulary | exactly the frozen 7 |
+
+**Blocked and unblocked at Gate 2.** The scope gate initially failed on
+`.agents/research/wave-back-pressure.md` — the branch's own first commit (2026-08-04),
+untouched by any wave. Cause: `.agents/research/` was missing from `check-scope.sh`'s
+`ALWAYS_ALLOW_PREFIXES` while logs/plans/state were all exempt. It could not be fixed from
+inside this delivery: amending the plan's Files in Scope would invalidate the approval
+fingerprint, and RAD has no re-approval path (#39). Fixed separately in **PR #104** and
+merged; this branch was then rebased and the gate passes.
+
+**Transient test note:** one loop run reported `test-check-tests-present.sh` failing. Not
+reproducible — it passed standalone and in two subsequent full loop runs. The failing run
+executed concurrently with `npm test --prefix harness`; that suite spawns processes while
+this test's B1 case greps tracked files. Recorded rather than dismissed.
+
+**For architect review at Gate 2:**
+- Truncation cap `PRIOR_FAILURE_FIELD_MAX_CHARS = 4000` — the plan reserved this number
+  for the architect.
+- Exit code **124** is reserved for timeout; a command genuinely exiting 124 surfaces
+  rather than retries (GNU `timeout(1)` convention, conservative).
+- New event type `capture-failed` — name ratified, audit-only, establishes no phase.
+- Two Program Design signatures were inaccurate; both resolved in favor of the constraint.
