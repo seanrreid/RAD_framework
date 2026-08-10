@@ -262,6 +262,40 @@ export function resultToOutcome(parsed) {
 }
 
 /**
+ * Wrap a parsed `{ status, tasks }` into the full spine-facing wave result —
+ * the single place every adapter builds its return value, so the contract shape
+ * is defined once rather than per-adapter.
+ *
+ * `outcome` and `status` are REQUIRED; `tasks` and `usage` are OPTIONAL and are
+ * OMITTED (not emitted empty/undefined) when there is nothing to report:
+ *   - `tasks` — the per-task `{title, status}` records parsed out of the
+ *     WAVE_RESULT block, passed through rather than collapsed away by
+ *     resultToOutcome. A malformed or absent tasks block degrades to omission of
+ *     the key: this function never throws and never itself forces a
+ *     'fail-protocol' (the outcome still comes from resultToOutcome alone, so an
+ *     empty/unparseable block maps exactly as it does without this pass-through).
+ *   - `usage` — a normalized {input,output,total} from normalizeUsage, which
+ *     never returns a partial object, so a truthy check is sufficient. An
+ *     adapter that observes no token counts omits it and contributes 0 to the
+ *     token budget.
+ *
+ * @param {{ status?: string, tasks?: Array } | null | undefined} parsed
+ * @param {{ input: number, output: number, total: number }} [usage]
+ * @returns {{ outcome: string, status: string, tasks?: Array, usage?: Object }}
+ */
+export function toWaveResult(parsed, usage) {
+  const result = {
+    outcome: resultToOutcome(parsed),
+    status: parsed?.status ?? 'failed',
+  };
+  if (Array.isArray(parsed?.tasks) && parsed.tasks.length > 0) {
+    result.tasks = parsed.tasks;
+  }
+  if (usage) result.usage = usage;
+  return result;
+}
+
+/**
  * Build a synthetic failure result when the model call itself fails.
  *
  * @param {string} waveId - wave identifier string/number for the title

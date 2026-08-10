@@ -157,8 +157,9 @@ Both shipped adapters follow the same skeleton; reuse the shared helpers in
 4. **Extract + parse:** `extractWaveResultBlock(text)` then
    `parseWaveResult(block)`. On a missing block, **reprompt exactly once** asking
    for the block; if still missing, return `fail-protocol`.
-5. **Reconcile:** wrap the parsed result with `resultToOutcome` into
-   `{ outcome, status, tasks }`.
+5. **Reconcile:** wrap the parsed result with `toWaveResult(parsed, usage)` — the
+   shared builder that applies `resultToOutcome` and attaches the optional
+   `tasks` / `usage` keys (omitting either when there is nothing to report).
 6. **Never leak credentials:** run every surfaced error message through
    `sanitizeErrorMessage`, and hand your agent only an **allow-listed** env
    subset (`PATH`, `HOME`, locale/temp vars) — never spread the full
