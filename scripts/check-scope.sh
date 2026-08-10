@@ -66,10 +66,30 @@ ALWAYS_ALLOW_PREFIXES=(
 )
 
 # ── Get changed files on the work branch ──────────────────────────────────────
+# Diff ranges tried in order; the first that resolves wins. The winning
+# expression is captured because the rename lookup below MUST query the same
+# range — two git queries over different ranges can disagree about what changed.
 
-CHANGED_FILES=$(git diff --name-only "origin/$BASE_BRANCH"..."$DELIVER_BRANCH" 2>/dev/null \
-  || git diff --name-only "$BASE_BRANCH"..."$DELIVER_BRANCH" 2>/dev/null \
-  || git diff --name-only "$BASE_BRANCH".."$DELIVER_BRANCH" 2>/dev/null)
+DIFF_REF_CANDIDATES=(
+  "origin/$BASE_BRANCH...$DELIVER_BRANCH"
+  "$BASE_BRANCH...$DELIVER_BRANCH"
+  "$BASE_BRANCH..$DELIVER_BRANCH"
+)
+
+REF_EXPR=""
+CHANGED_FILES=""
+for candidate in "${DIFF_REF_CANDIDATES[@]}"; do
+  if CHANGED_FILES=$(git diff --name-only "$candidate" 2>/dev/null); then
+    REF_EXPR="$candidate"
+    break
+  fi
+done
+
+if [[ -z "$REF_EXPR" ]]; then
+  echo "ERROR: no diff range resolves between $BASE_BRANCH and $DELIVER_BRANCH" >&2
+  echo "       (tried: ${DIFF_REF_CANDIDATES[*]})" >&2
+  exit 2
+fi
 
 if [[ -z "$CHANGED_FILES" ]]; then
   echo "⚠ No changed files detected between $BASE_BRANCH and $DELIVER_BRANCH"
@@ -77,6 +97,20 @@ if [[ -z "$CHANGED_FILES" ]]; then
 fi
 
 # ── Check each changed file ───────────────────────────────────────────────────
+
+scope_declares() {
+  # True iff $1 is declared in scope: an exact match, or inside a declared
+  # directory. The single membership rule — the verdict and the rename hint
+  # below both ask this question, and must answer it identically.
+  local candidate="$1" declared_path
+  while IFS= read -r declared_path; do
+    [[ -z "$declared_path" ]] && continue
+    if [[ "$candidate" == "$declared_path" || "$candidate" == "$declared_path/"* ]]; then
+      return 0
+    fi
+  done <<< "$SCOPE_LIST"
+  return 1
+}
 
 OUT_OF_SCOPE=()
 IN_SCOPE=()
@@ -96,13 +130,7 @@ while IFS= read -r file; do
 
   # Check declared scope (exact match or prefix match for directories)
   declared=false
-  while IFS= read -r declared_path; do
-    [[ -z "$declared_path" ]] && continue
-    if [[ "$file" == "$declared_path" || "$file" == "$declared_path/"* ]]; then
-      declared=true
-      break
-    fi
-  done <<< "$SCOPE_LIST"
+  scope_declares "$file" && declared=true
 
   if $declared; then
     IN_SCOPE+=("$file")
@@ -121,11 +149,46 @@ if [[ "${#OUT_OF_SCOPE[@]}" -eq 0 ]]; then
   exit 0
 fi
 
+# Rename pairs on the SAME range that produced CHANGED_FILES, as `dest<TAB>src`.
+# `--name-status` prints `R<score><TAB>src<TAB>dest`. Advisory data only: it
+# annotates the violation list and never feeds the verdict, so a failed lookup
+# degrades to today's message rather than blocking — but it says why.
+RENAME_PAIRS=""
+if ! RENAME_PAIRS=$(git diff --find-renames --diff-filter=R --name-status "$REF_EXPR" 2>/dev/null \
+     | awk -F'\t' 'NF >= 3 { print $3 "\t" $2 }'); then
+  RENAME_PAIRS=""
+  echo "⚠ rename detection unavailable for $REF_EXPR — listing paths without rename hints" >&2
+fi
+
+rename_source_in_scope() {
+  # Print the declared-in-scope path that $1 was renamed FROM, if the diff
+  # recorded such a rename; print nothing otherwise. Always returns 0 — an
+  # absent hint is a normal result, not a failure.
+  local dest="$1" pair_dest pair_src
+  if [[ -n "$RENAME_PAIRS" ]]; then
+    while IFS=$'\t' read -r pair_dest pair_src; do
+      [[ "$pair_dest" == "$dest" ]] || continue
+      if scope_declares "$pair_src"; then
+        printf '%s\n' "$pair_src"
+        return 0
+      fi
+    done <<< "$RENAME_PAIRS"
+  fi
+  return 0
+}
+
 echo "✗ Scope violation: $PLAN_NAME"
 echo ""
 echo "Out-of-scope changes (${#OUT_OF_SCOPE[@]}):"
+RENAME_HINT_SHOWN=false
 for f in "${OUT_OF_SCOPE[@]}"; do
-  echo "  ✗ $f"
+  rename_src=$(rename_source_in_scope "$f")
+  if [[ -n "$rename_src" ]]; then
+    echo "  ✗ $f — likely undeclared rename target of declared file: $rename_src"
+    RENAME_HINT_SHOWN=true
+  else
+    echo "  ✗ $f"
+  fi
 done
 echo ""
 SCOPE_COUNT=$(printf '%s' "$SCOPE_LIST" | grep -c . || true)
@@ -135,5 +198,11 @@ while IFS= read -r p; do
   echo "  · $p"
 done <<< "$SCOPE_LIST"
 echo ""
+if $RENAME_HINT_SHOWN; then
+  echo "A rename declares BOTH paths as separate Files-in-Scope rows: this check"
+  echo "reads the File column only and never the Change prose, so a destination"
+  echo "described only in prose reads as out-of-scope drift. Add the missing row."
+  echo ""
+fi
 echo "Out-of-scope changes require architect approval before this PR can merge."
 exit 1
