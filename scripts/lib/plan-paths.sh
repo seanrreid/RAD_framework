@@ -91,13 +91,64 @@ path_is_self_protected() {
 # editing this list in a reviewed commit.
 RAD_ANCHOR_EXT='(js|mjs|cjs|ts|tsx|jsx|sh|bash|py|rb|go|rs|java|c|h|cpp|hpp|yaml|yml|json|md|css|scss|sass|html|htm|txt|sql|toml|ini|cfg|conf|env|mk)'
 
+# Sentinel line plan_cited_anchors' filter loop emits when resolve_anchor_path
+# hits a genuine git failure. The loop runs inside a command substitution, so its
+# exit status cannot reach the caller — this in-band marker carries the failure
+# out instead. It can never collide with a real anchor: the anchor grep charset
+# is [A-Za-z0-9._/-], so a space and '!' are un-representable in a path token.
+RAD_ANCHOR_RESOLVE_FAILED='!! anchor-resolve-failed'
+
+# resolve_anchor_path <token>
+# Resolve a cited anchor to a repo-relative path against the tracked-file set.
+# A token that already contains a directory separator is echoed unchanged. A bare
+# basename is looked up with `git ls-files`: exactly one tracked match prints that
+# path; zero or two-or-more matches print NOTHING — an unknown or ambiguous
+# basename yields no signal, because a guess is worse than no signal. The token
+# charset excludes glob metacharacters, so it is safe to embed in a pathspec.
+# Return codes:
+#   0  resolved (path on stdout), or deliberately unresolvable (empty stdout)
+#   2  git could not be read — the caller MUST fail closed rather than read this
+#      as "unresolvable", which would silently drop a real anchor
+resolve_anchor_path() {
+  local token="$1" matches status line resolved count
+  case "$token" in
+    */*) printf '%s\n' "$token"; return 0 ;;
+  esac
+  # git ls-files exit: 0 = the query ran (empty output is a valid "no match"),
+  # non-zero = a real git/read failure. The `if` suspends set -e so we can
+  # classify rather than abort. `*/name` matches at any depth (git pathspec
+  # globs cross `/`); the bare `name` covers a repo-root file.
+  if matches=$(git ls-files -- "*/$token" "$token" 2>/dev/null); then
+    status=0
+  else
+    status=$?
+  fi
+  if [[ "$status" -ne 0 ]]; then
+    echo "resolve_anchor_path: git ls-files failed for '$token' (exit $status)" >&2
+    return 2
+  fi
+  [[ -z "$matches" ]] && return 0
+  count=0
+  resolved=""
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    count=$((count + 1))
+    resolved="$line"
+  done <<< "$matches"
+  [[ "$count" -eq 1 ]] && printf '%s\n' "$resolved"
+  return 0
+}
+
 # plan_cited_anchors <plan-file>
 # Scan the whole plan body for inline `path/to/file.ext:NNN` anchor tokens and
 # print each cited path with the trailing `:NNN` stripped (strip_task_file_lines
 # semantics), de-duplicated (sort -u), one per line. A token qualifies only if it
 # is real-path-shaped — it contains a `/` OR ends in a known file extension — so
 # prose like `AC#3`, a bare `word:12`, or a URL such as `http://host:80` is never
-# emitted. Empty output (exit 0) when the plan cites no anchors.
+# emitted. A qualifying token with no `/` (prose citing `spine.js:51`) is resolved
+# against the tracked-file set by resolve_anchor_path, so the emitted path is
+# repo-relative (`harness/spine.js`) and downstream existence checks are asked a
+# question they can answer. Empty output (exit 0) when the plan cites no anchors.
 plan_cited_anchors() {
   local plan_file="$1" raw status result token path
   # grep exit: 0 = matches, 1 = no anchor tokens (a valid empty result, NOT an
@@ -121,9 +172,18 @@ plan_cited_anchors() {
       path=$(strip_task_file_lines "$token")
       case "$path" in
         */*) echo "$path" ;;                                # has a directory sep
-        *.*) echo "$path" | grep -qE "\.${RAD_ANCHOR_EXT}\$" && echo "$path" ;;
+        *.*) echo "$path" | grep -qE "\.${RAD_ANCHOR_EXT}\$" \
+               && { resolve_anchor_path "$path" \
+                    || printf '%s\n' "$RAD_ANCHOR_RESOLVE_FAILED"; } ;;
       esac
     done | sort -u) || true
+  # Fail closed on a git read failure inside the loop: the sentinel is the only
+  # channel a subshell failure has, so treat its presence as the read error it is
+  # rather than letting a dropped anchor pass as "nothing cited".
+  if [[ $'\n'"$result"$'\n' == *$'\n'"$RAD_ANCHOR_RESOLVE_FAILED"$'\n'* ]]; then
+    echo "plan_cited_anchors: anchor resolution failed for '$plan_file'" >&2
+    return 2
+  fi
   [[ -n "$result" ]] && printf '%s\n' "$result"
   return 0
 }
