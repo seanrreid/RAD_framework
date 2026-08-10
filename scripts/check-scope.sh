@@ -57,10 +57,15 @@ done < <(
   awk '/^## Tests to Write/{found=1; next} /^## /{found=0} found && /^- /' "$PLAN_FILE"
 )
 
-# Always allow execution logs, the plan file itself, state files, and the review findings log
+# RAD's own process artifacts are never "scope drift" — they are the record OF the
+# work, written by the verbs themselves, and no plan declares them as files it edits.
+# `.agents/research/` belongs here for the same reason as the rest: /rad-research
+# commits it to the work branch BEFORE the plan exists, so a deliver that never
+# touched it would otherwise fail Gate 2 on its own branch's first commit.
 ALWAYS_ALLOW_PREFIXES=(
   ".agents/logs/"
   ".agents/plans/"
+  ".agents/research/"
   ".agents/state/"
   ".agents/findings.jsonl"
 )

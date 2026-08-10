@@ -127,6 +127,21 @@ code=$(run_scope "rad/artifacts")
 [[ "$code" -eq 0 ]] || fail "AC#3: .agents/logs + .agents/plans changes should exit 0 (got $code)"
 echo "✓ AC#3: .agents/logs/ and .agents/plans/ remain exempt (exit 0)"
 
+# ── AC#3b: undeclared .agents/research/ change → exit 0 ───────────────────────
+# /rad-research commits its artifact to the work branch BEFORE the plan exists,
+# so it can never appear in a plan's Files in Scope. Without this exemption a
+# deliver that never touched the artifact fails Gate 2 on its own branch's first
+# commit — observed on rad/wave-back-pressure (#89).
+git -C "$REPO" checkout -q main
+git -C "$REPO" checkout -q -b rad/research-artifact main
+mkdir -p "$REPO/.agents/research"
+printf '# Research: t\n' > "$REPO/.agents/research/feature.md"
+git -C "$REPO" add -A
+git -C "$REPO" commit -q -m "research artifact"
+code=$(run_scope "rad/research-artifact")
+[[ "$code" -eq 0 ]] || fail "AC#3b: .agents/research/ change should exit 0 (got $code)"
+echo "✓ AC#3b: .agents/research/ is exempt (exit 0)"
+
 # ── AC#4a: git mv of a declared file to an undeclared path → exit 1, names both ─
 # The destination is real drift (still exit 1); the message must additionally
 # point at the declared source it came from, plus the two-row convention block.
