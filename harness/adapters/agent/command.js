@@ -8,8 +8,10 @@
  * configured command's concern, not this adapter's.
  *
  * Interface (identical to the SDK adapter): runWave(wave, planCtx) -> result,
- * where result includes `outcome` (matrix string the spine reads),
- * `status`, and `tasks` (for logging).
+ * where result includes `outcome` (matrix string the spine reads) and `status`,
+ * plus the OPTIONAL `tasks` (per-task records, for logging) and `usage`
+ * (normalized token counts) — both omitted when there is nothing to report.
+ * The result is assembled by contract.toWaveResult so the shape is defined once.
  *
  * Security:
  *   - The child is spawned with a controlled, ALLOW-LISTED env subset (PATH,
@@ -26,7 +28,7 @@ import {
   buildWavePrompt,
   extractWaveResultBlock,
   parseWaveResult,
-  resultToOutcome,
+  toWaveResult,
   syntheticFailure,
   sanitizeErrorMessage,
   withTimeout,
@@ -156,25 +158,10 @@ function spawnOnce(cmd, prompt, repoRoot, effectiveModel) {
  * @param {string} [opts.model] - construction-time default model; only used when
  *   a `{model}` token appears in `cmd` and a wave declares no override
  * @param {number} [opts.timeoutMs] - wall-clock deadline per wave (default 10m)
- * @returns {(wave: Object, planCtx: Object) => Promise<{ outcome: string, status: string, tasks: Array }>}
+ * @returns {(wave: Object, planCtx: Object) => Promise<{ outcome: string, status: string, tasks?: Array, usage?: Object }>}
  */
 export function createCommandAdapter({ cmd, repoRoot, model, timeoutMs = 600000 } = {}) {
   if (!cmd) throw new Error('createCommandAdapter: cmd is required');
-
-  /**
-   * Wrap a parsed `{ status, tasks }` into the full spine-facing result. Usage
-   * is OPTIONAL for driven CLIs — most emit none, so when no normalized usage is
-   * supplied the field is OMITTED entirely.
-   */
-  function toResult(parsed, usage) {
-    const result = {
-      outcome: resultToOutcome(parsed),
-      status: parsed.status,
-      tasks: parsed.tasks,
-    };
-    if (usage) result.usage = usage;
-    return result;
-  }
 
   /**
    * Best-effort usage extraction from a CLI's stdout. Most agent CLIs emit NO
@@ -217,7 +204,7 @@ export function createCommandAdapter({ cmd, repoRoot, model, timeoutMs = 600000 
       }
       // Spawn-level failure (ENOENT, etc.) — classify and surface terminally.
       const parsed = syntheticFailure(waveId, message);
-      return { stdout: '', terminal: toResult(parsed) };
+      return { stdout: '', terminal: toWaveResult(parsed) };
     }
 
     // A runaway agent that blew the output cap was killed — terminal protocol fail.
@@ -230,7 +217,7 @@ export function createCommandAdapter({ cmd, repoRoot, model, timeoutMs = 600000 
       const stderrSummary = sanitizeErrorMessage((run.stderr || '').slice(0, 500));
       const message = `command exited with code ${run.code}: ${stderrSummary}`.trim();
       const parsed = syntheticFailure(waveId, message);
-      return { stdout: run.stdout, terminal: toResult(parsed) };
+      return { stdout: run.stdout, terminal: toWaveResult(parsed) };
     }
 
     return { stdout: run.stdout, terminal: null };
@@ -239,7 +226,7 @@ export function createCommandAdapter({ cmd, repoRoot, model, timeoutMs = 600000 
   /**
    * @param {Object} wave
    * @param {Object} planCtx
-   * @returns {Promise<{ outcome: string, status: string, tasks: Array }>}
+   * @returns {Promise<{ outcome: string, status: string, tasks?: Array, usage?: Object }>}
    */
   return async function runWave(wave, planCtx) {
     const waveId = wave.n ?? wave.number ?? wave.id ?? '?';
@@ -256,7 +243,7 @@ export function createCommandAdapter({ cmd, repoRoot, model, timeoutMs = 600000 
     if (first.terminal) return first.terminal;
 
     let block = extractWaveResultBlock(first.stdout);
-    if (block) return toResult(parseWaveResult(block), extractUsage(first.stdout));
+    if (block) return toWaveResult(parseWaveResult(block), extractUsage(first.stdout));
 
     // Missing WAVE_RESULT — re-prompt EXACTLY once, asking specifically for it.
     const reprompt =
@@ -269,7 +256,7 @@ export function createCommandAdapter({ cmd, repoRoot, model, timeoutMs = 600000 
     if (second.terminal) return second.terminal;
 
     block = extractWaveResultBlock(second.stdout);
-    if (block) return toResult(parseWaveResult(block), extractUsage(second.stdout));
+    if (block) return toWaveResult(parseWaveResult(block), extractUsage(second.stdout));
 
     // Still no protocol block after one reprompt — terminal protocol failure.
     return {

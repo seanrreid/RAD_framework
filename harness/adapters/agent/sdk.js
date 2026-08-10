@@ -3,9 +3,12 @@
  *
  * Drives a wave through the Claude Agent SDK's `query` loop, behind the SAME
  * interface every adapter shares: runWave(wave, planCtx) -> result, where the
- * result includes `outcome` (the matrix string the spine reads), `status`, and
- * `tasks` (for logging). The plain-text WAVE_RESULT contract and all resilience
- * helpers come from ./contract.js — this module owns only the SDK wiring.
+ * result includes `outcome` (the matrix string the spine reads) and `status`,
+ * plus the OPTIONAL `tasks` (per-task records, for logging) and `usage`
+ * (normalized token counts) — both omitted when there is nothing to report. The
+ * plain-text WAVE_RESULT contract, the shared result builder (toWaveResult), and
+ * all resilience helpers come from ./contract.js — this module owns only the SDK
+ * wiring.
  *
  * Hardening over the original runwave.js:
  *   - Wall-clock timeout via AbortController + contract.withTimeout (maxTurns
@@ -28,7 +31,7 @@ import {
   buildWavePrompt,
   extractWaveResultBlock,
   parseWaveResult,
-  resultToOutcome,
+  toWaveResult,
   syntheticFailure,
   sanitizeErrorMessage,
   classifyError,
@@ -72,7 +75,7 @@ const DEFAULT_MAX_TURNS = 40;
  * @param {number} [opts.maxTurns] - SDK turn ceiling
  * @param {Function} [opts.query] - injectable SDK query (defaults to the real one)
  * @param {Function} [opts.sleep] - injectable delay (defaults to setTimeout); for tests
- * @returns {(wave: Object, planCtx: Object) => Promise<{ outcome: string, status: string, tasks: Array }>}
+ * @returns {(wave: Object, planCtx: Object) => Promise<{ outcome: string, status: string, tasks?: Array, usage?: Object }>}
  */
 export function createRunWave({
   apiKey,
@@ -85,24 +88,6 @@ export function createRunWave({
 } = {}) {
   const delay =
     sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
-
-  /**
-   * Wrap a parsed `{ status, tasks }` into the full spine-facing result. When a
-   * normalized usage object is supplied it is attached; otherwise the field is
-   * OMITTED (usage is optional everywhere downstream).
-   */
-  function toResult(parsed, usage) {
-    const result = {
-      outcome: resultToOutcome(parsed),
-      status: parsed.status,
-      tasks: parsed.tasks,
-    };
-    // `usage` is either undefined or a fully-formed {input,output,total} object
-    // (normalizeUsage never returns an empty/partial object), so a truthy check
-    // is sufficient to decide whether to attach the optional field.
-    if (usage) result.usage = usage;
-    return result;
-  }
 
   /**
    * Run a single SDK query to completion, collecting assistant text. Returns
@@ -217,7 +202,7 @@ export function createRunWave({
         }
 
         // Transient exhausted, or permanent/model/resource — terminal failure.
-        return { terminal: toResult(syntheticFailure(waveId, safe), err._usage) };
+        return { terminal: toWaveResult(syntheticFailure(waveId, safe), err._usage) };
       }
     }
   }
@@ -225,7 +210,7 @@ export function createRunWave({
   /**
    * @param {Object} wave
    * @param {Object} planCtx
-   * @returns {Promise<{ outcome: string, status: string, tasks: Array }>}
+   * @returns {Promise<{ outcome: string, status: string, tasks?: Array, usage?: Object }>}
    */
   return async function runWave(wave, planCtx) {
     const waveId = wave.n ?? wave.number ?? wave.id ?? '?';
@@ -241,7 +226,7 @@ export function createRunWave({
     if (first.terminal) return first.terminal;
 
     let block = extractWaveResultBlock(first.text);
-    if (block) return toResult(parseWaveResult(block), first.usage);
+    if (block) return toWaveResult(parseWaveResult(block), first.usage);
 
     // Missing WAVE_RESULT — reprompt EXACTLY once for the protocol block.
     const reprompt =
@@ -254,7 +239,7 @@ export function createRunWave({
     if (second.terminal) return second.terminal;
 
     block = extractWaveResultBlock(second.text);
-    if (block) return toResult(parseWaveResult(block), second.usage);
+    if (block) return toWaveResult(parseWaveResult(block), second.usage);
 
     return {
       outcome: 'fail-protocol',
