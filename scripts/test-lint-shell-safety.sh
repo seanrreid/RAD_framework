@@ -3,7 +3,8 @@
 # Regression tests for lint-shell-safety.sh: taint detection (positional +
 # RAD_* env), sink matching (git / jq / node -e / eval), regex + case guard
 # recognition, baseline ratchet semantics (warn / stale), the committed-mode
-# pass, and usage errors.
+# pass (index-not-filesystem in BOTH directions, recursion, *.mjs), the
+# scripts-dir path-shape guard, and usage errors.
 # Self-contained: builds synthetic script fixtures in a temp dir and runs the
 # REAL script against them. Runs under bash 3.2+.
 #
@@ -200,5 +201,78 @@ code=$(run_lint "$TMP/nogit" "$EMPTY_BASELINE")
 grep -q 'committed-mode check needs a git repository' "$TMP/out" \
   || fail "case 11: expected the fail-closed git-repo error"
 echo "✓ case 11: scripts dir outside a git repo fails closed (exit 2)"
+
+# ── Case 12: non-executable ON DISK but committed 100755 still passes ──────────
+# The mirror image of case 9. Together they pin the check to the git index in
+# BOTH directions: case 9 proves a +x working tree does not rescue a 100644
+# index, and this proves a -x working tree does not condemn a 100755 index.
+mkdir -p "$TMP/diskonly"
+cat > "$TMP/diskonly/ok.sh" <<'EOF'
+#!/usr/bin/env bash
+echo ok
+EOF
+init_fixture_repo "$TMP/diskonly"   # stages 100755
+chmod -x "$TMP/diskonly/ok.sh" || fail "case 12 setup: chmod -x failed"
+code=$(run_lint "$TMP/diskonly" "$EMPTY_BASELINE")
+[[ "$code" -eq 0 ]] || { cat "$TMP/out"; fail "case 12: filesystem mode must not be consulted (got $code)"; }
+if grep -q 'ok.sh' "$TMP/out"; then cat "$TMP/out"; fail "case 12: a 100755-indexed script must not be flagged"; fi
+grep -q "^PASS:" "$TMP/out" || fail "case 12: expected terminal PASS line"
+echo "✓ case 12: chmod -x on disk with a 100755 index still passes (exit 0)"
+
+# ── Case 13: a bad mode in a SUBDIRECTORY is caught ────────────────────────────
+# The taint scan's glob stops at the top level; the mode pass uses git ls-files,
+# which recurses. Only a nested offender can tell the two apart.
+mkdir -p "$TMP/subdir/lib"
+cat > "$TMP/subdir/ok.sh" <<'EOF'
+#!/usr/bin/env bash
+echo ok
+EOF
+cat > "$TMP/subdir/lib/helper.sh" <<'EOF'
+#!/usr/bin/env bash
+echo helper
+EOF
+chmod +x "$TMP/subdir/lib/helper.sh" || fail "case 13 setup: chmod +x failed"
+init_fixture_repo "$TMP/subdir"
+git -C "$TMP/subdir" update-index --chmod=-x lib/helper.sh \
+  || fail "case 13 setup: could not stage 100644"
+code=$(run_lint "$TMP/subdir" "$EMPTY_BASELINE")
+[[ "$code" -eq 1 ]] || { cat "$TMP/out"; fail "case 13: nested 100644 script should exit 1 (got $code)"; }
+grep -q '✗ lib/helper.sh: committed mode 100644, expected 100755' "$TMP/out" \
+  || { cat "$TMP/out"; fail "case 13: expected the nested offender named by its repo-relative path"; }
+echo "✓ case 13: bad mode in a subdirectory is caught (exit 1)"
+
+# ── Case 14: *.mjs is covered by the mode pass, not just *.sh ──────────────────
+mkdir -p "$TMP/mjsmode"
+cat > "$TMP/mjsmode/ok.sh" <<'EOF'
+#!/usr/bin/env bash
+echo ok
+EOF
+cat > "$TMP/mjsmode/tool.mjs" <<'EOF'
+#!/usr/bin/env node
+console.log('tool');
+EOF
+chmod +x "$TMP/mjsmode/tool.mjs" || fail "case 14 setup: chmod +x failed"
+init_fixture_repo "$TMP/mjsmode"
+git -C "$TMP/mjsmode" update-index --chmod=-x tool.mjs \
+  || fail "case 14 setup: could not stage 100644"
+code=$(run_lint "$TMP/mjsmode" "$EMPTY_BASELINE")
+[[ "$code" -eq 1 ]] || { cat "$TMP/out"; fail "case 14: 100644-committed .mjs should exit 1 (got $code)"; }
+grep -q '✗ tool.mjs: committed mode 100644, expected 100755' "$TMP/out" \
+  || { cat "$TMP/out"; fail "case 14: expected the .mjs offender named with its actual mode"; }
+echo "✓ case 14: .mjs committed 100644 fails by name (exit 1)"
+
+# ── Case 15: a scripts dir path with shell metacharacters is refused (exit 2) ──
+# $SCRIPTS_DIR reaches a `git -C` command line, so the lint bounds its own input
+# the way it demands of every other script. The dir must EXIST, otherwise the
+# earlier dir-not-found check would answer first and prove nothing.
+mkdir -p "$TMP/bad dir"
+code=$(run_lint "$TMP/bad dir" "$EMPTY_BASELINE")
+[[ "$code" -eq 2 ]] || { cat "$TMP/out"; fail "case 15: metacharacter dir path should exit 2 (got $code)"; }
+grep -q 'scripts dir path has unsupported characters' "$TMP/out" \
+  || { cat "$TMP/out"; fail "case 15: expected the path-shape guard error"; }
+if grep -q 'scripts dir not found' "$TMP/out"; then
+  fail "case 15: dir must exist so the shape guard, not the existence check, fires"
+fi
+echo "✓ case 15: scripts dir path with unsupported characters exits 2"
 
 echo "ALL PASS"
