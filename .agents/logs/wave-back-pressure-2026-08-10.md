@@ -151,3 +151,53 @@ bash 5.3 and `/bin/bash` 3.2.
 script path resolves against `repoRoot` while cwd resolves to the worktree, confirmed with a
 marker file in a stand-in worktree. `env -i` does not reset cwd, so declared commands execute
 against the isolated tree.
+
+## Wave 4 — architect notes (closes #90)
+
+### Concern raised (Task 4.3) and ruled on: the new `capture-failed` event type
+
+Task 4.3 introduced a new event type, `capture-failed`, appended only on the fail-open
+degrade path when `priorFailure` capture throws.
+
+Ruling: **name ratified; behavior correct; documentation gap routed to Wave 5.**
+
+- **Name accepted.** It follows the established `hook-failed` precedent for an observe-only
+  failure that must never change flow, and `data.what: 'prior-failure'` disambiguates what
+  was being captured.
+- **Its absence from `PHASE_BY_TYPE` is correct, not an oversight.** `events.js` treats
+  deliberate omission as the mechanism for audit-only events — the same treatment given
+  `architecture-approved`, `owner-claimed`, and `owner-released`. An unmapped type
+  establishes no phase, so the fold is unaffected.
+- **But that file documents its deliberate absences in a comment, and `capture-failed`
+  appears nowhere in `events.js`** — not in the `Event` typedef union (line ~21), not in the
+  absence comment (line ~133). Correct behavior a reader cannot infer is exactly the defect
+  family the sibling #98/#99/#101 delivery just closed. `harness/events.js:16-50` is in this
+  plan's declared Files in Scope, so **Wave 5 must document it in both places.**
+
+### Orchestrator verification
+
+- `npm test --prefix harness` → **218/218 pass**, unchanged.
+- `gates.js`, `matrix.yaml`, `check-tests-present.sh` — zero diff vs `origin/main`.
+- **Doom-loop and `MAX_ATTEMPTS` untouched**: the only `spine.js` diff lines matching
+  `MAX_ATTEMPTS|doom-loop|fingerprint` are added *comments* recording that the capture sits
+  after the fingerprint decision and never feeds it. No logic moved.
+- **Event-type vocabulary** is now the frozen 7 outcomes plus 9 event types; the 7-outcome
+  matrix vocabulary gained nothing, as required.
+
+### Truncation cap — the value the plan left to the delivering wave
+
+`PRIOR_FAILURE_FIELD_MAX_CHARS = 4000`, deliberately tighter than the producer's own bound
+(`check-verify.sh` caps at 40 lines / 8000 bytes) so the prompt stays bounded even for text
+that never passed through that script. Applied unconditionally to both the excerpt and the
+reported error, keeping the tail and stating when it bit. **Flagged for Gate 2 review** — the
+plan explicitly reserved this number for the architect.
+
+### What #90 actually required
+
+The wave demonstrated attempt 1's prompt ≠ attempt 2's prompt, with attempt 2 carrying the
+prior outcome, the blocking task's title/status/error, and the bounded verify excerpt. That
+is the #90 defect ("bounded retries re-send an identical prompt") closed. AC#4 byte-parity
+was demonstrated by `cmp` against `origin/main`'s `buildWavePrompt` (2517/2517 and 2426/2426
+bytes identical), and AC#8 fail-open by forcing the capture to throw — attempt 2 still ran
+with a prompt byte-identical to attempt 1's, and the reason was recorded rather than
+swallowed.
