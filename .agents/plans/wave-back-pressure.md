@@ -1,7 +1,8 @@
 # Plan: Per-Wave Back-Pressure Contract
 Created: 2026-08-06
 Author: architect
-Status: in-progress
+Status: complete
+Completed-At: 2026-08-10T17:05:00Z
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-08-06T15:01:36.335Z
 Recorded-By: sean@torchcodelab.com
