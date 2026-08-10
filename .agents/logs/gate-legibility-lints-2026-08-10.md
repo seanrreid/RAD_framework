@@ -12,6 +12,9 @@ Executor role: architect
 | 2 | Wave 1 | Committed-mode check in the shell-safety lint | ✓ complete (concerns) | d0b50ed | 2026-08-10T14:02:00Z |
 | 3 | Wave 2 | Bare-basename resolution | ✓ complete | 8a8e9f3 | 2026-08-10T13:40:28Z |
 | 4 | Wave 2 | Suppress the duplicate for plan-created files | ✓ complete | 8fc17b8 | 2026-08-10T13:44:16Z |
+| 5 | Wave 3 | Rename-aware violation message | ✓ complete | d16348e | 2026-08-10T15:12:00Z |
+| 6 | Wave 3 | Plan-time rename advisory | ✓ complete | 3511dcb | 2026-08-10T15:20:00Z |
+| 7 | Wave 3 | Document the two-row convention | ✓ complete | f99109a | 2026-08-10T15:26:00Z |
 
 ## Wave 1 — architect notes
 
