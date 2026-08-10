@@ -33,6 +33,9 @@ Pre-flight, 2026-08-10:
 | 4 | Wave 2 | Event typedef gains both optional keys | ✓ complete | a7431da | 11:13 |
 | 5 | Wave 2 | Spine records `tasks` on the wave-attempt event | ✓ complete | 1050ab0 | 11:19 |
 | 6 | Wave 2 | Fold-parity test on historical logs | ✓ complete | fa0d59a | 11:26 |
+| 7 | Wave 3 | Parse the per-wave `Verify:` line | ✓ complete | 5c9ec4e | 11:12 |
+| 8 | Wave 3 | New `scripts/check-verify.sh` | ✓ complete | d7a66ea | 11:26 |
+| 9 | Wave 3 | Spine invokes verification and records the result | ✓ complete | 7e2d1b0 | 11:33 |
 
 ## Wave 1 — architect notes
 
