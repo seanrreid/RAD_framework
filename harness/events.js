@@ -33,6 +33,13 @@
  *   The `approved` event's `data` MAY carry an optional `fingerprint` field (a
  *   string hash of the plan body, from harness/plan-fingerprint.js) attesting to
  *   WHICH plan body was approved. The fold does not read it; it is data-only.
+ *
+ *   The `wave-attempt` event's `data` MAY carry two OPTIONAL, data-only keys that
+ *   record what the wave agent claimed it did (see WaveAttemptEvidence below).
+ *   Both are ADDITIVE and ABSENT-BY-DEFAULT: when the wave result carries neither,
+ *   the appended event is byte-identical to a pre-existing one, and every fold in
+ *   this module returns identical results on a history that lacks them. No fold
+ *   reads either key.
  * @property {string}  actor        - WHO the event is attributed to (human identity)
  * @property {string}  ts           - ISO timestamp, passed in by the caller
  * @property {string} [recordedBy]  - WHO physically ran the command, if not `actor`
@@ -53,6 +60,26 @@
  * @property {string} hook     - the hook script path that produced the signal
  * @property {string} outcome  - the outcome token (one of the fixed vocabulary)
  * @property {'hook'} source   - provenance tag; always the literal 'hook'
+ */
+
+/**
+ * OPTIONAL evidence payload a `wave-attempt` event's `data` MAY carry alongside
+ * the existing `{ wave, outcome, usage }` keys. Both fields are DATA-ONLY: no
+ * fold in this module reads them, and a wave result that carries neither appends
+ * an event byte-identical to today's (the keys are omitted entirely, never
+ * written as null or as an empty collection).
+ *
+ * `tasks` mirrors the per-task self-classification the wave agent reported in its
+ * WAVE_RESULT block. `verify` records the verification command a wave ran and
+ * whether it passed — a claim ABOUT verification, recorded for audit; it is NOT
+ * itself a gate, and nothing in this module treats it as one.
+ *
+ * @typedef {Object} WaveAttemptEvidence
+ * @property {Array<{title: string, status: string}>} [tasks]  - per-task titles +
+ *   self-classified statuses, as reported by the wave agent. Omitted when empty.
+ * @property {{command: string, status: number, passed: boolean}} [verify] - the
+ *   verification command run for the wave, its exit status, and whether it passed.
+ *   Omitted when the wave ran no verification command.
  */
 
 /**
