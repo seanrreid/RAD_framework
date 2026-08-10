@@ -36,6 +36,7 @@ Pre-flight, 2026-08-10:
 | 7 | Wave 3 | Parse the per-wave `Verify:` line | ✓ complete | 5c9ec4e | 11:12 |
 | 8 | Wave 3 | New `scripts/check-verify.sh` | ✓ complete | d7a66ea | 11:26 |
 | 9 | Wave 3 | Spine invokes verification and records the result | ✓ complete | 7e2d1b0 | 11:33 |
+| 10 | Wave 4 | Widen `runWave` to accept attempt context | ✓ complete | 528932d | 11:44 |
 
 ## Wave 1 — architect notes
 
