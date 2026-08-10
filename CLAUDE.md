@@ -162,6 +162,53 @@ Model: claude-opus-4-8
 Waves without a `Model:` line use the deliver default. See `docs/rad-cli.md` for the
 full description and the `RAD_TOKEN_BUDGET` example.
 
+### Per-Wave Verification
+
+OPT-IN and backward-compatible — absent, the wave gate behaves exactly as before.
+
+Alongside `Model:`, a `### Wave N` block may carry an optional `Verify:` line naming
+the shell command the HARNESS runs after that wave:
+
+```markdown
+### Wave 1
+Model: claude-haiku-4-5
+Verify: npm test --prefix harness
+
+### Wave 2
+Verify: bash scripts/test-check-verify.sh
+```
+
+**The absent-declaration guarantee.** A wave with no `Verify:` line runs no command and
+records no `verify` key — a plan declaring none anywhere produces a **byte-for-byte
+identical** event sequence to a pre-verification run. Opting in is the only way to
+change behavior.
+
+**What it adds.** Without it, the per-wave gate is `scripts/check-tests-present.sh` — a
+file-PRESENCE check: a wave can create every promised test file, have all of them fail,
+and still advance. A declared command is executed by `scripts/check-verify.sh` (through
+the deliver spine's injected `sh` port — `spine.js` never runs arbitrary shell itself)
+and its REAL exit code is read. A non-zero code demotes the wave to the existing
+`fail-tests` outcome through the matrix; the frozen 7-outcome vocabulary gains nothing.
+The two gates stay separate and neither replaces the other (issue #91).
+
+The command is arbitrary shell from a **human-approved plan** — approval is the trust
+boundary, unchanged. `check-verify.sh` contains the execution: an allow-listed env
+subset (`PATH HOME LANG LC_ALL TMPDIR TERM` via `env -i`, so no exported credential
+reaches the command), a hard timeout, and a bounded output excerpt (40 lines / 8000
+bytes) so a failing suite cannot flood the retry prompt.
+
+```
+RAD_VERIFY_TIMEOUT_SECONDS: <positive integer>   # wall-clock ceiling per declared command
+```
+
+Defaults to **600** seconds. A malformed value (non-numeric, zero, negative) is a **hard
+error — exit 2** at the check boundary, never a silent fall back to the default: an
+operator typo must not quietly restore a ten-minute ceiling. A command that exceeds the
+ceiling is killed and reported with the reserved exit code **124**, which the spine maps
+to the existing `fail-timeout` outcome (matrix action `surface`, a terminal) rather than
+`fail-tests` (`revision`) — **a retry cannot fix a hang**, so it surfaces to the operator
+instead of burning the attempt budget.
+
 ### Worktree Isolation
 
 OPTIONAL and backward-compatible — absent, deliver runs in the main checkout as before.

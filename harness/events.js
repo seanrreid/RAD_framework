@@ -19,7 +19,8 @@
  *   'wave-attempt' | 'wave-complete' | 'wave-failed' | 'approved' |
  *   'pr-opened' | 'revision-requested' | 'research-created' | 'plan-created' |
  *   'hook-observed' | 'hook-veto' | 'hook-failed' | 'done' |
- *   'owner-claimed' | 'owner-released' | 'architecture-approved'.
+ *   'owner-claimed' | 'owner-released' | 'architecture-approved' |
+ *   'capture-failed'.
  *   `owner-claimed` / `owner-released` are DATA-ONLY ownership events: they
  *   establish NO phase (absent from PHASE_BY_TYPE) and carry no outcome (never
  *   routed through resolveOutcome). Their provenance (who claimed/released) is
@@ -29,6 +30,14 @@
  *   records that an architecture review signed off, with no effect on the fold.
  *   It is NOT the deliver gate (that remains the `approved` event); it is a
  *   separate audit signal and has no rule in gates.yaml.
+ *   `capture-failed` is the third AUDIT-ONLY event of that family: the deliver
+ *   spine appends it when FAIL-OPEN prompt enrichment degraded — capturing the
+ *   previous attempt's failure into the next attempt's `priorFailure` threw, so
+ *   the retry proceeded with the enrichment-absent prompt. It establishes NO
+ *   phase (absent from PHASE_BY_TYPE), carries no outcome, and leaves the fold
+ *   unaffected; its `data` records `{ wave, attempt, outcome, what, reason }` so
+ *   the degradation is legible rather than swallowed. Because the capture is
+ *   prompt input only, it decides nothing and gates nothing.
  *
  *   The `approved` event's `data` MAY carry an optional `fingerprint` field (a
  *   string hash of the plan body, from harness/plan-fingerprint.js) attesting to
@@ -129,9 +138,12 @@ const PHASE_BY_TYPE = {
   'hook-failed': 'in-progress',
   'pr-opened': 'delivered',
   done: 'done',
-  // `architecture-approved` is audit-only: like owner-claimed/owner-released it
-  // is DELIBERATELY ABSENT from PHASE_BY_TYPE so it establishes no phase and the
-  // fold is unaffected. (Listed here in a comment, not as a key, on purpose.)
+  // `architecture-approved` and `capture-failed` are audit-only: like
+  // owner-claimed/owner-released they are DELIBERATELY ABSENT from PHASE_BY_TYPE
+  // so they establish no phase and the fold is unaffected. (Listed here in a
+  // comment, not as keys, on purpose.) `capture-failed` in particular records a
+  // fail-open degradation of prompt enrichment — adding it as a key would let a
+  // non-decision move a feature's phase.
 };
 
 /** Phase ordering — earliest first; later phases dominate in the fold. */
