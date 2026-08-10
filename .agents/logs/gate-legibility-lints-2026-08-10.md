@@ -78,6 +78,14 @@ warns. A bare basename with zero or ≥2 tracked matches emits nothing by design
 verified with `harness-ci.md` (3 tracked matches) — since a guess is worse than no
 signal.
 
+**Architect ruling on the bash 3.2 concern: filed, not fixed.** Confirmed
+pre-existing on `origin/main` (same construct, line 120 there vs 171 here) and
+confirmed to bite: this machine's `/bin/bash` is 3.2.57 and
+`/bin/bash scripts/lint-plan.sh <plan>` exits 2 with a syntax error instead of
+linting. Out of this plan's approved scope, so it ships as **issue #102** rather
+than widening the diff. The header claim at `plan-paths.sh:10` is currently false
+and #102 records that.
+
 **Concern, not fixed (pre-existing, filed for Wave 4 or a follow-up).**
 `scripts/lib/plan-paths.sh` declares "bash 3.2 (macOS stock) compatible" in its
 header, but it has not parsed under bash 3.2 since the premise-freshness lint
@@ -90,3 +98,31 @@ fixing it would widen the Wave 2 diff, so it was left alone. It matters because 
 a stock macOS box without a newer bash on PATH, `scripts/lint-plan.sh` fails
 outright rather than linting. All Wave 2 code was written to stay 3.2-safe
 (here-strings and `[[ ]]` only, no new case patterns inside the substitution).
+
+## Wave 3 — orchestrator verification
+
+Rebuilt the rename scenarios in an independent fixture repo rather than trusting
+the wave's self-report, because Task 3.1 edits a **fail-closed gate** and a
+message-only change that accidentally turned it permissive would be invisible in
+a passing test suite.
+
+| Scenario | Expected | Observed |
+|---|---|---|
+| `git mv` of a declared file to an undeclared path | fail (1) | **exit 1**, message names both `src/renamed.js` and `src/in-scope.js` |
+| Both source and destination declared as rows | pass (0) | **exit 0** |
+| Unrelated new file | fail (1), no rename hint | **exit 1**, plain message, no hint |
+
+Verdict provably unchanged — AC#4 satisfied without the gate becoming permissive.
+
+AC#6 (the approval-time under-execution flag) verified on **both** command specs:
+`rad-plan.md` and `rad-adopt.md` each carry the two-row convention. The risk
+flagged at Gate 1 did not materialize.
+
+Wave 2 regression re-confirmed after Wave 3's second edit to `lint-plan.sh`
+(required by the plan's Risks section): 0 stale-premise, 11 self-protected,
+exit 0. All four suites pass.
+
+**Carried to Wave 4:** `check-scope.sh`'s unresolvable-diff-range path now exits
+**2** with a logged reason, where previously `set -e` aborted with git's raw 128
+and no message. Still fail-closed and non-zero, and 2 is this script's documented
+usage-error code — but a Wave 4 case for that path must assert 2, not 128.
