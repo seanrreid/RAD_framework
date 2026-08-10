@@ -27,3 +27,6 @@ Pre-flight, 2026-08-10:
 
 | Step | Wave | Task | Status | Commit | Time |
 |------|------|------|--------|--------|------|
+| 1 | Wave 1 | Document `usage` and `tasks[]` in the wave contract | ✓ complete | 060e2cd | 11:32 |
+| 2 | Wave 1 | Thread parsed `tasks` onto the wave result | ✓ complete | 50cc7cd | 11:38 |
+| 3 | Wave 1 | Both adapters return `tasks` + normalized `usage` | ✓ complete | c35e2aa | 11:44 |
