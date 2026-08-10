@@ -39,6 +39,9 @@ Pre-flight, 2026-08-10:
 | 10 | Wave 4 | Widen `runWave` to accept attempt context | ✓ complete | 528932d | 11:44 |
 | 11 | Wave 4 | Render the `## Prior Attempt Failure` prompt section | ✓ complete | 1175398 | 11:52 |
 | 12 | Wave 4 | Capture the failing attempt into `priorFailure` | ✓ complete | a5ab2eb | 12:01 |
+| 13 | Wave 5 | Spine and CLI test coverage | ✓ complete | ce3b8ab | 12:22 |
+| 14 | Wave 5 | `scripts/test-check-verify.sh` | ✓ complete | 12c200b | 12:31 |
+| 15 | Wave 5 | Document the `Verify:` line | ✓ complete | ca6feb8 | 12:44 |
 
 ## Wave 1 — architect notes
 
@@ -201,3 +204,76 @@ was demonstrated by `cmp` against `origin/main`'s `buildWavePrompt` (2517/2517 a
 bytes identical), and AC#8 fail-open by forcing the capture to throw — attempt 2 still ran
 with a prompt byte-identical to attempt 1's, and the reason was recorded rather than
 swallowed.
+
+## Wave 5 — test + documentation notes
+
+Guardrails loaded: `ai/guardrails.md` (baseline), `ai/extensions/testing.md` (mandatory —
+every file this wave is a test), `ai/extensions/security.md` (the env allow-list regression
+test is an input-handling / data-exposure boundary). `frontend.md` / `database.md` /
+`backend.md` do not apply — no UI, schema, or server-route paths in scope.
+
+### Every test passed on its FIRST run against Waves 1–4
+
+Nothing written this wave initially failed. No implementation was touched — the only
+non-test source edit is a comment-and-typedef change in `harness/events.js` (Task 5.3's
+`capture-failed` documentation), which the plan lists in Files in Scope and which adds no
+key to `PHASE_BY_TYPE` and therefore no behavior.
+
+### Coverage added
+
+| Suite | Cases | What it pins |
+|---|---|---|
+| `harness/test/spine.test.js` | 9 (`w5-a`…`w5-g`) | Absent-`Verify:` parity (two runs deep-equal, `verify` key ABSENT, `check-verify.sh` never invoked), delegation through the `sh` port with one argument, presence-gate short-circuit, failure demotion inside the frozen vocabulary, `fail-timeout` on 124 with no retry, `priorFailure` threading, and the fail-open capture |
+| `harness/test/cli.test.js` | 3 | `parseWaveVerify` via `parsePlanCtx`: capture under `### Wave N`, an EMPTY map when nothing is declared, and the edge cases (blank value, `####` subheading stays inside, non-Wave heading closes the block) |
+| `harness/test/agent-contract.test.js` | 8 | `tasks` pass-through, malformed degradation to OMISSION across eight shapes, outcome-drift parity vs `resultToOutcome`, and the prompt section (absence byte-identical, truncation asserted to bite on excerpt AND task error) |
+| `scripts/test-check-verify.sh` | 14 assertions, new file | Explicit exit codes for pass/fail/truncation/usage/stderr/timeout, plus env containment |
+
+### The absent-declaration guarantee, pinned two ways
+
+The single most important property was tested at both ends of the seam: at the parser
+(`parsePlanCtx` returns `{}` for a plan with no `Verify:`) and at the spine (a run with
+`waveVerify` omitted and a run with `waveVerify: {}` append **deep-equal** event arrays, and
+every `wave-attempt` carries exactly `['wave','outcome','usage']`). The `verify` and `tasks`
+keys are asserted ABSENT with `in`, not merely `undefined` — the distinction that makes the
+byte-for-byte claim real.
+
+### Env containment carries a negative control
+
+`A7` asserts a non-allow-listed variable never reaches the executed command. On its own that
+assertion would also pass if the command never ran at all, so `A7b` inverts it (asserting the
+canary IS visible, and requiring that to fail) and `A7c` confirms allow-listed `PATH` does
+arrive. The suite also refuses to run vacuously: it checks the canary is exported in its own
+environment first.
+
+### Timing
+
+`scripts/test-check-verify.sh` runs in **1.4s** — the timeout case uses
+`RAD_VERIFY_TIMEOUT_SECONDS=1`, never the 600s default. The whole point of the env override
+is that the timeout PATH is testable without a ten-minute wait.
+
+### Verification
+
+| Check | Result |
+|---|---|
+| `npm test --prefix harness` | **239/239 pass** (was 218/218 — +21 harness cases, 0 fail) |
+| `bash scripts/test-check-verify.sh` | **ALL PASS**, 14 assertions, **1.4s** |
+| Every `scripts/test-*.sh` (15 suites) | **ALL PASS** |
+| `harness/gates.js`, `harness/matrix.yaml` | **zero diff vs `origin/main`** |
+| `scripts/check-tests-present.sh` | zero diff vs `origin/main` — the presence gate stays distinct (#91) |
+| `git ls-files -s scripts/test-check-verify.sh` | **100755** — #101's lesson held |
+
+### Two discrepancies for Gate 2
+
+1. **`buildWavePrompt` signature.** The wave brief described
+   `buildWavePrompt(wave, planCtx, priorFailure?)`; Wave 4 actually shipped
+   `buildWavePrompt(wave, planCtx)` reading `planCtx.priorFailure`, which is what the
+   `cli.js` binding (`adapter(wave, { ...planCtx, ...attemptCtx })`) feeds it. The tests are
+   written against the shipped signature — it is the coherent one, since the spread binding
+   has no third argument to pass. Recorded, not "fixed".
+2. **AC#6's literal wording.** AC#6 says a malformed/absent `tasks` "degrades to omission —
+   never `fail-protocol`", but `resultToOutcome({})` is still `fail-protocol` (pre-existing
+   and ratified in Wave 1). The tests encode the ratified reading: the *pass-through* degrades
+   to omission and never changes the outcome, asserted as
+   `toWaveResult(p).outcome === resultToOutcome(p)` across seven shapes. If the architect
+   intended the literal reading, that is a behavior change to `resultToOutcome` — out of scope
+   here and deliberately not made.
