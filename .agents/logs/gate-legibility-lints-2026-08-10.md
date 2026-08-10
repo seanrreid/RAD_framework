@@ -126,3 +126,47 @@ exit 0. All four suites pass.
 **2** with a logged reason, where previously `set -e` aborted with git's raw 128
 and no message. Still fail-closed and non-zero, and 2 is this script's documented
 usage-error code — but a Wave 4 case for that path must assert 2, not 128.
+
+## Wave 4 — test coverage (parallel, disjoint files)
+
+| Step | Wave | Task | Status | Commit | Time |
+|------|------|------|--------|--------|------|
+| 8 | Wave 4 | check-scope rename cases | ✓ complete | c099838 | 2026-08-10T16:05:00Z |
+| 9 | Wave 4 | shell-safety mode cases | ✓ complete | 19976fe | 2026-08-10T16:08:00Z |
+| 10 | Wave 4 | plan-paths and lint-plan cases | ✓ complete | dccbdd3 | 2026-08-10T16:22:00Z |
+
+Case counts: `test-check-scope.sh` 3 → 7, `test-lint-shell-safety.sh` 11 → 15,
+`test-plan-paths.sh` 9 → 16, `test-lint-plan.sh` 19 → 27. **42 → 65 cases.**
+Every pre-existing case kept its description, asserted exit code, and pass
+status (AC#9).
+
+Task 4.2 was scoped as an audit rather than a write: Wave 1 had already added
+three mode cases. It closed three real gaps (subdirectory recursion, `*.mjs`,
+the `$SCRIPTS_DIR` shape guard) plus the mirror of the index-vs-filesystem case,
+and correctly declined to duplicate the `test-*.sh` offender case that already
+existed.
+
+Task 4.3 covered **both** `test-plan-paths.sh` and `test-lint-plan.sh`. The
+plan's `File:` field named only the first; the second carries AC#5's coverage.
+Flagged at Gate 1 as an under-execution risk and corrected in the wave prompt —
+the same correction applied to Task 3.3 in Wave 3. Both landed complete.
+
+## Final verification (orchestrator)
+
+- **Acceptance fixture:** `lint-plan.sh` on this plan → **0** stale-premise
+  (was 3), **11** self-protected preserved, exit 0. Exactly as the plan specified.
+- **Population effect:** stale-premise warnings across all plans 30 → 21, with
+  zero new warnings introduced — noise reduction, not a reshuffle.
+- **Shell suites:** 14 files, all PASS.
+- **Harness suite:** `npm test --prefix harness` → **216/216 pass**. (An earlier
+  `node --test harness/test/` run failed; that was a wrong invocation, not a
+  regression — CI uses the npm script.)
+- **Scope gate:** `check-scope.sh` → 10 files changed, all within declared scope.
+- **Tests-present gate:** 4 test files present.
+- **Mode integrity:** all 14 `scripts/test-*.sh` are committed `100755` — the
+  #101 fix holds uniformly, and no Wave 4 content edit dropped a mode.
+- `lint-shell-safety-baseline.txt` unchanged, confirming the Program Design
+  prediction that no baseline entry would be needed.
+
+**Out-of-scope finding filed, not fixed:** issue #102 (bash 3.2 parse failure in
+`plan-paths.sh`, pre-existing on main).
