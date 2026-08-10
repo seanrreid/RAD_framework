@@ -94,3 +94,57 @@ Gate 2 review.
   `totalUsage.total` 23→24 fails both tests), so the parity gate is not vacuous.
 - Zero diff vs `origin/main` on `gates.js`, `matrix.yaml`, `cli.js`,
   `check-tests-present.sh`.
+
+## Wave 3 — architect notes (highest-risk wave)
+
+### Deviation from the plan's Program Design — ruled correct
+
+The Program Design specifies `scripts/check-verify.sh <feature> <command>` (two args).
+What shipped takes **one**: `check-verify.sh <command>`.
+
+Ruling: **the implementation is right and the plan's signature line was the error.** Every
+existing `sh` call site passes exactly one argument (`sh('scripts/check-tests-present.sh',
+feature)`), and both AC#2 and Task 3.2 require the `sh` port shape stay *unchanged*. Passing
+two arguments would have meant widening the port — violating the same plan. `<feature>` was
+unused by the script in any case. The Program Design was internally inconsistent with its own
+constraint; the wave resolved it in favor of the constraint.
+
+### Concerns raised and ruled on
+
+**1. Exit 124 is reserved for timeout.** A command that genuinely exits 124 is reported as a
+timeout. **Accepted** — it matches the GNU `timeout(1)` convention and errs conservative: the
+false positive *surfaces* (terminal) rather than retrying, so it cannot burn attempts or hide.
+Documented in the script header.
+
+**2. `RAD_VERIFY_TIMEOUT_SECONDS` override is undocumented in CLAUDE.md.** The task said
+"named constant"; the wave made the constant the default and added an env override, because
+AC#7 is otherwise untestable without a 10-minute test. Malformed values are a hard exit-2
+usage error, never a silent fallback. **Accepted, with the gap routed to Wave 5** — Task 5.3
+already edits CLAUDE.md to document the `Verify:` line, so the override is documented there.
+
+### Orchestrator verification (re-run independently, not taken on report)
+
+The plan names Task 3.2 its highest risk ("must apply the allow-listed-env treatment or it
+becomes a credential-leak path"), so every claim below was re-tested directly:
+
+| Check | Result |
+|---|---|
+| **Credential boundary** — `ANTHROPIC_API_KEY`, `GITHUB_TOKEN`, `MY_SECRET` exported in parent | **No canary reached the command.** Visible: `HOME LANG PATH TERM TMPDIR` (+ shell-set `PWD SHLVL _`) |
+| **Timeout** — `sleep 600` at a 3s limit | exit **124**, elapsed **3s**, **no orphan process** |
+| **Exit passthrough** — `exit 7` | exit **7** |
+| **Passing command** | exit 0, **0 bytes** of output (discarded) |
+| **Truncation** — 500-line failure | **42 lines** out |
+| **Frozen surfaces** | `gates.js`, `matrix.yaml`, `check-tests-present.sh` — zero diff vs main |
+| **Outcome vocabulary** | exactly the frozen 7 tokens; no eighth anywhere |
+| **Committed mode** | `check-verify.sh` is `100755` — #101's lesson applied on the next feature |
+| **Suite** | 218/218 pass |
+
+`timeout(1)` is absent on darwin, so the wave used a polling watchdog with a **marker file**
+to distinguish a timeout from a command that chose to exit 143 — a SIGTERMed process and a
+self-terminating one are indistinguishable by wait status alone. Verified working under both
+bash 5.3 and `/bin/bash` 3.2.
+
+**Open Question 4 (RAD_WORKTREE cwd) was asserted, not assumed**, as the plan required: the
+script path resolves against `repoRoot` while cwd resolves to the worktree, confirmed with a
+marker file in a stand-in worktree. `env -i` does not reset cwd, so declared commands execute
+against the isolated tree.
