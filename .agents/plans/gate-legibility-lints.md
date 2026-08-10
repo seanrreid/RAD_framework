@@ -87,6 +87,118 @@ plan. No agents were called. No out-of-scope agent dependencies.
 | .claude/commands/team/rad-plan.md | Files in Scope template | Document the two-row rename convention |
 | .claude/commands/team/rad-adopt.md | Files in Scope template | Document the two-row rename convention |
 
+## Program Design
+
+**Type / signature changes**
+
+- `scripts/lib/plan-paths.sh` — one new helper:
+  `resolve_anchor_path <token> → path | (nothing)`. A token containing `/` is echoed
+  unchanged. A bare basename is looked up with `git ls-files`; exactly one match prints the
+  repo-relative path, zero or ≥2 matches print nothing. Called from inside
+  `plan_cited_anchors`' filter loop, specifically the `*.*)` branch — the branch that today
+  emits bare basenames. `RAD_ANCHOR_EXT` and the `*/*)` branch are untouched.
+- `scripts/lint-plan.sh` — no new functions. One new accumulator array
+  `MISSING_IN_SCOPE=()`, appended alongside each existing
+  `WARNINGS+=("File in scope does not exist: …")`, then subtracted from the freshness input
+  set. Task 3.2's rename advisory is an inline `if` block over the Files-in-Scope rows.
+- `scripts/check-scope.sh` — no new functions. One new variable `RENAME_PAIRS` holding
+  `dest<TAB>src` lines, consulted while printing the `OUT_OF_SCOPE` list. The verdict
+  computation is not touched.
+- `scripts/lint-shell-safety.sh` — one new block, `MODE_VIOLATIONS`, reusing the existing
+  `VIOLATIONS` flag and `exit 1` path.
+
+**Call-stack / control-flow sketch**
+
+```
+lint-plan.sh (top-level, sequential)
+  Files-in-Scope existence check (~140-153)
+    WARNINGS+=("File in scope does not exist: $path")
+    MISSING_IN_SCOPE+=("$path")                      # NEW (Task 2.2)
+  ... task-File:, high-risk, Program Design, self-protected advisories (unchanged) ...
+  NEW rename advisory (Task 3.2): for each Files-in-Scope row
+    if Change cell matches (git mv|rename|→) and names a path-shaped token
+       not present in the File column ⇒ WARNINGS+=(...)
+  Premise-freshness block (~232-244):
+    { plan_cited_anchors            # ← Task 2.1 changes what this emits
+      plan_task_files
+      plan_files_in_scope
+    } | sort -u
+      | grep -Fxv -f <(plan_created_paths …)         # existing create-exempt
+      | grep -Fxv -f <(MISSING_IN_SCOPE)             # NEW suppression (AC#3)
+      → path_exists_on_ref path origin/main
+          rc 1 ⇒ "stale premise"   rc 2 ⇒ "not verified" + break
+
+plan_cited_anchors (plan-paths.sh)
+  grep -oE '…:[0-9]+'  → status classified: >1 ⇒ return (fail closed)   [KEEP]
+  per token: drop URL host:port; strip :NNN
+    */*)  echo path                                  [unchanged]
+    *.*)  matches RAD_ANCHOR_EXT ⇒ resolve_anchor_path path   # NEW indirection
+
+check-scope.sh
+  SCOPE_LIST built from column 2 only                [unchanged — see Non-Goals]
+  CHANGED_FILES=$(git diff --name-only <REF_EXPR>)   # 3-way fallback chain
+  classify → IN_SCOPE / OUT_OF_SCOPE                 [unchanged]
+  output block (~110-139):
+    RENAME_PAIRS=$(git diff --find-renames --diff-filter=R --name-status <REF_EXPR>)
+    for f in OUT_OF_SCOPE:
+      if f is a rename dest whose src ∈ SCOPE_LIST ⇒ annotate "likely rename target of <src>"
+      else print as today
+    exit 1                                           [verdict unchanged]
+
+lint-shell-safety.sh
+  existing scan loop:  for f in "$SCRIPTS_DIR"/*.sh   # non-recursive; SKIPS test-*.sh
+  NEW mode loop (separate):  git ls-files -s "$SCRIPTS_DIR"
+    include *.sh and *.mjs; exclude *.sh.sample and non-script data files
+    mode != 100755 ⇒ report "$path (committed $mode, read from the index)"; VIOLATIONS=1
+  stale-baseline pass, exit                          [unchanged]
+```
+
+**Design constraints this sketch surfaces**
+
+1. **The mode check cannot reuse the existing scan loop.** That loop skips `test-*.sh`
+   (`lint-shell-safety.sh:116`) and globs non-recursively, yet the sole offender is
+   `scripts/test-check-scope.sh`. Folding the mode check into it would make the check
+   structurally incapable of catching #101. It must be a separate `git ls-files -s` pass.
+2. **`git ls-files -s scripts/` recurses; the existing glob does not.** The new pass sees
+   `scripts/hooks/**`, so the `*.sh.sample` exclusion is load-bearing, not decorative.
+3. **`check-scope.sh` resolves its diff ref through a three-way fallback chain** (`origin/BASE...`,
+   `BASE...`, `BASE..`). The rename lookup must reuse the ref expression that actually
+   succeeded rather than recomputing it, or the two queries can disagree.
+4. **`resolve_anchor_path` sits downstream of an already-classified grep.** Its own
+   `git ls-files` failure needs the same treatment — a read error must fail closed, never
+   silently resolve to "no anchors" (already named in Risks).
+
+**Verified against the tree at rebase time**
+
+- Exactly one committed-mode offender under `scripts/`: `test-check-scope.sh` (`100644`).
+  The other four non-`100755` entries are legitimately data or fixtures (`hooks/README.md`,
+  two `*.sh.sample`, `lint-shell-safety-baseline.txt`). Confirms "no baseline entry expected".
+- `plan_created_paths` already exists and is already wired into the freshness filter, so
+  Task 2.2 adds the second, broader suppression rather than building create-exemption.
+- This plan's own lint run reproduces #98: it warns `stale premise:` for `spine.js`, `ci.yml`,
+  and `lint-shell-safety.sh` while `harness/spine.js`, `.github/workflows/ci.yml`, and
+  `scripts/lint-shell-safety.sh` all exist. Those three warnings are the acceptance fixture —
+  running `scripts/lint-plan.sh` on this very file after Wave 2 must emit none of them, while
+  the eleven self-protected warnings must all survive unchanged.
+
+**File-tree diff**
+
+```
+ scripts/lib/plan-paths.sh              (M)  + resolve_anchor_path; plan_cited_anchors calls it
+ scripts/lint-plan.sh                   (M)  + MISSING_IN_SCOPE accumulator, + rename advisory
+ scripts/check-scope.sh                 (M)  + RENAME_PAIRS lookup in the output block
+ scripts/lint-shell-safety.sh           (M)  + committed-mode pass over git ls-files -s
+ scripts/test-check-scope.sh            (M)  mode 100644 → 100755 (index), + rename cases
+ scripts/test-plan-paths.sh             (M)  + bare-basename resolution cases
+ scripts/test-lint-plan.sh              (M)  + suppression + rename-advisory cases
+ scripts/test-lint-shell-safety.sh      (M)  + committed-mode cases
+ .claude/commands/team/rad-plan.md      (M)  + two-row rename convention
+ .claude/commands/team/rad-adopt.md     (M)  + two-row rename convention
+```
+
+No files added, moved, or deleted. `scripts/lint-shell-safety-baseline.txt` is expected to
+stay byte-identical; it remains in Files in Scope only as the documented escape hatch.
+
 ## Execution Notes
 
 ### Do Not Touch
