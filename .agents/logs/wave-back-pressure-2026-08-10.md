@@ -64,3 +64,30 @@ against a slightly stale read of the adapters.
 - Only 4 files changed: `docs/rad-wave-contract.md` and the three adapter files.
 - Wave 1 is inert by design — nothing consumes `result.tasks` until Wave 2 wires it into
   the `wave-attempt` event.
+
+## Wave 2 — architect notes
+
+**Concern raised (Task 2.2) and ruled on: `usage`'s undefined-valued key.**
+`spine.js` assigns `usage: result.usage`, so a legacy-shaped attempt carries a `usage` key
+whose value is `undefined`. It serializes identically to an absent key, so no current fold
+is affected — but a future reader using `'usage' in data` instead of a truthiness check
+would get a false positive. Wave 2's `tasks` avoids this by construction (spread, so the
+key is genuinely absent).
+
+Ruling: **noted, not fixed.** Pre-existing and outside this plan's scope; changing it risks
+the byte-parity guarantee AC#5 turns on. Carried forward as a constraint instead: any
+reader over these keys in Waves 3-5 must test *values*, not key presence. Flagged for
+Gate 2 review.
+
+**Orchestrator verification:**
+- `npm test --prefix harness` → **218/218 pass** (216 baseline + 2 from Task 2.3).
+- AC#5 byte-identity was *demonstrated*, not asserted: the wave extracted
+  `origin/main:harness/spine.js` to a sibling module, drove both it and HEAD's spine
+  through identical tasks-free scripted results, serialized every appended event, and
+  `cmp`'d the streams — identical.
+- Task 2.3 names all six folds explicitly (`reduce`, `resumeFrom`, `totalUsage`,
+  `outcomeCounts`, `failReasonCounts`, `retryCounts`) and asserts hand-computed values
+  rather than values captured from a run. The wave mutation-checked it (perturbing
+  `totalUsage.total` 23→24 fails both tests), so the parity gate is not vacuous.
+- Zero diff vs `origin/main` on `gates.js`, `matrix.yaml`, `cli.js`,
+  `check-tests-present.sh`.
