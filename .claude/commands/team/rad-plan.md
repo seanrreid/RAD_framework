@@ -121,7 +121,12 @@ Branch: rad/[feature-slug]
 
 ## Files in Scope
 <!-- Lines must be a range (e.g. 45-120) or a single number. The linter sums
-     these to compute context budget. Warn at 800 lines, error at 1500. -->
+     these to compute context budget. Warn at 800 lines, error at 1500.
+     A RENAME DECLARES BOTH PATHS: one row for the source, one for the
+     destination. scripts/check-scope.sh builds the declared set from the File
+     column only — it never reads this Change prose — so a `git mv` destination
+     mentioned only in a Change cell reads as out-of-scope drift and fails the
+     scope check at deliver time. -->
 | File | Lines | Change |
 |------|-------|--------|
 | [path] | [start-end] | [what changes] |

@@ -22,6 +22,12 @@ ERRORS=()
 WARNINGS=()
 TOTAL_LINES=0
 BUDGET_COMPUTED=false
+# Newline-delimited Files-in-Scope paths already reported absent from disk. The
+# premise-freshness advisory subtracts this set so one fact yields one finding: a
+# path the plan is about to create is absent from the base branch by construction,
+# and "does not exist" already says so. A string, not an array — an empty array
+# expansion is an error under `set -u` on bash 3.2.
+MISSING_IN_SCOPE=""
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -144,6 +150,7 @@ if has_section "Files in Scope"; then
     # Check file exists
     if [[ ! -f "$path" && ! -d "$path" ]]; then
       WARNINGS+=("File in scope does not exist: $path")
+      MISSING_IN_SCOPE="${MISSING_IN_SCOPE}${path}"$'\n'
     fi
   done < <(
     awk '/^## Files in Scope/{found=1; next} /^## /{found=0} found && /^\|/' "$PLAN_FILE" \
@@ -217,10 +224,57 @@ while IFS= read -r path; do
   fi
 done < <(plan_scope_paths "$PLAN_FILE")
 
+# ── Rename convention advisory ────────────────────────────────────────────────
+# A rename declares BOTH paths as separate Files-in-Scope rows. check-scope.sh
+# builds its declared set from the File column alone and never reads the Change
+# prose, so a destination described only there fails deliver-time scope check as
+# out-of-scope drift (#99). Detect a rename-shaped Change cell and warn — never
+# error — for each path-shaped token in it that has no File-column row of its own.
+# The prose is NEVER parsed into any scope set: guessing at natural language
+# inside a fail-closed gate is worse than the current honest failure (Non-Goal).
+RENAME_CHANGE_PATTERN='git mv|rename|→'
+
+change_cell_describes_rename() {
+  echo "$1" | grep -qiE "$RENAME_CHANGE_PATTERN"
+}
+
+token_is_path_shaped() {
+  # True for a token that looks like a real file path: it carries a directory
+  # separator, or it is a bare basename ending in a known source extension
+  # (RAD_ANCHOR_EXT — the same "is this a file" test the anchor scan uses).
+  # Everything else is prose and must not produce a warning.
+  local token="$1"
+  [[ "$token" == */* ]] && return 0
+  echo "$token" | grep -qE "^[A-Za-z0-9_.-]+\.${RAD_ANCHOR_EXT}\$"
+}
+
+if has_section "Files in Scope"; then
+  DECLARED_IN_SCOPE=$(plan_files_in_scope "$PLAN_FILE")
+  RENAME_WARNED=""
+  while IFS= read -r change_cell; do
+    change_cell_describes_rename "$change_cell" || continue
+    while IFS= read -r token; do
+      token=$(echo "$token" | tr -d '`' | sed 's/[.,;:()]*$//')
+      [[ -z "$token" ]] && continue
+      token_is_path_shaped "$token" || continue
+      printf '%s\n' "$DECLARED_IN_SCOPE" | grep -Fxq -e "$token" && continue
+      printf '%s\n' "$RENAME_WARNED"    | grep -Fxq -e "$token" && continue
+      WARNINGS+=("rename destination not declared: '$token' is named in a rename Change cell but has no File-column row — a rename declares BOTH paths as separate Files-in-Scope rows (check-scope.sh reads the File column only)")
+      RENAME_WARNED="${RENAME_WARNED}${token}"$'\n'
+    done < <(printf '%s\n' "$change_cell" | tr ' \t' '\n\n')
+  done < <(
+    awk '/^## Files in Scope/{found=1; next} /^## /{found=0} found && /^\|/' "$PLAN_FILE" \
+      | grep -v "^| *File" | grep -v "^|[-| ]*$" \
+      | awk -F'|' '{print $4}'
+  )
+fi
+
 # ── Premise-freshness advisory ────────────────────────────────────────────────
 # Over the union of cited `path:line` anchors, per-task File: paths, and
 # Files-in-Scope entries — MINUS the paths this plan creates (create-exempt: they
-# don't yet exist on the base by design) — warn (never error) for any path absent
+# don't yet exist on the base by design) and MINUS any path the Files-in-Scope
+# existence check already reported absent from disk (one fact, one finding) —
+# warn (never error) for any path absent
 # on origin/<default_branch>: a plan anchored to removed/renamed code. Existence
 # only; line numbers are never verified. Queries the locally-known ref — NO
 # implicit fetch. Fail-closed: an unresolvable base ref yields ONE advisory that
@@ -240,7 +294,9 @@ done < <(
     plan_cited_anchors "$PLAN_FILE"
     plan_task_files "$PLAN_FILE"
     plan_files_in_scope "$PLAN_FILE"
-  } | grep -v '^$' | sort -u | grep -Fxv -f <(plan_created_paths "$PLAN_FILE")
+  } | grep -v '^$' | sort -u \
+    | grep -Fxv -f <(plan_created_paths "$PLAN_FILE") \
+    | grep -Fxv -f <(printf '%s' "$MISSING_IN_SCOPE")
 )
 
 # ── Context budget ────────────────────────────────────────────────────────────

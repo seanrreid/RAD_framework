@@ -1,0 +1,172 @@
+# Execution Log: Gate Legibility Lints
+Plan: .agents/plans/gate-legibility-lints.md
+Started: 2026-08-10T13:20:00Z
+Branch: rad/gate-legibility-lints
+Executor role: architect
+
+## Steps
+
+| Step | Wave | Task | Status | Commit | Time |
+|------|------|------|--------|--------|------|
+| 1 | Wave 1 | Fix the committed mode | ✓ complete | 44a7392 | 2026-08-10T13:56:36Z |
+| 2 | Wave 1 | Committed-mode check in the shell-safety lint | ✓ complete (concerns) | d0b50ed | 2026-08-10T14:02:00Z |
+| 3 | Wave 2 | Bare-basename resolution | ✓ complete | 8a8e9f3 | 2026-08-10T13:40:28Z |
+| 4 | Wave 2 | Suppress the duplicate for plan-created files | ✓ complete | 8fc17b8 | 2026-08-10T13:44:16Z |
+| 5 | Wave 3 | Rename-aware violation message | ✓ complete | d16348e | 2026-08-10T15:12:00Z |
+| 6 | Wave 3 | Plan-time rename advisory | ✓ complete | 3511dcb | 2026-08-10T15:20:00Z |
+| 7 | Wave 3 | Document the two-row convention | ✓ complete | f99109a | 2026-08-10T15:26:00Z |
+
+## Wave 1 — architect notes
+
+**Concern raised (Task 1.2) and ruled on: AC#9 vs fixture setup.**
+`git ls-files` exits 128 outside a repository, so the fail-closed requirement in
+Task 1.2 is structurally incompatible with the existing fixtures being plain
+scratch dirs — all 8 would have exited 2. The wave added an `init_fixture_repo`
+helper so each fixture is a real repo.
+
+Ruling: **accepted.** AC#9 requires existing suites to "pass unchanged in count
+and outcome". Verified: the original 8 cases retain their descriptions, their
+asserted exit codes (0/1/2), and their pass status; 3 new cases were appended
+(9, 10, 11). Only fixture *setup* changed. The rejected alternative — scoping the
+mode pass to the lint's own repo rather than `$SCRIPTS_DIR` — would have left zero
+fixture churn but made the check untestable, which is the worse trade.
+
+**Second concern, self-resolved:** the new `git -C "$SCRIPTS_DIR"` call violated
+the lint's own tainted-input rule, taking the clean tree from exit 0 to exit 1.
+Fixed with a shape guard on `$SCRIPTS_DIR` (exit 2 on whitespace/metacharacters)
+rather than a baseline entry, so the Program Design note "no baseline entry
+expected" still holds.
+
+**Independently verified by the orchestrator before Wave 2:**
+- `44a7392` records `:100644 100755 46e47dc 46e47dc M` — a pure mode transition,
+  blob hash unchanged. The Risks section's "a content edit that drops the mode
+  would silently reintroduce #101" is satisfied.
+- `scripts/test-check-scope.sh` invoked directly now exits 0 (was 126) — AC#7.
+- Clean-tree lint output is byte-identical to pre-change, exit 0 — AC#9.
+- Re-staging the bug with `git update-index --chmod=-x` while the file remained
+  `+x` on disk produces `✗ scripts/test-check-scope.sh: committed mode 100644 …`
+  and exit 1 — proving the check reads the index, not the filesystem (AC#8).
+- All 11 cases pass.
+
+
+## Wave 2 notes
+
+**Acceptance fixture (issue #98).** `scripts/lint-plan.sh
+.agents/plans/gate-legibility-lints.md`: 3 stale-premise warnings → **0**; the 11
+`self-protected path` warnings are byte-identical before and after; exit code
+stays 0. Total warnings 14 → 11. All three suppressed warnings were false —
+`.github/workflows/ci.yml`, `scripts/lint-shell-safety.sh`, and `harness/spine.js`
+are all present on `origin/main`; only the bare basename was being existence-
+checked at the repo root.
+
+**Population check.** Across all 32 files in `.agents/plans/`, stale-premise
+warnings drop 30 → 21, and `comm -13` against the pre-change run shows **zero new
+warnings introduced**. The change is pure noise reduction, not a re-shuffle.
+
+**Fail-closed on the new git read.** `resolve_anchor_path` returns 2 with a reason
+on stderr when `git ls-files` fails, and never lets a git error look like "no
+match". Because the call site sits inside a command substitution whose exit status
+cannot reach the caller, the failure travels out as the in-band sentinel
+`RAD_ANCHOR_RESOLVE_FAILED` (a string un-representable in the anchor grep's
+`[A-Za-z0-9._/-]` charset), which `plan_cited_anchors` converts back to `return 2`.
+Verified end-to-end by sourcing the lib outside a git repo: `git ls-files` exits
+128, `resolve_anchor_path` returns 2, and `plan_cited_anchors` returns 2 with a
+message rather than an empty (silently-dropped) anchor set.
+
+**True positives preserved.** A plan citing `harness/does-not-exist.js:12` still
+warns. A bare basename with zero or ≥2 tracked matches emits nothing by design —
+verified with `harness-ci.md` (3 tracked matches) — since a guess is worse than no
+signal.
+
+**Architect ruling on the bash 3.2 concern: filed, not fixed.** Confirmed
+pre-existing on `origin/main` (same construct, line 120 there vs 171 here) and
+confirmed to bite: this machine's `/bin/bash` is 3.2.57 and
+`/bin/bash scripts/lint-plan.sh <plan>` exits 2 with a syntax error instead of
+linting. Out of this plan's approved scope, so it ships as **issue #102** rather
+than widening the diff. The header claim at `plan-paths.sh:10` is currently false
+and #102 records that.
+
+**Concern, not fixed (pre-existing, filed for Wave 4 or a follow-up).**
+`scripts/lib/plan-paths.sh` declares "bash 3.2 (macOS stock) compatible" in its
+header, but it has not parsed under bash 3.2 since the premise-freshness lint
+landed: `/bin/bash -n scripts/lib/plan-paths.sh` fails with `syntax error near
+unexpected token ';;'` at the `case "$token" in *//*) continue ;; esac` line. This
+is the bash 3.2 `$( )` parser bug — a `)` in a case pattern inside a command
+substitution closes the substitution early; the fix is to write the patterns with
+a leading paren (`(*//*)`). It predates this branch, is unrelated to #98, and
+fixing it would widen the Wave 2 diff, so it was left alone. It matters because on
+a stock macOS box without a newer bash on PATH, `scripts/lint-plan.sh` fails
+outright rather than linting. All Wave 2 code was written to stay 3.2-safe
+(here-strings and `[[ ]]` only, no new case patterns inside the substitution).
+
+## Wave 3 — orchestrator verification
+
+Rebuilt the rename scenarios in an independent fixture repo rather than trusting
+the wave's self-report, because Task 3.1 edits a **fail-closed gate** and a
+message-only change that accidentally turned it permissive would be invisible in
+a passing test suite.
+
+| Scenario | Expected | Observed |
+|---|---|---|
+| `git mv` of a declared file to an undeclared path | fail (1) | **exit 1**, message names both `src/renamed.js` and `src/in-scope.js` |
+| Both source and destination declared as rows | pass (0) | **exit 0** |
+| Unrelated new file | fail (1), no rename hint | **exit 1**, plain message, no hint |
+
+Verdict provably unchanged — AC#4 satisfied without the gate becoming permissive.
+
+AC#6 (the approval-time under-execution flag) verified on **both** command specs:
+`rad-plan.md` and `rad-adopt.md` each carry the two-row convention. The risk
+flagged at Gate 1 did not materialize.
+
+Wave 2 regression re-confirmed after Wave 3's second edit to `lint-plan.sh`
+(required by the plan's Risks section): 0 stale-premise, 11 self-protected,
+exit 0. All four suites pass.
+
+**Carried to Wave 4:** `check-scope.sh`'s unresolvable-diff-range path now exits
+**2** with a logged reason, where previously `set -e` aborted with git's raw 128
+and no message. Still fail-closed and non-zero, and 2 is this script's documented
+usage-error code — but a Wave 4 case for that path must assert 2, not 128.
+
+## Wave 4 — test coverage (parallel, disjoint files)
+
+| Step | Wave | Task | Status | Commit | Time |
+|------|------|------|--------|--------|------|
+| 8 | Wave 4 | check-scope rename cases | ✓ complete | c099838 | 2026-08-10T16:05:00Z |
+| 9 | Wave 4 | shell-safety mode cases | ✓ complete | 19976fe | 2026-08-10T16:08:00Z |
+| 10 | Wave 4 | plan-paths and lint-plan cases | ✓ complete | dccbdd3 | 2026-08-10T16:22:00Z |
+
+Case counts: `test-check-scope.sh` 3 → 7, `test-lint-shell-safety.sh` 11 → 15,
+`test-plan-paths.sh` 9 → 16, `test-lint-plan.sh` 19 → 27. **42 → 65 cases.**
+Every pre-existing case kept its description, asserted exit code, and pass
+status (AC#9).
+
+Task 4.2 was scoped as an audit rather than a write: Wave 1 had already added
+three mode cases. It closed three real gaps (subdirectory recursion, `*.mjs`,
+the `$SCRIPTS_DIR` shape guard) plus the mirror of the index-vs-filesystem case,
+and correctly declined to duplicate the `test-*.sh` offender case that already
+existed.
+
+Task 4.3 covered **both** `test-plan-paths.sh` and `test-lint-plan.sh`. The
+plan's `File:` field named only the first; the second carries AC#5's coverage.
+Flagged at Gate 1 as an under-execution risk and corrected in the wave prompt —
+the same correction applied to Task 3.3 in Wave 3. Both landed complete.
+
+## Final verification (orchestrator)
+
+- **Acceptance fixture:** `lint-plan.sh` on this plan → **0** stale-premise
+  (was 3), **11** self-protected preserved, exit 0. Exactly as the plan specified.
+- **Population effect:** stale-premise warnings across all plans 30 → 21, with
+  zero new warnings introduced — noise reduction, not a reshuffle.
+- **Shell suites:** 14 files, all PASS.
+- **Harness suite:** `npm test --prefix harness` → **216/216 pass**. (An earlier
+  `node --test harness/test/` run failed; that was a wrong invocation, not a
+  regression — CI uses the npm script.)
+- **Scope gate:** `check-scope.sh` → 10 files changed, all within declared scope.
+- **Tests-present gate:** 4 test files present.
+- **Mode integrity:** all 14 `scripts/test-*.sh` are committed `100755` — the
+  #101 fix holds uniformly, and no Wave 4 content edit dropped a mode.
+- `lint-shell-safety-baseline.txt` unchanged, confirming the Program Design
+  prediction that no baseline entry would be needed.
+
+**Out-of-scope finding filed, not fixed:** issue #102 (bash 3.2 parse failure in
+`plan-paths.sh`, pre-existing on main).
