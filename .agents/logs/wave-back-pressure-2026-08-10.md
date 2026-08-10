@@ -30,6 +30,9 @@ Pre-flight, 2026-08-10:
 | 1 | Wave 1 | Document `usage` and `tasks[]` in the wave contract | ✓ complete | 060e2cd | 11:32 |
 | 2 | Wave 1 | Thread parsed `tasks` onto the wave result | ✓ complete | 50cc7cd | 11:38 |
 | 3 | Wave 1 | Both adapters return `tasks` + normalized `usage` | ✓ complete | c35e2aa | 11:44 |
+| 4 | Wave 2 | Event typedef gains both optional keys | ✓ complete | a7431da | 11:13 |
+| 5 | Wave 2 | Spine records `tasks` on the wave-attempt event | ✓ complete | 1050ab0 | 11:19 |
+| 6 | Wave 2 | Fold-parity test on historical logs | ✓ complete | fa0d59a | 11:26 |
 
 ## Wave 1 — architect notes
 
