@@ -21,7 +21,7 @@ adapters live alongside it.
 An adapter is a factory that returns a `runWave` function:
 
 ```
-runWave(wave, planCtx) -> Promise<{ outcome, status, tasks }>
+runWave(wave, planCtx) -> Promise<{ outcome, status, tasks?, usage? }>
 ```
 
 - `wave` — the wave descriptor from the plan: `{ n, type, tasks: [...] }`.
@@ -30,14 +30,26 @@ runWave(wave, planCtx) -> Promise<{ outcome, status, tasks }>
 
 The returned result:
 
-| Field | Type | Meaning |
-|-------|------|---------|
-| `outcome` | string | the **matrix outcome** the spine reads (`result.outcome`) |
-| `status` | string | `complete` or `failed` — the wave-level roll-up |
-| `tasks` | array | per-task records, for the execution log |
+| Field | Type | Optionality | Meaning |
+|-------|------|-------------|---------|
+| `outcome` | string | **required** | the **matrix outcome** the spine reads (`result.outcome`) |
+| `status` | string | **required** | `complete` or `failed` — the wave-level roll-up |
+| `tasks` | array of `{ title, status, commit, concern, error }` | **optional** — present only when the agent reported at least one parseable task; otherwise the key is **omitted** | the per-task records parsed out of the `WAVE_RESULT` block, passed through for the execution log and for downstream event recording |
+| `usage` | `{ input, output, total }` (numbers) | **optional and adapter-optional** — an adapter that observes no token counts omits the key entirely | normalized token usage for the wave attempt, produced by `normalizeUsage` |
 
-The spine only consumes `outcome`. It passes it to `resolveOutcome('implement',
-outcome)` against `harness/matrix.yaml`. The matrix vocabulary is **fixed**:
+Both optional fields are **adapter-optional**: an adapter that reports neither
+behaves exactly as one that predates them. A missing `usage` contributes `0` to
+the `RAD_TOKEN_BUDGET` breaker (the spine reads `result.usage?.total ?? 0`), and
+a missing `tasks` is simply nothing to record.
+
+A malformed, absent, or unparseable `tasks` block **degrades to omission of the
+key** — it is never a thrown error, and it never by itself produces
+`fail-protocol`. (An entirely missing or empty `WAVE_RESULT` block is a separate
+condition and still maps to `fail-protocol` via `resultToOutcome`; see below.)
+
+The spine only consumes `outcome` for control flow. It passes it to
+`resolveOutcome('implement', outcome)` against `harness/matrix.yaml`. The matrix
+vocabulary is **fixed**:
 
 ```
 success | fail-tests | fail-scope | fail-protocol | fail-timeout | no-changes | abort-user
@@ -111,6 +123,13 @@ outcome — it never invents an outcome outside the fixed set:
 | every task `complete` or `done_with_concerns` | `success` |
 | any task `blocked_*` (or otherwise not passing) | `fail-tests` |
 
+The mapping **collapses** the per-task statuses into a single outcome, but it
+does not consume them: the individual `{ title, status }` records are **passed
+through** onto the result as `tasks` alongside the collapsed `outcome`. The
+outcome remains the only field that drives control flow; `tasks` preserves the
+detail the collapse discards, so a caller can see *which* task blocked without
+re-parsing the agent's text.
+
 Run-level failures the adapter detects before/around parsing map directly:
 
 | Run-level condition | Matrix outcome |
@@ -138,8 +157,9 @@ Both shipped adapters follow the same skeleton; reuse the shared helpers in
 4. **Extract + parse:** `extractWaveResultBlock(text)` then
    `parseWaveResult(block)`. On a missing block, **reprompt exactly once** asking
    for the block; if still missing, return `fail-protocol`.
-5. **Reconcile:** wrap the parsed result with `resultToOutcome` into
-   `{ outcome, status, tasks }`.
+5. **Reconcile:** wrap the parsed result with `toWaveResult(parsed, usage)` — the
+   shared builder that applies `resultToOutcome` and attaches the optional
+   `tasks` / `usage` keys (omitting either when there is nothing to report).
 6. **Never leak credentials:** run every surfaced error message through
    `sanitizeErrorMessage`, and hand your agent only an **allow-listed** env
    subset (`PATH`, `HOME`, locale/temp vars) — never spread the full

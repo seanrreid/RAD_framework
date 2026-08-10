@@ -12,11 +12,88 @@
  */
 
 /**
+ * Hard character cap on EVERY free-text field carried into a retry prompt (the
+ * prior attempt's verification excerpt and its reported error).
+ *
+ * Constraint: truncation is MANDATORY, not best-effort. An untruncated failing
+ * suite in the retry prompt reproduces the exact context flood this feature
+ * exists to prevent, so the cap is applied unconditionally at render time —
+ * never conditionally on who produced the text. It is deliberately TIGHTER than
+ * the producer's own bound (scripts/check-verify.sh caps its excerpt at 40 lines
+ * / 8000 bytes) so the prompt stays bounded even for text that never passed
+ * through that script; 4000 chars is roughly 1k tokens, enough for a runner's
+ * failure summary and small against a wave prompt.
+ */
+export const PRIOR_FAILURE_FIELD_MAX_CHARS = 4000;
+
+/** The label opening the optional retry section. */
+const PRIOR_FAILURE_HEADING = '## Prior Attempt Failure';
+
+/**
+ * Truncate one free-text field to PRIOR_FAILURE_FIELD_MAX_CHARS, keeping the
+ * TAIL (where test runners put the failure summary) and stating that the cap
+ * bit. Applied unconditionally by the caller.
+ *
+ * @param {unknown} text
+ * @returns {string}
+ */
+function cappedField(text) {
+  const s = String(text ?? '');
+  if (s.length <= PRIOR_FAILURE_FIELD_MAX_CHARS) return s;
+  const kept = s.slice(-PRIOR_FAILURE_FIELD_MAX_CHARS);
+  return `(truncated: last ${PRIOR_FAILURE_FIELD_MAX_CHARS} of ${s.length} chars)\n${kept}`;
+}
+
+/**
+ * Render the OPTIONAL `## Prior Attempt Failure` section.
+ *
+ * Returns '' when there is no prior failure, and the caller interpolates it so
+ * that the empty case reproduces today's prompt BYTE-FOR-BYTE (AC#4) — the
+ * section owns its own surrounding blank lines.
+ *
+ * Presence is tested by TRUTHINESS, never by key presence: a legacy caller and a
+ * first attempt both arrive as undefined/null, and both mean "no prior failure".
+ *
+ * @param {{ attempt?: number, outcome?: string, task?: Object, excerpt?: string } | null | undefined} priorFailure
+ * @returns {string} '' or the section, wrapped in its own separators
+ */
+function renderPriorFailure(priorFailure) {
+  if (!priorFailure) return '';
+
+  const { attempt, outcome, task, excerpt } = priorFailure;
+  const which = attempt ? `Attempt ${attempt}` : 'The previous attempt';
+  const facts = [];
+  if (outcome) facts.push(`- Outcome: ${outcome}`);
+  if (task && (task.title || task.status)) {
+    const title = task.title || '(unnamed task)';
+    facts.push(`- Blocking task: ${title}${task.status ? ` — reported status: ${task.status}` : ''}`);
+  }
+  if (task && task.error && task.error !== '—') {
+    facts.push(`- Reported error: ${cappedField(task.error)}`);
+  }
+
+  const excerptBlock = excerpt
+    ? `Verification output from that attempt:\n\n\`\`\`\n${cappedField(excerpt)}\n\`\`\``
+    : '';
+
+  const body = [
+    `${which} of this wave FAILED. Diagnose the cause below and change your approach — re-running the same steps unchanged will fail the same way.`,
+    facts.join('\n'),
+    excerptBlock,
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+
+  return `\n${PRIOR_FAILURE_HEADING}\n\n${body}\n`;
+}
+
+/**
  * Build the wave prompt string from plan state, following the exact template
  * defined in .claude/commands/team/rad-deliver.md Step 6.
  *
  * @param {Object} wave - wave descriptor from the plan
- * @param {Object} planCtx - orchestrator plan context
+ * @param {Object} planCtx - orchestrator plan context; may additionally carry the
+ *   OPTIONAL `priorFailure` attempt context folded in by the deliver CLI
  * @returns {string}
  */
 export function buildWavePrompt(wave, planCtx) {
@@ -26,6 +103,7 @@ export function buildWavePrompt(wave, planCtx) {
     executionLog,
     executionNotes = {},
     acceptanceCriteria = [],
+    priorFailure = null,
   } = planCtx;
 
   const { doNotTouch = [], keyFiles = [], reminders = [] } = executionNotes;
@@ -44,6 +122,11 @@ export function buildWavePrompt(wave, planCtx) {
   const remindersBlock = reminders.length
     ? reminders.map((l) => `- ${l}`).join('\n')
     : '(none)';
+
+  // '' on a first attempt (and for any caller that never sets priorFailure), so
+  // the template below renders byte-for-byte the prompt it rendered before this
+  // section existed.
+  const priorFailureBlock = renderPriorFailure(priorFailure);
 
   const acBlock = acceptanceCriteria.length
     ? acceptanceCriteria.map((ac, i) => `- AC#${i + 1}: ${ac}`).join('\n')
@@ -81,7 +164,7 @@ ${keyFilesBlock}
 
 ### Reminders
 ${remindersBlock}
-
+${priorFailureBlock}
 ## Guardrail Extensions
 
 Before writing any code, complete this protocol:
@@ -259,6 +342,40 @@ export function resultToOutcome(parsed) {
   const hasNonRetryable = parsed.tasks.some((t) => nonRetryable.has(t && t.status));
 
   return hasNonRetryable ? 'fail-scope' : 'fail-tests';
+}
+
+/**
+ * Wrap a parsed `{ status, tasks }` into the full spine-facing wave result —
+ * the single place every adapter builds its return value, so the contract shape
+ * is defined once rather than per-adapter.
+ *
+ * `outcome` and `status` are REQUIRED; `tasks` and `usage` are OPTIONAL and are
+ * OMITTED (not emitted empty/undefined) when there is nothing to report:
+ *   - `tasks` — the per-task `{title, status}` records parsed out of the
+ *     WAVE_RESULT block, passed through rather than collapsed away by
+ *     resultToOutcome. A malformed or absent tasks block degrades to omission of
+ *     the key: this function never throws and never itself forces a
+ *     'fail-protocol' (the outcome still comes from resultToOutcome alone, so an
+ *     empty/unparseable block maps exactly as it does without this pass-through).
+ *   - `usage` — a normalized {input,output,total} from normalizeUsage, which
+ *     never returns a partial object, so a truthy check is sufficient. An
+ *     adapter that observes no token counts omits it and contributes 0 to the
+ *     token budget.
+ *
+ * @param {{ status?: string, tasks?: Array } | null | undefined} parsed
+ * @param {{ input: number, output: number, total: number }} [usage]
+ * @returns {{ outcome: string, status: string, tasks?: Array, usage?: Object }}
+ */
+export function toWaveResult(parsed, usage) {
+  const result = {
+    outcome: resultToOutcome(parsed),
+    status: parsed?.status ?? 'failed',
+  };
+  if (Array.isArray(parsed?.tasks) && parsed.tasks.length > 0) {
+    result.tasks = parsed.tasks;
+  }
+  if (usage) result.usage = usage;
+  return result;
 }
 
 /**

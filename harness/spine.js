@@ -48,6 +48,18 @@ function safeVetoOutcome(outcome) {
  * the early exit; this cap only bites when every attempt fails *differently*. */
 const MAX_ATTEMPTS = 3;
 
+/** The executing verification gate: runs a plan-declared command and reads its
+ * REAL exit code. Distinct from check-tests-present.sh (file presence) by
+ * design — neither replaces the other (issue #91). */
+const VERIFY_SCRIPT = 'scripts/check-verify.sh';
+
+/** Exit code check-verify.sh RESERVES for "the declared command exceeded its
+ * timeout and was killed". It maps to the EXISTING `fail-timeout` outcome
+ * (matrix action `surface`), never `fail-tests` (`revision`): a retry cannot fix
+ * a hang, so a wedged command must surface rather than burn the attempt budget.
+ * Kept in lockstep with VERIFY_TIMEOUT_STATUS in scripts/check-verify.sh. */
+const VERIFY_TIMEOUT_STATUS = 124;
+
 /** Post-check guardrails, run in order after all waves. The test-PRESENCE gate
  * now runs per-wave (a promised-but-absent test file blocks AT the wave that
  * promised it, not at the end), so check-tests-present is no longer an end
@@ -102,6 +114,78 @@ function fireHooks(runHooks, point, ctx, { state, feature, now }) {
   return res;
 }
 
+/** Task statuses the wave contract treats as passing. Mirrors the passing set in
+ * adapters/agent/contract.js resultToOutcome — restated here rather than
+ * imported so the spine keeps its no-adapter-dependency layering. */
+const PASSING_TASK_STATUSES = new Set(['complete', 'done_with_concerns']);
+
+/**
+ * The first task the agent reported as NOT passing — the one that blocked the
+ * wave. `tasks` is an OPTIONAL contract field, so an adapter that reported none
+ * (and a demotion where every reported task passed but a gate failed) yields
+ * null and the retry prompt simply carries no task line.
+ *
+ * @param {unknown} tasks - the wave result's optional per-task records
+ * @returns {{ title: string, status: string, error: string } | null}
+ */
+function blockingTask(tasks) {
+  if (!Array.isArray(tasks)) return null;
+  const t = tasks.find((task) => task && !PASSING_TASK_STATUSES.has(task.status));
+  return t ? { title: t.title, status: t.status, error: t.error } : null;
+}
+
+/**
+ * Capture the failing attempt as `priorFailure` context for the NEXT attempt
+ * (issue #90: today every retry rebuilds an identical prompt, so a retry differs
+ * from its predecessor only by model nondeterminism).
+ *
+ * FAIL-OPEN, deliberately. CLAUDE.md's default is fail-closed, but that rule
+ * governs GATE and CHECK boundaries; this is prompt enrichment and decides
+ * nothing. A capture failure therefore RECORDS its reason with context (a
+ * `capture-failed` event carrying wave, attempt, and the error message) and
+ * degrades to the priorFailure-absent prompt — today's behavior. It never
+ * blocks, fails, or retries the wave: losing the enrichment must never be worse
+ * than never having had it. The error is recorded, never swallowed.
+ *
+ * @param {Object} args
+ * @param {number} args.attempt - the 1-based attempt that just failed
+ * @param {string} args.outcome - the matrix outcome that failed
+ * @param {string} args.output - the failing gate's captured stdout ('' when none)
+ * @param {Object} args.result - the raw runWave result (for its optional tasks)
+ * @param {Object} args.wave - the wave descriptor (for event context)
+ * @param {Object} args.state - StateStore, for the degrade record
+ * @param {string} args.feature
+ * @param {() => string} args.now
+ * @returns {Object|null} the capture, or null when it degraded
+ */
+function capturePriorFailure({ attempt, outcome, output, result, wave, state, feature, now }) {
+  try {
+    return {
+      attempt,
+      outcome,
+      task: blockingTask(result.tasks),
+      // '' → undefined so the renderer's truthiness check (never key presence)
+      // omits an empty excerpt instead of rendering an empty code fence.
+      excerpt: output || undefined,
+    };
+  } catch (err) {
+    state.append({
+      feature,
+      type: 'capture-failed',
+      actor: 'harness',
+      ts: now(),
+      data: {
+        wave: wave.n,
+        attempt,
+        outcome,
+        what: 'prior-failure',
+        reason: err && err.message ? err.message : String(err),
+      },
+    });
+    return null;
+  }
+}
+
 /**
  * Run the deliver spine for one feature.
  *
@@ -111,11 +195,24 @@ function fireHooks(runHooks, point, ctx, { state, feature, now }) {
  * @param {Object} args.docs - ArtifactStore (read/write); unused branches reserved
  * @param {Object} args.matrix - a pre-loaded stop-condition matrix
  * @param {Object} args.gates - the loaded gate policy (passed through for parity)
- * @param {(wave: Object) => Promise<{ outcome: string }>} args.runWave - MODEL boundary
+ * @param {(wave: Object, attemptCtx: { attempt: number, priorFailure: (Object|null) }) => Promise<{ outcome: string }>} args.runWave
+ *   MODEL boundary. The second argument is ADDITIVE attempt context: the 1-based
+ *   `attempt` number and the previous attempt's captured `priorFailure` (null on
+ *   the first attempt, and whenever capture degraded). A runWave/adapter that
+ *   IGNORES it behaves exactly as it did before it existed — the spine's control
+ *   flow does not depend on the callee reading it.
  * @param {(script: string, feature: string) => { status: number }} args.sh - Bash boundary
  * @param {() => string} args.now - injected clock (ISO timestamp)
  * @param {number} [args.maxAttempts] - per-wave attempt ceiling (defaults to MAX_ATTEMPTS); injectable for tests
  * @param {number} [args.tokenBudget] - optional cumulative token ceiling; 0/null/undefined disables the breaker (no behavior change)
+ * @param {Record<number, string>} [args.waveVerify] - optional per-wave verification
+ *   commands, keyed by wave number (parsed from the plan's `Verify:` lines by
+ *   cli.js and passed through, exactly as tokenBudget is). A wave ABSENT from the
+ *   map runs no command and records no `verify` key — so a plan declaring no
+ *   `Verify:` anywhere produces the event sequence it did before this existed.
+ *   The spine never executes the command itself: it hands it to
+ *   scripts/check-verify.sh through the injected `sh` port, which owns the
+ *   allow-listed env, the timeout, and the output cap.
  * @param {(point: string, ctx: Object) => { ran: Array, veto: (Object|null), failures: Array }} [args.runHooks]
  *   wave-lifecycle hook runner (from createHookRunner). OBSERVE-ONLY in this wave:
  *   fired at six lifecycle points, its observations/failures are recorded as
@@ -142,6 +239,7 @@ export async function deliverSpine({
   now,
   maxAttempts = MAX_ATTEMPTS,
   tokenBudget = null,
+  waveVerify = {},
   runHooks = NOOP_HOOKS,
   hookPreflight = NOOP_PREFLIGHT,
 }) {
@@ -221,6 +319,11 @@ export async function deliverSpine({
 
     let lastPrint = null;
     let advanced = false;
+    // Back-pressure (issue #90): the previous attempt's captured failure, fed to
+    // the NEXT attempt so a retry differs by more than model nondeterminism.
+    // Scoped per wave and null on the first attempt — a retry that carries no
+    // capture is exactly today's behavior.
+    let priorFailure = null;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       // ── Hook: pre-wave (veto-capable point). Fired BEFORE runWave. A veto here
@@ -250,7 +353,9 @@ export async function deliverSpine({
         return { stopped: 'hook-veto', ok: false, wave: wave.n, action, outcome: vetoOutcome, point: 'pre-wave' };
       }
 
-      const result = await runWave(wave);
+      // ADDITIVE second argument: attempt context. A runWave that ignores it is
+      // unchanged; one that reads it can make attempt N+1 differ from attempt N.
+      const result = await runWave(wave, { attempt, priorFailure });
 
       // ── Hook: post-wave (veto-capable point). Fired after the wave result,
       // before the per-wave test-presence gate. A veto here REPLACES the wave's
@@ -273,13 +378,23 @@ export async function deliverSpine({
       // doom-loop fingerprint) handles it; the wave then blocks here instead of
       // advancing on an unwritten test.
       //
-      // The guarantee is narrow, and worth stating plainly: a wave does not
-      // advance if a promised test file is ABSENT. The gate never executes a test
-      // and never consults a test runner, so a present-but-empty or outright
-      // failing test satisfies it. Execution-based verification does not exist
-      // yet (see issue #89). ──
+      // The presence guarantee is narrow, and worth stating plainly: a wave does
+      // not advance if a promised test file is ABSENT. That gate never executes a
+      // test and never consults a test runner, so a present-but-empty or outright
+      // failing test satisfies it. The EXECUTING gate below closes that hole
+      // (issue #89) for waves that declare a `Verify:` command — the two stay
+      // separate checks, and neither replaces the other (issue #91). ──
       let { outcome } = result;
       let gated = result;
+      // Evidence of an executed verification, spread (not assigned) onto the
+      // attempt event so the key is ABSENT — never present-and-undefined — when
+      // no command ran. A wave with no `Verify:` line must append an event
+      // byte-identical to a pre-verification one.
+      let verifyEvidence = {};
+      // The failing gate's captured stdout, fed forward as the retry prompt's
+      // excerpt. Prompt input ONLY — it is never recorded on an event and never
+      // reaches the fingerprint, so it cannot change the doom-loop verdict.
+      let gateOutput = '';
       if (postVeto) {
         // A post-wave veto is authoritative: it REPLACES the model's outcome with
         // the (validated, fail-closed) veto outcome and routes THAT through the
@@ -305,6 +420,7 @@ export async function deliverSpine({
         const gate = sh('scripts/check-tests-present.sh', feature);
         if (gate.status !== 0) {
           outcome = 'fail-tests';
+          gateOutput = gate.stdout ?? '';
           // Fingerprint STABLE, gate-derived fields — NOT the model's variable
           // result text. Two consecutive gate failures must hash equally so the
           // doom-loop breaker trips at the cap instead of burning every attempt
@@ -315,8 +431,52 @@ export async function deliverSpine({
             categories: ['check-tests'],
             summary: `check-tests gate failed (status ${gate.status})`,
           };
+        } else {
+          // ── Per-wave EXECUTING gate. When the plan declared a `Verify:` command
+          // for this wave, the harness runs it and reads its REAL exit code — the
+          // one thing the presence gate cannot tell us. The command itself is
+          // arbitrary shell from a human-approved plan, so the spine never
+          // executes it: check-verify.sh does, through the SAME `sh` port every
+          // other guardrail uses (unchanged shape), and owns the allow-listed env,
+          // the timeout, and the output cap.
+          //
+          // A failure supplies a different INPUT TOKEN to the matrix; it never
+          // adds a branch here and never invents an outcome. The matrix stays the
+          // sole authority on what happens next. ──
+          const command = waveVerify[wave.n];
+          if (command) {
+            const run = sh(VERIFY_SCRIPT, command);
+            verifyEvidence = {
+              verify: { command, status: run.status, passed: run.status === 0 },
+            };
+            if (run.status !== 0) {
+              // A killed-on-timeout command is NOT a retryable test failure: a
+              // retry cannot fix a hang, so it takes the existing `fail-timeout`
+              // token (matrix action `surface`) instead of `fail-tests`.
+              outcome = run.status === VERIFY_TIMEOUT_STATUS ? 'fail-timeout' : 'fail-tests';
+              // check-verify.sh already bounds this excerpt (40 lines / 8000
+              // bytes); the prompt renderer caps it again, unconditionally.
+              gateOutput = run.stdout ?? '';
+              // Same stable-fingerprint discipline as the presence gate above:
+              // gate-derived fields only, so two identical failures hash equally.
+              gated = {
+                outcome,
+                gateStatus: run.status,
+                categories: ['check-verify'],
+                summary: `check-verify gate failed (status ${run.status})`,
+              };
+            }
+          }
         }
       }
+
+      // `tasks` rides on the same REAL runWave result as `usage` and is likewise
+      // OPTIONAL — the adapter contract (docs/rad-wave-contract.md) attaches it
+      // only when the agent reported a non-empty task list. Spread, not assigned,
+      // so the key is ABSENT rather than present-and-undefined when the result
+      // carries none: a tasks-free result must append an event byte-identical to
+      // a pre-tasks one. It is DATA-ONLY — no fold in events.js reads it.
+      const taskEvidence = result.tasks ? { tasks: result.tasks } : {};
 
       state.append({
         feature,
@@ -333,9 +493,15 @@ export async function deliverSpine({
         // attempt with source/point/hook so a veto-originated outcome is
         // distinguishable from an agent-emitted one. Absent a veto the shape is
         // unchanged — no provenance keys are added.
+        //
+        // Verification evidence (Task 3.3): when the wave declared a `Verify:`
+        // command and it actually ran, record { command, status, passed } so the
+        // event log carries what was executed and what really happened — not a
+        // self-classification. Spread, so a wave that declared none appends an
+        // event with NO `verify` key at all.
         data: vetoSource
-          ? { wave: wave.n, outcome, usage: result.usage, source: 'hook', point: vetoSource.point, hook: vetoSource.hook }
-          : { wave: wave.n, outcome, usage: result.usage },
+          ? { wave: wave.n, outcome, usage: result.usage, ...taskEvidence, ...verifyEvidence, source: 'hook', point: vetoSource.point, hook: vetoSource.hook }
+          : { wave: wave.n, outcome, usage: result.usage, ...taskEvidence, ...verifyEvidence },
       });
 
       // Accumulate this attempt's token spend for the budget breaker. Usage is
@@ -415,6 +581,20 @@ export async function deliverSpine({
           };
         }
         lastPrint = print;
+        // Back-pressure (issue #90): carry THIS attempt's failure into the next
+        // one so the retry prompt differs. Deliberately placed AFTER the
+        // fingerprint/doom-loop decision above — the capture is prompt input
+        // only and never participates in that verdict or in MAX_ATTEMPTS.
+        priorFailure = capturePriorFailure({
+          attempt,
+          outcome,
+          output: gateOutput,
+          result,
+          wave,
+          state,
+          feature,
+          now,
+        });
         continue; // within the bounded budget; the cap is the hard ceiling.
       }
 

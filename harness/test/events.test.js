@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {
   reduce,
   phaseOf,
+  resumeFrom,
+  totalUsage,
   outcomeCounts,
   failReasonCounts,
   retryCounts,
@@ -202,6 +204,107 @@ test('insights helpers return zeroed shapes on empty, non-array, and wave-event-
     assert.deepEqual(retryCounts(history), { total: 0, retriedWaves: 0, perWave: {} });
     assert.deepEqual(hookVetoCounts(history), { vetoes: 0, vetoedAttempts: 0 });
   }
+});
+
+// ── Fold parity on historical logs (AC#5) ────────────────────────────────────
+// `tasks` and `verify` are OPTIONAL, data-only keys on a `wave-attempt` event's
+// `data`. This block is the GATE on the "additive at parity" claim: every fold
+// this module exports must return the SAME result on a log that predates those
+// keys — the expected values below are hand-computed against the pre-change
+// behavior, not captured from a run. Every fold is named explicitly; a partial
+// sweep would not gate the claim.
+
+/** Recursively freeze so a fold that mutated its input would throw, not pass. */
+function deepFreeze(value) {
+  if (value === null || typeof value !== 'object' || Object.isFrozen(value)) return value;
+  for (const child of Object.values(value)) deepFreeze(child);
+  return Object.freeze(value);
+}
+
+// A realistic pre-change feature log: research → plan → approve → three waves
+// (clean advance, retried advance, hook-vetoed failure) → PR. No `tasks`, no
+// `verify`, anywhere.
+const LEGACY_HISTORY = deepFreeze([
+  { feature: 'legacy', type: 'research-created', actor: 'dev', ts: 't0' },
+  { feature: 'legacy', type: 'plan-created', actor: 'dev', ts: 't1' },
+  { feature: 'legacy', type: 'approved', actor: 'architect', role: 'architect', ts: 't2', data: { fingerprint: 'abc123' } },
+  { feature: 'legacy', type: 'deliver-started', actor: 'harness', ts: 't3' },
+  // Wave 1 — single attempt, advanced. wave-complete carries only { wave }.
+  { feature: 'legacy', type: 'wave-attempt', actor: 'harness', ts: 't4', data: { wave: 1, outcome: 'success', usage: { input: 10, output: 5, total: 15 } } },
+  { feature: 'legacy', type: 'wave-complete', actor: 'harness', ts: 't5', data: { wave: 1 } },
+  // Wave 2 — retried; the second attempt carries no usage (command adapter).
+  { feature: 'legacy', type: 'wave-attempt', actor: 'harness', ts: 't6', data: { wave: 2, outcome: 'fail-tests', usage: { input: 4, output: 2, total: 6 } } },
+  { feature: 'legacy', type: 'wave-attempt', actor: 'harness', ts: 't7', data: { wave: 2, outcome: 'success' } },
+  { feature: 'legacy', type: 'wave-complete', actor: 'harness', ts: 't8', data: { wave: 2, outcome: 'success' } },
+  // Wave 3 — post-wave hook veto, then a reasoned terminal. Never completes.
+  { feature: 'legacy', type: 'hook-veto', actor: 'harness', ts: 't9', data: { point: 'post-wave', hook: '20-scope.sh', outcome: 'abort-user', source: 'hook' } },
+  { feature: 'legacy', type: 'wave-attempt', actor: 'harness', ts: 't10', data: { wave: 3, outcome: 'abort-user', usage: { input: 1, output: 1, total: 2 }, source: 'hook', point: 'post-wave', hook: '20-scope.sh' } },
+  { feature: 'legacy', type: 'wave-failed', actor: 'harness', ts: 't11', data: { wave: 3, reason: 'abort-user' } },
+  { feature: 'legacy', type: 'pr-opened', actor: 'harness', ts: 't12' },
+]);
+
+/** Hand-computed pre-change results — the parity baseline, asserted twice below. */
+const EXPECTED = {
+  reduce: {
+    phase: 'delivered',
+    markers: ['research-created', 'plan-created', 'approved', 'deliver-started', 'wave-attempt', 'wave-complete', 'hook-veto', 'wave-failed', 'pr-opened'],
+    approvals: [{ actor: 'architect', ts: 't2', role: 'architect' }],
+  },
+  resumeFrom: new Set([1, 2]),
+  totalUsage: { input: 15, output: 8, total: 23 },
+  outcomeCounts: {
+    success: 1,
+    'fail-tests': 0,
+    'fail-scope': 0,
+    'fail-protocol': 0,
+    'fail-timeout': 0,
+    'no-changes': 0,
+    'abort-user': 0,
+    unknown: 1,
+    total: 2,
+  },
+  failReasonCounts: { total: 1, reasons: { 'abort-user': 1 } },
+  retryCounts: { total: 4, retriedWaves: 1, perWave: { 1: 1, 2: 2, 3: 1 } },
+};
+
+/** Assert all six folds against the parity baseline. Named one by one on purpose. */
+function assertFoldParity(history, label) {
+  assert.deepEqual(reduce(history), EXPECTED.reduce, `reduce ${label}`);
+  assert.deepEqual(resumeFrom(history), EXPECTED.resumeFrom, `resumeFrom ${label}`);
+  assert.deepEqual(totalUsage(history), EXPECTED.totalUsage, `totalUsage ${label}`);
+  assert.deepEqual(outcomeCounts(history), EXPECTED.outcomeCounts, `outcomeCounts ${label}`);
+  assert.deepEqual(failReasonCounts(history), EXPECTED.failReasonCounts, `failReasonCounts ${label}`);
+  assert.deepEqual(retryCounts(history), EXPECTED.retryCounts, `retryCounts ${label}`);
+}
+
+test('AC#5 — all six folds match pre-change values on a log lacking tasks/verify', () => {
+  // Guard the fixture itself: if either new key ever leaks into the "historical"
+  // log the parity claim would be vacuous, so assert their total absence first.
+  const serialized = JSON.stringify(LEGACY_HISTORY);
+  assert.equal(serialized.includes('"tasks"'), false);
+  assert.equal(serialized.includes('"verify"'), false);
+
+  assertFoldParity(LEGACY_HISTORY, 'on the legacy history');
+});
+
+test('AC#5 — the same folds are unmoved when tasks/verify ARE present (additive)', () => {
+  // Same log, with both optional keys attached to every wave-attempt. No fold
+  // reads them, so every result must be identical to the legacy baseline.
+  const augmented = deepFreeze(
+    LEGACY_HISTORY.map((event) =>
+      event.type === 'wave-attempt'
+        ? {
+            ...event,
+            data: {
+              ...event.data,
+              tasks: [{ title: 'a task', status: 'complete' }],
+              verify: { command: 'npm test', status: 0, passed: true },
+            },
+          }
+        : event,
+    ),
+  );
+  assertFoldParity(augmented, 'on the augmented history');
 });
 
 test('phaseOf is pure — no filesystem access (only the passed array matters)', () => {

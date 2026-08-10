@@ -292,10 +292,55 @@ function parseWaveModels(text) {
 }
 
 /**
+ * Parse optional per-wave verification commands from the plan doc.
+ *
+ * Convention: an optional `Verify:` line inside a `### Wave N` block declares the
+ * shell command the HARNESS runs after that wave (e.g. "Verify: npm test"). Waves
+ * without the line are absent from the returned map, so nothing is executed and
+ * the wave's gating is byte-for-byte what it was before this existed. The map is
+ * keyed by wave NUMBER (the integer N from the heading) → command string.
+ *
+ * Structurally mirrors parseWaveModels — same wave-block scoping, same rule that
+ * deeper `####` task subheadings stay INSIDE the wave. It lives in cli.js by
+ * design: the per-wave command travels via planCtx, NOT by editing the plan
+ * parser in git-state-store.js.
+ *
+ * The command is arbitrary shell from a HUMAN-APPROVED plan doc; the trust
+ * boundary is the approval gate, unchanged. Execution is deliberately NOT done
+ * here — scripts/check-verify.sh owns it, under an allow-listed env.
+ *
+ * @param {string} text - full plan doc text
+ * @returns {Record<number, string>}
+ */
+function parseWaveVerify(text) {
+  const waveVerify = {};
+  let currentWave;
+  for (const line of text.split('\n')) {
+    const heading = /^###\s+Wave\s+(\d+)\b/.exec(line.trim());
+    if (heading) {
+      currentWave = Number(heading[1]);
+      continue;
+    }
+    // A new `##`/`###` heading that is NOT a Wave heading ends the current block.
+    // Deeper headings (`####` task subheadings) stay INSIDE the wave so a Verify:
+    // line still applies across the wave's tasks.
+    if (/^#{2,3}\s/.test(line.trim())) {
+      currentWave = undefined;
+      continue;
+    }
+    if (currentWave !== undefined) {
+      const m = /^Verify:\s*(.+)$/.exec(line.trim());
+      if (m && m[1].trim() !== '') waveVerify[currentWave] = m[1].trim();
+    }
+  }
+  return waveVerify;
+}
+
+/**
  * Parse a plan doc text to extract the planCtx fields needed by runWave.
  *
  * @param {string} text - full plan doc text
- * @returns {{ branch: string, acceptanceCriteria: string[], waveModels: Record<number, string>, executionNotes: { doNotTouch: string[], keyFiles: string[], reminders: string[] } }}
+ * @returns {{ branch: string, acceptanceCriteria: string[], waveModels: Record<number, string>, waveVerify: Record<number, string>, executionNotes: { doNotTouch: string[], keyFiles: string[], reminders: string[] } }}
  */
 export function parsePlanCtx(text) {
   // Branch: extract from `Branch: rad/feature` header line
@@ -337,6 +382,7 @@ export function parsePlanCtx(text) {
     branch,
     acceptanceCriteria: acLines,
     waveModels: parseWaveModels(text),
+    waveVerify: parseWaveVerify(text),
     executionNotes: { doNotTouch, keyFiles, reminders },
   };
 }
@@ -429,8 +475,12 @@ export async function deliverCommand(argv, ctx) {
     // the gate/approve/command paths) load with the SDK absent.
     const { createRunWave } = await import('./adapters/agent/sdk.js');
     const adapter = createRunWave({ apiKey, model, repoRoot });
-    // Bind planCtx so deliverSpine's single-argument runWave(wave) call works.
-    runWave = (wave) => adapter(wave, planCtx);
+    // Bind planCtx so deliverSpine's runWave(wave, attemptCtx) call works. The
+    // spine's SECOND argument ({ attempt, priorFailure }) is folded into the
+    // per-call plan context, which is how it reaches buildWavePrompt without
+    // changing the adapter's (wave, planCtx) signature. Additive: on a first
+    // attempt priorFailure is null and the rendered prompt is today's, verbatim.
+    runWave = (wave, attemptCtx) => adapter(wave, { ...planCtx, ...attemptCtx });
   } else {
     // Command path (default): no ANTHROPIC_API_KEY required — credentials are
     // the configured command's concern. RAD_AGENT_CMD is mandatory here.
@@ -440,7 +490,9 @@ export async function deliverCommand(argv, ctx) {
       return 1;
     }
     const adapter = createCommandAdapter({ cmd, repoRoot, model });
-    runWave = (wave) => adapter(wave, planCtx);
+    // Same attempt-context fold as the sdk branch above — both adapters take
+    // (wave, planCtx), so the spine's second argument rides in the plan context.
+    runWave = (wave, attemptCtx) => adapter(wave, { ...planCtx, ...attemptCtx });
   }
 
   const matrix = loadMatrix();
@@ -499,6 +551,10 @@ export async function deliverCommand(argv, ctx) {
       sh: (script, feat) => sh(join(repoRoot, script), [feat], { cwd: shCwd }),
       now: () => new Date().toISOString(),
       tokenBudget,
+      // Per-wave `Verify:` commands, passed through exactly as tokenBudget is.
+      // Empty for a plan that declares none, which leaves the spine's behavior
+      // and its event sequence unchanged.
+      waveVerify: planCtx.waveVerify,
     });
   } catch (err) {
     // Unexpected spine throw: still preserve the worktree (so the operator can
