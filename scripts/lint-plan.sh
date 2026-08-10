@@ -22,6 +22,12 @@ ERRORS=()
 WARNINGS=()
 TOTAL_LINES=0
 BUDGET_COMPUTED=false
+# Newline-delimited Files-in-Scope paths already reported absent from disk. The
+# premise-freshness advisory subtracts this set so one fact yields one finding: a
+# path the plan is about to create is absent from the base branch by construction,
+# and "does not exist" already says so. A string, not an array — an empty array
+# expansion is an error under `set -u` on bash 3.2.
+MISSING_IN_SCOPE=""
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -144,6 +150,7 @@ if has_section "Files in Scope"; then
     # Check file exists
     if [[ ! -f "$path" && ! -d "$path" ]]; then
       WARNINGS+=("File in scope does not exist: $path")
+      MISSING_IN_SCOPE="${MISSING_IN_SCOPE}${path}"$'\n'
     fi
   done < <(
     awk '/^## Files in Scope/{found=1; next} /^## /{found=0} found && /^\|/' "$PLAN_FILE" \
@@ -220,7 +227,9 @@ done < <(plan_scope_paths "$PLAN_FILE")
 # ── Premise-freshness advisory ────────────────────────────────────────────────
 # Over the union of cited `path:line` anchors, per-task File: paths, and
 # Files-in-Scope entries — MINUS the paths this plan creates (create-exempt: they
-# don't yet exist on the base by design) — warn (never error) for any path absent
+# don't yet exist on the base by design) and MINUS any path the Files-in-Scope
+# existence check already reported absent from disk (one fact, one finding) —
+# warn (never error) for any path absent
 # on origin/<default_branch>: a plan anchored to removed/renamed code. Existence
 # only; line numbers are never verified. Queries the locally-known ref — NO
 # implicit fetch. Fail-closed: an unresolvable base ref yields ONE advisory that
@@ -240,7 +249,9 @@ done < <(
     plan_cited_anchors "$PLAN_FILE"
     plan_task_files "$PLAN_FILE"
     plan_files_in_scope "$PLAN_FILE"
-  } | grep -v '^$' | sort -u | grep -Fxv -f <(plan_created_paths "$PLAN_FILE")
+  } | grep -v '^$' | sort -u \
+    | grep -Fxv -f <(plan_created_paths "$PLAN_FILE") \
+    | grep -Fxv -f <(printf '%s' "$MISSING_IN_SCOPE")
 )
 
 # ── Context budget ────────────────────────────────────────────────────────────
