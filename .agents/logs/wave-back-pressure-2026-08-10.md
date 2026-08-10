@@ -328,10 +328,21 @@ the tests encode the ratified reading.
 **Blocked and unblocked at Gate 2.** The scope gate initially failed on
 `.agents/research/wave-back-pressure.md` — the branch's own first commit (2026-08-04),
 untouched by any wave. Cause: `.agents/research/` was missing from `check-scope.sh`'s
-`ALWAYS_ALLOW_PREFIXES` while logs/plans/state were all exempt. It could not be fixed from
-inside this delivery: amending the plan's Files in Scope would invalidate the approval
-fingerprint, and RAD has no re-approval path (#39). Fixed separately in **PR #104** and
-merged; this branch was then rebased and the gate passes.
+`ALWAYS_ALLOW_PREFIXES` while logs/plans/state were all exempt. Fixed separately in
+**PR #104** and merged; this branch was then rebased and the gate passes.
+
+> **Correction (2026-08-10, post-merge).** This entry originally claimed the alternative —
+> amending the plan's Files in Scope — was *unavailable* because it would invalidate the
+> approval fingerprint and "RAD has no re-approval path (#39)". **That was wrong.** PR #45
+> closed that gap on 2026-06-23: `harness/transitions.js:94-116` blocks a duplicate
+> `approved` event only when the plan fingerprint is UNCHANGED, and explicitly admits a
+> re-attestation whose fingerprint DIFFERS. This plan's approval carried a fingerprint
+> (`0b874d3b…`), so editing the plan and re-running `/rad-approve` was a legitimate route.
+>
+> The decision to fix `check-scope.sh` separately still stands, on better grounds than the
+> ones originally given: `.agents/research/` should be exempt for **every** delivery, so
+> amending this one plan would have papered over a general defect with a per-plan
+> workaround. The route was right; the stated reason was not.
 
 **Transient test note:** one loop run reported `test-check-tests-present.sh` failing. Not
 reproducible — it passed standalone and in two subsequent full loop runs. The failing run
