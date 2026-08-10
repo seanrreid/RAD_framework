@@ -114,6 +114,78 @@ function fireHooks(runHooks, point, ctx, { state, feature, now }) {
   return res;
 }
 
+/** Task statuses the wave contract treats as passing. Mirrors the passing set in
+ * adapters/agent/contract.js resultToOutcome — restated here rather than
+ * imported so the spine keeps its no-adapter-dependency layering. */
+const PASSING_TASK_STATUSES = new Set(['complete', 'done_with_concerns']);
+
+/**
+ * The first task the agent reported as NOT passing — the one that blocked the
+ * wave. `tasks` is an OPTIONAL contract field, so an adapter that reported none
+ * (and a demotion where every reported task passed but a gate failed) yields
+ * null and the retry prompt simply carries no task line.
+ *
+ * @param {unknown} tasks - the wave result's optional per-task records
+ * @returns {{ title: string, status: string, error: string } | null}
+ */
+function blockingTask(tasks) {
+  if (!Array.isArray(tasks)) return null;
+  const t = tasks.find((task) => task && !PASSING_TASK_STATUSES.has(task.status));
+  return t ? { title: t.title, status: t.status, error: t.error } : null;
+}
+
+/**
+ * Capture the failing attempt as `priorFailure` context for the NEXT attempt
+ * (issue #90: today every retry rebuilds an identical prompt, so a retry differs
+ * from its predecessor only by model nondeterminism).
+ *
+ * FAIL-OPEN, deliberately. CLAUDE.md's default is fail-closed, but that rule
+ * governs GATE and CHECK boundaries; this is prompt enrichment and decides
+ * nothing. A capture failure therefore RECORDS its reason with context (a
+ * `capture-failed` event carrying wave, attempt, and the error message) and
+ * degrades to the priorFailure-absent prompt — today's behavior. It never
+ * blocks, fails, or retries the wave: losing the enrichment must never be worse
+ * than never having had it. The error is recorded, never swallowed.
+ *
+ * @param {Object} args
+ * @param {number} args.attempt - the 1-based attempt that just failed
+ * @param {string} args.outcome - the matrix outcome that failed
+ * @param {string} args.output - the failing gate's captured stdout ('' when none)
+ * @param {Object} args.result - the raw runWave result (for its optional tasks)
+ * @param {Object} args.wave - the wave descriptor (for event context)
+ * @param {Object} args.state - StateStore, for the degrade record
+ * @param {string} args.feature
+ * @param {() => string} args.now
+ * @returns {Object|null} the capture, or null when it degraded
+ */
+function capturePriorFailure({ attempt, outcome, output, result, wave, state, feature, now }) {
+  try {
+    return {
+      attempt,
+      outcome,
+      task: blockingTask(result.tasks),
+      // '' → undefined so the renderer's truthiness check (never key presence)
+      // omits an empty excerpt instead of rendering an empty code fence.
+      excerpt: output || undefined,
+    };
+  } catch (err) {
+    state.append({
+      feature,
+      type: 'capture-failed',
+      actor: 'harness',
+      ts: now(),
+      data: {
+        wave: wave.n,
+        attempt,
+        outcome,
+        what: 'prior-failure',
+        reason: err && err.message ? err.message : String(err),
+      },
+    });
+    return null;
+  }
+}
+
 /**
  * Run the deliver spine for one feature.
  *
@@ -319,6 +391,10 @@ export async function deliverSpine({
       // no command ran. A wave with no `Verify:` line must append an event
       // byte-identical to a pre-verification one.
       let verifyEvidence = {};
+      // The failing gate's captured stdout, fed forward as the retry prompt's
+      // excerpt. Prompt input ONLY — it is never recorded on an event and never
+      // reaches the fingerprint, so it cannot change the doom-loop verdict.
+      let gateOutput = '';
       if (postVeto) {
         // A post-wave veto is authoritative: it REPLACES the model's outcome with
         // the (validated, fail-closed) veto outcome and routes THAT through the
@@ -344,6 +420,7 @@ export async function deliverSpine({
         const gate = sh('scripts/check-tests-present.sh', feature);
         if (gate.status !== 0) {
           outcome = 'fail-tests';
+          gateOutput = gate.stdout ?? '';
           // Fingerprint STABLE, gate-derived fields — NOT the model's variable
           // result text. Two consecutive gate failures must hash equally so the
           // doom-loop breaker trips at the cap instead of burning every attempt
@@ -377,6 +454,9 @@ export async function deliverSpine({
               // retry cannot fix a hang, so it takes the existing `fail-timeout`
               // token (matrix action `surface`) instead of `fail-tests`.
               outcome = run.status === VERIFY_TIMEOUT_STATUS ? 'fail-timeout' : 'fail-tests';
+              // check-verify.sh already bounds this excerpt (40 lines / 8000
+              // bytes); the prompt renderer caps it again, unconditionally.
+              gateOutput = run.stdout ?? '';
               // Same stable-fingerprint discipline as the presence gate above:
               // gate-derived fields only, so two identical failures hash equally.
               gated = {
@@ -501,6 +581,20 @@ export async function deliverSpine({
           };
         }
         lastPrint = print;
+        // Back-pressure (issue #90): carry THIS attempt's failure into the next
+        // one so the retry prompt differs. Deliberately placed AFTER the
+        // fingerprint/doom-loop decision above — the capture is prompt input
+        // only and never participates in that verdict or in MAX_ATTEMPTS.
+        priorFailure = capturePriorFailure({
+          attempt,
+          outcome,
+          output: gateOutput,
+          result,
+          wave,
+          state,
+          feature,
+          now,
+        });
         continue; // within the bounded budget; the cap is the hard ceiling.
       }
 
