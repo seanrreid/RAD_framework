@@ -1,7 +1,7 @@
 # Plan: Gate Legibility Lints
 Created: 2026-08-05
 Author: architect
-Status: approved
+Status: in-progress
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-08-10T13:09:55.174Z
 Recorded-By: sean@torchcodelab.com
