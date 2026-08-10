@@ -41,6 +41,91 @@ test('parsePlanCtx — a Model: line under ### Wave 2 lands in planCtx.waveModel
 });
 
 // ---------------------------------------------------------------------------
+// parsePlanCtx — per-wave verification declaration (AC#1)
+//
+// `Verify:` is OPT-IN and mirrors `Model:` exactly: same wave-block scoping,
+// same "absent from the map when undeclared" rule. The absence case is the one
+// that matters most — it is what guarantees a plan declaring no `Verify:`
+// anywhere behaves byte-for-byte as it did before the feature existed.
+// ---------------------------------------------------------------------------
+
+test('parsePlanCtx — a Verify: line under ### Wave 2 lands in planCtx.waveVerify[2]', () => {
+  const plan = [
+    '# feature',
+    'Branch: rad/feature',
+    '',
+    '## Waves',
+    '',
+    '### Wave 1',
+    'Type: sequential',
+    '',
+    '### Wave 2',
+    'Type: sequential',
+    'Verify: npm test --prefix harness',
+    '',
+    '### Wave 3',
+    'Type: parallel',
+  ].join('\n');
+
+  const ctx = parsePlanCtx(plan);
+  assert.equal(ctx.waveVerify[2], 'npm test --prefix harness', 'wave 2 command is captured');
+  assert.equal(ctx.waveVerify[1], undefined, 'wave 1 declares no command');
+  assert.equal(ctx.waveVerify[3], undefined, 'wave 3 declares no command');
+});
+
+test('parsePlanCtx — AC#1: a plan with no Verify: line anywhere yields an EMPTY map', () => {
+  const plan = [
+    '# feature',
+    'Branch: rad/feature',
+    '',
+    '## Waves',
+    '',
+    '### Wave 1',
+    'Type: sequential',
+    'Model: claude-haiku-4-5',
+    '',
+    '### Wave 2',
+    'Type: sequential',
+  ].join('\n');
+
+  const ctx = parsePlanCtx(plan);
+  // Empty, not undefined: the spine's default is `{}` and cli.js must hand it the
+  // same thing, so the wave loop executes nothing and appends no `verify` key.
+  assert.deepEqual(ctx.waveVerify, {}, 'no declaration → no entries at all');
+  assert.equal(Object.keys(ctx.waveVerify).length, 0);
+  // Declaring a Model: must not imply a Verify:, and vice versa — the two lines
+  // are parsed independently.
+  assert.equal(ctx.waveModels[1], 'claude-haiku-4-5');
+});
+
+test('parsePlanCtx — Verify: edge cases: empty value ignored, non-Wave heading ends the block, #### subheadings stay inside', () => {
+  const plan = [
+    '# feature',
+    'Branch: rad/feature',
+    '',
+    '### Wave 1',
+    'Verify:',                      // empty value → not a declaration
+    '',
+    '### Wave 2',
+    '#### Task 2.1',                // deeper heading stays INSIDE wave 2
+    'Verify:   bash scripts/test-check-verify.sh   ',
+    '',
+    '## Post-Delivery',             // a non-Wave heading closes the block
+    'Verify: this must not be captured',
+  ].join('\n');
+
+  const ctx = parsePlanCtx(plan);
+  assert.equal(ctx.waveVerify[1], undefined, 'an empty Verify: value declares nothing');
+  assert.equal(
+    ctx.waveVerify[2],
+    'bash scripts/test-check-verify.sh',
+    'a Verify: under a #### task subheading still belongs to the wave, trimmed',
+  );
+  // Nothing leaked out of the wave blocks into a stray key.
+  assert.deepEqual(Object.keys(ctx.waveVerify), ['2']);
+});
+
+// ---------------------------------------------------------------------------
 // Fixture helpers
 // ---------------------------------------------------------------------------
 

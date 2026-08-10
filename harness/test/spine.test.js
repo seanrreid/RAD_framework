@@ -993,3 +993,423 @@ test('(w3-f) no veto: agent-emitted wave-attempt carries NO provenance keys (dis
   assert.equal(attempt.data.hook, undefined);
   assert.ok(!state.appended.some((e) => e.type === 'hook-veto'));
 });
+
+// ── Wave 5: executing verification gate + retry back-pressure (#89 / #90) ────
+//
+// The gate under test is EXECUTING, not presence-based: the spine hands a
+// plan-declared command to scripts/check-verify.sh through the same injected
+// `sh` port every other guardrail uses, and reads its REAL exit code. These
+// cases pin the four properties that make that safe to ship: an absent
+// declaration changes nothing, a declared command reaches the script (and only
+// the script), a real failure demotes through the frozen matrix vocabulary, and
+// the failure is carried into the next attempt's prompt.
+
+/** The script the spine delegates verification to. Never invoked directly by the spine. */
+const VERIFY_SCRIPT = 'scripts/check-verify.sh';
+/** Exit code scripts/check-verify.sh RESERVES for "killed by the timeout". */
+const VERIFY_TIMEOUT_STATUS = 124;
+/** The frozen 7-outcome matrix vocabulary (harness/matrix.yaml). */
+const FROZEN_OUTCOMES = new Set([
+  'success',
+  'fail-tests',
+  'fail-scope',
+  'fail-protocol',
+  'fail-timeout',
+  'no-changes',
+  'abort-user',
+]);
+
+/**
+ * An `sh` spy that records every (script, arg) pair and answers check-verify.sh
+ * from a scripted per-call queue (so attempt 1 and attempt 2 can differ). Every
+ * other script returns success.
+ *
+ * @param {Array<{status: number, stdout?: string}>} verifyResults - consumed in order;
+ *   the last entry repeats once exhausted.
+ */
+function makeVerifyingSh(verifyResults = [{ status: 0 }]) {
+  const calls = [];
+  let i = 0;
+  const sh = (script, arg) => {
+    calls.push({ script, arg });
+    if (script === VERIFY_SCRIPT) {
+      const res = verifyResults[Math.min(i, verifyResults.length - 1)];
+      i += 1;
+      return res;
+    }
+    return { status: 0 };
+  };
+  return { sh, calls };
+}
+
+test('(w5-a) AC#1 absent Verify: declaring none is byte-for-byte today — no check-verify call, no `verify` key, identical event sequence', async () => {
+  // Two runs of the SAME scenario: one with waveVerify omitted entirely (a
+  // legacy caller), one with the empty map cli.js passes for a plan that
+  // declares no `Verify:` anywhere. Both must reproduce the pre-verification
+  // behavior exactly.
+  const runOnce = async (extra) => {
+    const state = makeFakeState({ gateResult: passingGate, plan: twoWaves });
+    const spy = makeVerifyingSh();
+    const result = await deliverSpine({
+      feature: 'demo',
+      state,
+      docs: {},
+      matrix: MATRIX,
+      gates: {},
+      runWave: async () => ({ outcome: 'success' }),
+      sh: spy.sh,
+      now: fixedClock(),
+      ...extra,
+    });
+    return { state, spy, result };
+  };
+
+  const legacy = await runOnce({}); // waveVerify omitted
+  const declaredNone = await runOnce({ waveVerify: {} }); // plan declares no Verify:
+
+  assert.deepEqual(legacy.result, { ok: true, waves: 2 });
+  assert.deepEqual(declaredNone.result, { ok: true, waves: 2 });
+
+  // check-verify.sh was never invoked on either path.
+  for (const run of [legacy, declaredNone]) {
+    assert.ok(
+      !run.spy.calls.some((c) => c.script === VERIFY_SCRIPT),
+      'no verification command may run when none is declared',
+    );
+  }
+
+  // The sh call order is the legacy one: per-wave presence gates, then the end
+  // post-checks. Nothing was inserted.
+  assert.deepEqual(
+    legacy.spy.calls.map((c) => c.script),
+    [
+      'scripts/check-tests-present.sh',
+      'scripts/check-tests-present.sh',
+      'scripts/check-scope.sh',
+      'scripts/open-pr.sh',
+    ],
+  );
+
+  // THE PARITY ASSERTION: the two appended event logs are deep-equal to each
+  // other, and every wave-attempt carries exactly the legacy data keys — `verify`
+  // is ABSENT, never present-and-undefined.
+  assert.deepEqual(declaredNone.state.appended, legacy.state.appended);
+  const attempts = legacy.state.appended.filter((e) => e.type === 'wave-attempt');
+  assert.equal(attempts.length, 2);
+  for (const e of attempts) {
+    assert.ok(!('verify' in e.data), '`verify` key must be absent, not undefined');
+    assert.ok(!('tasks' in e.data), '`tasks` key must be absent, not undefined');
+    assert.deepEqual(Object.keys(e.data), ['wave', 'outcome', 'usage']);
+  }
+});
+
+test('(w5-a2) AC#1 edge — a NON-empty waveVerify map still runs nothing for a wave absent from it', async () => {
+  // The absent-declaration guarantee is per WAVE, not per plan: wave 2 declaring
+  // a command must not cause wave 1 to run one.
+  const state = makeFakeState({ gateResult: passingGate, plan: twoWaves });
+  const spy = makeVerifyingSh([{ status: 0 }]);
+  const result = await deliverSpine({
+    feature: 'demo',
+    state,
+    docs: {},
+    matrix: MATRIX,
+    gates: {},
+    runWave: async () => ({ outcome: 'success' }),
+    sh: spy.sh,
+    now: fixedClock(),
+    waveVerify: { 2: 'npm test' },
+  });
+  assert.deepEqual(result, { ok: true, waves: 2 });
+  const verifyCalls = spy.calls.filter((c) => c.script === VERIFY_SCRIPT);
+  assert.equal(verifyCalls.length, 1, 'only the declaring wave runs a command');
+  const attempts = state.appended.filter((e) => e.type === 'wave-attempt');
+  assert.ok(!('verify' in attempts[0].data), 'wave 1 declared none → no verify key');
+  assert.deepEqual(attempts[1].data.verify, { command: 'npm test', status: 0, passed: true });
+});
+
+test('(w5-b) AC#2 a declared command reaches check-verify.sh through the sh port — one argument, never executed by the spine', async () => {
+  const state = makeFakeState({ gateResult: passingGate, plan: { waves: [{ n: 1 }] } });
+  const spy = makeVerifyingSh([{ status: 0 }]);
+  const result = await deliverSpine({
+    feature: 'demo',
+    state,
+    docs: {},
+    matrix: MATRIX,
+    gates: {},
+    runWave: async () => ({ outcome: 'success' }),
+    sh: spy.sh,
+    now: fixedClock(),
+    waveVerify: { 1: 'npm test --prefix harness' },
+  });
+  assert.deepEqual(result, { ok: true, waves: 1 });
+
+  // Delegated, not executed: the ONLY thing the spine passes is the command, as
+  // check-verify.sh's single positional argument.
+  const verifyCall = spy.calls.find((c) => c.script === VERIFY_SCRIPT);
+  assert.ok(verifyCall, 'check-verify.sh was invoked');
+  assert.equal(verifyCall.arg, 'npm test --prefix harness');
+
+  // It runs AFTER the presence gate — the two checks are distinct and ordered
+  // (issue #91), not merged.
+  const order = spy.calls.map((c) => c.script);
+  assert.ok(
+    order.indexOf('scripts/check-tests-present.sh') < order.indexOf(VERIFY_SCRIPT),
+    'presence gate runs before the executing gate',
+  );
+
+  // The event log records what was executed and what really happened.
+  const attempt = state.appended.find((e) => e.type === 'wave-attempt');
+  assert.deepEqual(attempt.data.verify, {
+    command: 'npm test --prefix harness',
+    status: 0,
+    passed: true,
+  });
+});
+
+test('(w5-b2) AC#2 a failed PRESENCE gate short-circuits: the declared command never runs', async () => {
+  const state = makeFakeState({ gateResult: passingGate, plan: { waves: [{ n: 1 }] } });
+  const calls = [];
+  const sh = (script, arg) => {
+    calls.push({ script, arg });
+    return script.endsWith('check-tests-present.sh') ? { status: 1 } : { status: 0 };
+  };
+  const result = await deliverSpine({
+    feature: 'demo',
+    state,
+    docs: {},
+    matrix: MATRIX,
+    gates: {},
+    runWave: async () => ({ outcome: 'success' }),
+    sh,
+    now: fixedClock(),
+    waveVerify: { 1: 'npm test' },
+  });
+  assert.equal(result.stopped, 'doom-loop'); // identical presence failure twice
+  assert.ok(
+    !calls.some((c) => c.script === VERIFY_SCRIPT),
+    'no command is executed against a wave that never wrote its promised tests',
+  );
+});
+
+test('(w5-c) AC#3 a failing verification demotes success → fail-tests through the matrix; the vocabulary gains nothing', async () => {
+  const state = makeFakeState({ gateResult: passingGate, plan: { waves: [{ n: 1 }] } });
+  // Attempt 1's command fails (exit 1); attempt 2's passes. The agent claims
+  // success both times — only the executed exit code differs.
+  const spy = makeVerifyingSh([
+    { status: 1, stdout: '✗ Verification FAILED (exit 1): npm test' },
+    { status: 0 },
+  ]);
+  let runWaveCalls = 0;
+  const result = await deliverSpine({
+    feature: 'demo',
+    state,
+    docs: {},
+    matrix: MATRIX,
+    gates: {},
+    runWave: async () => {
+      runWaveCalls += 1;
+      return { outcome: 'success' };
+    },
+    sh: spy.sh,
+    now: fixedClock(),
+    waveVerify: { 1: 'npm test' },
+  });
+  // Demoted to fail-tests → revision → retried → advanced on the green run.
+  assert.deepEqual(result, { ok: true, waves: 1 });
+  assert.equal(runWaveCalls, 2);
+
+  const attempts = state.appended.filter((e) => e.type === 'wave-attempt');
+  assert.equal(attempts.length, 2);
+  assert.equal(attempts[0].data.outcome, 'fail-tests'); // demoted, not the claimed success
+  assert.deepEqual(attempts[0].data.verify, { command: 'npm test', status: 1, passed: false });
+  assert.equal(attempts[1].data.outcome, 'success');
+  assert.deepEqual(attempts[1].data.verify, { command: 'npm test', status: 0, passed: true });
+  // Every recorded outcome is a member of the FROZEN vocabulary — no new token.
+  for (const e of attempts) assert.ok(FROZEN_OUTCOMES.has(e.data.outcome));
+});
+
+test('(w5-d) AC#7 a TIMED-OUT command maps to fail-timeout (surface), never fail-tests — and is not retried', async () => {
+  const state = makeFakeState({ gateResult: passingGate, plan: { waves: [{ n: 1 }] } });
+  const spy = makeVerifyingSh([
+    { status: VERIFY_TIMEOUT_STATUS, stdout: '✗ Verification TIMED OUT after 600s: sleep 999' },
+  ]);
+  let runWaveCalls = 0;
+  const result = await deliverSpine({
+    feature: 'demo',
+    state,
+    docs: {},
+    matrix: MATRIX,
+    gates: {},
+    runWave: async () => {
+      runWaveCalls += 1;
+      return { outcome: 'success' };
+    },
+    sh: spy.sh,
+    now: fixedClock(),
+    waveVerify: { 1: 'sleep 999' },
+  });
+  // fail-timeout resolves to `surface` — a terminal, not the revision loop.
+  assert.equal(result.stopped, 'matrix');
+  assert.equal(result.action, 'surface');
+  assert.equal(result.outcome, 'fail-timeout');
+  assert.notEqual(result.outcome, 'fail-tests');
+  // A retry cannot fix a hang: the agent ran exactly once.
+  assert.equal(runWaveCalls, 1);
+  assert.equal(spy.calls.filter((c) => c.script === VERIFY_SCRIPT).length, 1);
+
+  const attempt = state.appended.find((e) => e.type === 'wave-attempt');
+  assert.equal(attempt.data.outcome, 'fail-timeout');
+  assert.deepEqual(attempt.data.verify, {
+    command: 'sleep 999',
+    status: VERIFY_TIMEOUT_STATUS,
+    passed: false,
+  });
+  assert.ok(!state.appended.some((e) => e.type === 'wave-complete'));
+  assert.ok(!state.appended.some((e) => e.type === 'pr-opened'));
+});
+
+test('(w5-e) AC#4 priorFailure threading: attempt 1 gets null; attempt 2 carries the outcome, blocking task, and output excerpt', async () => {
+  const state = makeFakeState({ gateResult: passingGate, plan: { waves: [{ n: 1 }] } });
+  const EXCERPT = '✗ Verification FAILED (exit 1): npm test\n  2 tests failed';
+  const spy = makeVerifyingSh([{ status: 1, stdout: EXCERPT }, { status: 0 }]);
+  // The agent claims the wave succeeded but reports one blocked task — the
+  // executed gate is what demotes it, and that task is what the retry is told about.
+  const tasks = [
+    { title: 'T1', status: 'complete', error: '—' },
+    { title: 'T2', status: 'blocked_code', error: 'assertion failed in foo()' },
+  ];
+  const attemptCtxs = [];
+  const result = await deliverSpine({
+    feature: 'demo',
+    state,
+    docs: {},
+    matrix: MATRIX,
+    gates: {},
+    runWave: async (wave, ctx) => {
+      attemptCtxs.push(ctx);
+      return { outcome: 'success', tasks };
+    },
+    sh: spy.sh,
+    now: fixedClock(),
+    waveVerify: { 1: 'npm test' },
+  });
+  assert.deepEqual(result, { ok: true, waves: 1 });
+  assert.equal(attemptCtxs.length, 2);
+
+  // Attempt 1: no prior failure exists — today's prompt, exactly.
+  assert.deepEqual(attemptCtxs[0], { attempt: 1, priorFailure: null });
+
+  // Attempt 2: the retry differs by more than model nondeterminism.
+  assert.equal(attemptCtxs[1].attempt, 2);
+  const prior = attemptCtxs[1].priorFailure;
+  assert.equal(prior.attempt, 1);
+  assert.equal(prior.outcome, 'fail-tests');
+  assert.deepEqual(prior.task, {
+    title: 'T2',
+    status: 'blocked_code',
+    error: 'assertion failed in foo()',
+  });
+  assert.equal(prior.excerpt, EXCERPT);
+});
+
+test('(w5-e2) AC#4 edge — empty gate output and a task-free result yield an excerpt-less, task-less capture (never empty strings)', async () => {
+  const state = makeFakeState({ gateResult: passingGate, plan: { waves: [{ n: 1 }] } });
+  // A failing command that printed nothing, and a result carrying no tasks at all.
+  const spy = makeVerifyingSh([{ status: 1 }, { status: 0 }]);
+  const attemptCtxs = [];
+  const result = await deliverSpine({
+    feature: 'demo',
+    state,
+    docs: {},
+    matrix: MATRIX,
+    gates: {},
+    runWave: async (wave, ctx) => {
+      attemptCtxs.push(ctx);
+      return { outcome: 'success' };
+    },
+    sh: spy.sh,
+    now: fixedClock(),
+    waveVerify: { 1: 'npm test' },
+  });
+  assert.deepEqual(result, { ok: true, waves: 1 });
+  const prior = attemptCtxs[1].priorFailure;
+  assert.equal(prior.excerpt, undefined, 'empty output is omitted, not rendered as ""');
+  assert.equal(prior.task, null, 'a result with no tasks names no blocking task');
+  assert.equal(prior.outcome, 'fail-tests');
+});
+
+test('(w5-e3) AC#4 a non-array `tasks` cannot crash the capture — it degrades to no blocking task', async () => {
+  const state = makeFakeState({ gateResult: passingGate, plan: { waves: [{ n: 1 }] } });
+  const spy = makeVerifyingSh([{ status: 1, stdout: 'boom' }, { status: 0 }]);
+  const attemptCtxs = [];
+  const result = await deliverSpine({
+    feature: 'demo',
+    state,
+    docs: {},
+    matrix: MATRIX,
+    gates: {},
+    runWave: async (wave, ctx) => {
+      attemptCtxs.push(ctx);
+      return { outcome: 'success', tasks: 'not-an-array' };
+    },
+    sh: spy.sh,
+    now: fixedClock(),
+    waveVerify: { 1: 'npm test' },
+  });
+  assert.deepEqual(result, { ok: true, waves: 1 });
+  assert.equal(attemptCtxs[1].priorFailure.task, null);
+  assert.equal(attemptCtxs[1].priorFailure.excerpt, 'boom');
+});
+
+test('(w5-g) AC#8 capture is FAIL-OPEN: a capture failure logs its reason and attempt 2 still runs with the priorFailure-absent prompt', async () => {
+  const state = makeFakeState({ gateResult: passingGate, plan: { waves: [{ n: 1 }] } });
+  // A tasks array whose `find` throws — the one operation the capture performs on
+  // it. Non-enumerable, so the value still serializes normally onto the event and
+  // the doom-loop fingerprint (which reads only categories/summary) is unaffected.
+  const boobyTrapped = [];
+  Object.defineProperty(boobyTrapped, 'find', {
+    value: () => {
+      throw new Error('exploding tasks accessor');
+    },
+  });
+  let i = 0;
+  const attemptCtxs = [];
+  const result = await deliverSpine({
+    feature: 'demo',
+    state,
+    docs: {},
+    matrix: MATRIX,
+    gates: {},
+    // Distinct summaries so the doom-loop breaker does not trip before attempt 2.
+    runWave: async (wave, ctx) => {
+      attemptCtxs.push(ctx);
+      i += 1;
+      return i === 1
+        ? { outcome: 'fail-tests', summary: 'first failure', tasks: boobyTrapped }
+        : { outcome: 'success' };
+    },
+    sh: () => ({ status: 0 }),
+    now: fixedClock(),
+  });
+
+  // The wave still completed: losing the enrichment is never worse than never
+  // having had it.
+  assert.deepEqual(result, { ok: true, waves: 1 });
+  assert.equal(attemptCtxs.length, 2);
+  assert.equal(attemptCtxs[1].priorFailure, null, 'degraded to today\'s prompt');
+
+  // The error was RECORDED with context, not swallowed.
+  const captureFailed = state.appended.find((e) => e.type === 'capture-failed');
+  assert.ok(captureFailed, 'a capture-failed event was appended');
+  assert.deepEqual(captureFailed.data, {
+    wave: 1,
+    attempt: 1,
+    outcome: 'fail-tests',
+    what: 'prior-failure',
+    reason: 'exploding tasks accessor',
+  });
+  assert.equal(captureFailed.actor, 'harness');
+  // Fail-OPEN: the capture failure neither vetoed the wave nor added a failure terminal.
+  assert.ok(!state.appended.some((e) => e.type === 'wave-failed'));
+  assert.ok(state.appended.some((e) => e.type === 'pr-opened'));
+});
