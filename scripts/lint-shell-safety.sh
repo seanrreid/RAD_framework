@@ -28,6 +28,10 @@
 # Scan target: <scripts-dir>/*.sh, EXCLUDING test-*.sh fixtures (scripts/lib/
 # is never entered — the glob does not recurse).
 #
+# Committed-mode pass: a SEPARATE, recursive pass asserting every tracked
+# *.sh / *.mjs under <scripts-dir> is committed 100755. Modes are read from the
+# git index, not the filesystem. Not subject to the baseline ratchet.
+#
 # Baseline ratchet: <baseline-file> lists filenames (one per line, '#'
 # comments allowed, including a trailing per-entry comment after the name).
 #   - violation in a baselined file      → "⚠ baseline: <file>: <reason>", no fail
@@ -40,8 +44,9 @@
 #
 # Exit codes:
 #   0 = clean (possibly with baseline / stale-baseline warnings)
-#   1 = one or more violations in non-baselined files
-#   2 = usage error (too many args, or scripts dir not found)
+#   1 = one or more violations in non-baselined files, or a non-100755 script
+#   2 = usage error (too many args, scripts dir not found, or scripts dir not
+#       inside a git repository — the committed-mode pass cannot run blind)
 
 set -euo pipefail
 
@@ -54,6 +59,18 @@ SCRIPTS_DIR="${1:-scripts}"
 BASELINE_FILE="${2:-scripts/lint-shell-safety-baseline.txt}"
 
 [[ -d "$SCRIPTS_DIR" ]] || { echo "ERROR: scripts dir not found at: $SCRIPTS_DIR"; exit 2; }
+
+# $SCRIPTS_DIR reaches a `git -C` command line in the committed-mode pass below,
+# so it is bounded here — this script holds itself to the rule it enforces on
+# every other script. Paths containing whitespace or shell metacharacters are
+# refused rather than quoted-and-hoped; no RAD scripts dir needs them.
+if [[ ! "$SCRIPTS_DIR" =~ ^[A-Za-z0-9._/-]+$ ]]; then
+  echo "ERROR: scripts dir path has unsupported characters: $SCRIPTS_DIR" >&2
+  exit 2
+fi
+
+# Every tracked script must be committed with this mode. 100644 is the defect.
+EXPECTED_SCRIPT_MODE=100755
 
 VIOLATIONS=0
 
@@ -140,6 +157,42 @@ if [[ -n "$BASELINE_ENTRIES" ]]; then
     fi
   done <<< "$BASELINE_ENTRIES"
 fi
+
+# check_committed_modes — fail closed unless every tracked script under
+# $SCRIPTS_DIR is committed executable.
+#
+# Modes come from the GIT INDEX, never the filesystem: the defect this catches is
+# a script left +x locally but committed 100644, which then exits 126 for
+# everyone else. A filesystem stat would report the author's local mode and see
+# nothing wrong.
+#
+# Deliberately a SEPARATE pass from the scan loop above: that loop skips
+# test-*.sh and does not recurse, and the offender that motivated this check was
+# a test-*.sh. Folding it in would make it structurally unable to catch the bug.
+#
+# `git ls-files` DOES recurse (so scripts/hooks/ is covered), which makes the
+# .sh/.mjs suffix allowlist load-bearing — it is what excludes the *.sh.sample
+# hook fixtures and the non-script data files (README.md, the baseline .txt).
+#
+# scripts/lib/plan-paths.sh is sourced rather than executed, yet is intentionally
+# committed 100755: the rule is uniform, with no per-file exemption.
+check_committed_modes() {
+  local tracked meta path mode
+  if ! tracked=$(git -C "$SCRIPTS_DIR" ls-files -s --full-name . 2>/dev/null); then
+    echo "ERROR: committed-mode check needs a git repository; '$SCRIPTS_DIR' is not inside one" >&2
+    exit 2
+  fi
+  while IFS=$'\t' read -r meta path; do
+    [[ -z "$path" ]] && continue
+    case "$path" in *.sh|*.mjs) ;; *) continue ;; esac
+    mode="${meta%% *}"
+    [[ "$mode" == "$EXPECTED_SCRIPT_MODE" ]] && continue
+    echo "✗ $path: committed mode $mode, expected $EXPECTED_SCRIPT_MODE — the mode is read from the git index, so a bare 'chmod +x' will not fix it; run: git update-index --chmod=+x $path"
+    VIOLATIONS=1
+  done <<< "$tracked"
+}
+
+check_committed_modes
 
 if [[ "$VIOLATIONS" -ne 0 ]]; then
   exit 1
