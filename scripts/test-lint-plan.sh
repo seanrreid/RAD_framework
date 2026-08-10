@@ -4,6 +4,10 @@
 #   - missing task `File:` path advisory
 #   - high-risk path advisory + RAD_HIGH_RISK_PATTERNS override
 #   - self-protected path advisory (unconditional, never env-gated)
+#   - rename-destination advisory (#99): a rename-shaped Change cell whose
+#     destination has no File-column row of its own
+#   - missing-in-scope suppression (#100): a path already reported absent from
+#     disk is never ALSO reported as a stale premise
 #   - warnings-only plans still exit 0
 # Self-contained (no external harness): writes temp fixture plans, runs the real
 # lint-plan.sh, and asserts on output/exit code. Runs under bash 3.2+ (set -u safe).
@@ -322,6 +326,38 @@ t_freshness_created_exempt() {
   echo "✓ AC#4: a Files-in-Scope 'new file' path is exempt from the freshness check"
 }
 
+# ── Missing-in-scope suppression (#100): one fact, one finding ─────────────────
+# A Files-in-Scope path absent from disk is reported ONCE — by the existence
+# check — and is subtracted from the freshness input, so the same path never also
+# produces a stale-premise warning. Needs the git-backed fixture: without a
+# resolvable base ref the freshness scan is skipped and the case is vacuous.
+MISSING_SCOPE_ADVISORY="File in scope does not exist"
+STALE_ADVISORY="stale premise"
+
+t_missing_scope_suppression() {
+  # (a) src/ghost.js is absent from disk AND from origin/main, and is NOT a create
+  # target (Change is "Modify"), so pre-suppression it earned both warnings.
+  write_plan "$GREPO/.agents/plans/missing-scope.md" \
+    "$(printf '| src/app.js | 1-2 | x |\n| src/ghost.js | 1-5 | Modify |')" "src/app.js:1-2"
+  run_lint_in_repo "$GREPO" ".agents/plans/missing-scope.md"
+  printf '%s\n' "$FRESH_OUT" | grep -q "$MISSING_SCOPE_ADVISORY: src/ghost.js" \
+    || fail "MIS(a): absent Files-in-Scope path lost its does-not-exist warning: $FRESH_OUT"
+  printf '%s\n' "$FRESH_OUT" | grep -q "$STALE_ADVISORY" \
+    && fail "MIS(a): the same absent path was double-reported as a stale premise: $FRESH_OUT" || true
+  [[ "$FRESH_CODE" -eq 0 ]] || fail "MIS(a): exited $FRESH_CODE (expected 0)"
+  echo "✓ MIS(a): an absent Files-in-Scope path warns once (does-not-exist), never also stale-premise"
+
+  # (b) Parity: a plan with NO missing files is untouched by the subtraction — its
+  # output is byte-identical to the pre-suppression clean-plan line.
+  local expected="✓ parity.md — plan is valid (waves: 1, budget: ~2L)"
+  write_plan "$GREPO/.agents/plans/parity.md" "| src/app.js | 1-2 | x |" "src/app.js:1-2"
+  run_lint_in_repo "$GREPO" ".agents/plans/parity.md"
+  [[ "$FRESH_OUT" == "$expected" ]] \
+    || fail "MIS(b): clean-plan output drifted. expected [$expected] got [$FRESH_OUT]"
+  [[ "$FRESH_CODE" -eq 0 ]] || fail "MIS(b): exited $FRESH_CODE (expected 0)"
+  echo "✓ MIS(b): a plan with no missing files produces byte-identical output (parity)"
+}
+
 # ── AC#5: unresolvable base ref → ONE advisory (fail-closed), exit 0 ────────────
 t_freshness_unresolvable_ref() {
   write_plan "$NOREPO/.agents/plans/noorigin.md" "| src/app.js | 1-2 | x |" "src/removed.js:9"
@@ -397,14 +433,81 @@ t_program_design_advisory() {
   echo "✓ PD(e): exactly-2-waves plan missing Program Design stays silent (boundary), exit 0"
 }
 
+# ── Rename-destination advisory (#99) ──────────────────────────────────────────
+# check-scope.sh builds its declared set from the File column alone, so a rename
+# destination named only in the Change prose fails deliver-time scope check as
+# out-of-scope drift. lint-plan.sh warns at plan time for each path-shaped token
+# in a rename-shaped Change cell that has no File-column row. ADVISORY ONLY: the
+# warning must never change lint-plan.sh's exit code, which stays 0.
+RENAME_ADVISORY="rename destination not declared"
+RENAME_SRC="src/old-name.js"
+RENAME_DST="src/new-name.js"
+
+t_rename_advisory() {
+  # (a) Each rename phrasing the matcher recognizes — `git mv`, `rename`, and the
+  # `→` arrow — warns and NAMES the undeclared destination, exit 0.
+  local phrasing plan i=0
+  for phrasing in "git mv $RENAME_SRC $RENAME_DST" \
+                  "rename $RENAME_SRC to $RENAME_DST" \
+                  "$RENAME_SRC → $RENAME_DST"; do
+    i=$((i + 1))
+    plan="$TMP/rename-$i.md"
+    write_plan "$plan" "| $RENAME_SRC | 1-40 | $phrasing |" "$RENAME_SRC:1-40"
+    ( unset RAD_HIGH_RISK_PATTERNS; run_lint "$plan"
+      printf '%s\n' "$LINT_OUT" | grep -q "$RENAME_ADVISORY: '$RENAME_DST'" \
+        || fail "REN(a$i): '$phrasing' did not warn naming $RENAME_DST: $LINT_OUT"
+      printf '%s\n' "$LINT_OUT" | grep -q "Errors (must fix before approval):" \
+        && fail "REN(a$i): the rename advisory was reported as an error, not a warning: $LINT_OUT" || true
+      [[ "$LINT_CODE" -eq 0 ]] \
+        || fail "REN(a$i): exited $LINT_CODE (expected 0 — advisory, never an error)"
+    ) || exit 1
+    echo "✓ REN(a$i): rename cell '$phrasing' warns naming the undeclared destination, exit 0"
+  done
+
+  # (b) Declaring the destination as its own File-column row silences it.
+  local plan_declared="$TMP/rename-declared.md"
+  write_plan "$plan_declared" \
+    "$(printf '| %s | 1-40 | git mv %s %s |\n| %s | new file | New — rename destination |' \
+        "$RENAME_SRC" "$RENAME_SRC" "$RENAME_DST" "$RENAME_DST")" "$RENAME_SRC:1-40"
+  ( unset RAD_HIGH_RISK_PATTERNS; run_lint "$plan_declared"
+    printf '%s\n' "$LINT_OUT" | grep -q "$RENAME_ADVISORY" \
+      && fail "REN(b): a declared destination row did not silence the advisory: $LINT_OUT" || true
+    [[ "$LINT_CODE" -eq 0 ]] || fail "REN(b): exited $LINT_CODE (expected 0)"
+  ) || exit 1
+  echo "✓ REN(b): declaring the destination as its own File row silences the advisory"
+
+  # (c) A plan with no rename-shaped Change cell emits no new output.
+  local plan_none="$TMP/rename-none.md"
+  write_plan "$plan_none" "| $REAL_PATH | 1-2 | Modify the linter |" "$REAL_PATH:1-2"
+  ( unset RAD_HIGH_RISK_PATTERNS; run_lint "$plan_none"
+    printf '%s\n' "$LINT_OUT" | grep -q "$RENAME_ADVISORY" \
+      && fail "REN(c): a plan with no rename wrongly emitted the advisory: $LINT_OUT" || true
+    [[ "$LINT_CODE" -eq 0 ]] || fail "REN(c): exited $LINT_CODE (expected 0)"
+  ) || exit 1
+  echo "✓ REN(c): plan with no rename-shaped Change cell emits no rename advisory, exit 0"
+
+  # (d) Edge: a rename-shaped cell containing only PROSE (no path-shaped token)
+  # warns about nothing — the prose is never mined for paths (plan Non-Goal).
+  local plan_prose="$TMP/rename-prose.md"
+  write_plan "$plan_prose" "| $REAL_PATH | 1-2 | rename the helper for clarity |" "$REAL_PATH:1-2"
+  ( unset RAD_HIGH_RISK_PATTERNS; run_lint "$plan_prose"
+    printf '%s\n' "$LINT_OUT" | grep -q "$RENAME_ADVISORY" \
+      && fail "REN(d): prose-only rename cell wrongly produced a destination warning: $LINT_OUT" || true
+    [[ "$LINT_CODE" -eq 0 ]] || fail "REN(d): exited $LINT_CODE (expected 0)"
+  ) || exit 1
+  echo "✓ REN(d): rename cell with no path-shaped token warns about nothing, exit 0"
+}
+
 t_missing_task_file
 t_high_risk_advisory
 t_exit_zero_invariance
 t_self_protected_advisory
 t_program_design_advisory
+t_rename_advisory
 setup_freshness_fixture
 setup_noorigin_fixture
 t_freshness_present_and_absent
 t_freshness_created_exempt
+t_missing_scope_suppression
 t_freshness_unresolvable_ref
 echo "ALL PASS"
