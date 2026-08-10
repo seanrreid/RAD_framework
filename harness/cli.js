@@ -292,10 +292,55 @@ function parseWaveModels(text) {
 }
 
 /**
+ * Parse optional per-wave verification commands from the plan doc.
+ *
+ * Convention: an optional `Verify:` line inside a `### Wave N` block declares the
+ * shell command the HARNESS runs after that wave (e.g. "Verify: npm test"). Waves
+ * without the line are absent from the returned map, so nothing is executed and
+ * the wave's gating is byte-for-byte what it was before this existed. The map is
+ * keyed by wave NUMBER (the integer N from the heading) → command string.
+ *
+ * Structurally mirrors parseWaveModels — same wave-block scoping, same rule that
+ * deeper `####` task subheadings stay INSIDE the wave. It lives in cli.js by
+ * design: the per-wave command travels via planCtx, NOT by editing the plan
+ * parser in git-state-store.js.
+ *
+ * The command is arbitrary shell from a HUMAN-APPROVED plan doc; the trust
+ * boundary is the approval gate, unchanged. Execution is deliberately NOT done
+ * here — scripts/check-verify.sh owns it, under an allow-listed env.
+ *
+ * @param {string} text - full plan doc text
+ * @returns {Record<number, string>}
+ */
+function parseWaveVerify(text) {
+  const waveVerify = {};
+  let currentWave;
+  for (const line of text.split('\n')) {
+    const heading = /^###\s+Wave\s+(\d+)\b/.exec(line.trim());
+    if (heading) {
+      currentWave = Number(heading[1]);
+      continue;
+    }
+    // A new `##`/`###` heading that is NOT a Wave heading ends the current block.
+    // Deeper headings (`####` task subheadings) stay INSIDE the wave so a Verify:
+    // line still applies across the wave's tasks.
+    if (/^#{2,3}\s/.test(line.trim())) {
+      currentWave = undefined;
+      continue;
+    }
+    if (currentWave !== undefined) {
+      const m = /^Verify:\s*(.+)$/.exec(line.trim());
+      if (m && m[1].trim() !== '') waveVerify[currentWave] = m[1].trim();
+    }
+  }
+  return waveVerify;
+}
+
+/**
  * Parse a plan doc text to extract the planCtx fields needed by runWave.
  *
  * @param {string} text - full plan doc text
- * @returns {{ branch: string, acceptanceCriteria: string[], waveModels: Record<number, string>, executionNotes: { doNotTouch: string[], keyFiles: string[], reminders: string[] } }}
+ * @returns {{ branch: string, acceptanceCriteria: string[], waveModels: Record<number, string>, waveVerify: Record<number, string>, executionNotes: { doNotTouch: string[], keyFiles: string[], reminders: string[] } }}
  */
 export function parsePlanCtx(text) {
   // Branch: extract from `Branch: rad/feature` header line
@@ -337,6 +382,7 @@ export function parsePlanCtx(text) {
     branch,
     acceptanceCriteria: acLines,
     waveModels: parseWaveModels(text),
+    waveVerify: parseWaveVerify(text),
     executionNotes: { doNotTouch, keyFiles, reminders },
   };
 }
