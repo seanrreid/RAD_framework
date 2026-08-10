@@ -112,6 +112,11 @@ Issue-Title: [original issue title, if fetched]
 [List every agent called during research. Flag out-of-scope dependencies.]
 
 ## Files in Scope
+<!-- A RENAME DECLARES BOTH PATHS: one row for the source, one for the
+     destination. scripts/check-scope.sh builds the declared set from the File
+     column only — it never reads this Change prose — so a `git mv` destination
+     mentioned only in a Change cell reads as out-of-scope drift and fails the
+     scope check at deliver time. -->
 | File | Lines | Change |
 |------|-------|--------|
 | [path] | [range] | [what changes] |
