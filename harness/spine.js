@@ -48,6 +48,18 @@ function safeVetoOutcome(outcome) {
  * the early exit; this cap only bites when every attempt fails *differently*. */
 const MAX_ATTEMPTS = 3;
 
+/** The executing verification gate: runs a plan-declared command and reads its
+ * REAL exit code. Distinct from check-tests-present.sh (file presence) by
+ * design — neither replaces the other (issue #91). */
+const VERIFY_SCRIPT = 'scripts/check-verify.sh';
+
+/** Exit code check-verify.sh RESERVES for "the declared command exceeded its
+ * timeout and was killed". It maps to the EXISTING `fail-timeout` outcome
+ * (matrix action `surface`), never `fail-tests` (`revision`): a retry cannot fix
+ * a hang, so a wedged command must surface rather than burn the attempt budget.
+ * Kept in lockstep with VERIFY_TIMEOUT_STATUS in scripts/check-verify.sh. */
+const VERIFY_TIMEOUT_STATUS = 124;
+
 /** Post-check guardrails, run in order after all waves. The test-PRESENCE gate
  * now runs per-wave (a promised-but-absent test file blocks AT the wave that
  * promised it, not at the end), so check-tests-present is no longer an end
@@ -116,6 +128,14 @@ function fireHooks(runHooks, point, ctx, { state, feature, now }) {
  * @param {() => string} args.now - injected clock (ISO timestamp)
  * @param {number} [args.maxAttempts] - per-wave attempt ceiling (defaults to MAX_ATTEMPTS); injectable for tests
  * @param {number} [args.tokenBudget] - optional cumulative token ceiling; 0/null/undefined disables the breaker (no behavior change)
+ * @param {Record<number, string>} [args.waveVerify] - optional per-wave verification
+ *   commands, keyed by wave number (parsed from the plan's `Verify:` lines by
+ *   cli.js and passed through, exactly as tokenBudget is). A wave ABSENT from the
+ *   map runs no command and records no `verify` key — so a plan declaring no
+ *   `Verify:` anywhere produces the event sequence it did before this existed.
+ *   The spine never executes the command itself: it hands it to
+ *   scripts/check-verify.sh through the injected `sh` port, which owns the
+ *   allow-listed env, the timeout, and the output cap.
  * @param {(point: string, ctx: Object) => { ran: Array, veto: (Object|null), failures: Array }} [args.runHooks]
  *   wave-lifecycle hook runner (from createHookRunner). OBSERVE-ONLY in this wave:
  *   fired at six lifecycle points, its observations/failures are recorded as
@@ -142,6 +162,7 @@ export async function deliverSpine({
   now,
   maxAttempts = MAX_ATTEMPTS,
   tokenBudget = null,
+  waveVerify = {},
   runHooks = NOOP_HOOKS,
   hookPreflight = NOOP_PREFLIGHT,
 }) {
@@ -273,13 +294,19 @@ export async function deliverSpine({
       // doom-loop fingerprint) handles it; the wave then blocks here instead of
       // advancing on an unwritten test.
       //
-      // The guarantee is narrow, and worth stating plainly: a wave does not
-      // advance if a promised test file is ABSENT. The gate never executes a test
-      // and never consults a test runner, so a present-but-empty or outright
-      // failing test satisfies it. Execution-based verification does not exist
-      // yet (see issue #89). ──
+      // The presence guarantee is narrow, and worth stating plainly: a wave does
+      // not advance if a promised test file is ABSENT. That gate never executes a
+      // test and never consults a test runner, so a present-but-empty or outright
+      // failing test satisfies it. The EXECUTING gate below closes that hole
+      // (issue #89) for waves that declare a `Verify:` command — the two stay
+      // separate checks, and neither replaces the other (issue #91). ──
       let { outcome } = result;
       let gated = result;
+      // Evidence of an executed verification, spread (not assigned) onto the
+      // attempt event so the key is ABSENT — never present-and-undefined — when
+      // no command ran. A wave with no `Verify:` line must append an event
+      // byte-identical to a pre-verification one.
+      let verifyEvidence = {};
       if (postVeto) {
         // A post-wave veto is authoritative: it REPLACES the model's outcome with
         // the (validated, fail-closed) veto outcome and routes THAT through the
@@ -315,6 +342,39 @@ export async function deliverSpine({
             categories: ['check-tests'],
             summary: `check-tests gate failed (status ${gate.status})`,
           };
+        } else {
+          // ── Per-wave EXECUTING gate. When the plan declared a `Verify:` command
+          // for this wave, the harness runs it and reads its REAL exit code — the
+          // one thing the presence gate cannot tell us. The command itself is
+          // arbitrary shell from a human-approved plan, so the spine never
+          // executes it: check-verify.sh does, through the SAME `sh` port every
+          // other guardrail uses (unchanged shape), and owns the allow-listed env,
+          // the timeout, and the output cap.
+          //
+          // A failure supplies a different INPUT TOKEN to the matrix; it never
+          // adds a branch here and never invents an outcome. The matrix stays the
+          // sole authority on what happens next. ──
+          const command = waveVerify[wave.n];
+          if (command) {
+            const run = sh(VERIFY_SCRIPT, command);
+            verifyEvidence = {
+              verify: { command, status: run.status, passed: run.status === 0 },
+            };
+            if (run.status !== 0) {
+              // A killed-on-timeout command is NOT a retryable test failure: a
+              // retry cannot fix a hang, so it takes the existing `fail-timeout`
+              // token (matrix action `surface`) instead of `fail-tests`.
+              outcome = run.status === VERIFY_TIMEOUT_STATUS ? 'fail-timeout' : 'fail-tests';
+              // Same stable-fingerprint discipline as the presence gate above:
+              // gate-derived fields only, so two identical failures hash equally.
+              gated = {
+                outcome,
+                gateStatus: run.status,
+                categories: ['check-verify'],
+                summary: `check-verify gate failed (status ${run.status})`,
+              };
+            }
+          }
         }
       }
 
@@ -341,9 +401,15 @@ export async function deliverSpine({
         // attempt with source/point/hook so a veto-originated outcome is
         // distinguishable from an agent-emitted one. Absent a veto the shape is
         // unchanged — no provenance keys are added.
+        //
+        // Verification evidence (Task 3.3): when the wave declared a `Verify:`
+        // command and it actually ran, record { command, status, passed } so the
+        // event log carries what was executed and what really happened — not a
+        // self-classification. Spread, so a wave that declared none appends an
+        // event with NO `verify` key at all.
         data: vetoSource
-          ? { wave: wave.n, outcome, usage: result.usage, ...taskEvidence, source: 'hook', point: vetoSource.point, hook: vetoSource.hook }
-          : { wave: wave.n, outcome, usage: result.usage, ...taskEvidence },
+          ? { wave: wave.n, outcome, usage: result.usage, ...taskEvidence, ...verifyEvidence, source: 'hook', point: vetoSource.point, hook: vetoSource.hook }
+          : { wave: wave.n, outcome, usage: result.usage, ...taskEvidence, ...verifyEvidence },
       });
 
       // Accumulate this attempt's token spend for the budget breaker. Usage is

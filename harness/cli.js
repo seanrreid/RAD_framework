@@ -545,6 +545,10 @@ export async function deliverCommand(argv, ctx) {
       sh: (script, feat) => sh(join(repoRoot, script), [feat], { cwd: shCwd }),
       now: () => new Date().toISOString(),
       tokenBudget,
+      // Per-wave `Verify:` commands, passed through exactly as tokenBudget is.
+      // Empty for a plan that declares none, which leaves the spine's behavior
+      // and its event sequence unchanged.
+      waveVerify: planCtx.waveVerify,
     });
   } catch (err) {
     // Unexpected spine throw: still preserve the worktree (so the operator can
