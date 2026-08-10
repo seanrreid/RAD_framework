@@ -318,6 +318,14 @@ export async function deliverSpine({
         }
       }
 
+      // `tasks` rides on the same REAL runWave result as `usage` and is likewise
+      // OPTIONAL — the adapter contract (docs/rad-wave-contract.md) attaches it
+      // only when the agent reported a non-empty task list. Spread, not assigned,
+      // so the key is ABSENT rather than present-and-undefined when the result
+      // carries none: a tasks-free result must append an event byte-identical to
+      // a pre-tasks one. It is DATA-ONLY — no fold in events.js reads it.
+      const taskEvidence = result.tasks ? { tasks: result.tasks } : {};
+
       state.append({
         feature,
         type: 'wave-attempt',
@@ -334,8 +342,8 @@ export async function deliverSpine({
         // distinguishable from an agent-emitted one. Absent a veto the shape is
         // unchanged — no provenance keys are added.
         data: vetoSource
-          ? { wave: wave.n, outcome, usage: result.usage, source: 'hook', point: vetoSource.point, hook: vetoSource.hook }
-          : { wave: wave.n, outcome, usage: result.usage },
+          ? { wave: wave.n, outcome, usage: result.usage, ...taskEvidence, source: 'hook', point: vetoSource.point, hook: vetoSource.hook }
+          : { wave: wave.n, outcome, usage: result.usage, ...taskEvidence },
       });
 
       // Accumulate this attempt's token spend for the budget breaker. Usage is
