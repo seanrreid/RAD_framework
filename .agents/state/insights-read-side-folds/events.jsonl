@@ -1,1 +1,5 @@
 {"feature":"insights-read-side-folds","type":"approved","actor":"sean@torchcodelab.com","role":"architect","ts":"2026-08-20T18:18:25.487Z","recordedBy":"sean@torchcodelab.com","data":{"fingerprint":"bc792d70aa5976dbfe72c50c7099364db24422ddc9197844f08386dc98c227ed"}}
+{"feature":"insights-read-side-folds","type":"deliver-started","actor":"harness","ts":"2026-08-20T18:26:49.995Z"}
+{"feature":"insights-read-side-folds","type":"wave-attempt","actor":"harness","ts":"2026-08-20T18:26:53.277Z","data":{"wave":1,"outcome":"fail-tests","tasks":[{"title":"1","status":"blocked_code","commit":"—","concern":"—","error":"command exited with code 1:"}]}}
+{"feature":"insights-read-side-folds","type":"wave-attempt","actor":"harness","ts":"2026-08-20T18:26:55.783Z","data":{"wave":1,"outcome":"fail-tests","tasks":[{"title":"1","status":"blocked_code","commit":"—","concern":"—","error":"command exited with code 1:"}]}}
+{"feature":"insights-read-side-folds","type":"wave-failed","actor":"harness","ts":"2026-08-20T18:26:55.783Z","data":{"wave":1,"reason":"doom-loop"}}
