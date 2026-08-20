@@ -1,7 +1,10 @@
 # Plan: Insights Read-Side Folds
 Created: 2026-08-20
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-08-20T18:18:25.487Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/insights-read-side-folds
 Adopted-From: https://github.com/seanrreid/RAD_framework/issues/63
 Issue-Title: Mine traces, not counts: persist per-task WAVE_RESULT statuses, failed-wave transcripts, and contract-level usage
