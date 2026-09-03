@@ -1,7 +1,7 @@
 # Plan: Command-Adapter Env Allow-List + Failure Diagnostics
 Created: 2026-08-26
 Author: architect
-Status: approved
+Status: in-progress
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-08-26T17:37:36.661Z
 Recorded-By: sean@torchcodelab.com
