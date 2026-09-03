@@ -134,6 +134,83 @@ test('command adapter — non-zero exit is classified terminally', async () => {
   });
 });
 
+test('command adapter — non-zero exit with empty stderr falls back to stdout excerpt', async () => {
+  await withTempDir(async (dir) => {
+    const cmd = fakeCmd(
+      dir,
+      'stdout-only.js',
+      `process.stdout.write('Not logged in - please run /login');process.exit(3);\n`,
+    );
+    const runWave = createCommandAdapter({ cmd, repoRoot: dir });
+    const result = await runWave(WAVE, PLAN_CTX);
+    assert.equal(result.status, 'failed');
+    const error = result.tasks[0].error;
+    assert.ok(error.includes('code 3'), `error should mention exit code 3; got ${error}`);
+    assert.ok(
+      error.includes('Not logged in - please run /login'),
+      `error should carry the stdout excerpt; got ${error}`,
+    );
+    assert.ok(error.includes('(stdout)'), `error should tag the excerpt's origin; got ${error}`);
+  });
+});
+
+test('command adapter — non-zero exit with non-empty stderr is unchanged and omits stdout', async () => {
+  await withTempDir(async (dir) => {
+    const cmd = fakeCmd(
+      dir,
+      'both-streams.js',
+      `process.stdout.write('STDOUT_SHOULD_NOT_APPEAR');` +
+        `process.stderr.write('actual stderr reason');process.exit(5);\n`,
+    );
+    const runWave = createCommandAdapter({ cmd, repoRoot: dir });
+    const result = await runWave(WAVE, PLAN_CTX);
+    assert.equal(result.status, 'failed');
+    const error = result.tasks[0].error;
+    assert.ok(error.includes('code 5'), `error should mention exit code 5; got ${error}`);
+    assert.ok(
+      error.includes('actual stderr reason'),
+      `error should carry the stderr text; got ${error}`,
+    );
+    assert.ok(
+      !error.includes('STDOUT_SHOULD_NOT_APPEAR'),
+      `stderr present — stdout must not be appended; got ${error}`,
+    );
+    assert.ok(!error.includes('(stdout)'), `stderr present — no stdout tag expected; got ${error}`);
+  });
+});
+
+test('command adapter — stdout fallback excerpt is capped at 500 bytes and sanitized', async () => {
+  await withTempDir(async (dir) => {
+    const head = 'STDOUT_HEAD_MARKER ';
+    const secret = `sk-ant-${'S'.repeat(20)} `;
+    const filler = 'pad '.repeat(150); // well past the 500-byte cap before the tail marker
+    const tail = 'STDOUT_TAIL_MARKER_SHOULD_BE_CUT';
+    const stdoutBody = head + secret + filler + tail;
+    const cmd = fakeCmd(
+      dir,
+      'stdout-overflow.js',
+      `process.stdout.write(${JSON.stringify(stdoutBody)});process.exit(9);\n`,
+    );
+    const runWave = createCommandAdapter({ cmd, repoRoot: dir });
+    const result = await runWave(WAVE, PLAN_CTX);
+    assert.equal(result.status, 'failed');
+    const error = result.tasks[0].error;
+    assert.ok(error.includes('(stdout)'), `error should tag the excerpt's origin; got ${error}`);
+    assert.ok(
+      error.includes('STDOUT_HEAD_MARKER'),
+      `excerpt should include content within the first 500 bytes; got ${error}`,
+    );
+    assert.ok(
+      !error.includes('STDOUT_TAIL_MARKER_SHOULD_BE_CUT'),
+      `excerpt should be capped before the 500-byte tail marker; got ${error}`,
+    );
+    assert.ok(
+      error.includes('[REDACTED]') && !error.includes('S'.repeat(20)),
+      `excerpt should be sanitized like the stderr path; got ${error}`,
+    );
+  });
+});
+
 test('command adapter — child env omits a sentinel but forwards USER (allow-list)', async () => {
   await withTempDir(async (dir) => {
     const SENTINEL = 'RAD_TEST_SENTINEL_SECRET';
