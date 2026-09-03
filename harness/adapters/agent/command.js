@@ -35,8 +35,13 @@ import {
   normalizeUsage,
 } from './contract.js';
 
-/** Env vars that are safe to forward to the child. Secrets are NOT in this set. */
-const ENV_ALLOW_LIST = ['PATH', 'HOME', 'LANG', 'LC_ALL', 'TMPDIR', 'TERM'];
+/**
+ * Env vars that are safe to forward to the child. This set carries process
+ * identity needed for credential lookup — `USER` resolves the OS keychain
+ * entry some CLIs (e.g. git credential helpers) depend on — plus locale/temp
+ * plumbing. Secrets are NOT in this set: `USER` is a username, not a secret.
+ */
+const ENV_ALLOW_LIST = ['PATH', 'HOME', 'LANG', 'LC_ALL', 'TMPDIR', 'TERM', 'USER'];
 
 /** Hard cap on captured child output. A runaway agent that floods stdout is
  * killed rather than buffered into an OOM before the wall-clock timeout fires. */

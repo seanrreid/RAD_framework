@@ -134,27 +134,52 @@ test('command adapter — non-zero exit is classified terminally', async () => {
   });
 });
 
-test('command adapter — child env omits a sentinel process.env var (allow-list)', async () => {
+test('command adapter — child env omits a sentinel but forwards USER (allow-list)', async () => {
   await withTempDir(async (dir) => {
     const SENTINEL = 'RAD_TEST_SENTINEL_SECRET';
     process.env[SENTINEL] = 'leak-me-if-you-can';
+    process.env.USER = 'rad-test-user';
     try {
       // The fake agent emits a valid WAVE_RESULT ONLY when the sentinel is
-      // absent from its env; if the sentinel leaked it writes nothing, so the
-      // adapter would fall through to fail-protocol. Asserting success thus
-      // proves the allow-list omitted the sentinel.
+      // absent from its env AND USER is present; if the sentinel leaked, or
+      // USER did not make it through, it writes nothing, so the adapter would
+      // fall through to fail-protocol. Asserting success thus proves the
+      // allow-list omitted the sentinel while forwarding USER.
       const cmd = fakeCmd(
         dir,
         'reportenv.js',
-        `if(process.env[${JSON.stringify(SENTINEL)}]===undefined){` +
+        `if(process.env[${JSON.stringify(SENTINEL)}]===undefined&&process.env.USER===${JSON.stringify('rad-test-user')}){` +
           `process.stdout.write(${JSON.stringify(GOOD_RESULT)});}` +
           `else{process.stdout.write('LEAKED');}\n`,
       );
       const runWave = createCommandAdapter({ cmd, repoRoot: dir });
       const result = await runWave(WAVE, PLAN_CTX);
-      assert.equal(result.outcome, 'success', 'sentinel must not reach the child env');
+      assert.equal(result.outcome, 'success', 'sentinel must not reach the child env, and USER must');
     } finally {
       delete process.env[SENTINEL];
+    }
+  });
+});
+
+test('command adapter — child env has no USER key when parent USER is unset', async () => {
+  await withTempDir(async (dir) => {
+    const savedUser = process.env.USER;
+    delete process.env.USER;
+    try {
+      // Asserts absence (no USER key at all), not an empty string — mirrors
+      // buildChildEnv's "skip undefined keys" behavior.
+      const cmd = fakeCmd(
+        dir,
+        'reportnouser.js',
+        `if(!Object.prototype.hasOwnProperty.call(process.env,'USER')){` +
+          `process.stdout.write(${JSON.stringify(GOOD_RESULT)});}` +
+          `else{process.stdout.write('USER_LEAKED:'+JSON.stringify(process.env.USER));}\n`,
+      );
+      const runWave = createCommandAdapter({ cmd, repoRoot: dir });
+      const result = await runWave(WAVE, PLAN_CTX);
+      assert.equal(result.outcome, 'success', 'child env must have no USER key when parent USER is unset');
+    } finally {
+      if (savedUser !== undefined) process.env.USER = savedUser;
     }
   });
 });
