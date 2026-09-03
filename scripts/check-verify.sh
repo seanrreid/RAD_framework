@@ -62,7 +62,7 @@ readonly VERIFY_OUTPUT_MAX_LINES=40
 readonly VERIFY_OUTPUT_MAX_BYTES=8000
 # The env subset handed to the executed command. Mirrors ENV_ALLOW_LIST in
 # harness/adapters/agent/command.js — one treatment for every spawn boundary.
-readonly VERIFY_ENV_ALLOW_LIST=(PATH HOME LANG LC_ALL TMPDIR TERM)
+readonly VERIFY_ENV_ALLOW_LIST=(PATH HOME LANG LC_ALL TMPDIR TERM USER)
 
 # ── Argument + config validation (fail-closed) ────────────────────────────────
 
