@@ -8,3 +8,5 @@ Executor role: architect
 
 | Step | Wave | Task | Status | Commit | Time |
 |------|------|------|--------|--------|------|
+| 1 | Wave 1 | Forward `USER` from the command adapter | ✓ complete | 5c26122 | 2026-09-03T16:41:23Z |
+| 2 | Wave 1 | Forward `USER` from check-verify.sh | ✓ complete | c01f3c6 | 2026-09-03T16:42:25Z |
