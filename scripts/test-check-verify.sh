@@ -186,4 +186,22 @@ run_verify 'test -n "$PATH"'
 [[ "$CODE" -eq 0 ]] || fail "A7c: the allow-listed PATH did not reach the command (exit $CODE)"
 echo "✓ A7c: allow-listed PATH reaches the executed command"
 
+# ── A8: USER is forwarded; a non-allow-listed sentinel is not ────────────────
+# Mirrors ENV_ALLOW_LIST in harness/adapters/agent/command.js: USER carries
+# process identity for credential lookup and is forwarded on the same terms as
+# the other allow-listed vars, while an unrelated sentinel stays excluded.
+
+SAVED_USER="${USER:-}"
+export USER="rad-test-user"
+export RAD_TEST_USER_SENTINEL="leak-me-if-you-can"
+
+run_verify 'echo "USER=[$USER] SENTINEL=[$RAD_TEST_USER_SENTINEL]"; exit 1'
+[[ "$CODE" -eq 1 ]] || fail "A8: failing command should exit 1 (got $CODE)"
+grep -q "USER=\[rad-test-user\]" "$OUT" || fail "A8: USER was not forwarded to the executed command"
+grep -q "SENTINEL=\[\]" "$OUT" || fail "A8: non-allow-listed sentinel was not empty in the command's env"
+
+unset RAD_TEST_USER_SENTINEL
+if [[ -n "$SAVED_USER" ]]; then export USER="$SAVED_USER"; else unset USER; fi
+echo "✓ A8: USER forwarded; non-allow-listed sentinel excluded"
+
 echo "ALL PASS"

@@ -134,27 +134,129 @@ test('command adapter — non-zero exit is classified terminally', async () => {
   });
 });
 
-test('command adapter — child env omits a sentinel process.env var (allow-list)', async () => {
+test('command adapter — non-zero exit with empty stderr falls back to stdout excerpt', async () => {
+  await withTempDir(async (dir) => {
+    const cmd = fakeCmd(
+      dir,
+      'stdout-only.js',
+      `process.stdout.write('Not logged in - please run /login');process.exit(3);\n`,
+    );
+    const runWave = createCommandAdapter({ cmd, repoRoot: dir });
+    const result = await runWave(WAVE, PLAN_CTX);
+    assert.equal(result.status, 'failed');
+    const error = result.tasks[0].error;
+    assert.ok(error.includes('code 3'), `error should mention exit code 3; got ${error}`);
+    assert.ok(
+      error.includes('Not logged in - please run /login'),
+      `error should carry the stdout excerpt; got ${error}`,
+    );
+    assert.ok(error.includes('(stdout)'), `error should tag the excerpt's origin; got ${error}`);
+  });
+});
+
+test('command adapter — non-zero exit with non-empty stderr is unchanged and omits stdout', async () => {
+  await withTempDir(async (dir) => {
+    const cmd = fakeCmd(
+      dir,
+      'both-streams.js',
+      `process.stdout.write('STDOUT_SHOULD_NOT_APPEAR');` +
+        `process.stderr.write('actual stderr reason');process.exit(5);\n`,
+    );
+    const runWave = createCommandAdapter({ cmd, repoRoot: dir });
+    const result = await runWave(WAVE, PLAN_CTX);
+    assert.equal(result.status, 'failed');
+    const error = result.tasks[0].error;
+    assert.ok(error.includes('code 5'), `error should mention exit code 5; got ${error}`);
+    assert.ok(
+      error.includes('actual stderr reason'),
+      `error should carry the stderr text; got ${error}`,
+    );
+    assert.ok(
+      !error.includes('STDOUT_SHOULD_NOT_APPEAR'),
+      `stderr present — stdout must not be appended; got ${error}`,
+    );
+    assert.ok(!error.includes('(stdout)'), `stderr present — no stdout tag expected; got ${error}`);
+  });
+});
+
+test('command adapter — stdout fallback excerpt is capped at 500 bytes and sanitized', async () => {
+  await withTempDir(async (dir) => {
+    const head = 'STDOUT_HEAD_MARKER ';
+    const secret = `sk-ant-${'S'.repeat(20)} `;
+    const filler = 'pad '.repeat(150); // well past the 500-byte cap before the tail marker
+    const tail = 'STDOUT_TAIL_MARKER_SHOULD_BE_CUT';
+    const stdoutBody = head + secret + filler + tail;
+    const cmd = fakeCmd(
+      dir,
+      'stdout-overflow.js',
+      `process.stdout.write(${JSON.stringify(stdoutBody)});process.exit(9);\n`,
+    );
+    const runWave = createCommandAdapter({ cmd, repoRoot: dir });
+    const result = await runWave(WAVE, PLAN_CTX);
+    assert.equal(result.status, 'failed');
+    const error = result.tasks[0].error;
+    assert.ok(error.includes('(stdout)'), `error should tag the excerpt's origin; got ${error}`);
+    assert.ok(
+      error.includes('STDOUT_HEAD_MARKER'),
+      `excerpt should include content within the first 500 bytes; got ${error}`,
+    );
+    assert.ok(
+      !error.includes('STDOUT_TAIL_MARKER_SHOULD_BE_CUT'),
+      `excerpt should be capped before the 500-byte tail marker; got ${error}`,
+    );
+    assert.ok(
+      error.includes('[REDACTED]') && !error.includes('S'.repeat(20)),
+      `excerpt should be sanitized like the stderr path; got ${error}`,
+    );
+  });
+});
+
+test('command adapter — child env omits a sentinel but forwards USER (allow-list)', async () => {
   await withTempDir(async (dir) => {
     const SENTINEL = 'RAD_TEST_SENTINEL_SECRET';
     process.env[SENTINEL] = 'leak-me-if-you-can';
+    process.env.USER = 'rad-test-user';
     try {
       // The fake agent emits a valid WAVE_RESULT ONLY when the sentinel is
-      // absent from its env; if the sentinel leaked it writes nothing, so the
-      // adapter would fall through to fail-protocol. Asserting success thus
-      // proves the allow-list omitted the sentinel.
+      // absent from its env AND USER is present; if the sentinel leaked, or
+      // USER did not make it through, it writes nothing, so the adapter would
+      // fall through to fail-protocol. Asserting success thus proves the
+      // allow-list omitted the sentinel while forwarding USER.
       const cmd = fakeCmd(
         dir,
         'reportenv.js',
-        `if(process.env[${JSON.stringify(SENTINEL)}]===undefined){` +
+        `if(process.env[${JSON.stringify(SENTINEL)}]===undefined&&process.env.USER===${JSON.stringify('rad-test-user')}){` +
           `process.stdout.write(${JSON.stringify(GOOD_RESULT)});}` +
           `else{process.stdout.write('LEAKED');}\n`,
       );
       const runWave = createCommandAdapter({ cmd, repoRoot: dir });
       const result = await runWave(WAVE, PLAN_CTX);
-      assert.equal(result.outcome, 'success', 'sentinel must not reach the child env');
+      assert.equal(result.outcome, 'success', 'sentinel must not reach the child env, and USER must');
     } finally {
       delete process.env[SENTINEL];
+    }
+  });
+});
+
+test('command adapter — child env has no USER key when parent USER is unset', async () => {
+  await withTempDir(async (dir) => {
+    const savedUser = process.env.USER;
+    delete process.env.USER;
+    try {
+      // Asserts absence (no USER key at all), not an empty string — mirrors
+      // buildChildEnv's "skip undefined keys" behavior.
+      const cmd = fakeCmd(
+        dir,
+        'reportnouser.js',
+        `if(!Object.prototype.hasOwnProperty.call(process.env,'USER')){` +
+          `process.stdout.write(${JSON.stringify(GOOD_RESULT)});}` +
+          `else{process.stdout.write('USER_LEAKED:'+JSON.stringify(process.env.USER));}\n`,
+      );
+      const runWave = createCommandAdapter({ cmd, repoRoot: dir });
+      const result = await runWave(WAVE, PLAN_CTX);
+      assert.equal(result.outcome, 'success', 'child env must have no USER key when parent USER is unset');
+    } finally {
+      if (savedUser !== undefined) process.env.USER = savedUser;
     }
   });
 });
