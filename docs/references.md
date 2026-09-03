@@ -22,6 +22,41 @@ Each entry follows the same shape:
 
 ## Agent harness analyses
 
+### WSD — Walking Skeleton Development
+- **Source:** WSD framework self-description (composition + declared methodological
+  ancestry), provided directly rather than read from a published artifact — unlike
+  every other entry here, this review assessed a *methodology statement*, not code
+  or a public post. Claims about WSD's enforcement are therefore unknown, not absent.
+- **Reviewed:** 2026-09-02
+- **Takeaway:** A third independent convergence on RAD's substrate bets (after
+  Cosmos and CUGA) — staged human governance, a universal discipline floor with a
+  precedence ladder, contract-first seams, hexagonal boundaries, information
+  radiators. Load-bearing difference: **which half of the problem each framework
+  claims.** WSD prescribes *how to slice work* (smallest composed end-to-end path,
+  actor-visible capabilities, never layer phases); RAD prescribes *how to prove
+  what happened* (pure folds, frozen vocabulary, fail-closed gates). Complementary,
+  not competing. The genuine divergence is decomposition: RAD's waves slice by
+  dependency profile and context budget, and `wave-execution.md`'s canonical
+  *correct* example (model → schema → routes) is exactly the layer phasing WSD
+  forbids — which is issue #47 ("outcome-checkpointing vs context-fitting") stated
+  from the outside. Also new: asymmetric falsification (Popper/Lakatos) as a method
+  to attach to the already-instrumented-but-uncalibrated reviewer work (#48, #49);
+  evolutionary architecture as a second vote for #46. Notable in the other
+  direction: WSD credits Toyota (jidoka/andon/poka-yoke) and Continuous Delivery
+  explicitly, both of which are load-bearing in RAD and entirely uncited — jidoka
+  is arguably RAD's most pervasive single pattern. Steal-with-modification:
+  a skeleton-first plan-lint rule (Wave 1 declares a composed end-to-end path and
+  carries a `Verify:` line), the corroborate/falsify reviewer split, and a
+  vault-shaped *read* layer over `.agents/` — a better answer to the soft-knowledge
+  gap than Cosmos's hosted KB, because a vault stays in plain git the operator owns.
+  Declined: capability slicing wholesale (it fights the context budget waves exist
+  to satisfy). Full breakdown: [wsd-vs-rad.md](wsd-vs-rad.md).
+- **Issues:** none filed. Candidates overlap existing
+  [#46](https://github.com/seanrreid/RAD_framework/issues/46),
+  [#47](https://github.com/seanrreid/RAD_framework/issues/47),
+  [#48](https://github.com/seanrreid/RAD_framework/issues/48), and
+  [#49](https://github.com/seanrreid/RAD_framework/issues/49).
+
 ### Cosmos — Augment Code's Agentic SDLC Platform
 - **Source:** Augment Code — [augmentcode.com/blog/cosmos-now-in-public-preview](https://www.augmentcode.com/blog/cosmos-now-in-public-preview)
 - **Reviewed:** 2026-07-13
