@@ -211,10 +211,10 @@ remembering when #108 is designed.
 2. **Blueprint mechanics for pinned playbooks** (version, primary-file marker,
    cumulative upgrade guide) → comment on #50.
 3. **Optional `cacheRead`/`cacheWrite`/`cost` fields in `normalizeUsage`** so
-   `/rad-insights` can see whether the retry prefix held → comment on #112.
+   `/rad-insights` can see whether the retry prefix held → filed as #121.
 4. **Flue as a `RAD_AGENT_CMD` cookbook entry** — `npx flue run agent.ts -m
    {prompt}` needs no wrapper because Flue's stdout/stderr contract is exactly
-   the one #114 wished other CLIs had → comment on #110.
+   the one #114 wished other CLIs had → provider cookbook added to #110's scope.
 
 **Corroborates (no new work)**
 
@@ -243,5 +243,10 @@ remembering when #108 is designed.
 - **#119** — Record the wave attempt before running it: a crash mid-wave
   leaves no event, so resume re-runs blind and the dead attempt escapes the
   attempt and token budgets.
-- Comments on #50, #85, #87, #95, #110, #112.
+- **#121** — Carry cache-read/cache-write (and optional cost) through
+  `normalizeUsage` so the event log can show whether a retry prefix held.
+- **#50** body extended with the blueprint mechanics (version, primary-file
+  marker, cumulative upgrade guide, frozen kinds, `Playbook:` plan header).
+- **#110** body extended with the provider cookbook and a new AC 6.
+- Comments on #85, #87, #95, #108, #112.
 - `docs/rad-wave-contract.md`: corrected the task-status coercion line.
