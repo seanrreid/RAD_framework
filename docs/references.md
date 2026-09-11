@@ -22,6 +22,31 @@ Each entry follows the same shape:
 
 ## Agent harness analyses
 
+### Flue — The Open Agent Framework (Astro team)
+- **Source:** [flueframework.com](https://flueframework.com/) · [`withastro/flue`](https://github.com/withastro/flue) · [Flue 2 announcement](https://flueframework.com/blog/flue-2/)
+- **Reviewed:** 2026-09-11
+- **Takeaway:** A TypeScript agent *runtime* (hooks-based agent functions, durable
+  append-only conversation streams, opt-in sandboxes, `flue run` for CI) — the
+  engine behind the Astro triage bot assessed 2026-08-05. Below RAD's BYO seam,
+  so no architectural steal; Flue 2.0 even deleted its workflow system. But its
+  durability contract ("exactly-once recording, at-least-once execution":
+  record the submission *before* model work, converge orphaned attempts on
+  recovery, then classify) exposed a real gap: RAD appends `wave-attempt`
+  *after* `runWave` returns, so a crash mid-wave records nothing — resume
+  re-runs blind, the attempt budget and `RAD_TOKEN_BUDGET` are bypassable by
+  crash-looping. Also found `rad-wave-contract.md` misstating the (actually
+  fail-closed) task-status coercion; corrected. Flue's `blueprints/` are #50's
+  pinned playbooks shipped (versioned, primary-file marker, cumulative upgrade
+  guide). Default-deny-by-hook capabilities and their two-token LLM/deterministic
+  split corroborate #85; an approver allowlist changed only via PR corroborates
+  #87. Note: their own `AGENTS.md` says "No tests exist in the repo." Full
+  breakdown: [flue-vs-rad.md](flue-vs-rad.md).
+- **Issues:** [#119](https://github.com/seanrreid/RAD_framework/issues/119)
+  (record `wave-started` before `runWave`; converge orphans on resume),
+  [#121](https://github.com/seanrreid/RAD_framework/issues/121) (cache-read /
+  cache-write through `normalizeUsage`); #50 and #110 bodies extended
+  (blueprint mechanics; provider cookbook); comments on #85, #87, #95, #108, #112.
+
 ### WSD — Walking Skeleton Development
 - **Source:** WSD framework self-description (composition + declared methodological
   ancestry), provided directly rather than read from a published artifact — unlike

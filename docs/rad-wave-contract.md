@@ -103,7 +103,7 @@ Grammar notes (enforced by `extractWaveResultBlock` + `parseWaveResult`):
 - `status:` at the **top level** (no leading indent) is the wave status.
 - Each task starts with `  - title:`; subsequent indented `status:`/`commit:`/
   `concern:`/`error:` lines belong to the current task.
-- An unrecognized task `status` value is coerced to `complete`.
+- An unrecognized task `status` value is coerced to `blocked_code` (non-passing — it routes through `fail-tests`, never `success`; see `contract.js` and the `agent-contract.test.js` case).
 - An unrecognized wave `status` value is coerced to `failed`.
 
 The five valid task statuses are the RAD self-classification vocabulary:
