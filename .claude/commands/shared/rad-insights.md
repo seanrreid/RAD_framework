@@ -264,9 +264,60 @@ Reading the output:
   state today: committed event logs contain only `approved` events, so a fresh
   clone renders the zeros path (see the Reliability template below), not an error.
 
+### Step 4d: Fold per-task blocked reasons from the event logs
+
+Blocked-reason metrics read the OPTIONAL per-task records (`data.tasks`, see
+`docs/rad-wave-contract.md`) that newer `wave-attempt` events carry. As in Step
+4c, the counting lives in `harness/events.js` (`blockedReasonCounts`) — import
+it, never re-implement it in jq. Same invocation convention: run from the repo
+root; `RAD_STATE_DIR` (default `.agents/state`) exists only for fixture testing.
+This step only reads; it writes nothing.
+
+```bash
+node --input-type=module -e '
+import { readFileSync, readdirSync, existsSync } from "node:fs";
+import { join } from "node:path";
+const { blockedReasonCounts } = await import("./harness/events.js");
+
+const stateDir = process.env.RAD_STATE_DIR || ".agents/state";
+const features = existsSync(stateDir)
+  ? readdirSync(stateDir, { withFileTypes: true })
+      .filter((d) => d.isDirectory())
+      .map((d) => d.name)
+      .filter((f) => existsSync(join(stateDir, f, "events.jsonl")))
+      .sort()
+  : [];
+
+const aggregate = blockedReasonCounts([]);
+const perFeature = {};
+for (const feature of features) {
+  const history = readFileSync(join(stateDir, feature, "events.jsonl"), "utf8")
+    .split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  const counts = blockedReasonCounts(history);
+  perFeature[feature] = counts;
+  for (const k of Object.keys(aggregate)) aggregate[k] += counts[k];
+}
+
+const noEnrichedData = aggregate.enrichedAttempts === 0;
+console.log(JSON.stringify({ noEnrichedData, aggregate, perFeature }, null, 2));
+'
+```
+
+Reading the output:
+
+- **`aggregate.blocked_code` / `blocked_spec` / `blocked_intent`** — tasks the
+  wave agent self-classified as blocked, by reason. `complete` and
+  `done_with_concerns` tasks are not counted.
+- **`aggregate.enrichedAttempts`** — `wave-attempt` events that carried per-task
+  data. The bucket counts cover ONLY these attempts; legacy attempts (no
+  `tasks`) are invisible to this fold.
+- **`noEnrichedData: true`** — no attempt anywhere carried per-task data. The
+  zeros are then NOT a measurement; render the degradation line in the
+  Blocked Reasons template below, never the zero counts.
+
 ### Step 5: Synthesize and output report
 
-Using the data from Steps 3–4c, write the following report. Populate each section
+Using the data from Steps 3–4d, write the following report. Populate each section
 with real numbers and real pattern names — do not leave placeholders.
 
 ```markdown
@@ -339,6 +390,22 @@ Hook vetoes: [vetoes] veto event(s); [vetoedAttempts] hook-provenance attempt(s)
 Token spend per wave [for features with recorded usage; 0 = usage not recorded]:
 - [feature] / Wave [n] — [N] tokens
 ...
+
+### Blocked Reasons
+[From Step 4d. Omit this section entirely if no per-feature events.jsonl exists.]
+[If the fold reports noEnrichedData: true, render EXACTLY this line and nothing
+ else in the section — zeros here would be unmeasured, not a clean record:]
+No enriched (per-task) wave events exist yet — blocked-reason metrics will
+populate once /rad-deliver records wave-attempt events carrying per-task data.
+
+[Otherwise, populate from the aggregate (and perFeature where noted):]
+Blocked tasks across [enrichedAttempts] enriched wave attempt(s):
+- blocked_code: [N]  blocked_spec: [N]  blocked_intent: [N]
+[Name the features contributing blocked tasks from perFeature. If all three are
+ 0: "No blocked tasks in [enrichedAttempts] enriched attempt(s)."]
+[Suggestion only — never edit files. A blocked_spec or blocked_intent majority
+ suggests plans need sharper Validate fields or intent; a blocked_code majority
+ points at implementation difficulty rather than plan quality.]
 
 ### Recommended Focus Areas
 [Top 2–3 patterns that are both frequent and high-severity. Each as one sentence:
