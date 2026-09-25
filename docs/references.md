@@ -22,6 +22,66 @@ Each entry follows the same shape:
 
 ## Agent harness analyses
 
+### Flue — The Open Agent Framework (Astro team)
+- **Source:** [flueframework.com](https://flueframework.com/) · [`withastro/flue`](https://github.com/withastro/flue) · [Flue 2 announcement](https://flueframework.com/blog/flue-2/)
+- **Reviewed:** 2026-09-11
+- **Takeaway:** A TypeScript agent *runtime* (hooks-based agent functions, durable
+  append-only conversation streams, opt-in sandboxes, `flue run` for CI) — the
+  engine behind the Astro triage bot assessed 2026-08-05. Below RAD's BYO seam,
+  so no architectural steal; Flue 2.0 even deleted its workflow system. But its
+  durability contract ("exactly-once recording, at-least-once execution":
+  record the submission *before* model work, converge orphaned attempts on
+  recovery, then classify) exposed a real gap: RAD appends `wave-attempt`
+  *after* `runWave` returns, so a crash mid-wave records nothing — resume
+  re-runs blind, the attempt budget and `RAD_TOKEN_BUDGET` are bypassable by
+  crash-looping. Also found `rad-wave-contract.md` misstating the (actually
+  fail-closed) task-status coercion; corrected. Flue's `blueprints/` are #50's
+  pinned playbooks shipped (versioned, primary-file marker, cumulative upgrade
+  guide). Default-deny-by-hook capabilities and their two-token LLM/deterministic
+  split corroborate #85; an approver allowlist changed only via PR corroborates
+  #87. Note: their own `AGENTS.md` says "No tests exist in the repo." Full
+  breakdown: [flue-vs-rad.md](flue-vs-rad.md).
+- **Issues:** [#119](https://github.com/seanrreid/RAD_framework/issues/119)
+  (record `wave-started` before `runWave`; converge orphans on resume),
+  [#121](https://github.com/seanrreid/RAD_framework/issues/121) (cache-read /
+  cache-write through `normalizeUsage`); #50 and #110 bodies extended
+  (blueprint mechanics; provider cookbook); comments on #85, #87, #95, #108, #112.
+
+### WSD — Walking Skeleton Development
+- **Source:** WSD framework self-description (composition + declared methodological
+  ancestry), provided directly rather than read from a published artifact — unlike
+  every other entry here, this review assessed a *methodology statement*, not code
+  or a public post. Claims about WSD's enforcement are therefore unknown, not absent.
+- **Reviewed:** 2026-09-02
+- **Takeaway:** A third independent convergence on RAD's substrate bets (after
+  Cosmos and CUGA) — staged human governance, a universal discipline floor with a
+  precedence ladder, contract-first seams, hexagonal boundaries, information
+  radiators. Load-bearing difference: **which half of the problem each framework
+  claims.** WSD prescribes *how to slice work* (smallest composed end-to-end path,
+  actor-visible capabilities, never layer phases); RAD prescribes *how to prove
+  what happened* (pure folds, frozen vocabulary, fail-closed gates). Complementary,
+  not competing. The genuine divergence is decomposition: RAD's waves slice by
+  dependency profile and context budget, and `wave-execution.md`'s canonical
+  *correct* example (model → schema → routes) is exactly the layer phasing WSD
+  forbids — which is issue #47 ("outcome-checkpointing vs context-fitting") stated
+  from the outside. Also new: asymmetric falsification (Popper/Lakatos) as a method
+  to attach to the already-instrumented-but-uncalibrated reviewer work (#48, #49);
+  evolutionary architecture as a second vote for #46. Notable in the other
+  direction: WSD credits Toyota (jidoka/andon/poka-yoke) and Continuous Delivery
+  explicitly, both of which are load-bearing in RAD and entirely uncited — jidoka
+  is arguably RAD's most pervasive single pattern. Steal-with-modification:
+  a skeleton-first plan-lint rule (Wave 1 declares a composed end-to-end path and
+  carries a `Verify:` line), the corroborate/falsify reviewer split, and a
+  vault-shaped *read* layer over `.agents/` — a better answer to the soft-knowledge
+  gap than Cosmos's hosted KB, because a vault stays in plain git the operator owns.
+  Declined: capability slicing wholesale (it fights the context budget waves exist
+  to satisfy). Full breakdown: [wsd-vs-rad.md](wsd-vs-rad.md).
+- **Issues:** none filed. Candidates overlap existing
+  [#46](https://github.com/seanrreid/RAD_framework/issues/46),
+  [#47](https://github.com/seanrreid/RAD_framework/issues/47),
+  [#48](https://github.com/seanrreid/RAD_framework/issues/48), and
+  [#49](https://github.com/seanrreid/RAD_framework/issues/49).
+
 ### Cosmos — Augment Code's Agentic SDLC Platform
 - **Source:** Augment Code — [augmentcode.com/blog/cosmos-now-in-public-preview](https://www.augmentcode.com/blog/cosmos-now-in-public-preview)
 - **Reviewed:** 2026-07-13

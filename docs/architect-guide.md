@@ -27,7 +27,7 @@ access is enforced by branch protection, not file visibility.
 ### 0. Install RAD
 
 ```bash
-git clone https://github.com/torchcodelab/rad-framework /tmp/rad
+git clone https://github.com/seanrreid/RAD_framework /tmp/rad
 bash /tmp/rad/install.sh --dir /path/to/your-project
 ```
 

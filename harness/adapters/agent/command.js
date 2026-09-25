@@ -35,8 +35,13 @@ import {
   normalizeUsage,
 } from './contract.js';
 
-/** Env vars that are safe to forward to the child. Secrets are NOT in this set. */
-const ENV_ALLOW_LIST = ['PATH', 'HOME', 'LANG', 'LC_ALL', 'TMPDIR', 'TERM'];
+/**
+ * Env vars that are safe to forward to the child. This set carries process
+ * identity needed for credential lookup — `USER` resolves the OS keychain
+ * entry some CLIs (e.g. git credential helpers) depend on — plus locale/temp
+ * plumbing. Secrets are NOT in this set: `USER` is a username, not a secret.
+ */
+const ENV_ALLOW_LIST = ['PATH', 'HOME', 'LANG', 'LC_ALL', 'TMPDIR', 'TERM', 'USER'];
 
 /** Hard cap on captured child output. A runaway agent that floods stdout is
  * killed rather than buffered into an OOM before the wall-clock timeout fires. */
@@ -214,8 +219,16 @@ export function createCommandAdapter({ cmd, repoRoot, model, timeoutMs = 600000 
     }
 
     if (run.code !== 0) {
-      const stderrSummary = sanitizeErrorMessage((run.stderr || '').slice(0, 500));
-      const message = `command exited with code ${run.code}: ${stderrSummary}`.trim();
+      // Stderr wins when non-empty (today's behavior, unchanged). When a CLI
+      // reports its failure on stdout instead (e.g. "Not logged in"), fall
+      // back to a sanitized, capped stdout excerpt so the failure reason
+      // still reaches the event log.
+      const rawStderr = (run.stderr || '').slice(0, 500);
+      const stderrSummary = sanitizeErrorMessage(rawStderr);
+      const summary = stderrSummary
+        ? stderrSummary
+        : `(stdout) ${sanitizeErrorMessage((run.stdout || '').slice(0, 500))}`.trim();
+      const message = `command exited with code ${run.code}: ${summary}`.trim();
       const parsed = syntheticFailure(waveId, message);
       return { stdout: run.stdout, terminal: toWaveResult(parsed) };
     }

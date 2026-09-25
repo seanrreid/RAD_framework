@@ -31,7 +31,7 @@ up by hand.
 
 ```bash
 # 1. Get the latest framework source
-git clone https://github.com/torchcodelab/rad-framework /tmp/rad
+git clone https://github.com/seanrreid/RAD_framework /tmp/rad
 # (already cloned? refresh it instead)
 #   cd /tmp/rad && git pull
 

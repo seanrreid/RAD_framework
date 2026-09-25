@@ -608,10 +608,10 @@ export async function deliverCommand(argv, ctx) {
 }
 
 /**
- * Bootstrap dual-write part (b): write the plan-doc Status header fields so the
- * existing `/rad-deliver` gate (check-plan-approved.sh, which reads the doc
- * Status) passes. Updates `Status`, `Approved-By`, `Approved-At` in place, and
- * in proxy mode also `Recorded-By` and `Approval-Evidence` (inserted after the
+ * Bootstrap dual-write part (b): write the plan-doc Status header fields — the
+ * human-readable mirror of the approval, written for the reader of the plan, not
+ * for any gate. Updates `Status`, `Approved-By`, `Approved-At` in place, and in
+ * proxy mode also `Recorded-By` and `Approval-Evidence` (inserted after the
  * existing header block if not already present). Preserves all other content.
  *
  * DISPLAY-ONLY (Decision 2): the plan-doc `Status: approved` header is a HUMAN-

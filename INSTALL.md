@@ -20,7 +20,7 @@ structure, commands, scripts, and CLAUDE.md scaffolding — in one step.
 Clone the RAD repo and run the installer from your project directory:
 
 ```bash
-git clone https://github.com/torchcodelab/rad-framework /tmp/rad
+git clone https://github.com/seanrreid/RAD_framework /tmp/rad
 cd /path/to/your-project
 bash /tmp/rad/install.sh
 ```

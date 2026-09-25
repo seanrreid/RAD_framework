@@ -131,7 +131,7 @@ branch protection and PR workflow, not command access control.
 ## Installation
 
 ```bash
-git clone https://github.com/torchcodelab/rad-framework /tmp/rad
+git clone https://github.com/seanrreid/RAD_framework /tmp/rad
 bash /tmp/rad/install.sh --dir /path/to/your-project
 ```
 
