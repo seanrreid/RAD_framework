@@ -296,17 +296,27 @@ state.append({ feature, type: 'deliver-started', actor: whoami(), ts: now() })
 
 // ── DET wave loop — the MATRIX decides what happens next, not an inline counter ──
 await pipeline(plan.waves, async (wave) => {
-  let lastPrint = null
+  // Resume (#119): an orphan — `wave-started` with no matching `wave-attempt` —
+  // converges to a synthetic wave-attempt { outcome: 'fail-timeout',
+  // reason: 'orphaned' }; the matrix routes it to `surface`, recorded as
+  // wave-failed { action: 'surface', reason: 'orphaned' }. Otherwise the attempt
+  // count and lastPrint are seeded from attempts since the last terminal stop.
+  let { attempts: attempt, lastPrint } = priorAttemptState(state.history(feature), wave.n)
   while (true) {
+    attempt += 1
+    // Record BEFORE model work, so a crash mid-agent leaves evidence (#119).
+    state.append({ feature, type: 'wave-started', actor: whoami(), ts: now(),
+                   data: { wave: wave.n, attempt } })
     const result = await agent(implementPrompt(wave, plan), {
       label:  `wave-${wave.n}`,
       schema: WAVE_RESULT,                 // structured output — model never re-parses text
     })
-    state.append({ feature, type: 'wave-attempt', actor: whoami(), ts: now(),
-                   data: { wave: wave.n, outcome: result.outcome } })
 
     // Doom-loop breaker: identical failure twice in a row ⇒ provably stuck.
     const print = fingerprint(result)       // SHA-256 of failed categories + summary
+    state.append({ feature, type: 'wave-attempt', actor: whoami(), ts: now(),
+                   data: { wave: wave.n, attempt, outcome: result.outcome,
+                           fingerprint: print } })  // `fingerprint`: retry/revision only
     if (print === lastPrint) {
       state.append({ feature, type: 'wave-failed', actor: whoami(), ts: now(),
                      data: { wave: wave.n, reason: 'doom-loop' } })

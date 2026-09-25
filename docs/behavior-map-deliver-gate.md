@@ -60,34 +60,40 @@ function owns it. That is the condition this format exists to fix.
    │      state store, matrix, waveVerify, tokenBudget, worktree
    │      then calls deliverSpine                            cli.js:544
    │
-   └─(4) deliverSpine ─────────── harness/spine.js:231-661
-          ├─ gate re-check, in-process                       :249-252
+   └─(4) deliverSpine ─────────── harness/spine.js:317-773
+          ├─ gate re-check, in-process                       :335-338
           │    blocked → { stopped:'gate' } — runWave never called
-          ├─ append `deliver-started`                        :254
-          ├─ hook pre-flight (validate hooks dir once)       :261
-          ├─ read plan + waves, resume from `wave-complete`  :263-271
-          ├─ seed token spend from prior runs                :293
+          ├─ append `deliver-started`                        :340
+          ├─ hook pre-flight (validate hooks dir once)       :347
+          ├─ read plan + waves, resume from `wave-complete`  :349-357
+          ├─ seed token spend from prior runs                :379
           │
-          ├─ FOR EACH WAVE                                   :296-647
-          │    ├─ token-budget breaker                       :301-310
-          │    ├─ resume-verify (once, if waves were skipped):312-318
-          │    └─ FOR EACH ATTEMPT (≤ 3)                     :328
-          │         ├─ hook pre-wave (veto-capable)          :335-354
-          │         ├─ runWave  ← THE MODEL BOUNDARY         :358
-          │         ├─ hook post-wave (veto replaces outcome):366-371, :398-418
-          │         ├─ gate: check-tests-present.sh          :420-433
+          ├─ FOR EACH WAVE                                   :382-761
+          │    ├─ token-budget breaker                       :387-396
+          │    ├─ resume-verify (once, if waves were skipped):398-404
+          │    ├─ converge orphans (#119): synthetic         :406-411
+          │    │    `wave-attempt` reason `orphaned` →
+          │    │    matrix `surface` → `wave-failed`, return  :244-273
+          │    ├─ seed attempt count + doom-loop print (#119):413-418
+          │    └─ FOR EACH ATTEMPT (≤ 3)                     :426
+          │         ├─ hook pre-wave (veto-capable)          :427-452
+          │         ├─ append `wave-started` {wave, attempt} :454, :209-218
+          │         ├─ runWave  ← THE MODEL BOUNDARY         :458
+          │         ├─ hook post-wave (veto replaces outcome):466-471, :498-518
+          │         ├─ gate: check-tests-present.sh          :519-534
           │         │    fail → demote to `fail-tests`
-          │         ├─ gate: check-verify.sh (if `Verify:`)  :446-469
+          │         ├─ gate: check-verify.sh (if `Verify:`)  :546-568
           │         │    exit 124 → `fail-timeout`, else `fail-tests`
-          │         ├─ append `wave-attempt` (+ usage, tasks, verify) :481-505
-          │         ├─ matrix: resolveOutcome('implement', …):513
-          │         └─ advance → `wave-complete`             :524-542
-          │            retry/revision → doom-loop fingerprint:544-598
-          │            abort/surface → `wave-failed`, return :601-625
+          │         ├─ matrix: resolveOutcome('implement', …):585
+          │         ├─ append `wave-attempt` (+ attempt,     :588-620
+          │         │    fingerprint, usage, tasks, verify)
+          │         └─ advance → `wave-complete`             :636-654
+          │            retry/revision → doom-loop fingerprint:656-711
+          │            abort/surface → `wave-failed`, return :716-738
           │
-          ├─ post-checks: check-scope.sh, open-pr.sh         :67, :651-656
-          ├─ append `pr-opened`                              :658
-          └─ return { ok: true }                             :660
+          ├─ post-checks: check-scope.sh, open-pr.sh         :80, :763-767
+          ├─ append `pr-opened`                              :770
+          └─ return { ok: true }                             :772
    │
    └─(5) at the PR ───────────── .github/workflows/ci.yml
           all PRs:      check-events-append-only.sh          :64
@@ -118,10 +124,10 @@ flow unit-testable with no real git, model, or clock (`spine.js:9-22`).
 | U3 | **Gate fold** | Decide whether the log satisfies a named gate — *pure*, no I/O | reads history in memory | `harness/gates.js:77-122`, `harness/gates.yaml:19-23` |
 | U4 | **Approval write** | Verify role at write time and freeze it into the event | appends `approved` | `git-state-store.js:375-408` |
 | U5 | **Transition validation** | Reject illegal moves before anything is persisted | reads history, gates `append` | `harness/transitions.js:63-132` |
-| U6 | **Spine control flow** | The deterministic wave loop: gate → waves → post-checks → PR | appends `deliver-started`, `wave-*`, `pr-opened` | `harness/spine.js:231-661` |
+| U6 | **Spine control flow** | The deterministic wave loop: gate → waves → post-checks → PR | appends `deliver-started`, `wave-*`, `pr-opened` | `harness/spine.js:317-773` |
 | U7 | **Outcome resolution** | Map `(phase, outcome)` → action. No default fallthrough — unknown pairs throw | none (pure table lookup) | `harness/matrix.js:89-104`, `harness/matrix.yaml:28-35` |
-| U8 | **Wave gates** | Test *presence* (always) and declared *execution* (opt-in) | none; supplies an input token to U7 | `spine.js:420-433`, `:446-469` |
-| U9 | **Hook lifecycle** | Six operator extension points; two veto-capable, four observe-only | appends `hook-observed`/`hook-failed`/`hook-veto` | `spine.js:94-115`, `harness/hook-runner.js` |
+| U8 | **Wave gates** | Test *presence* (always) and declared *execution* (opt-in) | none; supplies an input token to U7 | `spine.js:519-534`, `:546-568` |
+| U9 | **Hook lifecycle** | Six operator extension points; two veto-capable, four observe-only | appends `hook-observed`/`hook-failed`/`hook-veto` | `spine.js:107-128`, `harness/hook-runner.js` |
 | U10 | **CI re-verification** | Re-prove approval at the PR head; enforce append-only logs | reads git history + log | `scripts/check-approval-integrity.sh`, `check-events-append-only.sh` |
 
 ### Unit dependency shape
@@ -156,7 +162,7 @@ Two invariants hold this shape together, and both are load-bearing:
 Any `Skill` tool call whose skill name's trailing `:`-segment is `rad-deliver`
 (`deliver-gate-hook.mjs:70-77` — so both `team:rad-deliver` and a bare
 `rad-deliver` match), plus the spine's own entry point for any caller that
-reaches it directly (`spine.js:249`).
+reaches it directly (`spine.js:335`).
 
 ### Permission rule
 
@@ -212,7 +218,7 @@ it:
 | 2 | `rad-deliver.md:53-62` | Prose Step 2, inside the skill | Print and stop |
 | 3 | `check-plan-approved.sh:101-130` | Fingerprint tripwire, before the role gate | `exit 1` — "plan modified after approval" |
 | 4 | `gates.js:77-122` | The fold itself, via `rad gate --stdin` | Non-zero exit → sites 1–3 fail |
-| 5 | `spine.js:249-252` | In-process, first statement of the spine | `{ stopped:'gate' }` — structured, no events, `runWave` never called |
+| 5 | `spine.js:335-338` | In-process, first statement of the spine | `{ stopped:'gate' }` — structured, no events, `runWave` never called |
 | 6 | `check-approval-integrity.sh` | CI, at the deliver PR head | Job fails, merge blocked |
 
 Sites 1–3 are defense in depth over the same predicate; site 5 is the one that
@@ -258,7 +264,7 @@ harness/plan-fingerprint.js:27-59           what the fingerprint covers (body on
 harness/transitions.js:94-131               duplicate + missing-role rules
 harness/adapters/git-state-store.js:375-408 write-time role freeze
 harness/adapters/git-state-store.js:432-445 policy auto-clear
-harness/spine.js:249-252                    in-process gate
+harness/spine.js:335-338                    in-process gate
 .github/workflows/ci.yml:88-128             deliver-PR job
 ```
 
