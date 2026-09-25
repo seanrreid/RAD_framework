@@ -235,12 +235,13 @@ function attemptData({ wave, attempt, outcome, result, evidence, vetoSource, pri
  * Converge every orphaned attempt of `wave` (issue #119) BEFORE its attempt
  * loop: each gets a synthetic `wave-attempt {wave, attempt, outcome:
  * 'fail-timeout', reason: 'orphaned'}`, the outcome is routed through the matrix
- * (→ `surface`), and one `wave-failed {wave, action, reason: 'orphaned'}` is
- * appended. Idempotent: the synthetic wave-attempt matches its `wave-started`,
- * so a second resume finds no orphan. Returns the existing matrix-terminal
+ * (→ `surface`), the observe-only `on-error` hook fires, and one
+ * `wave-failed {wave, action, reason: 'orphaned'}` is appended. Idempotent: the
+ * synthetic wave-attempt matches its `wave-started`, so a second resume finds
+ * no orphan. Returns the existing matrix-terminal
  * result shape, or null when the wave has no orphan.
  */
-function convergeOrphans({ history, wave, matrix, state, feature, now }) {
+function convergeOrphans({ history, wave, matrix, state, feature, now, runHooks }) {
   const orphans = findOrphanAttempts(history).filter((o) => o.wave === wave.n);
   if (orphans.length === 0) return null;
   for (const { attempt } of orphans) {
@@ -253,6 +254,14 @@ function convergeOrphans({ history, wave, matrix, state, feature, now }) {
     });
   }
   const { action } = resolveOutcome('implement', ORPHAN_OUTCOME, matrix);
+  // ── Hook: on-error (observe-only). Fired at this wave-failed terminal
+  // (orphan surface), mirroring the matrix abort/surface terminal. ──
+  fireHooks(
+    runHooks,
+    'on-error',
+    { feature, wave: wave.n, outcome: ORPHAN_OUTCOME },
+    { state, feature, now },
+  );
   state.append({
     feature,
     type: 'wave-failed',
@@ -398,7 +407,7 @@ export async function deliverSpine({
     // a `wave-started` with no `wave-attempt`. Surface it to the operator via
     // the matrix before any new attempt runs. Its token spend was never
     // recorded, so the budget breaker under-counts it — that is unrecoverable. ──
-    const orphaned = convergeOrphans({ history, wave, matrix, state, feature, now });
+    const orphaned = convergeOrphans({ history, wave, matrix, state, feature, now, runHooks });
     if (orphaned) return orphaned;
 
     // ── Resume seeding (#119): continue the attempt budget and the doom-loop

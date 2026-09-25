@@ -301,6 +301,37 @@ test('durability (a): runWave dies after wave-started → the rerun converges ex
   assert.deepEqual(failed[0].data, { wave: 1, action: 'surface', reason: 'orphaned' });
 });
 
+test('durability (a2): the orphan surface terminal fires on-error once, before its wave-failed', async () => {
+  const state = makeSeededState({ gateResult: passingGate, plan: oneWave });
+  await assert.rejects(deliver(state, async () => {
+    throw new Error('crash');
+  }));
+
+  const hookCalls = [];
+  const runHooks = (point, ctx) => {
+    hookCalls.push({ point, ctx, eventsBefore: state.events.length });
+    return { ran: [], veto: null, failures: [] };
+  };
+  const result = await deliverSpine({
+    feature: 'demo',
+    state,
+    docs: {},
+    matrix: MATRIX,
+    gates: {},
+    runWave: async () => ({ outcome: 'success' }),
+    sh: () => ({ status: 0 }),
+    now: fixedClock(),
+    runHooks,
+  });
+
+  assert.equal(result.stopped, 'matrix');
+  const onError = hookCalls.filter((c) => c.point === 'on-error');
+  assert.equal(onError.length, 1, 'on-error fires exactly once for the orphaned wave');
+  assert.deepEqual(onError[0].ctx, { feature: 'demo', wave: 1, outcome: 'fail-timeout' });
+  const failedIdx = state.events.findIndex((e) => e.type === 'wave-failed');
+  assert.ok(onError[0].eventsBefore <= failedIdx, 'on-error fires before wave-failed is appended');
+});
+
 test('durability (b): a third run appends no second synthetic event and re-runs the wave with a fresh budget', async () => {
   const state = makeSeededState({ gateResult: passingGate, plan: oneWave });
   await assert.rejects(deliver(state, async () => {
