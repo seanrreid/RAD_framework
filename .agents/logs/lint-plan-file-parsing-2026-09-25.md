@@ -8,3 +8,5 @@ Executor role: architect
 
 | Step | Wave | Task | Status | Commit | Time |
 |------|------|------|--------|--------|------|
+| 1 | 1 | 1.1 Shared comma-splitting helper | complete | e440424 | 14:49 |
+| 2 | 1 | 1.2 lint-plan existence check and bare-number budget | complete | afc61ad | 14:49 |
