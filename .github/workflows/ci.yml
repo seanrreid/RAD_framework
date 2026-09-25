@@ -51,6 +51,23 @@ jobs:
           done
           exit "$failed"
 
+  # Layer 1 — bash 3.2 parse check over scripts/ (macOS ships /bin/bash 3.2).
+  # The script SKIPs where no 3.2 exists (e.g. ubuntu script-tests); here a
+  # SKIP means the runner image lost 3.2, so the guard below fails loudly.
+  bash32-parse:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run scripts/test-bash32-parse.sh
+        run: |
+          rc=0
+          out=$(bash scripts/test-bash32-parse.sh 2>&1) || rc=$?
+          printf '%s\n' "$out"
+          case "$out" in
+            *SKIP:*) echo "::error::bash 3.2 not found on runner — parse check skipped"; exit 1 ;;
+          esac
+          exit "$rc"
+
   # All PRs — event logs are append-only audit trails (fail-closed).
   events-append-only:
     runs-on: ubuntu-latest
