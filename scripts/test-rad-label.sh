@@ -133,11 +133,13 @@ grep -qx "auth status" "$TMP/log/calls" || fail "d: stub not engaged (auth statu
 grep -qF "gh unavailable" "$TMP/out" || fail "d: no-op message missing"
 echo "✓ d: unauthenticated gh → no-op, exit 0"
 
-# (d2) no gh on PATH at all → same no-op. A PATH of only system dirs; skip-guard
-# fails loudly if a real gh lives there (the case would then not be exercised).
-NOGH_PATH="/usr/bin:/bin"
+# (d2) no gh on PATH at all → same no-op. PATH is an EMPTY dir, not system dirs:
+# CI runners ship a real gh in /usr/bin. rad-label.sh reaches its gh check using
+# builtins only, so an empty PATH is sufficient; the guard proves gh is absent.
+NOGH_PATH="$TMP/nogh-bin"
+mkdir -p "$NOGH_PATH"
 if PATH="$NOGH_PATH" command -v gh >/dev/null 2>&1; then
-  fail "d: a real gh exists on $NOGH_PATH — cannot exercise the absent-gh case"
+  fail "d: gh resolvable on empty PATH $NOGH_PATH — cannot exercise the absent-gh case"
 fi
 set +e
 out=$(PATH="$NOGH_PATH" /bin/bash "$SCRIPT" "$TARGET_NUM" approved 2>&1)
