@@ -1,16 +1,17 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
+import { approveCommand } from '../cli.js';
 import { createGitStateStore } from '../adapters/git-state-store.js';
 import { evaluateGate } from '../gates.js';
 import { planFingerprint } from '../plan-fingerprint.js';
 import { validateTransition, TransitionError } from '../transitions.js';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
-// Mirrors policy-approval.test.js: async so an async `fn` is fully awaited
+// Async so an async `fn` is fully awaited
 // BEFORE the temp dir is removed. `await fn(...)` is a no-op for sync callbacks.
 async function withTempRepo(fn) {
   const repoRoot = mkdtempSync(join(tmpdir(), 'rad-approval-authority-'));
@@ -380,4 +381,89 @@ test('AC#5: both approvals absent-fingerprint is BLOCKED (legacy fail-closed)', 
       return true;
     },
   );
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Human authority path — recordApproval consults check-role.sh for the architect
+// role against the actor identity (moved from the retired policy-approval tests;
+// the non-zero rejection case is covered in git-state-store.test.js).
+// ─────────────────────────────────────────────────────────────────────────────
+test('recordApproval (human path) invokes check-role.sh for the architect role with the actor identity', async () => {
+  await withTempRepo((repoRoot) => {
+    const { sh, calls } = passingSh();
+    const store = createGitStateStore({ repoRoot, sh });
+
+    store.recordApproval({ feature: 'demo', actor: 'architect', recordedBy: 'dev', ts: 't0' });
+
+    const roleCall = calls.find((c) => /check-role\.sh$/.test(c.file));
+    assert.ok(roleCall, 'human path must invoke check-role.sh');
+    assert.equal(roleCall.args[0], 'architect', 'check-role.sh must be asked for the architect role');
+    assert.equal(roleCall.args[roleCall.args.length - 1], 'architect', 'check-role.sh must be passed the actor identity');
+    const event = store.history('demo')[0];
+    assert.equal(event.actor, 'architect');
+    assert.equal(event.role, 'architect');
+    assert.equal(event.recordedBy, 'dev');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Regression (#137) — no machine auto-approval path remains. Even with the
+// broadest possible low-risk allowlist, a direct approve by a non-architect is
+// refused by the role check and appends no approved event.
+// ─────────────────────────────────────────────────────────────────────────────
+const LOW_RISK_ENV = 'RAD_LOW_RISK_PATTERNS';
+const APPROVAL_STORE_SURFACE = [
+  'append', 'gate', 'history', 'list', 'phase', 'plan',
+  'recordApproval', 'recordArchitectureApproved', 'recordOwnerClaimed', 'recordOwnerReleased',
+].sort();
+
+function writeMinimalPlan(repoRoot, feature) {
+  const plansDir = join(repoRoot, '.agents', 'plans');
+  mkdirSync(plansDir, { recursive: true });
+  writeFileSync(
+    join(plansDir, `${feature}.md`),
+    [`# ${feature}`, '', 'Status: pending-review', `Branch: rad/${feature}`, '',
+      '## Files in Scope', '', '- docs/guide.md', ''].join('\n'),
+    'utf8',
+  );
+}
+
+test('regression: RAD_LOW_RISK_PATTERNS=.* does not let a non-architect direct approve record an approval', async () => {
+  const saved = process.env[LOW_RISK_ENV];
+  process.env[LOW_RISK_ENV] = '.*';
+  const origWrite = process.stderr.write;
+  let stderr = '';
+  try {
+    await withTempRepo(async (repoRoot) => {
+      writeFileSync(join(repoRoot, 'CLAUDE.md'), '# CLAUDE\n', 'utf8');
+      const feature = 'low-risk-feature';
+      writeMinimalPlan(repoRoot, feature);
+
+      // Non-architect: check-role.sh fails; the git identity resolves to a dev.
+      const sh = (file, args) => {
+        if (/check-role\.sh$/.test(file)) return { status: 1, stdout: 'Permission denied', stderr: '' };
+        if (file === 'git' && args[0] === 'config') return { status: 0, stdout: 'dev@example.com\n', stderr: '' };
+        return { status: 0, stdout: '', stderr: '' };
+      };
+
+      process.stderr.write = (chunk) => { stderr += String(chunk); return true; };
+      const code = await approveCommand([feature], { repoRoot, sh });
+      process.stderr.write = origWrite;
+
+      assert.equal(code, 1, `non-architect direct approve must fail; got ${code}`);
+      assert.match(stderr, /permission denied — direct approval requires the architect role/);
+      const eventsFile = join(repoRoot, '.agents', 'state', feature, 'events.jsonl');
+      assert.equal(existsSync(eventsFile), false, 'no approved event may be written');
+
+      const store = createGitStateStore({ repoRoot, sh });
+      // Exhaustive surface: the only approval writer is the human recordApproval.
+      // A new store method (e.g. a machine-policy approval writer) must be added
+      // here deliberately, so an approval bypass cannot slip in unreviewed.
+      assert.deepEqual(Object.keys(store).sort(), APPROVAL_STORE_SURFACE);
+    });
+  } finally {
+    process.stderr.write = origWrite;
+    if (saved === undefined) delete process.env[LOW_RISK_ENV];
+    else process.env[LOW_RISK_ENV] = saved;
+  }
 });

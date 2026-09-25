@@ -15,7 +15,7 @@ const GIT_SYNC = join(SCRIPTS, 'git-sync.sh');
 const CHECKOUT_PLAN = join(SCRIPTS, 'checkout-plan.sh');
 const CHECK_PLAN_APPROVED = join(SCRIPTS, 'check-plan-approved.sh');
 
-// Async wrapper mirroring policy-approval.test.js / cli.test.js — await fn() so an
+// Async wrapper mirroring cli.test.js — await fn() so an
 // async callback completes before the temp dir is removed.
 async function withTempRepo(fn) {
   const repoRoot = mkdtempSync(join(tmpdir(), 'rad-ppm-'));
@@ -241,11 +241,14 @@ test('AC#3 — recordOwnerClaimed / recordOwnerReleased append data-only events 
 
 test('AC#3 — evaluateGate is pure: ownership events do not change the approved-gate verdict', async () => {
   await withTempRepo((repoRoot) => {
-    const store = createGitStateStore({ repoRoot });
+    // Injected sh passes check-role.sh so the human recordApproval freezes the
+    // architect role without a real CLAUDE.md / role map.
+    const sh = () => ({ status: 0, stdout: '', stderr: '' });
+    const store = createGitStateStore({ repoRoot, sh });
     const feature = 'purity';
 
-    // A baseline history with just a policy approval (satisfies the approved gate).
-    store.recordPolicyApproval({ feature, patterns: ['\\.md$'], scope: ['docs/x.md'], ts: 't0' });
+    // A baseline history with just a human architect approval (satisfies the approved gate).
+    store.recordApproval({ feature, actor: 'architect@example.com', recordedBy: 'architect@example.com', ts: 't0' });
     const historyWithout = store.history(feature);
     const resultWithout = evaluateGate('approved', historyWithout);
     assert.equal(resultWithout.passed, true, 'baseline approval should satisfy the gate');
