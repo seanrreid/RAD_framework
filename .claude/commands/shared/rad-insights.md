@@ -315,6 +315,91 @@ Reading the output:
   zeros are then NOT a measurement; render the degradation line in the
   Blocked Reasons template below, never the zero counts.
 
+### Step 4e: Attribute blocked tasks to files (code-legibility signal)
+
+Per-file attribution joins the per-task blocked statuses from Step 4d with the
+files each task DECLARED in its plan. The plan docs are the only source of the
+task-title → paths association: every task in `.agents/plans/*.md` is a
+`#### Task N.M: <title>` header followed by a `File:` line (paths separated by
+`,` or `;`, sometimes with `:lines` / `:+N` suffixes or a parenthetical note).
+This step builds that mapping and passes it to `fileFailureCounts` in
+`harness/events.js` — the fold itself never touches the filesystem, and the
+counting must never be re-implemented in jq. Same invocation convention as
+Steps 4c/4d: run from the repo root; `RAD_STATE_DIR` (default `.agents/state`)
+and `RAD_PLANS_DIR` (default `.agents/plans`) exist only for fixture testing.
+This step only reads; it writes nothing.
+
+```bash
+node --input-type=module -e '
+import { readFileSync, readdirSync, existsSync } from "node:fs";
+import { join } from "node:path";
+const { fileFailureCounts } = await import("./harness/events.js");
+
+const stateDir = process.env.RAD_STATE_DIR || ".agents/state";
+const plansDir = process.env.RAD_PLANS_DIR || ".agents/plans";
+const TASK_HEADER = /^#### Task [0-9]+\.[0-9]+:\s*(.+?)\s*$/;
+const LINE_SUFFIX = /:[+0-9,-]+$/;
+
+// "a.js:10-20; b.md (throughout)" -> ["a.js", "b.md"]; drops prose fragments.
+const parseFileLine = (line) => line.replace(/^File:\s*/, "")
+  .split(/[,;]|\s\+\s/)
+  .map((part) => part.trim().replace(/`/g, "").split(/\s+/)[0] || "")
+  .map((p) => p.replace(LINE_SUFFIX, ""))
+  .filter((p) => /[./]/.test(p));
+
+const taskFiles = {};
+const planFiles = existsSync(plansDir)
+  ? readdirSync(plansDir).filter((f) => f.endsWith(".md")).sort() : [];
+for (const plan of planFiles) {
+  let title = null;
+  for (const line of readFileSync(join(plansDir, plan), "utf8").split("\n")) {
+    const header = line.match(TASK_HEADER);
+    if (header) { title = header[1]; continue; }
+    if (line.startsWith("#")) { title = null; continue; }
+    if (title && line.startsWith("File:")) {
+      taskFiles[title] = [...new Set([...(taskFiles[title] || []), ...parseFileLine(line)])];
+      title = null;
+    }
+  }
+}
+
+const features = existsSync(stateDir)
+  ? readdirSync(stateDir, { withFileTypes: true })
+      .filter((d) => d.isDirectory())
+      .map((d) => d.name)
+      .filter((f) => existsSync(join(stateDir, f, "events.jsonl")))
+      .sort()
+  : [];
+// One history across all features; the feature name is stamped from the dir
+// only where an event omits it, so cross-feature counting always has a key.
+const history = features.flatMap((feature) =>
+  readFileSync(join(stateDir, feature, "events.jsonl"), "utf8")
+    .split("\n").filter(Boolean)
+    .map((l) => JSON.parse(l))
+    .map((e) => ({ ...e, feature: e.feature || feature })));
+
+const result = fileFailureCounts(history, taskFiles);
+const mappedTitles = Object.keys(taskFiles).length;
+const reportedFiles = Object.keys(result.files).length;
+console.log(JSON.stringify({ mappedTitles, reportedFiles, ...result }, null, 2));
+'
+```
+
+Reading the output:
+
+- **`files`** — each path whose declared tasks were self-classified `blocked_*`
+  in at least `minFeatures` DISTINCT features: `failures` is the number of
+  blocked task records attributed to it (a task declaring two files counts once
+  for each), `features` the distinct features they came from.
+- **`belowFloor`** — files with blocked tasks in fewer than `minFeatures`
+  features. They are withheld on purpose: one feature's trouble says more about
+  that plan than about the region of code.
+- **`minFeatures`** — the floor applied (`FILE_FAILURE_MIN_FEATURES`, default 2).
+- **`mappedTitles`** — task titles the plan docs mapped to paths. `0` means no
+  plan doc under the plans dir carried a `#### Task` header + `File:` line.
+- Only enriched attempts (Step 4d's `enrichedAttempts`) can be attributed; a
+  legacy attempt without per-task data names no task, so it names no file.
+
 ### Step 5: Synthesize and output report
 
 Using the data from Steps 3–4d, write the following report. Populate each section
@@ -407,6 +492,34 @@ Blocked tasks across [enrichedAttempts] enriched wave attempt(s):
  suggests plans need sharper Validate fields or intent; a blocked_code majority
  points at implementation difficulty rather than plan quality.]
 
+### Code Legibility Signals
+[From Step 4e. Omit this section entirely if no per-feature events.jsonl exists.]
+[Pick EXACTLY ONE degradation line when it applies, and render nothing else in
+ the section — silence would read as a clean record:]
+[If Step 4d reported noEnrichedData: true:]
+No enriched (per-task) wave events exist yet — code-legibility signals need
+per-task data to attribute blocked tasks to files.
+[Else if mappedTitles is 0:]
+No plan-doc task mappings found (no "#### Task" header + "File:" line under the
+plans directory) — blocked tasks cannot be attributed to files.
+[Else if reportedFiles is 0:]
+Insufficient history for code-legibility signals — no file has accumulated
+blocked tasks across at least [minFeatures] distinct features yet
+([belowFloor] file(s) below the floor).
+
+[Otherwise, list every entry in `files`, most failures first:]
+Files accumulating blocked tasks across features (floor: [minFeatures] features):
+- [path] — [failures] blocked task(s) across [N] features ([features joined])
+...
+[If belowFloor > 0: "[belowFloor] further file(s) had blocked tasks in fewer than
+ [minFeatures] features and are not listed."]
+[Framing (#93) — render this sentence verbatim under the list:]
+These counts are a code-legibility signal about the named region of the codebase —
+repeated trouble there across unrelated features suggests the code is hard to
+understand or change safely — not a verdict on agent or developer performance.
+[Suggestion only — name the files; never edit them and never propose an automatic
+ change. A reader may choose to add a comment, a README, or a refactor task.]
+
 ### Recommended Focus Areas
 [Top 2–3 patterns that are both frequent and high-severity. Each as one sentence:
  "Address [category] — appears in [N] cycles ([%]) and always blocks architect review."]
@@ -463,6 +576,9 @@ Auto-cleared by the severity gate: [N] change(s)
 - Reliability counts (Step 4c) MUST come from the `harness/events.js` read helpers
   (`outcomeCounts`, `failReasonCounts`, `retryCounts`, `hookVetoCounts`, `totalUsage`) —
   never re-implement those folds in jq or shell
+- Per-file attribution (Step 4e) MUST come from `fileFailureCounts` in `harness/events.js`;
+  the skill only builds the plan-doc title → paths mapping. The section frames counts as a
+  code-legibility signal about a region of code (#93), never an agent-performance verdict
 - All-zero reliability counts are the "no wave data yet" path, not an error — render
   the zeros text from the template and move on
 - Findings Recurrence (Step 3b) outputs are suggestions only — never edit CLAUDE.md
