@@ -152,3 +152,61 @@ Each entry follows the same shape:
   loop, vector/semantic policy matching, A2A RPC transport.
 - **Issues:** [#50](https://github.com/seanrreid/RAD_framework/issues/50) (pinned
   playbooks: reusable, human-approved plan templates).
+
+### CASE — WorkOS's PR-loop agent harness
+- **Source:** WorkOS — [`workos/case`](https://github.com/workos/case)
+- **Reviewed:** 2026-06-22 · **Refreshed:** 2026-09-25 (RAD side only; CASE not re-reviewed)
+- **Takeaway:** RAD's closest sibling *system* and the strongest
+  convergent-design validation in this log. It is a deterministic Bun executor over
+  a fixed `scout → implementer → verifier → reviewer → closer → retrospective`
+  pipeline, with per-phase context isolation, append-only events, a
+  two-cycle revision budget, and **identical-failure-fingerprint early abort**,
+  which RAD's `fingerprint.js` also landed on independently. CASE's transition-validated
+  `append()` was adopted into RAD's state store (`harness-state-store.md`,
+  Decision 4). Load-bearing difference: **who the harness serves**. CASE is an
+  autonomous pipeline for a developer pointing an agent at an issue; RAD gates
+  human judgment *before* code (Gate 1) for a team that must prove who approved
+  what. In June, CASE led on three fronts: the ratchet (`learnings.md` +
+  `amendments/`), evidence discipline (tests proven *run*, not just *present*), and
+  one-command DX. By the September refresh, RAD had narrowed the first two:
+  `/rad-insights` recurrence proposals, plus the per-wave `Verify:` gate (#105),
+  which executes a real command and reads its exit code. RAD keeps its human
+  pawl, so its proposals are suggestion-only where CASE's retrospective writes
+  autonomously. The refresh also found RAD's "bash 3.2+" portability claim
+  currently false (#102). Full breakdown: [case-vs-rad.md](case-vs-rad.md).
+- **Issues:** none filed. Findings map onto existing
+  [#52](https://github.com/seanrreid/RAD_framework/issues/52) (fresh-context
+  verifier ≈ interactive evaluation),
+  [#64](https://github.com/seanrreid/RAD_framework/issues/64) (proposal →
+  Gate-1-blocked plan), [#71](https://github.com/seanrreid/RAD_framework/issues/71)
+  (packaging / DX), and [#102](https://github.com/seanrreid/RAD_framework/issues/102).
+
+### The Anatomy of an Agent Harness / Agent Harness Engineering
+- **Source:** LangChain — [The Anatomy of an Agent Harness](https://www.langchain.com/blog/the-anatomy-of-an-agent-harness) ·
+  Addy Osmani — [Agent Harness Engineering](https://addyosmani.com/blog/agent-harness-engineering/)
+- **Reviewed:** 2026-06-22 · **Refreshed:** 2026-09-25
+- **Takeaway:** Both articles frame *Agent = Model + Harness* and name **context
+  engineering** (compaction, tool-output offloading, progressive disclosure) as the
+  harness's primary job, with the "ratchet" (every mistake becomes a permanent
+  rule) as the key practice. RAD optimizes the *other* half: the harness as a
+  **governance and provability layer** (pure-fold gates, frozen authority, an opaque
+  swappable agent) rather than a **capability amplifier**. The same decision,
+  "ship determinism, not intelligence," is both RAD's greatest strength and its
+  largest blind spot. Validations: filesystem + git as the foundational primitive,
+  and human approval gates as structure rather than hooks. Gaps flagged in June:
+  near-absent context engineering, no ratchet, thin sandboxing, heavyweight for
+  solo/autonomous work. At refresh: the ratchet is borrowed in RAD's shape
+  (deterministic detection, suggestion-only proposals), the autonomous-mode gap
+  is tracked, and context engineering has its first measurable-cache issues but
+  remains the largest gap. Full breakdown:
+  [harness-engineering-vs-rad.md](harness-engineering-vs-rad.md).
+- **Issues:** none filed at review. Gaps now map onto
+  [#112](https://github.com/seanrreid/RAD_framework/issues/112) and
+  [#121](https://github.com/seanrreid/RAD_framework/issues/121) (cache-aware
+  prompt/usage), [#61](https://github.com/seanrreid/RAD_framework/issues/61) and
+  [#85](https://github.com/seanrreid/RAD_framework/issues/85) (isolation /
+  capabilities), [#77](https://github.com/seanrreid/RAD_framework/issues/77),
+  [#81](https://github.com/seanrreid/RAD_framework/issues/81) and
+  [#108](https://github.com/seanrreid/RAD_framework/issues/108) (autonomous /
+  lighter-weight modes), [#64](https://github.com/seanrreid/RAD_framework/issues/64)
+  (closing the proposal loop).
