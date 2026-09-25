@@ -1,5 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   reduce,
   phaseOf,
@@ -318,4 +321,99 @@ test('phaseOf is pure — no filesystem access (only the passed array matters)',
   assert.equal(phaseOf(history), 'delivered');
   // A second, independent call with empty input is unaffected by the first.
   assert.equal(phaseOf([]), null);
+});
+
+// ── Regression fence over the five insights folds on the fixture corpus ──────
+// harness/test/fixtures/insights is laid out as a RAD_STATE_DIR: one
+// <feature>/events.jsonl per feature (legacy = pre-#89 no `tasks`; enriched =
+// `tasks` on every attempt; mixed = both shapes interleaved). The expected
+// objects below are HAND-COMPUTED from the fixture lines — never recomputed
+// from the folds under test — so any later change that moves an existing fold's
+// output on these logs turns this test red.
+const INSIGHTS_FIXTURE_DIR = fileURLToPath(new URL('./fixtures/insights/', import.meta.url));
+const INSIGHTS_FIXTURE_FEATURES = ['legacy', 'enriched', 'mixed'];
+
+/** Parse one fixture feature's events.jsonl (one event per non-empty line). */
+function loadInsightsFixture(feature) {
+  return readFileSync(join(INSIGHTS_FIXTURE_DIR, feature, 'events.jsonl'), 'utf8')
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+}
+
+/** Outcome-count shape with every bucket zeroed, overridden per fixture. */
+function outcomesWith(overrides) {
+  return {
+    success: 0,
+    'fail-tests': 0,
+    'fail-scope': 0,
+    'fail-protocol': 0,
+    'fail-timeout': 0,
+    'no-changes': 0,
+    'abort-user': 0,
+    unknown: 0,
+    total: 0,
+    ...overrides,
+  };
+}
+
+const FENCE_EXPECTED = {
+  legacy: {
+    // Usage: 140 + (80+20, no explicit total) = 240; the 2nd wave-2 and wave-3 attempts carry none.
+    totalUsage: { input: 180, output: 60, total: 240 },
+    // wave-complete 1 is 'success'; wave-complete 2 has no outcome → unknown.
+    outcomeCounts: outcomesWith({ success: 1, unknown: 1, total: 2 }),
+    // The wave-3 surface terminal records { wave, action } with no reason.
+    failReasonCounts: { total: 1, reasons: { unknown: 1 } },
+    retryCounts: { total: 4, retriedWaves: 1, perWave: { 1: 1, 2: 2, 3: 1 } },
+    hookVetoCounts: { vetoes: 0, vetoedAttempts: 0 },
+  },
+  enriched: {
+    // Usage: 250 + 150 + 75 + 50; the resumed wave-2 attempt carries none.
+    totalUsage: { input: 420, output: 105, total: 525 },
+    outcomeCounts: outcomesWith({ success: 2, total: 2 }),
+    failReasonCounts: { total: 2, reasons: { 'budget-exhausted': 1, 'abort-user': 1 } },
+    retryCounts: { total: 5, retriedWaves: 1, perWave: { 1: 1, 2: 3, 3: 1 } },
+    // One post-wave veto: a hook-veto event AND a provenance-tagged attempt.
+    hookVetoCounts: { vetoes: 1, vetoedAttempts: 1 },
+  },
+  mixed: {
+    // Usage: 60 + 90 + (30+5, no explicit total) + (total-only 40) = 225.
+    totalUsage: { input: 150, output: 35, total: 225 },
+    outcomeCounts: outcomesWith({ success: 1, 'no-changes': 1, total: 2 }),
+    // doom-loop terminal, then a pre-wave-veto abort with { wave, action } only.
+    failReasonCounts: { total: 2, reasons: { 'doom-loop': 1, unknown: 1 } },
+    retryCounts: { total: 5, retriedWaves: 2, perWave: { 1: 2, 2: 1, 3: 2 } },
+    // Pre-wave veto: a hook-veto event with no tagged attempt.
+    hookVetoCounts: { vetoes: 1, vetoedAttempts: 0 },
+  },
+};
+
+test('regression fence — the five insights folds return committed literals on every fixture', () => {
+  for (const feature of INSIGHTS_FIXTURE_FEATURES) {
+    const history = deepFreeze(loadInsightsFixture(feature));
+    assert.ok(history.length > 0, `${feature} fixture is non-empty`);
+    for (const event of history) assert.equal(event.feature, feature, `${feature} fixture feature field`);
+    const expected = FENCE_EXPECTED[feature];
+    assert.deepStrictEqual(totalUsage(history), expected.totalUsage, `totalUsage on ${feature}`);
+    assert.deepStrictEqual(outcomeCounts(history), expected.outcomeCounts, `outcomeCounts on ${feature}`);
+    assert.deepStrictEqual(failReasonCounts(history), expected.failReasonCounts, `failReasonCounts on ${feature}`);
+    assert.deepStrictEqual(retryCounts(history), expected.retryCounts, `retryCounts on ${feature}`);
+    assert.deepStrictEqual(hookVetoCounts(history), expected.hookVetoCounts, `hookVetoCounts on ${feature}`);
+  }
+});
+
+test('regression fence — the fixture corpus covers legacy, enriched, and mixed task shapes', () => {
+  const attempts = (feature) => loadInsightsFixture(feature).filter((e) => e.type === 'wave-attempt');
+  assert.equal(attempts('legacy').some((e) => 'tasks' in e.data), false, 'legacy has no tasks key');
+  assert.equal(attempts('enriched').every((e) => Array.isArray(e.data.tasks)), true, 'enriched always has tasks');
+  const mixed = attempts('mixed');
+  assert.equal(mixed.some((e) => Array.isArray(e.data.tasks)), true, 'mixed has enriched attempts');
+  assert.equal(mixed.some((e) => !('tasks' in e.data)), true, 'mixed has legacy attempts');
+  const statuses = new Set(
+    INSIGHTS_FIXTURE_FEATURES.flatMap((f) => attempts(f).flatMap((e) => (e.data.tasks || []).map((t) => t.status))),
+  );
+  for (const status of ['complete', 'done_with_concerns', 'blocked_code', 'blocked_spec', 'blocked_intent']) {
+    assert.ok(statuses.has(status), `corpus carries a ${status} task`);
+  }
 });
