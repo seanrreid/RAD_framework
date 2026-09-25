@@ -8,11 +8,10 @@ Issue-Title: outcomeCounts folds wave-complete.data.outcome, which the spine nev
 
 ## Context
 
-Four reporting-accuracy fixes. This plan closes #122, #121, #132 and the remainder of #93.
+Three reporting-accuracy fixes. This plan closes #122, #121 and #132.
 
 - **#122.** `outcomeCounts` (`harness/events.js`) folds `wave-complete.data.outcome`. The spine writes `wave-complete` as `{ wave }` only (`spine.js:535`) and records outcomes on `wave-attempt`, so every real log lands in `unknown`, and the `/rad-insights` Reliability line reports zeros that look measured. Tests didn't catch it because the inline histories and the committed fixtures model a `wave-complete` event that carries an outcome, which the spine never emits.
 - **#121.** `normalizeUsage` (`contract.js`) keeps `input` / `output` / `total` and drops the cache counts that both adapters already see: the SDK `message.usage` snake_case fields, and anything a `RAD_USAGE {json}` wrapper line reports. So nothing can show whether a retry prefix held (#112). The `RAD_USAGE` format is documented only in a `command.js` JSDoc.
-- **#93 remainder.** #123 shipped the per-file Code Legibility section, but it doesn't name any of #93's three deficits (opaque abstractions, missing documentation, insufficient testing).
 - **#132.** `rad-status.sh` lists every plan twice. In `collect_plans`, passes 1 and 2 pipe into `emit_plan_row`, so the `SEEN_FEATURES` update is lost in a subshell. The research collector added in #131 already uses the fix (feed it through a redirect).
 
 The spend-derived model-tier advisories moved onto #121 from #65 are **out of scope**. They consume this data and are better planned separately.
@@ -24,7 +23,7 @@ The spend-derived model-tier advisories moved onto #121 from #65 are **out of sc
 | `outcomeCounts` counts each (feature, wave)'s **terminal** `wave-attempt` outcome; locked test values updated deliberately | Making the spine write an outcome on `wave-complete` (a writer change) |
 | `normalizeUsage` passes through optional `cacheRead` / `cacheWrite` / `cost` only when present and valid | Changing `totalUsage`'s return shape or the budget breaker |
 | A new pure `cacheUsage` fold: per-attempt cache-hit ratio plus totals | Spend-derived model-tier advisories (#65's half), and pricing tables |
-| `/rad-insights`: corrected Reliability wording, a cache-hit readout, and the three #93 deficits named | Editing the committed fixture files |
+| `/rad-insights`: corrected Reliability wording and a cache-hit readout | Editing the committed fixture files; #93's deficit naming (deferred to #93's own plan) |
 | Document `usage` cache fields and the `RAD_USAGE` line in `rad-wave-contract.md` | The `rad-insights` Step 4b jq cost path |
 | `rad-status.sh` lists each plan once | Other `rad-status.sh` output changes |
 
@@ -34,11 +33,10 @@ The spend-derived model-tier advisories moved onto #121 from #65 are **out of sc
 2. The `outcomeCounts` literals in `harness/test/events.test.js` (fixture regression fence, the parity baseline, and the old wave-complete-premise test) are updated to hand-computed terminal-attempt values, each with a comment giving the arithmetic. No other fold's locked value changes.
 3. `normalizeUsage` passes through `cacheRead` (from `cacheRead` or `cache_read_input_tokens`), `cacheWrite` (from `cacheWrite` or `cache_creation_input_tokens`) and `cost`, **only** when each is a finite, non-negative number. Otherwise the key is absent (never coerced). Input with none of them returns an object deep-equal to today's `{ input, output, total }`. The SDK and `RAD_USAGE` paths carry the fields with no other adapter changes.
 4. A new pure `cacheUsage(history)` fold returns per-attempt `{ feature, wave, attempt, cacheRead, input, ratio }` for attempts that report `cacheRead` (`ratio = cacheRead / (input + cacheRead)`, or `null` when the denominator is 0), plus totals and a count of attempts without cache data. It returns a zeroed shape on empty or invalid input and never throws. `totalUsage`'s result shape is unchanged.
-5. `/rad-insights` makes four changes:
+5. `/rad-insights` makes three changes:
    - the Reliability wording and template describe terminal-attempt outcomes per (feature, wave), not wave-complete events;
    - a cache-hit readout shows the per-attempt ratio and flags any retry whose ratio dropped to 0 after a non-zero earlier attempt, rendering an explicit "no cache data reported" line when none exists;
-   - the Model-tiering deferral note is updated so it no longer says it is blocked on #121 (spend advisories are still deferred);
-   - the Code Legibility section names the three candidate deficits (opaque abstractions, missing documentation, insufficient testing) for the reader to judge, without asserting one.
+   - the Model-tiering deferral note is updated so it no longer says it is blocked on #121 (spend advisories are still deferred, tracked in #65).
 6. `docs/rad-wave-contract.md` documents the optional `cacheRead` / `cacheWrite` / `cost` usage fields and the `RAD_USAGE {json}` stdout line (accepted keys, and that invalid values are dropped). `docs/harness-and-framework.md` no longer describes `outcomeCounts` as counting wave-complete events.
 7. `scripts/rad-status.sh` lists a plan present on several sources exactly once, credited to the highest-priority source (branch tip, then base, then local). `scripts/test-rad-status.sh` asserts a plan on base plus local renders once as `<base> (merged)`, under `bash` and `/bin/bash`. `npm test --prefix harness` and every `scripts/test-*.sh` pass.
 
@@ -58,7 +56,7 @@ covering the `events.js` folds and consumers, the `normalizeUsage` callers and t
 | harness/adapters/agent/contract.js | 415-450 | `normalizeUsage` optional cache and cost passthrough |
 | harness/adapters/agent/command.js | 300-320 | `RAD_USAGE` JSDoc lists the new optional keys |
 | harness/test/agent-contract.test.js | 240-260 | `normalizeUsage` unit tests |
-| .claude/commands/shared/rad-insights.md | 169-760 | Reliability wording; cache readout; deferral note; #93 deficits |
+| .claude/commands/shared/rad-insights.md | 169-760 | Reliability wording; cache readout; deferral note |
 | docs/rad-wave-contract.md | 60-90 | Usage cache fields and the `RAD_USAGE` line |
 | docs/harness-and-framework.md | 225-232 | `outcomeCounts` wording |
 | scripts/rad-status.sh | 64-96 | `collect_plans` feeds `emit_plan_row` by redirect |
@@ -78,7 +76,7 @@ covering the `events.js` folds and consumers, the `normalizeUsage` callers and t
 - `harness/events.js`: `totalUsage`, `outcomeCounts` (and its JSDoc noting the spine never writes an outcome), the private `collectWavePairs`, `waveReliability`, `attemptOutcomeCounts`, and the `OUTCOME_VOCAB` import.
 - `harness/test/events.test.js`: the `outcomeCounts` inline test (~L127-148), the zeroed-shape contract (~L186), the parity baseline (~L241-292), the fixture fence (~L355-412), and the per-fixture attempt sequences in the comment near ~L653.
 - `harness/adapters/agent/contract.js`: `normalizeUsage`. `command.js`: the `RAD_USAGE` regex and JSDoc (~L305-318).
-- `.claude/commands/shared/rad-insights.md`: Step 4c (fold script plus "Reading the output"), Step 4f, the Reliability template (~L662-685), Code Legibility (~L703-729), Model Tiering and its verbatim deferral note (~L731-757), and Rules.
+- `.claude/commands/shared/rad-insights.md`: Step 4c (fold script plus "Reading the output"), Step 4f, the Reliability template (~L662-685), Model Tiering and its verbatim deferral note (~L731-757), and Rules.
 - `scripts/rad-status.sh`: `emit_research_row`'s redirect pattern, to mirror in `collect_plans`.
 
 ### Reminders
@@ -126,8 +124,7 @@ What:
 - **`rad-insights.md`:**
   - (a) Step 4c "Reading the output" and the Reliability template say outcomes are each (feature, wave)'s terminal attempt, and "total" counts waves, not wave-complete events.
   - (b) Add a step that invokes `cacheUsage` through the same `node -e` / `RAD_STATE_DIR` pattern, plus a cache-hit subsection near Model Tiering. It shows per-attempt ratios, flags any retry whose ratio dropped to 0 after a positive earlier attempt, and renders `no cache data reported` when `attempts` is empty.
-  - (c) Amend the Model-tiering deferral note: cache fields are now carried (#121), but spend-derived advice is still deferred until a follow-up reasons about cost.
-  - (d) In Code Legibility, name the three candidate deficits (opaque abstractions, missing documentation, insufficient testing) as things to check, without asserting which applies, and keep the "suggestion only" framing.
+  - (c) Amend the Model-tiering deferral note: cache fields are now carried (#121), but spend-derived advice is still deferred (tracked in #65).
 - **`rad-wave-contract.md`:** extend the `usage` row with the optional `cacheRead` / `cacheWrite` / `cost` fields, and document the `RAD_USAGE {json}` stdout line (accepted keys, and that invalid values are dropped).
 - **`harness-and-framework.md` (~L228):** update the `outcomeCounts` description.
 
@@ -157,8 +154,8 @@ None. Every file is architect-writable.
 
 ## Issue Gaps
 
-- **#121's `totalUsage` change is not adopted as written.** #121 proposed that `totalUsage` always return `cacheRead` / `cacheWrite`. That would break six locked values across `events.test.js` and `cost.test.js` for no consumer benefit, since the budget reads only `.total`. This plan keeps `totalUsage` unchanged and adds a separate `cacheUsage` fold. *Verify: agree?*
-- **#65's spend-derived advisories stay deferred.** They were moved onto #121 as its downstream consumer. This plan delivers the data (#121) but not the advice. *Verify: file a follow-up, or reopen #65?*
-- **The terminal-attempt semantics for `outcomeCounts`.** This is #122's option 1. A wave that is still in progress (retrying) counts its latest attempt, which may flip on the next run. *Verify: acceptable, versus counting only waves with a terminal event?*
-- **#93's deficits are named as candidates, not diagnosed.** The per-file failure data can't distinguish opaque abstractions from missing docs or tests, so the section lists all three for the reader to judge. *Verify: agree, rather than a heuristic mapping from blocked_code versus blocked_spec?*
-- **#132 was folded into this batch.** It was filed today and matches the "reporting accuracy" theme. *Verify: agree it belongs here?*
+- **#121's `totalUsage` change is not adopted as written.** #121 proposed that `totalUsage` always return `cacheRead` / `cacheWrite`. That would break six locked values across `events.test.js` and `cost.test.js` for no consumer benefit, since the budget reads only `.total`. This plan keeps `totalUsage` unchanged and adds a separate `cacheUsage` fold. *Architect: agreed.*
+- **#65's spend-derived advisories stay deferred; #65 reopened (architect decision, 2026-09-25).** This plan delivers the data (#121) but not the advice.
+- **The terminal-attempt semantics for `outcomeCounts`.** This is #122's option 1. A wave that is still in progress (retrying) counts its latest attempt, which may flip on the next run. *Architect: acceptable.*
+- **#93's remainder removed from this batch (architect decision, 2026-09-25).** Naming the three deficits is deferred until #93 gets its own focus. The per-file data can't tell the deficits apart, so it needs design, not a wording tweak.
+- **#132 was folded into this batch.** It was filed today and matches the "reporting accuracy" theme. *Architect: agreed.*
