@@ -11,3 +11,5 @@ Note: a prior run on 2026-08-20 failed at Wave 1 before any code was written
 
 | Step | Wave | Task | Status | Commit | Time |
 |------|------|------|--------|--------|------|
+| 1 | Wave 1 | Commit the fixture corpus | ✓ complete | 3c18f70 | 09:58 |
+| 2 | Wave 1 | Regression fence over the five existing folds | ✓ complete | 6ce8807 | 09:59 |
