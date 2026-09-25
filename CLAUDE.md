@@ -118,6 +118,27 @@ RAD_AGENT_CMD:           # the CLI to spawn, required when RAD_AGENT=command
   `ANTHROPIC_API_KEY`; credentials are the configured command's concern.
 - `sdk` — drives the Claude Agent SDK; requires `ANTHROPIC_API_KEY`.
 
+**Env-less auth contract (command path).** `RAD_AGENT_CMD` runs under an
+**allow-listed** env — only `PATH HOME LANG LC_ALL TMPDIR TERM USER` are
+forwarded — so it must authenticate **without inherited env vars**: on-disk
+credentials or the OS keychain, not an env-injected token (an exported
+`ANTHROPIC_API_KEY`, `GH_TOKEN`, etc. never reaches it).
+
+```
+RAD_AGENT_PREFLIGHT: off   # exactly `off` skips the startup probe; unset/anything else runs it
+```
+
+Before Wave 1, `rad deliver` runs a **startup preflight** on the command path: it
+spawns `RAD_AGENT_CMD` once under the same env with one tiny prompt (one small
+model call per deliver). If it exits non-zero, cannot spawn, or times out,
+deliver exits 1 with `RAD_AGENT_CMD failed to start under the adapter env (it
+must authenticate without inherited env vars): <error>` — before any worktree or
+event is created. The SDK path and an injected `runWave` never probe. If your
+agent genuinely needs an env-injected credential, configure a **wrapper script**
+as `RAD_AGENT_CMD` that loads the secret itself and execs the agent — keeping
+re-injection an explicit operator act (the allow-list is deliberately not
+widened).
+
 See `docs/rad-cli.md` for selection details and per-path credential rules.
 
 ### Branch Conventions

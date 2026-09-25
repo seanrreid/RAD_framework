@@ -106,6 +106,7 @@ The runner is chosen by environment variable — there is no config-file loader.
 |---------|--------|---------|---------|
 | `RAD_AGENT` | `command` \| `sdk` | `command` | which adapter drives the wave |
 | `RAD_AGENT_CMD` | any command string | — | the CLI to spawn (command path only) |
+| `RAD_AGENT_PREFLIGHT` | `off` | — (probe runs) | exactly `off` skips the command-path startup preflight |
 | `RAD_TOKEN_BUDGET` | positive integer | — | per-deliver cumulative token ceiling (cost breaker) |
 
 **Per-path credential requirements:**
@@ -117,6 +118,27 @@ The runner is chosen by environment variable — there is no config-file loader.
   `ANTHROPIC_API_KEY is required`.
 
 An unrecognized `RAD_AGENT` value exits 1 with a clear message.
+
+**Command-path env and startup preflight.** The command adapter hands
+`RAD_AGENT_CMD` only an allow-listed env (`PATH`, `HOME`, `LANG`, `LC_ALL`,
+`TMPDIR`, `TERM`, `USER`), so the CLI must authenticate **without inherited env
+vars** — on-disk credentials or the OS keychain, not an exported token. To catch
+a CLI that is not logged in *before* any work starts, `rad deliver` runs a
+**preflight** on the command path, after the approval gate and before worktree
+creation, `deliver-started`, or any event append: it spawns `RAD_AGENT_CMD` once
+under that same env with a one-line prompt (one tiny model call per deliver). A
+non-zero exit, spawn error, or timeout exits 1 with:
+
+```
+rad deliver: RAD_AGENT_CMD failed to start under the adapter env (it must authenticate without inherited env vars): <error>
+```
+
+`<error>` is a sanitized, capped excerpt of the CLI's output. The preflight is
+skipped when `RAD_AGENT=sdk` or a `runWave` is injected (tests), and when
+`RAD_AGENT_PREFLIGHT` is **exactly** `off` — unset, empty, or any other value
+runs it. If your agent needs an env-injected credential, set `RAD_AGENT_CMD` to a
+wrapper script that loads the secret itself and execs the agent; the allow-list
+is deliberately not widened.
 
 ```bash
 # Default (command) path — bring your own agent CLI, no API key needed here:
