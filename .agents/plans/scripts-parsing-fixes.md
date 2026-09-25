@@ -1,7 +1,10 @@
 # Plan: Scripts Parsing Fixes
 Created: 2026-09-25
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-09-25T14:54:01.577Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/scripts-parsing-fixes
 
 ## Context
