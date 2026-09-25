@@ -305,47 +305,6 @@ auth|payment|billing|migration|secret|credential|token
 Set `RAD_HIGH_RISK_PATTERNS` to override the default with your own `|`-separated
 extended-regex alternation. Empty disables the check.
 
-### Severity Routing — Low-Risk Allowlist
-
-OPTIONAL and backward-compatible — absent, severity routing is OFF and every plan
-takes the normal human-approval path.
-
-```
-RAD_LOW_RISK_PATTERNS: <|-separated extended-regex alternation>
-```
-
-`scripts/classify-low-risk.sh` computes a deterministic, **fail-closed** auto-clear
-verdict over the union of a plan's Files-in-Scope and per-task `File:` paths (the
-same path set the high-risk advisory reasons over). It uses the same matcher as
-`scripts/lint-plan.sh` — one source of truth in `scripts/lib/plan-paths.sh`.
-
-A plan is classified **low** (exit 0, auto-clearable) **iff all** of the following hold:
-
-- `RAD_LOW_RISK_PATTERNS` is non-empty, **and**
-- every touched path matches `RAD_LOW_RISK_PATTERNS`, **and**
-- **no** touched path matches `RAD_HIGH_RISK_PATTERNS` (**high-risk wins ties**), **and**
-- the declared scope is unchanged vs the working git diff (no out-of-scope drift).
-
-Anything else — empty/unset allowlist, any non-matching path, any high-risk match,
-any scope drift, or any ambiguity (e.g. an undetectable diff) — yields **not-low**
-(non-zero exit). The router never auto-clears on uncertainty.
-
-The built-in default allowlist is **inert-by-type only**:
-
-```
-css|scss|\.(png|jpe?g|gif|svg|webp|woff2?|ttf|otf|eot)$|\.md$|^docs/
-```
-
-That is: stylesheets, image/font assets, and docs. **Tests, config, lockfiles, and
-CI are deliberately EXCLUDED from the default** — changes to them can alter behavior
-or trust and always warrant human judgment. Set `RAD_LOW_RISK_PATTERNS` to override
-the default with your own `|`-separated extended-regex alternation; keep it tight.
-Empty/unset disables severity routing entirely.
-
-`RAD_LOW_RISK_PATTERNS` is a **TRUSTED operator input**: a broad pattern (e.g. `.*`)
-auto-clears every non-high-risk, in-scope plan, bypassing human approval — so keep it
-tight and specific. This is a documented trust boundary, not a guarded one.
-
 ### Self-Protected Paths
 
 NOT optional and NOT configurable — unlike the neighboring knobs, this set is
@@ -356,12 +315,9 @@ high-risk:
 ^harness/|^scripts/|^\.claude/|^\.agents/state/|(^|/)gates\.ya?ml$|(^|/)matrix\.ya?ml$
 ```
 
-`scripts/classify-low-risk.sh` refuses to classify any plan touching a
-self-protected path as **low** BEFORE consulting the operator patterns — the
-refusal wins over any `RAD_LOW_RISK_PATTERNS`, including `.*` — and
 `scripts/lint-plan.sh` always emits an advisory warning for such a path
-regardless of `RAD_HIGH_RISK_PATTERNS`. Rationale: no auto-clear path may ever
-clear a change to itself (trust inversion; #73).
+regardless of `RAD_HIGH_RISK_PATTERNS`. Rationale: a change to RAD's own
+machinery always requires architect review.
 
 The set lives as a literal (`RAD_SELF_PROTECTED_PATTERN`) in
 `scripts/lib/plan-paths.sh`; changing it requires a reviewed commit — there is
@@ -448,13 +404,6 @@ Approval requires:
 | spine-mapper | context-tool | harness/spine.js, matrix.js, matrix.yaml | architect |
 | hook-runtime-orchestrator | role-orchestrator | nothing | architect |
 | hook-surface-mapper | context-tool | contract.js, events writer, scripts/** | architect |
-| severity-approval-parent-orchestrator | parent-orchestrator | nothing | architect |
-| gate-authority-orchestrator | role-orchestrator | nothing | architect |
-| gate-authority-mapper | context-tool | harness/gates.js, gates.yaml, events.js, approve/deliver gate-check sites | architect |
-| severity-classifier-orchestrator | role-orchestrator | nothing | architect |
-| classifier-surface-mapper | context-tool | scripts/check-scope.sh, lint-plan.sh, CLAUDE.md RAD config, .env.example | architect |
-| audit-surface-orchestrator | role-orchestrator | nothing | developer |
-| audit-surface-mapper | context-tool | rad-insights skill, kickoff skill, events.js read side | developer |
 | portable-memory-parent-orchestrator | parent-orchestrator | nothing | architect |
 | sync-transport-orchestrator | role-orchestrator | nothing | architect |
 | sync-surface-mapper | context-tool | rad-approve/deliver verb sites, git-vs-host-CLI invocation, detect-platform.sh + mirror scripts, CLAUDE.md RAD config, .env.example | architect |
