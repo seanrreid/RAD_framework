@@ -19,3 +19,5 @@ Note: a prior run on 2026-08-20 failed at Wave 1 before any code was written
 | 6 | Wave 3 | Code-legibility subsection in /rad-insights | ✓ complete | 61b11ee | 10:04 |
 | 7 | Wave 4 | Outcome-derived reliability fold | ✓ complete | 74a1052 | 10:08 |
 | 8 | Wave 4 | Model-tiering advisory subsection | ✓ complete | 40dafce | 10:08 |
+| 9 | Wave 5 | Outcome to prompt-surface mapping table | ✓ complete | aff876d | 10:11 |
+| 10 | Wave 5 | Document the mapping rationale | ✓ complete | fc365f9 | 10:11 |
