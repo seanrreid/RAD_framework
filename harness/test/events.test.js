@@ -17,6 +17,7 @@ import {
   FILE_FAILURE_MIN_FEATURES,
   waveReliability,
   attemptOutcomeCounts,
+  cacheUsage,
 } from '../events.js';
 
 test('reduce on empty history → null phase, no markers, no approvals', () => {
@@ -787,4 +788,113 @@ test('attemptOutcomeCounts never reads usage', () => {
     return { ...event, data };
   });
   assert.deepStrictEqual(attemptOutcomeCounts(guarded), expected);
+});
+
+// ── cacheUsage ───────────────────────────────────────────────────────────────
+// Every expected value below is hand-computed; the arithmetic is in comments.
+
+const CACHE_ZERO = { attempts: [], totals: { cacheRead: 0, input: 0 }, withoutCache: 0 };
+
+test('cacheUsage lists a retry whose ratio drops from positive to 0', () => {
+  const history = deepFreeze([
+    { feature: 'f', type: 'wave-attempt', data: { wave: 1, outcome: 'fail-tests', usage: { input: 200, output: 50, cacheRead: 800 } } },
+    { feature: 'f', type: 'wave-attempt', data: { wave: 1, outcome: 'success', usage: { input: 1000, output: 50, cacheRead: 0 } } },
+  ]);
+  assert.deepStrictEqual(cacheUsage(history), {
+    attempts: [
+      // 800 / (200 + 800) = 800 / 1000 = 0.8
+      { feature: 'f', wave: 1, attempt: 1, cacheRead: 800, input: 200, ratio: 0.8 },
+      // 0 / (1000 + 0) = 0
+      { feature: 'f', wave: 1, attempt: 2, cacheRead: 0, input: 1000, ratio: 0 },
+    ],
+    // cacheRead 800 + 0 = 800; input 200 + 1000 = 1200
+    totals: { cacheRead: 800, input: 1200 },
+    withoutCache: 0,
+  });
+});
+
+test('cacheUsage counts legacy attempts with no usage (or no cacheRead) in withoutCache', () => {
+  const history = deepFreeze([
+    { feature: 'f', type: 'wave-attempt', data: { wave: 1, outcome: 'success' } },
+    { feature: 'f', type: 'wave-attempt', data: { wave: 2, outcome: 'success', usage: { input: 10, output: 5 } } },
+    { feature: 'f', type: 'wave-attempt', data: { wave: 3, outcome: 'success', usage: null } },
+  ]);
+  // 3 placeable attempts, none with a cacheRead → withoutCache 3, nothing listed.
+  assert.deepStrictEqual(cacheUsage(history), { ...CACHE_ZERO, withoutCache: 3 });
+});
+
+test('cacheUsage ratio is null on a zero denominator; missing input is treated as 0', () => {
+  const history = deepFreeze([
+    // input 0 + cacheRead 0 = 0 → null
+    { feature: 'f', type: 'wave-attempt', data: { wave: 1, usage: { input: 0, cacheRead: 0 } } },
+    // input absent → 0; 0 + 0 = 0 → null
+    { feature: 'f', type: 'wave-attempt', data: { wave: 2, usage: { cacheRead: 0 } } },
+    // input absent → 0; 50 / (0 + 50) = 1
+    { feature: 'f', type: 'wave-attempt', data: { wave: 3, usage: { cacheRead: 50 } } },
+  ]);
+  assert.deepStrictEqual(cacheUsage(history), {
+    attempts: [
+      { feature: 'f', wave: 1, attempt: 1, cacheRead: 0, input: 0, ratio: null },
+      { feature: 'f', wave: 2, attempt: 1, cacheRead: 0, input: 0, ratio: null },
+      { feature: 'f', wave: 3, attempt: 1, cacheRead: 50, input: 0, ratio: 1 },
+    ],
+    // cacheRead 0 + 0 + 50 = 50; input 0 + 0 + 0 = 0
+    totals: { cacheRead: 50, input: 0 },
+    withoutCache: 0,
+  });
+});
+
+test('cacheUsage on a mixed history: invalid cacheRead values count as withoutCache, ordinals span them', () => {
+  const history = deepFreeze([
+    { feature: 'a', type: 'wave-complete', data: { wave: 1 } }, // ignored: not an attempt
+    { feature: 'a', type: 'wave-attempt', data: { wave: 1, usage: { input: 100 } } }, // a/1 #1 no cache
+    { feature: 'a', type: 'wave-attempt', data: { wave: 1, usage: { input: 300, cacheRead: 100 } } }, // a/1 #2
+    { feature: 'a', type: 'wave-attempt', data: { wave: 1, usage: { input: 5, cacheRead: -1 } } }, // a/1 #3 negative
+    { feature: 'a', type: 'wave-attempt', data: { wave: 2, usage: { input: 5, cacheRead: Infinity } } }, // a/2 #1 non-finite
+    { feature: 'a', type: 'wave-attempt', data: { wave: 2, usage: { input: 5, cacheRead: '9' } } }, // a/2 #2 string
+    { feature: 'b', type: 'wave-attempt', data: { wave: 1, usage: { input: -7, cacheRead: 30 } } }, // b/1 #1 bad input → 0
+  ]);
+  assert.deepStrictEqual(cacheUsage(history), {
+    attempts: [
+      // 100 / (300 + 100) = 100 / 400 = 0.25
+      { feature: 'a', wave: 1, attempt: 2, cacheRead: 100, input: 300, ratio: 0.25 },
+      // input -7 invalid → 0; 30 / (0 + 30) = 1
+      { feature: 'b', wave: 1, attempt: 1, cacheRead: 30, input: 0, ratio: 1 },
+    ],
+    // cacheRead 100 + 30 = 130; input 300 + 0 = 300
+    totals: { cacheRead: 130, input: 300 },
+    // a/1 #1 (absent) + a/1 #3 (negative) + a/2 #1 (Infinity) + a/2 #2 (string) = 4
+    withoutCache: 4,
+  });
+});
+
+test('cacheUsage skips attempts that cannot be placed in a (feature, wave), as collectWavePairs does', () => {
+  const history = deepFreeze([
+    null,
+    { type: 'wave-attempt', data: { wave: 1, usage: { input: 1, cacheRead: 1 } } }, // no feature
+    { feature: '', type: 'wave-attempt', data: { wave: 1, usage: { input: 1, cacheRead: 1 } } }, // empty feature
+    { feature: 'f', type: 'wave-attempt', data: { usage: { input: 1, cacheRead: 1 } } }, // no wave
+    { feature: 'f', type: 'wave-attempt', data: { wave: 'x', usage: { input: 1 } } }, // non-numeric wave
+    { feature: 'f', type: 'wave-attempt' }, // no data
+  ]);
+  // Every attempt is unplaceable → skipped: nothing listed, nothing in withoutCache.
+  assert.deepStrictEqual(cacheUsage(history), CACHE_ZERO);
+});
+
+test('cacheUsage is zeroed on empty / null / non-array input', () => {
+  for (const input of [[], null, undefined, 'x', 7, {}, { length: 2 }]) {
+    assert.deepStrictEqual(cacheUsage(input), CACHE_ZERO);
+  }
+});
+
+test('cacheUsage reports no cache data on the committed fixture corpus and leaves totalUsage unchanged', () => {
+  const history = deepFreeze(loadAllInsightsFixtures());
+  const usageBefore = totalUsage(history);
+  const out = cacheUsage(history);
+  assert.deepStrictEqual(out.attempts, []);
+  assert.deepStrictEqual(out.totals, { cacheRead: 0, input: 0 });
+  // Fixtures carry no cacheRead → every attempt is withoutCache:
+  // enriched 5 + legacy 4 + mixed 5 = 14 wave-attempt events.
+  assert.equal(out.withoutCache, 14);
+  assert.deepStrictEqual(totalUsage(history), usageBefore);
 });

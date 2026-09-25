@@ -624,3 +624,61 @@ export function attemptOutcomeCounts(history) {
   }
   return { counts, features };
 }
+
+/** A usage field is reportable iff it is a finite, non-negative number. */
+const isTokenCount = (v) => typeof v === 'number' && Number.isFinite(v) && v >= 0;
+
+/** Cache-hit ratio: cacheRead / (input + cacheRead), or null on a 0 denominator. */
+function cacheRatio(cacheRead, input) {
+  const denominator = input + cacheRead;
+  return denominator === 0 ? null : cacheRead / denominator;
+}
+
+/**
+ * Pure fold over an event history → per-attempt prompt-cache hit readout, read
+ * ONLY from `wave-attempt` `data.usage.cacheRead` / `data.usage.input` (the
+ * optional cache fields `normalizeUsage` carries since #121).
+ *
+ * Attempts are placed by (feature, wave) exactly as `collectWavePairs` places
+ * them: an attempt lacking a string `feature` or a finite numeric `data.wave`
+ * cannot be placed and is SKIPPED entirely (neither listed nor counted in
+ * `withoutCache`). `attempt` is the 1-based ordinal of that attempt within its
+ * (feature, wave) in history order — every placeable attempt advances the
+ * ordinal, including ones that report no cache data, so the number matches the
+ * real retry count. A placeable attempt whose `cacheRead` is absent, non-finite,
+ * or negative (every legacy event) is counted in `withoutCache` and not listed.
+ * A missing/invalid `input` is treated as 0. `ratio` is
+ * `cacheRead / (input + cacheRead)`, or `null` when that denominator is 0.
+ * `totals` sums `cacheRead` and `input` over the LISTED attempts only. Zeroed
+ * shape on [] / null / non-array input; never mutates input.
+ *
+ * @param {Event[]} history - in-memory event array (no I/O performed)
+ * @returns {{ attempts: Array<{ feature: string, wave: number, attempt: number,
+ *   cacheRead: number, input: number, ratio: number|null }>,
+ *   totals: { cacheRead: number, input: number }, withoutCache: number }}
+ */
+export function cacheUsage(history) {
+  const out = { attempts: [], totals: { cacheRead: 0, input: 0 }, withoutCache: 0 };
+  if (!Array.isArray(history)) return out;
+  const ordinals = new Map();
+  for (const event of history) {
+    if (!event || event.type !== 'wave-attempt' || !event.data) continue;
+    if (typeof event.feature !== 'string' || event.feature === '') continue;
+    const wave = event.data.wave;
+    if (typeof wave !== 'number' || !Number.isFinite(wave)) continue;
+    const key = JSON.stringify([event.feature, wave]);
+    const attempt = (ordinals.get(key) || 0) + 1;
+    ordinals.set(key, attempt);
+    const usage = event.data.usage && typeof event.data.usage === 'object' ? event.data.usage : {};
+    if (!isTokenCount(usage.cacheRead)) {
+      out.withoutCache += 1;
+      continue;
+    }
+    const input = isTokenCount(usage.input) ? usage.input : 0;
+    const { cacheRead } = usage;
+    out.attempts.push({ feature: event.feature, wave, attempt, cacheRead, input, ratio: cacheRatio(cacheRead, input) });
+    out.totals.cacheRead += cacheRead;
+    out.totals.input += input;
+  }
+  return out;
+}
