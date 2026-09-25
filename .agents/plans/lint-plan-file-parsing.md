@@ -1,7 +1,7 @@
 # Plan: Lint-Plan File Parsing
 Created: 2026-09-25
 Author: architect
-Status: approved
+Status: in-progress
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-09-25T18:43:13.351Z
 Recorded-By: sean@torchcodelab.com
