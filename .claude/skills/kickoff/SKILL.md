@@ -56,6 +56,17 @@ Group what it returns by status and surface the actionable ones first:
 
 Skip silently if there are no plans.
 
+Then report the **Research (pre-plan)** group from the `── Research (pre-plan) ──`
+section of the same output, by each artifact's `Status:`:
+- **pending-design** → *Ready to design* — `/rad-design <slug>`.
+- **pending-plan** → *Ready to plan* — `/rad-plan <slug>`.
+- **parked** → *Deliberately deferred* — list it, no next command.
+
+`rad-status.sh` already hides research that is `consumed` or whose slug has a plan,
+so everything in that section is genuinely pre-plan. If it prints
+`(no pre-plan research; N consumed)` or `(no research artifacts)`, report the group
+as none.
+
 **Auto-clear count.** The severity-routed approval gate records each policy
 auto-clear as an `approved` event with `recordedBy === 'policy'` in the per-feature
 audit logs. Count them across the feature event logs and surface one line —
@@ -87,10 +98,16 @@ Summarize in this shape, then ask what to focus on:
 - ✓ {feature} — approved, ready to deliver
 - ▶ {feature} — in progress on rad/{feature}
 
+## Research
+- 🔍 {slug} — pending design → /rad-design {slug}
+- 🔍 {slug} — pending plan → /rad-plan {slug}
+- ⏸ {slug} — parked
+{or: "- none — no pre-plan research"}
+
 Auto-cleared: {N} changes since last session   {omit this line entirely if N is 0}
 
 ## Suggested focus
-{the most actionable item — an approved plan to deliver, or a pending one to approve}
+{the most actionable item — an approved plan to deliver, a pending one to approve, or research ready to design/plan}
 
 What would you like to work on?
 ```
