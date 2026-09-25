@@ -18,6 +18,8 @@ import {
   waveReliability,
   attemptOutcomeCounts,
   cacheUsage,
+  findOrphanAttempts,
+  priorAttemptState,
 } from '../events.js';
 
 test('reduce on empty history → null phase, no markers, no approvals', () => {
@@ -897,4 +899,158 @@ test('cacheUsage reports no cache data on the committed fixture corpus and leave
   // enriched 5 + legacy 4 + mixed 5 = 14 wave-attempt events.
   assert.equal(out.withoutCache, 14);
   assert.deepStrictEqual(totalUsage(history), usageBefore);
+});
+
+// ── #119 wave-attempt durability helpers ─────────────────────────────────────
+const PRIOR_ZERO = { attempts: 0, lastPrint: null };
+
+test('findOrphanAttempts reports a wave-started with no later matching wave-attempt', () => {
+  const history = deepFreeze([
+    { feature: 'f', type: 'deliver-started', data: {} },
+    { feature: 'f', type: 'wave-started', data: { wave: 1, attempt: 1 } },
+    { feature: 'f', type: 'wave-attempt', data: { wave: 1, attempt: 1, outcome: 'success' } },
+    { feature: 'f', type: 'wave-complete', data: { wave: 1 } },
+    { feature: 'f', type: 'wave-started', data: { wave: 2, attempt: 1, model: 'm' } }, // crash here
+  ]);
+  // wave 1 attempt 1 is matched by the attempt at index 2; wave 2 attempt 1 has nothing after it.
+  assert.deepStrictEqual(findOrphanAttempts(history), [{ wave: 2, attempt: 1 }]);
+});
+
+test('findOrphanAttempts is idempotent: a converged orphan is no longer reported', () => {
+  const history = deepFreeze([
+    { feature: 'f', type: 'wave-started', data: { wave: 2, attempt: 1 } },
+    // synthetic convergence appended on resume
+    { feature: 'f', type: 'wave-attempt', data: { wave: 2, attempt: 1, outcome: 'fail-timeout', reason: 'orphaned' } },
+  ]);
+  assert.deepStrictEqual(findOrphanAttempts(history), []);
+});
+
+test('findOrphanAttempts requires the matching attempt to come LATER, and to match the attempt ordinal', () => {
+  const history = deepFreeze([
+    { feature: 'f', type: 'wave-attempt', data: { wave: 1, attempt: 1, outcome: 'fail-tests' } }, // before → no match
+    { feature: 'f', type: 'wave-started', data: { wave: 1, attempt: 1 } },
+    { feature: 'f', type: 'wave-started', data: { wave: 1, attempt: 2 } },
+    { feature: 'f', type: 'wave-attempt', data: { wave: 1, attempt: 2, outcome: 'fail-tests' } }, // matches attempt 2 only
+    { feature: 'f', type: 'wave-started', data: { wave: 3, attempt: 1 } },
+    { feature: 'f', type: 'wave-attempt', data: { wave: 4, attempt: 1, outcome: 'success' } }, // other wave → no match
+  ]);
+  // w1a1: only matching attempt is at index 0 < 1 → orphan; w1a2 matched at index 3; w3a1: nothing for wave 3.
+  assert.deepStrictEqual(findOrphanAttempts(history), [
+    { wave: 1, attempt: 1 },
+    { wave: 3, attempt: 1 },
+  ]);
+});
+
+test('findOrphanAttempts infers legacy attempt ordinals by per-wave order', () => {
+  const history = deepFreeze([
+    { feature: 'f', type: 'wave-attempt', data: { wave: 1, outcome: 'fail-tests' } }, // legacy → ordinal 1
+    { feature: 'f', type: 'wave-attempt', data: { wave: 1, outcome: 'fail-tests' } }, // legacy → ordinal 2
+    { feature: 'f', type: 'wave-started', data: { wave: 1, attempt: 3 } },
+  ]);
+  // Legacy ordinals are 1 and 2 and both precede the start; nothing carries ordinal 3 → orphan.
+  assert.deepStrictEqual(findOrphanAttempts(history), [{ wave: 1, attempt: 3 }]);
+
+  const converged = deepFreeze([
+    { feature: 'f', type: 'wave-started', data: { wave: 1, attempt: 1 } },
+    { feature: 'f', type: 'wave-attempt', data: { wave: 1, outcome: 'success' } }, // legacy → ordinal 1
+  ]);
+  // Ordinal 1 inferred for the later legacy attempt → matches → no orphan.
+  assert.deepStrictEqual(findOrphanAttempts(converged), []);
+});
+
+test('findOrphanAttempts skips non-numeric waves and wave-started without a positive-integer attempt', () => {
+  const history = deepFreeze([
+    null,
+    { feature: 'f', type: 'wave-started' }, // no data
+    { feature: 'f', type: 'wave-started', data: { wave: '1', attempt: 1 } }, // string wave
+    { feature: 'f', type: 'wave-started', data: { wave: NaN, attempt: 1 } }, // non-finite wave
+    { feature: 'f', type: 'wave-started', data: { wave: 1 } }, // no attempt
+    { feature: 'f', type: 'wave-started', data: { wave: 1, attempt: 0 } }, // zero attempt
+    { feature: 'f', type: 'wave-started', data: { wave: 1, attempt: -2 } }, // negative attempt
+    { feature: 'f', type: 'wave-started', data: { wave: 1, attempt: 1.5 } }, // non-integer attempt
+  ]);
+  assert.deepStrictEqual(findOrphanAttempts(history), []);
+});
+
+test('findOrphanAttempts is [] on empty / null / non-array input', () => {
+  for (const input of [[], null, undefined, 'x', 7, {}, { length: 2 }]) {
+    assert.deepStrictEqual(findOrphanAttempts(input), []);
+  }
+});
+
+test('priorAttemptState counts only attempts since the wave\'s last terminal wave-failed', () => {
+  const history = deepFreeze([
+    { feature: 'f', type: 'wave-attempt', data: { wave: 1, attempt: 1, outcome: 'fail-tests' } },
+    { feature: 'f', type: 'wave-attempt', data: { wave: 1, attempt: 2, outcome: 'fail-tests', fingerprint: 'aaa' } },
+    { feature: 'f', type: 'wave-failed', data: { wave: 1, reason: 'doom-loop' } },
+    { feature: 'f', type: 'wave-attempt', data: { wave: 1, attempt: 1, outcome: 'fail-tests', fingerprint: 'bbb' } },
+  ]);
+  // 2 attempts, then a terminal resets to 0, then 1 more → attempts 1; last print is 'bbb'.
+  assert.deepStrictEqual(priorAttemptState(history, 1), { attempts: 1, lastPrint: 'bbb' });
+});
+
+test('priorAttemptState resets on a matrix wave-failed (action) too, and is zero right after it', () => {
+  const history = deepFreeze([
+    { feature: 'f', type: 'wave-attempt', data: { wave: 2, attempt: 1, outcome: 'fail-timeout', fingerprint: 'x' } },
+    { feature: 'f', type: 'wave-failed', data: { wave: 2, action: 'surface' } },
+  ]);
+  // 1 attempt, then terminal → 0 attempts since; nothing after it → lastPrint null.
+  assert.deepStrictEqual(priorAttemptState(history, 2), PRIOR_ZERO);
+});
+
+test('priorAttemptState seeds lastPrint from the last attempt\'s fingerprint', () => {
+  const history = deepFreeze([
+    { feature: 'f', type: 'wave-started', data: { wave: 1, attempt: 1 } },
+    { feature: 'f', type: 'wave-attempt', data: { wave: 1, attempt: 1, outcome: 'fail-tests', fingerprint: 'p1' } },
+    { feature: 'f', type: 'wave-started', data: { wave: 1, attempt: 2 } },
+    { feature: 'f', type: 'wave-attempt', data: { wave: 1, attempt: 2, outcome: 'fail-tests', fingerprint: 'p2' } },
+  ]);
+  // 2 attempts (wave-started is not an attempt); the last carries 'p2'.
+  assert.deepStrictEqual(priorAttemptState(history, 1), { attempts: 2, lastPrint: 'p2' });
+});
+
+test('priorAttemptState gives lastPrint null for legacy / empty / non-string fingerprints', () => {
+  const legacy = deepFreeze([
+    { feature: 'f', type: 'wave-attempt', data: { wave: 1, outcome: 'fail-tests' } },
+    { feature: 'f', type: 'wave-attempt', data: { wave: 1, outcome: 'fail-tests' } },
+  ]);
+  // 2 legacy attempts, no fingerprint anywhere → attempts 2, lastPrint null.
+  assert.deepStrictEqual(priorAttemptState(legacy, 1), { attempts: 2, lastPrint: null });
+
+  // A fingerprinted attempt followed by a legacy one: the LAST attempt decides → null.
+  const printedThenLegacy = deepFreeze([
+    { feature: 'f', type: 'wave-attempt', data: { wave: 1, fingerprint: 'old' } },
+    { feature: 'f', type: 'wave-attempt', data: { wave: 1 } },
+  ]);
+  assert.deepStrictEqual(priorAttemptState(printedThenLegacy, 1), { attempts: 2, lastPrint: null });
+
+  for (const fingerprint of ['', 42, null]) {
+    const history = deepFreeze([{ feature: 'f', type: 'wave-attempt', data: { wave: 1, fingerprint } }]);
+    assert.deepStrictEqual(priorAttemptState(history, 1), { attempts: 1, lastPrint: null });
+  }
+});
+
+test('priorAttemptState ignores attempts and wave-failed events for a different wave', () => {
+  const history = deepFreeze([
+    { feature: 'f', type: 'wave-attempt', data: { wave: 1, attempt: 1, outcome: 'fail-tests', fingerprint: 'w1' } },
+    { feature: 'f', type: 'wave-attempt', data: { wave: 2, attempt: 1, outcome: 'fail-tests', fingerprint: 'w2' } },
+    { feature: 'f', type: 'wave-failed', data: { wave: 2, action: 'abort' } }, // wave 2's terminal, not wave 1's
+    { feature: 'f', type: 'wave-attempt', data: { wave: 3, outcome: 'success' } },
+    { feature: 'f', type: 'wave-attempt', data: { wave: '1', outcome: 'success' } }, // string wave ≠ 1
+  ]);
+  // Wave 1: only the first event counts → attempts 1, lastPrint 'w1'.
+  assert.deepStrictEqual(priorAttemptState(history, 1), { attempts: 1, lastPrint: 'w1' });
+  // Wave 4: nothing recorded.
+  assert.deepStrictEqual(priorAttemptState(history, 4), PRIOR_ZERO);
+});
+
+test('priorAttemptState is zeroed on invalid history or wave input', () => {
+  const history = deepFreeze([{ feature: 'f', type: 'wave-attempt', data: { wave: 1 } }]);
+  for (const input of [[], null, undefined, 'x', 7, {}, { length: 2 }]) {
+    assert.deepStrictEqual(priorAttemptState(input, 1), PRIOR_ZERO);
+  }
+  for (const wave of [undefined, null, '1', NaN, Infinity]) {
+    assert.deepStrictEqual(priorAttemptState(history, wave), PRIOR_ZERO);
+  }
+  assert.deepStrictEqual(priorAttemptState([null, { type: 'wave-attempt' }], 1), PRIOR_ZERO);
 });

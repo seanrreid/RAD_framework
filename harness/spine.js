@@ -28,7 +28,7 @@
 
 import { resolveOutcome } from './matrix.js';
 import { fingerprint } from './fingerprint.js';
-import { resumeFrom, totalUsage } from './events.js';
+import { resumeFrom, totalUsage, findOrphanAttempts, priorAttemptState } from './events.js';
 import { OUTCOME_VOCAB } from './hook-runner.js';
 
 /** The fail-closed aborting outcome a veto resolves to when its token is somehow
@@ -47,6 +47,19 @@ function safeVetoOutcome(outcome) {
 /** Bounded attempt budget per wave — the hard ceiling. The doom-loop breaker is
  * the early exit; this cap only bites when every attempt fails *differently*. */
 const MAX_ATTEMPTS = 3;
+
+/** Reason stamped on the synthetic wave-attempt and the wave-failed a resume
+ * appends when it converges an orphan (a `wave-started` whose attempt never
+ * recorded a `wave-attempt` — the process died mid-agent, issue #119). */
+const ORPHAN_REASON = 'orphaned';
+
+/** The EXISTING outcome an orphan converges to. The matrix routes it to
+ * `surface`: a crashed attempt is handed to the operator, never silently
+ * retried (its in-flight work and token spend are unrecoverable). */
+const ORPHAN_OUTCOME = 'fail-timeout';
+
+/** Matrix actions whose attempt is fingerprinted for the doom-loop breaker. */
+const FINGERPRINTED_ACTIONS = new Set(['retry', 'revision']);
 
 /** The executing verification gate: runs a plan-declared command and reads its
  * REAL exit code. Distinct from check-tests-present.sh (file presence) by
@@ -187,6 +200,79 @@ function capturePriorFailure({ attempt, outcome, output, result, wave, state, fe
 }
 
 /**
+ * Record that attempt `attempt` of `wave` is about to run the agent. Appended
+ * AFTER the pre-wave hooks pass (a vetoed attempt never ran) and immediately
+ * BEFORE runWave, so a crash mid-agent leaves a `wave-started` with no matching
+ * `wave-attempt` — the orphan a later resume converges. `model` is spread only
+ * when the wave descriptor declares one, so the key is absent otherwise.
+ */
+function appendWaveStarted({ state, feature, now, wave, attempt }) {
+  const model = typeof wave.model === 'string' && wave.model !== '' ? { model: wave.model } : {};
+  state.append({
+    feature,
+    type: 'wave-started',
+    actor: 'harness',
+    ts: now(),
+    data: { wave: wave.n, attempt, ...model },
+  });
+}
+
+/**
+ * Build a `wave-attempt` event's data. `attempt` is always recorded;
+ * `fingerprint` (the digest the doom-loop compares) only when `print` is set,
+ * i.e. the resolved action was retry/revision. Optional keys are spread, never
+ * present-and-undefined. Post-wave veto provenance keeps its prior shape.
+ */
+function attemptData({ wave, attempt, outcome, result, evidence, vetoSource, print }) {
+  const printEvidence = print ? { fingerprint: print } : {};
+  const base = { wave: wave.n, attempt, outcome, usage: result.usage, ...evidence, ...printEvidence };
+  return vetoSource
+    ? { ...base, source: 'hook', point: vetoSource.point, hook: vetoSource.hook }
+    : base;
+}
+
+/**
+ * Converge every orphaned attempt of `wave` (issue #119) BEFORE its attempt
+ * loop: each gets a synthetic `wave-attempt {wave, attempt, outcome:
+ * 'fail-timeout', reason: 'orphaned'}`, the outcome is routed through the matrix
+ * (→ `surface`), the observe-only `on-error` hook fires, and one
+ * `wave-failed {wave, action, reason: 'orphaned'}` is appended. Idempotent: the
+ * synthetic wave-attempt matches its `wave-started`, so a second resume finds
+ * no orphan. Returns the existing matrix-terminal
+ * result shape, or null when the wave has no orphan.
+ */
+function convergeOrphans({ history, wave, matrix, state, feature, now, runHooks }) {
+  const orphans = findOrphanAttempts(history).filter((o) => o.wave === wave.n);
+  if (orphans.length === 0) return null;
+  for (const { attempt } of orphans) {
+    state.append({
+      feature,
+      type: 'wave-attempt',
+      actor: 'harness',
+      ts: now(),
+      data: { wave: wave.n, attempt, outcome: ORPHAN_OUTCOME, reason: ORPHAN_REASON },
+    });
+  }
+  const { action } = resolveOutcome('implement', ORPHAN_OUTCOME, matrix);
+  // ── Hook: on-error (observe-only). Fired at this wave-failed terminal
+  // (orphan surface), mirroring the matrix abort/surface terminal. ──
+  fireHooks(
+    runHooks,
+    'on-error',
+    { feature, wave: wave.n, outcome: ORPHAN_OUTCOME },
+    { state, feature, now },
+  );
+  state.append({
+    feature,
+    type: 'wave-failed',
+    actor: 'harness',
+    ts: now(),
+    data: { wave: wave.n, action, reason: ORPHAN_REASON },
+  });
+  return { stopped: 'matrix', ok: false, wave: wave.n, action, outcome: ORPHAN_OUTCOME };
+}
+
+/**
  * Run the deliver spine for one feature.
  *
  * @param {Object} args
@@ -317,7 +403,19 @@ export async function deliverSpine({
       }
     }
 
-    let lastPrint = null;
+    // ── Orphan convergence (#119): an attempt whose process died mid-agent left
+    // a `wave-started` with no `wave-attempt`. Surface it to the operator via
+    // the matrix before any new attempt runs. Its token spend was never
+    // recorded, so the budget breaker under-counts it — that is unrecoverable. ──
+    const orphaned = convergeOrphans({ history, wave, matrix, state, feature, now, runHooks });
+    if (orphaned) return orphaned;
+
+    // ── Resume seeding (#119): continue the attempt budget and the doom-loop
+    // fingerprint from attempts recorded since the wave's last terminal
+    // wave-failed. After a terminal stop the wave re-runs with a full budget; a
+    // legacy log (no fingerprint) seeds null and cannot trip the breaker. ──
+    const prior = priorAttemptState(history, wave.n);
+    let lastPrint = prior.lastPrint;
     let advanced = false;
     // Back-pressure (issue #90): the previous attempt's captured failure, fed to
     // the NEXT attempt so a retry differs by more than model nondeterminism.
@@ -325,7 +423,7 @@ export async function deliverSpine({
     // capture is exactly today's behavior.
     let priorFailure = null;
 
-    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    for (let attempt = prior.attempts + 1; attempt <= maxAttempts; attempt += 1) {
       // ── Hook: pre-wave (veto-capable point). Fired BEFORE runWave. A veto here
       // aborts the wave without running the agent: route the veto outcome through
       // the existing matrix and terminate the same way an agent-emitted outcome
@@ -352,6 +450,8 @@ export async function deliverSpine({
         });
         return { stopped: 'hook-veto', ok: false, wave: wave.n, action, outcome: vetoOutcome, point: 'pre-wave' };
       }
+
+      appendWaveStarted({ state, feature, now, wave, attempt });
 
       // ADDITIVE second argument: attempt context. A runWave that ignores it is
       // unchanged; one that reads it can make attempt N+1 differ from attempt N.
@@ -478,6 +578,13 @@ export async function deliverSpine({
       // a pre-tasks one. It is DATA-ONLY — no fold in events.js reads it.
       const taskEvidence = result.tasks ? { tasks: result.tasks } : {};
 
+      // The MATRIX decides what happens next — never inline retry arithmetic.
+      // Resolved BEFORE the attempt is recorded so a failing (retry/revision)
+      // attempt can carry the SAME fingerprint the doom-loop breaker compares —
+      // which lets a resumed run seed `lastPrint` from the log (issue #119).
+      const { action } = resolveOutcome('implement', outcome, matrix);
+      const print = FINGERPRINTED_ACTIONS.has(action) ? fingerprint(gated) : null;
+
       state.append({
         feature,
         type: 'wave-attempt',
@@ -499,18 +606,23 @@ export async function deliverSpine({
         // event log carries what was executed and what really happened — not a
         // self-classification. Spread, so a wave that declared none appends an
         // event with NO `verify` key at all.
-        data: vetoSource
-          ? { wave: wave.n, outcome, usage: result.usage, ...taskEvidence, ...verifyEvidence, source: 'hook', point: vetoSource.point, hook: vetoSource.hook }
-          : { wave: wave.n, outcome, usage: result.usage, ...taskEvidence, ...verifyEvidence },
+        //
+        // Durability (#119): `attempt` always; `fingerprint` only on retry/revision.
+        data: attemptData({
+          wave,
+          attempt,
+          outcome,
+          result,
+          evidence: { ...taskEvidence, ...verifyEvidence },
+          vetoSource,
+          print,
+        }),
       });
 
       // Accumulate this attempt's token spend for the budget breaker. Usage is
       // OPTIONAL (a command adapter may emit none) — a missing total contributes
       // 0, never NaN.
       spent += result.usage?.total ?? 0;
-
-      // The MATRIX decides what happens next — never inline retry arithmetic.
-      const { action } = resolveOutcome('implement', outcome, matrix);
 
       // ── Hook: on-outcome (observe-only). Fired after the matrix resolves the
       // outcome, before the action is dispatched. Observe + emit only. ──
@@ -554,7 +666,7 @@ export async function deliverSpine({
         // means the retry is provably stuck — abort rather than burn the budget.
         // Only failing (retry/revision) outcomes are fingerprinted here, so a
         // genuine success can never trip the breaker (it advances above first).
-        const print = fingerprint(gated);
+        // `print` was computed above, before the attempt was recorded.
         if (print === lastPrint) {
           // ── Hook: on-error (observe-only). Fired at this wave-failed terminal
           // (doom-loop). Observe + emit only. ──

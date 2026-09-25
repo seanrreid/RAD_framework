@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { deliverSpine } from '../spine.js';
 import { loadMatrix } from '../matrix.js';
+import { fingerprint } from '../fingerprint.js';
 
 const MATRIX = loadMatrix();
 
@@ -100,12 +101,15 @@ test('(b) happy path → all waves advance, post-checks called in order, pr-open
   );
   assert.ok(shCalls.every((c) => c.feature === 'demo'));
 
-  // Event trail: deliver-started, then per-wave attempt+complete, then pr-opened.
+  // Event trail: deliver-started, then per-wave started+attempt+complete, then
+  // pr-opened. `wave-started` precedes each runWave since #119 (durability).
   const types = state.appended.map((e) => e.type);
   assert.deepEqual(types, [
     'deliver-started',
+    'wave-started',
     'wave-attempt',
     'wave-complete',
+    'wave-started',
     'wave-attempt',
     'wave-complete',
     'pr-opened',
@@ -154,10 +158,13 @@ test('(c) retry-then-advance: a transient failure then success advances the wave
   });
   assert.deepEqual(result, { ok: true, waves: 1 });
   const types = state.appended.map((e) => e.type);
-  // deliver-started, attempt(fail), attempt(success), wave-complete, pr-opened
+  // deliver-started, [started, attempt(fail)], [started, attempt(success)],
+  // wave-complete, pr-opened — `wave-started` precedes each runWave since #119.
   assert.deepEqual(types, [
     'deliver-started',
+    'wave-started',
     'wave-attempt',
+    'wave-started',
     'wave-attempt',
     'wave-complete',
     'pr-opened',
@@ -760,12 +767,15 @@ test('(w2-b) BACKWARD-COMPAT SNAPSHOT: default no-op runHooks → event sequence
   );
 
   // THE SNAPSHOT: the appended event-type sequence is byte-for-byte the same as
-  // the legacy happy path — no hook-observed / hook-veto / hook-failed appear.
+  // the no-hooks happy path of the same version — no hook-observed / hook-veto /
+  // hook-failed appear (`wave-started` is part of every run since #119).
   const types = state.appended.map((e) => e.type);
   assert.deepEqual(types, [
     'deliver-started',
+    'wave-started',
     'wave-attempt',
     'wave-complete',
+    'wave-started',
     'wave-attempt',
     'wave-complete',
     'pr-opened',
@@ -1099,7 +1109,9 @@ test('(w5-a) AC#1 absent Verify: declaring none is byte-for-byte today — no ch
   for (const e of attempts) {
     assert.ok(!('verify' in e.data), '`verify` key must be absent, not undefined');
     assert.ok(!('tasks' in e.data), '`tasks` key must be absent, not undefined');
-    assert.deepEqual(Object.keys(e.data), ['wave', 'outcome', 'usage']);
+    // `attempt` is recorded on every wave-attempt since #119; `verify`/`tasks`
+    // (and `fingerprint`, success never fingerprints) stay absent.
+    assert.deepEqual(Object.keys(e.data), ['wave', 'attempt', 'outcome', 'usage']);
   }
 });
 
@@ -1412,4 +1424,111 @@ test('(w5-g) AC#8 capture is FAIL-OPEN: a capture failure logs its reason and at
   // Fail-OPEN: the capture failure neither vetoed the wave nor added a failure terminal.
   assert.ok(!state.appended.some((e) => e.type === 'wave-failed'));
   assert.ok(state.appended.some((e) => e.type === 'pr-opened'));
+});
+
+// ── #119 durability: wave-started, attempt, fingerprint (Task 2.1) ──────────
+
+/** Run a one-wave deliver with the given runWave/sh/extra ports. */
+async function runOneWave({ plan = { waves: [{ n: 1 }] }, runWave, sh = () => ({ status: 0 }), ...extra }) {
+  const state = makeFakeState({ gateResult: passingGate, plan });
+  const result = await deliverSpine({
+    feature: 'demo',
+    state,
+    docs: {},
+    matrix: MATRIX,
+    gates: {},
+    runWave,
+    sh,
+    now: fixedClock(),
+    ...extra,
+  });
+  return { state, result };
+}
+
+test('(dur-a) AC#1 wave-started {wave, attempt} is appended immediately before each runWave', async () => {
+  const typesAtRun = [];
+  let state;
+  let i = 0;
+  const runWave = async () => {
+    typesAtRun.push(state.appended.map((e) => e.type));
+    i += 1;
+    return i === 1 ? { outcome: 'fail-tests', summary: 'first' } : { outcome: 'success' };
+  };
+  state = makeFakeState({ gateResult: passingGate, plan: { waves: [{ n: 1 }] } });
+  await deliverSpine({
+    feature: 'demo', state, docs: {}, matrix: MATRIX, gates: {}, runWave,
+    sh: () => ({ status: 0 }), now: fixedClock(),
+  });
+  // At each runWave call, the most recent event is that attempt's wave-started.
+  assert.equal(typesAtRun.length, 2);
+  for (const types of typesAtRun) assert.equal(types.at(-1), 'wave-started');
+  const started = state.appended.filter((e) => e.type === 'wave-started');
+  assert.deepEqual(started.map((e) => e.data), [{ wave: 1, attempt: 1 }, { wave: 1, attempt: 2 }]);
+  assert.ok(started.every((e) => e.actor === 'harness' && !('model' in e.data)));
+});
+
+test('(dur-b) AC#1 model is recorded on wave-started only when the wave declares one', async () => {
+  const { state } = await runOneWave({
+    plan: { waves: [{ n: 1, model: 'claude-haiku-4-5' }, { n: 2 }] },
+    runWave: async () => ({ outcome: 'success' }),
+  });
+  const started = state.appended.filter((e) => e.type === 'wave-started');
+  assert.deepEqual(started.map((e) => e.data), [
+    { wave: 1, attempt: 1, model: 'claude-haiku-4-5' },
+    { wave: 2, attempt: 1 },
+  ]);
+});
+
+test('(dur-c) AC#1 a pre-wave veto appends NO wave-started (the agent never ran)', async () => {
+  const spy = makeVetoSpy({ point: 'pre-wave', outcome: 'fail-scope' });
+  const { state, result } = await runOneWave({
+    runWave: async () => ({ outcome: 'success' }),
+    runHooks: spy.runHooks,
+  });
+  assert.equal(result.stopped, 'hook-veto');
+  assert.ok(!state.appended.some((e) => e.type === 'wave-started'));
+});
+
+test('(dur-d) AC#2 every wave-attempt records attempt; retry/revision also records the doom-loop fingerprint', async () => {
+  let i = 0;
+  const failures = [
+    { outcome: 'fail-tests', summary: 'first failure' },
+    { outcome: 'fail-tests', summary: 'first failure' }, // identical → doom-loop
+  ];
+  const { state, result } = await runOneWave({ runWave: async () => failures[i++] });
+  assert.equal(result.stopped, 'doom-loop');
+  const attempts = state.appended.filter((e) => e.type === 'wave-attempt');
+  assert.deepEqual(attempts.map((e) => e.data.attempt), [1, 2]);
+  const expected = fingerprint(failures[0]);
+  // The recorded digest IS the one the breaker compared: identical on both, and
+  // equal to fingerprint() of the failing result.
+  assert.deepEqual(attempts.map((e) => e.data.fingerprint), [expected, expected]);
+});
+
+test('(dur-e) AC#2 advance and terminal (abort/surface) attempts carry attempt but NO fingerprint key', async () => {
+  const ok = await runOneWave({ runWave: async () => ({ outcome: 'success' }) });
+  const aborted = await runOneWave({ runWave: async () => ({ outcome: 'fail-scope' }) });
+  for (const { state } of [ok, aborted]) {
+    const [attempt] = state.appended.filter((e) => e.type === 'wave-attempt');
+    assert.equal(attempt.data.attempt, 1);
+    assert.ok(!('fingerprint' in attempt.data), 'fingerprint must be absent, not undefined');
+  }
+});
+
+test('(dur-f) AC#2 a post-wave veto attempt keeps its provenance keys alongside attempt', async () => {
+  const spy = makeVetoSpy({ point: 'post-wave', outcome: 'fail-scope' });
+  const { state } = await runOneWave({
+    runWave: async () => ({ outcome: 'success' }),
+    runHooks: spy.runHooks,
+  });
+  const [attempt] = state.appended.filter((e) => e.type === 'wave-attempt');
+  assert.deepEqual(attempt.data, {
+    wave: 1,
+    attempt: 1,
+    outcome: 'fail-scope',
+    usage: undefined,
+    source: 'hook',
+    point: 'post-wave',
+    hook: 'hooks/post-wave/01.sh',
+  });
 });

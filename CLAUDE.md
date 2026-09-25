@@ -207,7 +207,9 @@ Verify: bash scripts/test-check-verify.sh
 
 **The absent-declaration guarantee.** A wave with no `Verify:` line runs no command and
 records no `verify` key — a plan declaring none anywhere produces a **byte-for-byte
-identical** event sequence to a pre-verification run. Opting in is the only way to
+identical** event sequence to a run of the same RAD version without verification.
+(Since #119 every run's sequence includes a `wave-started` before each agent run, so
+the baseline is the same version, not a pre-#119 log.) Opting in is the only way to
 change behavior.
 
 **What it adds.** Without it, the per-wave gate is `scripts/check-tests-present.sh` — a
@@ -388,7 +390,8 @@ filename order. The spine fires six lifecycle points:
 Veto outcomes reuse the frozen 7-outcome matrix vocabulary (`success | fail-tests
 | fail-scope | fail-protocol | fail-timeout | no-changes | abort-user`) — a hook
 cannot invent a new outcome. With no hooks dir the appended event sequence is
-byte-for-byte identical to today's.
+byte-for-byte identical to a run of the same RAD version without hooks (since #119
+that sequence includes a `wave-started` before each agent run).
 
 See `scripts/hooks/README.md` for the full invocation contract (argv positions,
 `RAD_HOOK_*` env, stdout veto token, exit-code semantics, first-veto-wins).

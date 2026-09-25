@@ -159,7 +159,8 @@ points without touching the spine. Created with injected `sh`/`now`/`hooksDir`
 A veto routes through the **same** `resolveOutcome()` path as an agent-emitted
 outcome and can only use the frozen 7-vocabulary — a hook cannot invent a new
 outcome. With no hooks dir, the appended event sequence is byte-for-byte identical
-to today's. See [`scripts/hooks/README.md`](../scripts/hooks/README.md).
+to a run of the same RAD version without hooks (since #119 that sequence includes a
+`wave-started` before each agent run). See [`scripts/hooks/README.md`](../scripts/hooks/README.md).
 
 ---
 

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { resumeFrom } from '../events.js';
 import { deliverSpine } from '../spine.js';
 import { loadMatrix } from '../matrix.js';
+import { fingerprint } from '../fingerprint.js';
 
 const MATRIX = loadMatrix();
 
@@ -242,4 +243,165 @@ test('resume idempotency: re-running an already fully-complete plan appends no n
     state.events.filter((e) => e.type === 'wave-complete' && e.data && e.data.wave === n);
   assert.equal(completesFor(1).length, 1);
   assert.equal(completesFor(2).length, 1);
+});
+
+// ── #119 durability: orphan convergence and resume seeding (Task 2.2) ───────
+
+const MAX_ATTEMPTS = 3; // mirrors spine.js MAX_ATTEMPTS (the default ceiling)
+
+/** One deliverSpine run over `state` (whose history persists across runs). */
+function deliver(state, runWave) {
+  return deliverSpine({
+    feature: 'demo',
+    state,
+    docs: {},
+    matrix: MATRIX,
+    gates: {},
+    runWave,
+    sh: () => ({ status: 0 }),
+    now: fixedClock(),
+  });
+}
+
+const oneWave = { waves: [{ n: 1 }] };
+const ofType = (state, type) => state.events.filter((e) => e.type === type);
+
+/** A runWave that fails differently every call (never trips the doom-loop). */
+function distinctFailures(calls) {
+  return async (wave, ctx) => {
+    calls.push(ctx.attempt);
+    return { outcome: 'fail-tests', summary: `distinct failure ${calls.length}` };
+  };
+}
+
+test('durability (a): runWave dies after wave-started → the rerun converges exactly one orphan and surfaces', async () => {
+  const state = makeSeededState({ gateResult: passingGate, plan: oneWave });
+  await assert.rejects(
+    deliver(state, async () => {
+      throw new Error('process killed mid-agent');
+    }),
+    /process killed mid-agent/,
+  );
+  assert.equal(ofType(state, 'wave-started').length, 1);
+  assert.equal(ofType(state, 'wave-attempt').length, 0);
+
+  let runWaveCalls = 0;
+  const result = await deliver(state, async () => {
+    runWaveCalls += 1;
+    return { outcome: 'success' };
+  });
+
+  assert.deepEqual(result, { stopped: 'matrix', ok: false, wave: 1, action: 'surface', outcome: 'fail-timeout' });
+  assert.equal(runWaveCalls, 0, 'no new attempt runs before the orphan is surfaced');
+  const attempts = ofType(state, 'wave-attempt');
+  assert.equal(attempts.length, 1);
+  assert.deepEqual(attempts[0].data, { wave: 1, attempt: 1, outcome: 'fail-timeout', reason: 'orphaned' });
+  const failed = ofType(state, 'wave-failed');
+  assert.equal(failed.length, 1);
+  assert.deepEqual(failed[0].data, { wave: 1, action: 'surface', reason: 'orphaned' });
+});
+
+test('durability (a2): the orphan surface terminal fires on-error once, before its wave-failed', async () => {
+  const state = makeSeededState({ gateResult: passingGate, plan: oneWave });
+  await assert.rejects(deliver(state, async () => {
+    throw new Error('crash');
+  }));
+
+  const hookCalls = [];
+  const runHooks = (point, ctx) => {
+    hookCalls.push({ point, ctx, eventsBefore: state.events.length });
+    return { ran: [], veto: null, failures: [] };
+  };
+  const result = await deliverSpine({
+    feature: 'demo',
+    state,
+    docs: {},
+    matrix: MATRIX,
+    gates: {},
+    runWave: async () => ({ outcome: 'success' }),
+    sh: () => ({ status: 0 }),
+    now: fixedClock(),
+    runHooks,
+  });
+
+  assert.equal(result.stopped, 'matrix');
+  const onError = hookCalls.filter((c) => c.point === 'on-error');
+  assert.equal(onError.length, 1, 'on-error fires exactly once for the orphaned wave');
+  assert.deepEqual(onError[0].ctx, { feature: 'demo', wave: 1, outcome: 'fail-timeout' });
+  const failedIdx = state.events.findIndex((e) => e.type === 'wave-failed');
+  assert.ok(onError[0].eventsBefore <= failedIdx, 'on-error fires before wave-failed is appended');
+});
+
+test('durability (b): a third run appends no second synthetic event and re-runs the wave with a fresh budget', async () => {
+  const state = makeSeededState({ gateResult: passingGate, plan: oneWave });
+  await assert.rejects(deliver(state, async () => {
+    throw new Error('crash');
+  }));
+  await deliver(state, async () => ({ outcome: 'success' })); // converges the orphan
+
+  const calls = [];
+  const result = await deliver(state, distinctFailures(calls));
+
+  const synthetic = ofType(state, 'wave-attempt').filter((e) => e.data.reason === 'orphaned');
+  assert.equal(synthetic.length, 1, 'idempotent: the orphan is converged exactly once');
+  // The last terminal wave-failed resets the count: the full budget runs again.
+  assert.deepEqual(calls, [1, 2, 3]);
+  assert.equal(result.stopped, 'budget');
+});
+
+test('durability (c): 2 recorded attempts with no terminal → only MAX_ATTEMPTS-2 more attempts', async () => {
+  const seed = [
+    { feature: 'demo', type: 'deliver-started', ts: 's0' },
+    { feature: 'demo', type: 'wave-started', ts: 's1', data: { wave: 1, attempt: 1 } },
+    { feature: 'demo', type: 'wave-attempt', ts: 's2', data: { wave: 1, attempt: 1, outcome: 'fail-tests', fingerprint: 'a'.repeat(64) } },
+    { feature: 'demo', type: 'wave-started', ts: 's3', data: { wave: 1, attempt: 2 } },
+    { feature: 'demo', type: 'wave-attempt', ts: 's4', data: { wave: 1, attempt: 2, outcome: 'fail-tests', fingerprint: 'b'.repeat(64) } },
+  ];
+  const state = makeSeededState({ gateResult: passingGate, plan: oneWave, seed });
+
+  const calls = [];
+  const result = await deliver(state, distinctFailures(calls));
+
+  assert.equal(calls.length, MAX_ATTEMPTS - 2);
+  assert.deepEqual(calls, [3], 'the attempt counter continues from the log');
+  assert.equal(result.stopped, 'budget');
+  const newStarted = state.events.slice(state.seedCount).filter((e) => e.type === 'wave-started');
+  assert.deepEqual(newStarted.map((e) => e.data), [{ wave: 1, attempt: 3 }]);
+});
+
+test('durability (d): an identical recorded fingerprint + the same failure after restart → doom-loop on the first post-restart attempt', async () => {
+  const failure = { outcome: 'fail-tests', summary: 'the same failure' };
+  const seed = [
+    { feature: 'demo', type: 'wave-started', ts: 's0', data: { wave: 1, attempt: 1 } },
+    { feature: 'demo', type: 'wave-attempt', ts: 's1', data: { wave: 1, attempt: 1, outcome: 'fail-tests', fingerprint: fingerprint(failure) } },
+  ];
+  const state = makeSeededState({ gateResult: passingGate, plan: oneWave, seed });
+
+  let runWaveCalls = 0;
+  const result = await deliver(state, async () => {
+    runWaveCalls += 1;
+    return { ...failure };
+  });
+
+  assert.equal(result.stopped, 'doom-loop');
+  assert.equal(runWaveCalls, 1, 'the breaker trips on the first attempt after restart');
+});
+
+test('durability (e): a legacy log (no fingerprint, no attempt keys) never doom-loops on resume', async () => {
+  const failure = { outcome: 'fail-tests', summary: 'the same failure' };
+  const seed = [
+    { feature: 'demo', type: 'deliver-started', ts: 's0' },
+    { feature: 'demo', type: 'wave-attempt', ts: 's1', data: { wave: 1, outcome: 'fail-tests' } },
+  ];
+  const state = makeSeededState({ gateResult: passingGate, plan: oneWave, seed });
+
+  const outcomes = [{ ...failure }, { outcome: 'success' }];
+  let i = 0;
+  const result = await deliver(state, async () => outcomes[i++]);
+
+  // The first post-restart attempt repeats the failure yet does not trip the
+  // breaker (lastPrint seeded null); the next attempt advances.
+  assert.deepEqual(result, { ok: true, waves: 1 });
+  assert.equal(i, 2);
+  assert.ok(!ofType(state, 'wave-failed').length, 'no doom-loop, no orphan surfaced');
 });

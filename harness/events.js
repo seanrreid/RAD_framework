@@ -20,7 +20,19 @@
  *   'pr-opened' | 'revision-requested' | 'research-created' | 'plan-created' |
  *   'hook-observed' | 'hook-veto' | 'hook-failed' | 'done' |
  *   'owner-claimed' | 'owner-released' | 'architecture-approved' |
- *   'capture-failed'.
+ *   'capture-failed' | 'wave-started'.
+ *   `wave-started` is the fourth AUDIT-ONLY event (#119): the deliver spine
+ *   appends `{ wave, attempt[, model] }` BEFORE running a wave's agent, so a
+ *   crash mid-run leaves a durable trace. It establishes NO phase (absent from
+ *   PHASE_BY_TYPE) and carries no outcome. A `wave-started` with no LATER
+ *   `wave-attempt` of the same wave + attempt is an ORPHAN (see
+ *   findOrphanAttempts); on resume it is converged into a synthetic
+ *   `wave-attempt { wave, attempt, outcome: 'fail-timeout', reason: 'orphaned' }`.
+ *   `wave-attempt` `data` MAY also carry `attempt` (1-based positive integer —
+ *   absent on legacy events, whose ordinal is inferred by per-wave order),
+ *   `fingerprint` (non-empty string, recorded on retry/revision attempts for
+ *   the doom-loop check), and `reason: 'orphaned'` (only on the synthetic
+ *   converged attempt). All are additive and absent-by-default.
  *   `owner-claimed` / `owner-released` are DATA-ONLY ownership events: they
  *   establish NO phase (absent from PHASE_BY_TYPE) and carry no outcome (never
  *   routed through resolveOutcome). Their provenance (who claimed/released) is
@@ -679,6 +691,105 @@ export function cacheUsage(history) {
     out.attempts.push({ feature: event.feature, wave, attempt, cacheRead, input, ratio: cacheRatio(cacheRead, input) });
     out.totals.cacheRead += cacheRead;
     out.totals.input += input;
+  }
+  return out;
+}
+
+// ── Wave-attempt durability read helpers (#119; appended; pure, no I/O) ──────
+
+/** A wave id is usable iff it is a finite number (the spine stores wave.n). */
+const waveIdOf = (event) =>
+  event && event.data && typeof event.data.wave === 'number' && Number.isFinite(event.data.wave)
+    ? event.data.wave
+    : null;
+
+/** An explicit attempt ordinal is usable iff it is a positive integer. */
+const explicitAttemptOf = (event) => {
+  const attempt = event.data.attempt;
+  return Number.isInteger(attempt) && attempt > 0 ? attempt : null;
+};
+
+/**
+ * Ordinal for every placeable `wave-attempt`, by history index: `data.attempt`
+ * when a positive integer, else its 1-based order among that wave's attempts.
+ * @returns {Map<number,{ wave: number, attempt: number }>}
+ */
+function attemptOrdinals(history) {
+  const byIndex = new Map();
+  const perWave = new Map();
+  history.forEach((event, index) => {
+    if (!event || event.type !== 'wave-attempt') return;
+    const wave = waveIdOf(event);
+    if (wave === null) return;
+    const order = (perWave.get(wave) || 0) + 1;
+    perWave.set(wave, order);
+    byIndex.set(index, { wave, attempt: explicitAttemptOf(event) ?? order });
+  });
+  return byIndex;
+}
+
+/** True iff some wave-attempt AFTER `start` has the same wave + attempt. */
+function hasLaterAttempt(ordinals, start, wave, attempt) {
+  for (const [index, ord] of ordinals) {
+    if (index > start && ord.wave === wave && ord.attempt === attempt) return true;
+  }
+  return false;
+}
+
+/**
+ * Pure fold → every ORPHANED wave attempt: a `wave-started` with no LATER
+ * `wave-attempt` of the same wave and attempt ordinal. A wave-attempt's ordinal
+ * is `data.attempt` when a positive integer, else (legacy) its 1-based order
+ * among that wave's wave-attempts. Events with a non-numeric wave — and
+ * `wave-started` events lacking a positive-integer attempt, which no attempt
+ * could ever converge — are skipped. Idempotent under convergence: once a
+ * matching wave-attempt is appended, the orphan is no longer reported.
+ * `[]` on [] / null / non-array input; never throws.
+ *
+ * @param {Event[]} history - in-memory event array (no I/O performed)
+ * @returns {Array<{ wave: number, attempt: number }>} in history order
+ */
+export function findOrphanAttempts(history) {
+  if (!Array.isArray(history)) return [];
+  const ordinals = attemptOrdinals(history);
+  const orphans = [];
+  history.forEach((event, index) => {
+    if (!event || event.type !== 'wave-started') return;
+    const wave = waveIdOf(event);
+    if (wave === null) return;
+    const attempt = explicitAttemptOf(event);
+    if (attempt === null) return;
+    if (!hasLaterAttempt(ordinals, index, wave, attempt)) orphans.push({ wave, attempt });
+  });
+  return orphans;
+}
+
+/**
+ * Pure fold → the attempt state a resumed deliver seeds for `wave`: the
+ * `wave-attempt` events of that wave occurring AFTER the wave's last
+ * `wave-failed` (any reason or action — a terminal resets the count). `attempts`
+ * is their count; `lastPrint` is the last one's `data.fingerprint` when a
+ * non-empty string, else null (legacy attempts carry none). Zeroed
+ * `{ attempts: 0, lastPrint: null }` on [] / null / non-array history or a
+ * non-numeric wave; never throws.
+ *
+ * @param {Event[]} history - in-memory event array (no I/O performed)
+ * @param {number} wave - the wave number (data.wave) to seed
+ * @returns {{ attempts: number, lastPrint: (string|null) }}
+ */
+export function priorAttemptState(history, wave) {
+  const out = { attempts: 0, lastPrint: null };
+  if (!Array.isArray(history) || typeof wave !== 'number' || !Number.isFinite(wave)) return out;
+  for (const event of history) {
+    if (!event || waveIdOf(event) !== wave) continue;
+    if (event.type === 'wave-failed') {
+      out.attempts = 0;
+      out.lastPrint = null;
+    } else if (event.type === 'wave-attempt') {
+      out.attempts += 1;
+      const print = event.data.fingerprint;
+      out.lastPrint = typeof print === 'string' && print !== '' ? print : null;
+    }
   }
   return out;
 }

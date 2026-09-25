@@ -5,7 +5,8 @@ against RAD: where the two converge, where they genuinely differ, and which
 Flue ideas are worth adopting, deferring, or declining. Like the Cosmos and
 CUGA reviews in [`references.md`](references.md), the headline is convergent
 design validation. Unlike those reviews, this one also produced a **defect
-finding** in RAD's own spine (issue #119).
+finding** in RAD's own spine (issue #119, since resolved — see
+[Resolution](#resolution-119)).
 
 Sources: [flueframework.com](https://flueframework.com/) (docs at 2.0.5),
 [`withastro/flue`](https://github.com/withastro/flue) (Apache-2.0, 8.2k stars,
@@ -76,7 +77,7 @@ providers." Its own `AGENTS.md` says: "No tests exist in the repo."
 |-----------|------|-----|
 | What it is | Agent **runtime**: the thing that runs a model loop durably | Delivery **process**: gates, waves, and an event log around a BYO agent |
 | Unit of durability | The conversation (append-only stream per instance) | The feature (append-only `events.jsonl` on the work-branch tip) |
-| Recorded when | Input recorded *before* model work; terminal outcome guaranteed | `wave-attempt` appended *after* `runWave` returns — a crash mid-wave records nothing (**#119**) |
+| Recorded when | Input recorded *before* model work; terminal outcome guaranteed | `wave-started` appended *before* `runWave`; an orphan is converged to a synthetic `wave-attempt` (`orphaned`) on resume (**#119**, resolved; a crashed attempt's token spend is still unrecorded) |
 | Outcome vocabulary | 3 terminal states (`completed`/`failed`/`aborted`); hung work force-settles after 60 s | 7 matrix outcomes; `fail-timeout → surface` is neither terminal nor resumable (#95) |
 | Capability model | Default-deny by construction: nothing until a hook mounts it; env allowlist `PATH HOME LANG …` | Path-denominated scope checked post-hoc (`check-scope.sh`); identical env allowlist in `command.js`; capability classes proposed (#85) |
 | Human gate | None built in — approval lives in Slack/GitHub UI | Fail-closed Gate 1 (`approved` event + PreToolUse hook) and Gate 2 (PR) |
@@ -108,7 +109,10 @@ never lose the fact that work was attempted. Recovery first *converges* — the
 dead attempt is closed as `aborted`, unconditionally and idempotently — and only
 then *classifies* what to do next.
 
-RAD's spine does the opposite order. `runWave` is awaited at `spine.js:358`;
+*The rest of this section describes the spine as reviewed, before #119 landed;
+see [Resolution](#resolution-119) for what changed.*
+
+RAD's spine did the opposite order. `runWave` is awaited at `spine.js:358`;
 the `wave-attempt` event is appended at `spine.js:481`, after the result is in
 hand. The resume comment at `spine.js:268` says a crashed wave is "attempt
 logged, never advanced" — which holds only for a crash in the milliseconds
@@ -130,6 +134,28 @@ than only corroboration. The fix is small and follows Flue's shape: append a
 a synthetic attempt that counts toward the budgets, then classify it through
 the existing matrix. Details and the two candidate outcome mappings are in
 **#119**.
+
+<a id="resolution-119"></a>
+**Resolution (#119).** The gap is closed, in Flue's order:
+
+- **Record before run.** The spine appends `wave-started {wave, attempt}`
+  immediately before each agent run (after pre-wave hooks pass — a vetoed
+  attempt writes none), and every `wave-attempt` now carries `attempt` (plus
+  the doom-loop `fingerprint` on retry/revision).
+- **Converge, then classify.** On resume, a `wave-started` with no matching
+  `wave-attempt` is converged idempotently into a synthetic
+  `wave-attempt {outcome: 'fail-timeout', reason: 'orphaned'}`, routed by the
+  existing matrix to `surface`, recorded as
+  `wave-failed {action: 'surface', reason: 'orphaned'}`, and the `on-error` hook
+  fires. The stop is now on the record.
+- **Budgets seeded across restarts.** The attempt counter and doom-loop
+  fingerprint are seeded from attempts since the wave's last terminal
+  `wave-failed`, so a crash/kill carries its attempts over, while a deliberate
+  re-run after a terminal stop gets a fresh budget. Legacy logs without
+  fingerprints never doom-loop.
+
+One limitation remains: a crashed attempt's **token spend** is never reported,
+so `RAD_TOKEN_BUDGET`'s lifetime total under-counts it.
 
 ### Capability: withheld by the harness, not the prompt
 
@@ -207,7 +233,8 @@ remembering when #108 is designed.
 **Steal**
 
 1. **Record the attempt before running it; converge orphans on resume** →
-   filed as #119. The one durable finding.
+   filed as #119. The one durable finding — since resolved (see
+   [Resolution](#resolution-119)).
 2. **Blueprint mechanics for pinned playbooks** (version, primary-file marker,
    cumulative upgrade guide) → comment on #50.
 3. **Optional `cacheRead`/`cacheWrite`/`cost` fields in `normalizeUsage`** so
@@ -242,7 +269,8 @@ remembering when #108 is designed.
 
 - **#119** — Record the wave attempt before running it: a crash mid-wave
   leaves no event, so resume re-runs blind and the dead attempt escapes the
-  attempt and token budgets.
+  attempt and token budgets. **Resolved**; the dead attempt's token spend is
+  still unrecorded.
 - **#121** — Carry cache-read/cache-write (and optional cost) through
   `normalizeUsage` so the event log can show whether a retry prefix held.
 - **#50** body extended with the blueprint mechanics (version, primary-file
