@@ -120,7 +120,7 @@ The plan linter enforces a **context budget** on the Files in Scope table:
 | Architect | All commands (incl. `/rad-design`, `/rad-approve`, `/rad-epic-decompose`) | Defines agent boundaries, decomposes epics, approves plans, merges PRs |
 | Developer | `/rad-research`, `/rad-plan`, `/rad-adopt`, `/rad-deliver`, `/rad-review` | Research, plan, and execute within boundaries |
 | Designer | `/rad-research`, `/rad-plan`, `/rad-adopt`, `/rad-deliver` | UI-scoped research, planning, and execution |
-| All roles | `/rad-status`, `/rad-insights`, `/kickoff`, `/wrap`, `/rpi-design` | Team dashboard, review pattern analysis, session start/end rituals, agent-architecture scaffolding |
+| All roles | `/rad-status`, `/rad-insights`, `/kickoff`, `/wrap` | Team dashboard, review pattern analysis, session start/end rituals |
 
 All commands are committed to the project repo. The `architect/` subdirectory
 signals which commands carry architect-level responsibility — enforcement is via
@@ -171,8 +171,7 @@ your-project/
 │           └── rad-insights.md       → /rad-insights  (shared)
 │   └── skills/
 │       ├── kickoff/SKILL.md          → /kickoff       (session start ritual)
-│       ├── wrap/SKILL.md             → /wrap          (session end ritual)
-│       └── rpi-design/SKILL.md       → /rpi-design    (agent-architecture scaffolding)
+│       └── wrap/SKILL.md             → /wrap          (session end ritual)
 ├── .agents/
 │   ├── research/                     ← research artifacts (/rad-research output)
 │   ├── architecture/                 ← architecture drafts (/rad-design draft → approved)
