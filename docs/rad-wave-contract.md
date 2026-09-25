@@ -72,12 +72,48 @@ The returned result:
 | `outcome` | string | **required** | the **matrix outcome** the spine reads (`result.outcome`) |
 | `status` | string | **required** | `complete` or `failed` — the wave-level roll-up |
 | `tasks` | array of `{ title, status, commit, concern, error }` | **optional** — present only when the agent reported at least one parseable task; otherwise the key is **omitted** | the per-task records parsed out of the `WAVE_RESULT` block, passed through for the execution log and for downstream event recording |
-| `usage` | `{ input, output, total }` (numbers) | **optional and adapter-optional** — an adapter that observes no token counts omits the key entirely | normalized token usage for the wave attempt, produced by `normalizeUsage` |
+| `usage` | `{ input, output, total, cacheRead?, cacheWrite?, cost? }` (numbers) | **optional and adapter-optional** — an adapter that observes no token counts omits the key entirely; within it, `cacheRead` / `cacheWrite` / `cost` are each **optional** and **absent** (never `0`, never `undefined`) when unreported | normalized token usage for the wave attempt, produced by `normalizeUsage`: `input` is the uncached input remainder, `cacheRead` the cache tokens read, `cacheWrite` the cache tokens written, `cost` the provider-reported spend (#121) |
 
 Both optional fields are **adapter-optional**: an adapter that reports neither
 behaves exactly as one that predates them. A missing `usage` contributes `0` to
 the `RAD_TOKEN_BUDGET` breaker (the spine reads `result.usage?.total ?? 0`), and
 a missing `tasks` is simply nothing to record.
+
+Each optional `usage` key (`cacheRead`, `cacheWrite`, `cost`) is set **only**
+when its value is a finite, non-negative number; any other value (string, `NaN`,
+`±Infinity`, negative) is **dropped** and the key is absent. A usage object with
+no cache/cost data is byte-identical to the pre-#121 `{ input, output, total }`
+shape, and cache/cost fields alone never make usage "usable" — without any of
+`input` / `output` / `total` the whole `usage` key is omitted.
+
+### The `RAD_USAGE` line (command adapter)
+
+Most agent CLIs print no machine-readable token counts, so the command adapter
+(`harness/adapters/agent/command.js`) omits `usage` by default. A wrapper that
+does know its counts may print a single line on stdout:
+
+```
+RAD_USAGE {"input_tokens":10,"output_tokens":5,"cache_read_input_tokens":800,"cost":0.012}
+```
+
+- **Format** — the literal token `RAD_USAGE`, whitespace, then one JSON object on
+  the same line (matched as `^RAD_USAGE\s+(\{.*\})\s*$`, multiline, first
+  match wins). It may appear anywhere in stdout, alongside the `WAVE_RESULT` block.
+- **Accepted keys** — each normalized key accepts its camelCase name or a
+  snake_case alias (the camelCase name wins when both are present):
+
+  | Normalized key | Accepted keys |
+  |---|---|
+  | `input` | `input`, `input_tokens` |
+  | `output` | `output`, `output_tokens` |
+  | `total` | `total`, `total_tokens` (derived as `input + output` when absent) |
+  | `cacheRead` | `cacheRead`, `cache_read_input_tokens` |
+  | `cacheWrite` | `cacheWrite`, `cache_creation_input_tokens` |
+  | `cost` | `cost` |
+
+- **Invalid values are dropped** — per the rules above; unknown keys are ignored.
+- **Malformed line** — unparseable JSON, or no usable `input` / `output` /
+  `total`, is non-fatal: `usage` is omitted and the wave outcome is unaffected.
 
 A malformed, absent, or unparseable `tasks` block **degrades to omission of the
 key** — it is never a thrown error, and it never by itself produces
