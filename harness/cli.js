@@ -82,6 +82,17 @@ const SUBCOMMANDS = {
  */
 const PREFLIGHT_OFF = 'off';
 
+/**
+ * Env var overriding the preflight probe deadline, in whole seconds. Unset or
+ * empty keeps the adapter default; anything but digits (no sign, no unit, no
+ * whitespace, no zero) is a hard usage error — mirrors RAD_VERIFY_TIMEOUT_SECONDS
+ * in scripts/check-verify.sh: a typo must never silently restore the default.
+ */
+const PREFLIGHT_TIMEOUT_ENV = 'RAD_AGENT_PREFLIGHT_TIMEOUT_SECONDS';
+const POSITIVE_INTEGER_PATTERN = /^[1-9][0-9]*$/;
+/** Exit code for a malformed deliver configuration value. */
+const USAGE_EXIT_CODE = 2;
+
 /** The harness package root (where cli.js lives). */
 const HERE = dirname(fileURLToPath(import.meta.url));
 /** The repo root is the parent of the harness/ directory. */
@@ -394,22 +405,245 @@ export function parsePlanCtx(text) {
 }
 
 /**
+ * Parse RAD_AGENT_PREFLIGHT_TIMEOUT_SECONDS. Unset/empty → `timeoutMs`
+ * undefined (probeCommand's default applies); malformed → `{ ok: false }`.
+ *
+ * @returns {{ ok: true, timeoutMs?: number } | { ok: false, raw: string }}
+ */
+function preflightTimeoutFromEnv() {
+  const raw = process.env[PREFLIGHT_TIMEOUT_ENV];
+  if (raw === undefined || raw === '') return { ok: true };
+  if (!POSITIVE_INTEGER_PATTERN.test(raw)) return { ok: false, raw };
+  return { ok: true, timeoutMs: Number(raw) * 1000 };
+}
+
+/**
  * Run the command-path startup probe unless RAD_AGENT_PREFLIGHT is exactly
- * PREFLIGHT_OFF. On failure, writes the operator-facing reason to stderr.
+ * PREFLIGHT_OFF. On failure, writes the operator-facing reason to stderr. A
+ * malformed RAD_AGENT_PREFLIGHT_TIMEOUT_SECONDS fails before the probe spawns.
  *
  * @param {string} cmd - the configured RAD_AGENT_CMD
  * @param {string} repoRoot
- * @returns {Promise<boolean>} true when the probe passed or was skipped
+ * @returns {Promise<number|null>} null when the probe passed or was skipped,
+ *   else the deliver exit code (1 probe failed, 2 malformed timeout)
  */
-async function preflightPassed(cmd, repoRoot) {
-  if (process.env.RAD_AGENT_PREFLIGHT === PREFLIGHT_OFF) return true;
-  const probe = await probeCommand({ cmd, repoRoot });
-  if (probe.ok) return true;
+async function preflightExitCode(cmd, repoRoot) {
+  if (process.env.RAD_AGENT_PREFLIGHT === PREFLIGHT_OFF) return null;
+  const timeout = preflightTimeoutFromEnv();
+  if (!timeout.ok) {
+    process.stderr.write(
+      `rad deliver: ${PREFLIGHT_TIMEOUT_ENV} must be a positive integer (got '${timeout.raw}')\n`,
+    );
+    return USAGE_EXIT_CODE;
+  }
+  const probe = await probeCommand({ cmd, repoRoot, timeoutMs: timeout.timeoutMs });
+  if (probe.ok) return null;
   process.stderr.write(
     'rad deliver: RAD_AGENT_CMD failed to start under the adapter env ' +
     `(it must authenticate without inherited env vars): ${probe.error}\n`,
   );
-  return false;
+  return 1;
+}
+
+/**
+ * Default work-branch prefix. RAD_BRANCH_PREFIX (non-empty) overrides it, the
+ * same convention scripts/checkout-plan.sh and git-sync.sh follow.
+ */
+const DEFAULT_BRANCH_PREFIX = 'rad/';
+/** The gate every deliver run must pass before any wave executes. */
+const APPROVED_GATE = 'approved';
+
+/** The work branch by convention: RAD_BRANCH_PREFIX (default rad/) + feature. */
+function conventionWorkBranch(feature) {
+  const prefix = isNonEmpty(process.env.RAD_BRANCH_PREFIX)
+    ? process.env.RAD_BRANCH_PREFIX
+    : DEFAULT_BRANCH_PREFIX;
+  return `${prefix}${feature}`;
+}
+
+/**
+ * Evaluate the approved gate over the work-branch TIP's event log, read through
+ * the sh port (`git show <branch>:<log>`) so it works while the branch is
+ * checked out nowhere. Same pure fold as `rad gate --stdin` (evaluateGate over
+ * parseEventsJsonl). A missing log (git show fails) fails CLOSED.
+ *
+ * @returns {{ passed: boolean, reason: string }}
+ */
+function branchTipApprovedGate({ feature, branch, repoRoot, sh }) {
+  const logPath = `.agents/state/${feature}/events.jsonl`;
+  const res = sh('git', ['show', `${branch}:${logPath}`], { cwd: repoRoot });
+  if (res.status !== 0) {
+    const detail = sanitizeErrorMessage(String(res.stderr ?? '').trim());
+    return {
+      passed: false,
+      reason: `no event log at ${branch}:${logPath}` + (detail ? ` (${detail})` : ''),
+    };
+  }
+  return evaluateGate(APPROVED_GATE, parseEventsJsonl(String(res.stdout ?? '')));
+}
+
+/**
+ * Read + parse the plan doc under `root` into planCtx. Writes the operator
+ * message and returns null when the doc is absent.
+ */
+function loadPlanCtx(root, feature) {
+  const planFile = join(root, '.agents', 'plans', `${feature}.md`);
+  if (!existsSync(planFile)) {
+    process.stderr.write(`rad deliver: no plan doc at .agents/plans/${feature}.md\n`);
+    return null;
+  }
+  const planCtx = parsePlanCtx(readFileSync(planFile, 'utf8'));
+  planCtx.feature = feature;
+  planCtx.executionLog = `.agents/logs/${feature}-${new Date().toISOString().slice(0, 10)}.md`;
+  return planCtx;
+}
+
+/**
+ * Validate the selected agent's credentials from the environment, WITHOUT
+ * constructing anything. An injected ctx.runWave (tests) skips the check.
+ *
+ * @returns {{ injected: Function } | { kind: 'sdk', apiKey: string }
+ *   | { kind: 'command', cmd: string } | { code: number }}
+ */
+function resolveAgent(ctx, agentKind) {
+  if (ctx.runWave) return { injected: ctx.runWave };
+  if (agentKind === 'sdk') {
+    // SDK path: requires ANTHROPIC_API_KEY (checked before any SDK construction
+    // or model call). Credentials are the SDK's concern, not the command path's.
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!isNonEmpty(apiKey)) {
+      process.stderr.write('rad deliver: ANTHROPIC_API_KEY is required\n');
+      return { code: 1 };
+    }
+    return { kind: 'sdk', apiKey };
+  }
+  // Command path (default): no ANTHROPIC_API_KEY required — credentials are
+  // the configured command's concern. RAD_AGENT_CMD is mandatory here.
+  const cmd = process.env.RAD_AGENT_CMD;
+  if (!isNonEmpty(cmd)) {
+    process.stderr.write('rad deliver: RAD_AGENT_CMD is required when RAD_AGENT=command\n');
+    return { code: 1 };
+  }
+  return { kind: 'command', cmd };
+}
+
+/**
+ * Construct the runWave for a resolved agent, rooted at `root` (the main
+ * checkout, or the worktree in isolation mode). Runs the command-path preflight.
+ *
+ * @returns {Promise<{ runWave: Function } | { code: number }>}
+ */
+async function buildRunWave(agent, { model, root, planCtx }) {
+  if (agent.injected) return { runWave: agent.injected };
+  let adapter;
+  if (agent.kind === 'sdk') {
+    // Lazy-load the SDK adapter: only the sdk branch imports it, so cli.js (and
+    // the gate/approve/command paths) load with the SDK absent.
+    const { createRunWave } = await import('./adapters/agent/sdk.js');
+    adapter = createRunWave({ apiKey: agent.apiKey, model, repoRoot: root });
+  } else {
+    adapter = createCommandAdapter({ cmd: agent.cmd, repoRoot: root, model });
+    // Startup preflight: prove the agent CLI can authenticate under the
+    // allow-listed adapter env BEFORE any event append, so an env-dependent
+    // credential fails fast with a clear message instead of as a Wave-1 failure.
+    const preflightCode = await preflightExitCode(agent.cmd, root);
+    if (preflightCode !== null) return { code: preflightCode };
+  }
+  // Bind planCtx so deliverSpine's runWave(wave, attemptCtx) call works. The
+  // spine's SECOND argument ({ attempt, priorFailure }) is folded into the
+  // per-call plan context, which is how it reaches buildWavePrompt without
+  // changing the adapter's (wave, planCtx) signature. Additive: on a first
+  // attempt priorFailure is null and the rendered prompt is today's, verbatim.
+  return { runWave: (wave, attemptCtx) => adapter(wave, { ...planCtx, ...attemptCtx }) };
+}
+
+/**
+ * Main-checkout setup (RAD_WORKTREE unset): plan read → gate → agent — the
+ * pre-isolation order, byte-for-byte. Everything is rooted at repoRoot.
+ */
+async function setupMainRun({ ctx, feature, model, agentKind, repoRoot, sh }) {
+  const planCtx = loadPlanCtx(repoRoot, feature);
+  if (!planCtx) return { code: 1 };
+  const state = createGitStateStore({ repoRoot, sh, claudeMd: join(repoRoot, 'CLAUDE.md') });
+  // Gate check: approved status must be established before any wave execution.
+  const g = await state.gate(feature, APPROVED_GATE);
+  if (!g.passed) {
+    process.stderr.write(`rad deliver: gate not passed for '${feature}' — ${g.reason}\n`);
+    return { code: 1 };
+  }
+  const agent = resolveAgent(ctx, agentKind);
+  if (agent.code !== undefined) return agent;
+  const built = await buildRunWave(agent, { model, root: repoRoot, planCtx });
+  if (built.code !== undefined) return built;
+  return { root: repoRoot, planCtx, state, runWave: built.runWave, worktree: null };
+}
+
+/**
+ * Gate on the work-branch tip, then create the worktree on that branch. Under
+ * Lane B the plan and its approval events exist ONLY on the work branch, so the
+ * gate reads the branch tip (never the main checkout) and fails BEFORE any
+ * worktree is created.
+ *
+ * v1 constraint: `git worktree add` cannot check out a branch that is checked
+ * out anywhere else. The operator must keep the work branch checked out nowhere
+ * else — e.g. leave the main checkout on the default branch. v1 surfaces the
+ * create failure rather than detaching/relocating.
+ *
+ * @returns {{ root: string, worktree: object, workBranch: string } | { code: number }}
+ */
+function prepareWorktreeRoot({ feature, repoRoot, sh }) {
+  const workBranch = conventionWorkBranch(feature);
+  const g = branchTipApprovedGate({ feature, branch: workBranch, repoRoot, sh });
+  if (!g.passed) {
+    process.stderr.write(`rad deliver: gate not passed for '${feature}' — ${g.reason}\n`);
+    return { code: 1 };
+  }
+  // The lifecycle adapter shells out via the same sh port, pinned to repoRoot so
+  // `git worktree` and the script path resolve against the main checkout.
+  const worktree = makeWorktreeLifecycle({
+    sh: (file, args) => sh(file, args, { cwd: repoRoot }),
+    now: () => new Date().toISOString(),
+  });
+  try {
+    return { root: worktree.create(feature, workBranch), worktree, workBranch };
+  } catch (err) {
+    const safe = sanitizeErrorMessage(err?.message ?? String(err));
+    process.stderr.write(`rad deliver: worktree create failed — ${safe}\n`);
+    return { code: 1 };
+  }
+}
+
+/** Preserve a worktree after a setup failure; a preserve error is reported, not hidden. */
+function preserveAfterSetupFailure(worktree, feature, root) {
+  try {
+    worktree.preserve(feature);
+    process.stderr.write(`rad deliver: worktree preserved at ${root}\n`);
+  } catch (err) {
+    const safe = sanitizeErrorMessage(err?.message ?? String(err));
+    process.stderr.write(`rad deliver: worktree preserve failed — ${safe}\n`);
+  }
+}
+
+/**
+ * Worktree setup (RAD_WORKTREE set): agent credentials → branch-tip gate →
+ * worktree create → plan read, state store, and agent ALL rooted at the
+ * worktree, so events are read and written on the work branch and the main
+ * checkout is never modified. A failure after create preserves the worktree.
+ */
+async function setupWorktreeRun({ ctx, feature, model, agentKind, repoRoot, sh }) {
+  const agent = resolveAgent(ctx, agentKind);
+  if (agent.code !== undefined) return agent;
+  const prepared = prepareWorktreeRoot({ feature, repoRoot, sh });
+  if (prepared.code !== undefined) return prepared;
+  const { root, worktree, workBranch } = prepared;
+  const planCtx = loadPlanCtx(root, feature);
+  const built = planCtx ? await buildRunWave(agent, { model, root, planCtx }) : { code: 1 };
+  if (built.code !== undefined) {
+    preserveAfterSetupFailure(worktree, feature, root);
+    return built;
+  }
+  const state = createGitStateStore({ repoRoot: root, sh, claudeMd: join(root, 'CLAUDE.md') });
+  return { root, planCtx, state, runWave: built.runWave, worktree, workBranch };
 }
 
 /**
@@ -453,77 +687,27 @@ export async function deliverCommand(argv, ctx) {
 
   // Adapter selection (ENV-driven, no config-file loader). RAD_AGENT picks the
   // runner: 'command' (default, vendor-neutral CLI) or 'sdk' (Anthropic SDK).
-  // Credential requirements differ per path and are validated below, just
-  // before constructing the chosen adapter — an injected ctx.runWave (tests)
-  // skips construction and therefore skips the credential check entirely.
+  // Credential requirements differ per path and are validated in resolveAgent —
+  // an injected ctx.runWave (tests) skips construction and the credential check.
   const agentKind = isNonEmpty(process.env.RAD_AGENT) ? process.env.RAD_AGENT.trim() : 'command';
   if (!ctx.runWave && agentKind !== 'command' && agentKind !== 'sdk') {
     process.stderr.write(`rad deliver: unknown RAD_AGENT '${agentKind}' (expected 'command' or 'sdk')\n`);
     return 1;
   }
 
-  const planFile = join(repoRoot, '.agents', 'plans', `${feature}.md`);
-  if (!existsSync(planFile)) {
-    process.stderr.write(`rad deliver: no plan doc at .agents/plans/${feature}.md\n`);
-    return 1;
-  }
-
-  // Read and parse the plan file for planCtx (execution notes, branch, AC list).
-  const planText = readFileSync(planFile, 'utf8');
-  const planCtx = parsePlanCtx(planText);
-  planCtx.feature = feature;
-  planCtx.executionLog = `.agents/logs/${feature}-${new Date().toISOString().slice(0, 10)}.md`;
-
-  const claudeMd = join(repoRoot, 'CLAUDE.md');
-  const state = createGitStateStore({ repoRoot, sh, claudeMd });
-
-  // Gate check: approved status must be established before any wave execution.
-  const g = await state.gate(feature, 'approved');
-  if (!g.passed) {
-    process.stderr.write(`rad deliver: gate not passed for '${feature}' — ${g.reason}\n`);
-    return 1;
-  }
-
-  // Accept an injected runWave (for tests) or construct the selected adapter.
-  let runWave;
-  if (ctx.runWave) {
-    runWave = ctx.runWave;
-  } else if (agentKind === 'sdk') {
-    // SDK path: requires ANTHROPIC_API_KEY (checked before any SDK construction
-    // or model call). Credentials are the SDK's concern, not the command path's.
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!isNonEmpty(apiKey)) {
-      process.stderr.write('rad deliver: ANTHROPIC_API_KEY is required\n');
-      return 1;
-    }
-    // Lazy-load the SDK adapter: only the sdk branch imports it, so cli.js (and
-    // the gate/approve/command paths) load with the SDK absent.
-    const { createRunWave } = await import('./adapters/agent/sdk.js');
-    const adapter = createRunWave({ apiKey, model, repoRoot });
-    // Bind planCtx so deliverSpine's runWave(wave, attemptCtx) call works. The
-    // spine's SECOND argument ({ attempt, priorFailure }) is folded into the
-    // per-call plan context, which is how it reaches buildWavePrompt without
-    // changing the adapter's (wave, planCtx) signature. Additive: on a first
-    // attempt priorFailure is null and the rendered prompt is today's, verbatim.
-    runWave = (wave, attemptCtx) => adapter(wave, { ...planCtx, ...attemptCtx });
-  } else {
-    // Command path (default): no ANTHROPIC_API_KEY required — credentials are
-    // the configured command's concern. RAD_AGENT_CMD is mandatory here.
-    const cmd = process.env.RAD_AGENT_CMD;
-    if (!isNonEmpty(cmd)) {
-      process.stderr.write('rad deliver: RAD_AGENT_CMD is required when RAD_AGENT=command\n');
-      return 1;
-    }
-    const adapter = createCommandAdapter({ cmd, repoRoot, model });
-    // Startup preflight: prove the agent CLI can authenticate under the
-    // allow-listed adapter env BEFORE worktree creation or any event append, so
-    // an env-dependent credential fails fast with a clear message instead of as
-    // a Wave-1 failure. Unreachable with an injected ctx.runWave (tests).
-    if (!(await preflightPassed(cmd, repoRoot))) return 1;
-    // Same attempt-context fold as the sdk branch above — both adapters take
-    // (wave, planCtx), so the spine's second argument rides in the plan context.
-    runWave = (wave, attemptCtx) => adapter(wave, { ...planCtx, ...attemptCtx });
-  }
+  // Optional worktree isolation. RAD_WORKTREE follows the env-knob convention:
+  // unset/empty = OFF (exact today's behavior — main checkout, no worktree port,
+  // everything rooted at repoRoot); any non-empty value = ON: the gate is read
+  // from the work-branch tip, then plan, state store, agent, and every
+  // check-*.sh / open-pr.sh run are rooted at an isolated git worktree on the
+  // work branch. RAD_WORKTREE_DIR (optional base dir) is read by the lifecycle
+  // script itself, so we just let it flow through the environment.
+  const setupOpts = { ctx, feature, model, agentKind, repoRoot, sh };
+  const setup = isNonEmpty(process.env.RAD_WORKTREE)
+    ? await setupWorktreeRun(setupOpts)
+    : await setupMainRun(setupOpts);
+  if (setup.code !== undefined) return setup.code;
+  const { root, planCtx, state, runWave, worktree } = setup;
 
   const matrix = loadMatrix();
 
@@ -531,43 +715,6 @@ export async function deliverCommand(argv, ctx) {
   // arms the spine's budget breaker; unset/invalid/0 leaves it null (disabled).
   const parsedBudget = Number.parseInt(process.env.RAD_TOKEN_BUDGET, 10);
   const tokenBudget = Number.isFinite(parsedBudget) && parsedBudget > 0 ? parsedBudget : null;
-
-  // Optional worktree isolation. RAD_WORKTREE follows the env-knob convention:
-  // unset/empty = OFF (exact today's behavior — main checkout, no worktree port,
-  // sh bound to repoRoot); any non-empty value = ON. When ON, the deliver run is
-  // isolated into a git worktree on the work branch so every check-*.sh / open-pr.sh
-  // runs against an isolated tree. RAD_WORKTREE_DIR (optional base dir) is read by
-  // the lifecycle script itself, so we just let it flow through the environment.
-  const worktreeEnabled = isNonEmpty(process.env.RAD_WORKTREE);
-
-  // shCwd is the directory the spine's scripts run in: repoRoot today, the
-  // worktree path when isolation is enabled. Defaults to repoRoot so the OFF
-  // path is byte-for-byte unchanged.
-  let shCwd = repoRoot;
-  let worktree = null;
-  if (worktreeEnabled) {
-    // The lifecycle adapter shells out via the same sh port, pinned to repoRoot so
-    // `git worktree` and the script path resolve against the main checkout.
-    worktree = makeWorktreeLifecycle({
-      sh: (file, args) => sh(file, args, { cwd: repoRoot }),
-      now: () => new Date().toISOString(),
-    });
-    // The work branch is the SAME rad/<feature> branch this deliver runs on. A git
-    // worktree cannot check out a branch already checked out in the main tree, so
-    // `git worktree add <dir> <branch>` will fail with a clear error if the main
-    // checkout is currently on the work branch. v1 surfaces that failure rather
-    // than detaching/relocating: RAD_WORKTREE requires the work branch not be
-    // checked out in the main tree. The plan's `Branch:` header is canonical;
-    // fall back to the rad/<feature> convention when it is absent.
-    const workBranch = isNonEmpty(planCtx.branch) ? planCtx.branch : `rad/${feature}`;
-    try {
-      shCwd = worktree.create(feature, workBranch);
-    } catch (err) {
-      const safe = sanitizeErrorMessage(err?.message ?? String(err));
-      process.stderr.write(`rad deliver: worktree create failed — ${safe}\n`);
-      return 1;
-    }
-  }
 
   let result;
   try {
@@ -578,7 +725,8 @@ export async function deliverCommand(argv, ctx) {
       matrix,
       gates: null,
       runWave,
-      sh: (script, feat) => sh(join(repoRoot, script), [feat], { cwd: shCwd }),
+      // Scripts run with cwd = root: repoRoot today, the worktree when isolated.
+      sh: (script, feat) => sh(join(repoRoot, script), [feat], { cwd: root }),
       now: () => new Date().toISOString(),
       tokenBudget,
       // Per-wave `Verify:` commands, passed through exactly as tokenBudget is.
@@ -612,9 +760,10 @@ export async function deliverCommand(argv, ctx) {
   if (result.ok) {
     // Best-effort publish (RAD_SYNC-gated): deliver recorded wave events on the
     // work-branch tip; push it so the process memory is portable across machines.
-    // Never fails the verb (offline-fail-safe). Branch resolved as in the worktree
-    // block: plan's `Branch:` header is canonical, else rad/<feature>.
-    const workBranch = isNonEmpty(planCtx.branch) ? planCtx.branch : `rad/${feature}`;
+    // Never fails the verb (offline-fail-safe). Worktree mode pushes the branch it
+    // isolated; otherwise the plan's `Branch:` header is canonical, else rad/<feature>.
+    const workBranch = setup.workBranch
+      ?? (isNonEmpty(planCtx.branch) ? planCtx.branch : `rad/${feature}`);
     bestEffortSyncPush(repoRoot, workBranch, sh);
     process.stdout.write(
       `rad deliver: ok feature=${feature} waves=${result.waves} status=complete\n`,
@@ -631,7 +780,7 @@ export async function deliverCommand(argv, ctx) {
     (result.check ? ` check=${result.check}` : '') +
     (result.spent !== undefined ? ` spent=${result.spent}` : '') +
     (result.budget !== undefined ? ` budget=${result.budget}` : '') +
-    (worktree ? ` worktree=${shCwd}` : '') +
+    (worktree ? ` worktree=${root}` : '') +
     '\n',
   );
   return 1;
@@ -1212,7 +1361,18 @@ function parseGateArgs(argv) {
  * @returns {import('./events.js').Event[]}
  */
 function readEventsFromStdin() {
-  const raw = readFileSync(0, 'utf8'); // fd 0 = stdin
+  return parseEventsJsonl(readFileSync(0, 'utf8')); // fd 0 = stdin
+}
+
+/**
+ * Parse JSONL text into an event history (crash-tolerant, as described on
+ * readEventsFromStdin). Shared by `rad gate --stdin` and deliver's branch-tip
+ * gate read so both evaluate the identical history.
+ *
+ * @param {string} raw
+ * @returns {import('./events.js').Event[]}
+ */
+function parseEventsJsonl(raw) {
   const events = [];
   for (const line of raw.split('\n')) {
     const trimmed = line.trim();

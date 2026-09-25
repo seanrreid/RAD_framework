@@ -574,9 +574,11 @@ export function backoffWithJitter(attempt) {
  * @param {Promise<T>} promise - the in-flight work
  * @param {number} ms - deadline in milliseconds
  * @param {AbortController} [abortController] - aborted on timeout, if provided
+ * @param {string} [label] - names what timed out in the message; the default
+ *   'wave' keeps the wave message byte-identical (`wave timed out after <ms>ms`)
  * @returns {Promise<T>}
  */
-export function withTimeout(promise, ms, abortController) {
+export function withTimeout(promise, ms, abortController, label = 'wave') {
   let timer;
   const timeout = new Promise((_resolve, reject) => {
     timer = setTimeout(() => {
@@ -586,7 +588,7 @@ export function withTimeout(promise, ms, abortController) {
       // Tag the error with a sentinel so callers discriminate a wall-clock
       // timeout from a spawn/transport error WITHOUT parsing the message string
       // (a remote ETIMEDOUT must not be misread as our deadline).
-      const err = new Error(`wave timed out after ${ms}ms`);
+      const err = new Error(`${label} timed out after ${ms}ms`);
       err._isRadTimeout = true;
       reject(err);
     }, ms);

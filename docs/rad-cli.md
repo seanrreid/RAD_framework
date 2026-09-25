@@ -107,6 +107,7 @@ The runner is chosen by environment variable — there is no config-file loader.
 | `RAD_AGENT` | `command` \| `sdk` | `command` | which adapter drives the wave |
 | `RAD_AGENT_CMD` | any command string | — | the CLI to spawn (command path only) |
 | `RAD_AGENT_PREFLIGHT` | `off` | — (probe runs) | exactly `off` skips the command-path startup preflight |
+| `RAD_AGENT_PREFLIGHT_TIMEOUT_SECONDS` | positive integer | `60` | preflight probe deadline; malformed exits 2 |
 | `RAD_TOKEN_BUDGET` | positive integer | — | per-deliver cumulative token ceiling (cost breaker) |
 
 **Per-path credential requirements:**
@@ -124,8 +125,9 @@ An unrecognized `RAD_AGENT` value exits 1 with a clear message.
 `TMPDIR`, `TERM`, `USER`), so the CLI must authenticate **without inherited env
 vars** — on-disk credentials or the OS keychain, not an exported token. To catch
 a CLI that is not logged in *before* any work starts, `rad deliver` runs a
-**preflight** on the command path, after the approval gate and before worktree
-creation, `deliver-started`, or any event append: it spawns `RAD_AGENT_CMD` once
+**preflight** on the command path, after the approval gate and before
+`deliver-started` or any event append (in worktree mode it runs inside the new
+worktree, which is preserved if the probe fails): it spawns `RAD_AGENT_CMD` once
 under that same env with a one-line prompt (one tiny model call per deliver). A
 non-zero exit, spawn error, or timeout exits 1 with:
 
@@ -139,6 +141,13 @@ skipped when `RAD_AGENT=sdk` or a `runWave` is injected (tests), and when
 runs it. If your agent needs an env-injected credential, set `RAD_AGENT_CMD` to a
 wrapper script that loads the secret itself and execs the agent; the allow-list
 is deliberately not widened.
+
+`RAD_AGENT_PREFLIGHT_TIMEOUT_SECONDS` sets the probe deadline in whole seconds
+(default **60**). A malformed value (non-numeric, zero, negative) is a hard error:
+`rad deliver` exits **2** with `RAD_AGENT_PREFLIGHT_TIMEOUT_SECONDS must be a
+positive integer` rather than silently falling back to the default. It is not
+validated when `RAD_AGENT_PREFLIGHT=off`, since no probe runs. A probe that
+exceeds the deadline is killed and reported as an `agent preflight` timeout.
 
 ```bash
 # Default (command) path — bring your own agent CLI, no API key needed here:
@@ -241,12 +250,28 @@ feature. This prevents ever deleting the main checkout or an unrelated worktree.
 The marker stays local and uncommitted (it records execution-environment state,
 never delivery outcomes).
 
-**v1 constraint.** The worktree checks out the *same* `rad/<feature>` work branch
-this deliver runs on. Git cannot check out a branch that is already checked out in
-the main tree, so **the work branch must not be checked out in the main checkout**
-when you enable `RAD_WORKTREE`. If it is, `git worktree add` fails and `rad
-deliver` exits 1 with a clear `worktree create failed` message rather than
-detaching or relocating the branch.
+**Everything is read from the work branch.** In worktree mode the approved gate,
+the plan doc, and the event log come from the work branch
+(`$RAD_BRANCH_PREFIX<feature>`, default `rad/<feature>`), never from the main
+checkout — so a Lane B plan, whose plan doc and approval exist only on the work
+branch, delivers under isolation:
+
+1. **gate** — the approved gate is evaluated over the branch tip's log
+   (`git show <branch>:.agents/state/<feature>/events.jsonl`, the same fold as
+   `rad gate --stdin`). An unapproved tip, or a log absent at the tip, fails closed
+   with `gate not passed` (exit 1) **before any worktree is created**.
+2. **create** — the worktree is created on that branch.
+3. **rooted run** — the plan read, the state store (events read **and written**),
+   the agent (and its preflight), and every spine script run are rooted at the
+   worktree. Events land in the worktree, i.e. on the work branch; the main tree
+   is left unmodified. A setup failure after create (e.g. no plan doc on the
+   branch, failed preflight) preserves the worktree.
+
+**v1 constraint.** Git cannot check out a branch that is already checked out
+elsewhere, so **keep the main checkout on the default branch** (the work branch
+must be checked out nowhere else) when you enable `RAD_WORKTREE`. If it is checked
+out, `git worktree add` fails and `rad deliver` exits 1 with a clear `worktree
+create failed` message rather than detaching or relocating the branch.
 
 ```bash
 RAD_WORKTREE=1 node harness/cli.js deliver my-feature

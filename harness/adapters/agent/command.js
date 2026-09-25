@@ -64,6 +64,16 @@ export const PREFLIGHT_PROMPT = 'Reply with the single word OK.';
 /** Wall-clock ceiling for the preflight probe. */
 export const PREFLIGHT_TIMEOUT_MS = 60_000;
 
+/** Label naming the probe in its timeout message (the wave keeps 'wave'). */
+const PREFLIGHT_TIMEOUT_LABEL = 'agent preflight';
+
+/**
+ * Grace between SIGTERM and SIGKILL for a timed-out agent. Mirrors
+ * VERIFY_KILL_GRACE_SECONDS in scripts/check-verify.sh. Only tests override it,
+ * via the internal `killGraceMs` option — never an env var.
+ */
+export const KILL_GRACE_MS = 5_000;
+
 /** Build the allow-listed env handed to the spawned child. */
 function buildChildEnv() {
   const env = {};
@@ -87,6 +97,47 @@ function describeExitFailure(run) {
     ? stderrSummary
     : `(stdout) ${sanitizeErrorMessage((run.stdout || '').slice(0, EXIT_EXCERPT_CHARS))}`.trim();
   return `command exited with code ${run.code}: ${summary}`.trim();
+}
+
+/**
+ * Send `signal` to a child that has not yet exited. ESRCH (it exited between
+ * the check and the signal) is the expected race and is not an error; any
+ * other failure is logged with context — the agent may still be running.
+ */
+function signalChild(child, signal) {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  try {
+    process.kill(child.pid, signal);
+  } catch (err) {
+    if (err?.code === 'ESRCH') return;
+    process.stderr.write(
+      `command adapter: failed to send ${signal} to agent pid ${child.pid}: ${err?.message ?? err}\n`,
+    );
+  }
+}
+
+/**
+ * On `signal` abort, terminate the child: SIGTERM now, SIGKILL after
+ * `killGraceMs` if it is still alive. The grace timer is cleared when the child
+ * exits so nothing keeps the event loop alive past the child.
+ *
+ * @param {import('node:child_process').ChildProcess} child
+ * @param {AbortSignal} [signal]
+ * @param {number} killGraceMs
+ */
+function killOnAbort(child, signal, killGraceMs) {
+  if (!signal) return;
+  let graceTimer;
+  const terminate = () => {
+    signalChild(child, 'SIGTERM');
+    graceTimer = setTimeout(() => signalChild(child, 'SIGKILL'), killGraceMs);
+  };
+  child.on('exit', () => {
+    clearTimeout(graceTimer);
+    signal.removeEventListener('abort', terminate);
+  });
+  if (signal.aborted) terminate();
+  else signal.addEventListener('abort', terminate, { once: true });
 }
 
 /** Hand-built terminal result carrying one synthetic failed task. */
@@ -138,9 +189,11 @@ function tokenizeCommand(cmd, prompt, effectiveModel) {
  * @param {string} prompt
  * @param {string} [repoRoot]
  * @param {string} [effectiveModel]
+ * @param {{ signal?: AbortSignal, killGraceMs?: number }} [kill] - abort to
+ *   terminate the child (SIGTERM, then SIGKILL after killGraceMs)
  * @returns {Promise<{ code: number|null, stdout: string, stderr: string }>}
  */
-function spawnOnce(cmd, prompt, repoRoot, effectiveModel) {
+function spawnOnce(cmd, prompt, repoRoot, effectiveModel, { signal, killGraceMs = KILL_GRACE_MS } = {}) {
   return new Promise((resolve, reject) => {
     const { argv, usedPlaceholder } = tokenizeCommand(cmd, prompt, effectiveModel);
     if (argv.length === 0) {
@@ -160,6 +213,7 @@ function spawnOnce(cmd, prompt, repoRoot, effectiveModel) {
       reject(err);
       return;
     }
+    killOnAbort(child, signal, killGraceMs);
 
     let stdout = '';
     let stderr = '';
@@ -201,14 +255,22 @@ function spawnOnce(cmd, prompt, repoRoot, effectiveModel) {
  * @param {Object} opts
  * @param {string} opts.cmd - the agent CLI (same value runWave is built with)
  * @param {string} [opts.repoRoot] - cwd for the child
- * @param {number} [opts.timeoutMs] - override for PREFLIGHT_TIMEOUT_MS (tests)
+ * @param {number} [opts.timeoutMs] - override for PREFLIGHT_TIMEOUT_MS
+ * @param {number} [opts.killGraceMs] - internal: SIGTERM→SIGKILL grace (tests)
  * @returns {Promise<{ ok: true } | { ok: false, error: string }>}
  */
-export async function probeCommand({ cmd, repoRoot, timeoutMs = PREFLIGHT_TIMEOUT_MS } = {}) {
+export async function probeCommand({
+  cmd, repoRoot, timeoutMs = PREFLIGHT_TIMEOUT_MS, killGraceMs = KILL_GRACE_MS,
+} = {}) {
   if (!cmd) return { ok: false, error: 'probeCommand: cmd is required' };
+  // A timed-out probe must not leave the agent running (#129).
+  const abortController = new AbortController();
+  const spawned = spawnOnce(cmd, PREFLIGHT_PROMPT, repoRoot, undefined, {
+    signal: abortController.signal, killGraceMs,
+  });
   let run;
   try {
-    run = await withTimeout(spawnOnce(cmd, PREFLIGHT_PROMPT, repoRoot), timeoutMs);
+    run = await withTimeout(spawned, timeoutMs, abortController, PREFLIGHT_TIMEOUT_LABEL);
   } catch (err) {
     // Spawn error (ENOENT, empty argv) or the wall-clock deadline.
     const raw = String(err?.message ?? err).slice(0, EXIT_EXCERPT_CHARS);
@@ -230,9 +292,12 @@ export async function probeCommand({ cmd, repoRoot, timeoutMs = PREFLIGHT_TIMEOU
  * @param {string} [opts.model] - construction-time default model; only used when
  *   a `{model}` token appears in `cmd` and a wave declares no override
  * @param {number} [opts.timeoutMs] - wall-clock deadline per wave (default 10m)
+ * @param {number} [opts.killGraceMs] - internal: SIGTERM→SIGKILL grace (tests)
  * @returns {(wave: Object, planCtx: Object) => Promise<{ outcome: string, status: string, tasks?: Array, usage?: Object }>}
  */
-export function createCommandAdapter({ cmd, repoRoot, model, timeoutMs = 600000 } = {}) {
+export function createCommandAdapter({
+  cmd, repoRoot, model, timeoutMs = 600000, killGraceMs = KILL_GRACE_MS,
+} = {}) {
   if (!cmd) throw new Error('createCommandAdapter: cmd is required');
 
   /**
@@ -263,9 +328,14 @@ export function createCommandAdapter({ cmd, repoRoot, model, timeoutMs = 600000 
    * with terminal === null.
    */
   async function runCommand(prompt, waveId, effectiveModel) {
+    // A timed-out wave must not leave the agent editing the tree (#129).
+    const abortController = new AbortController();
+    const spawned = spawnOnce(cmd, prompt, repoRoot, effectiveModel, {
+      signal: abortController.signal, killGraceMs,
+    });
     let run;
     try {
-      run = await withTimeout(spawnOnce(cmd, prompt, repoRoot, effectiveModel), timeoutMs);
+      run = await withTimeout(spawned, timeoutMs, abortController);
     } catch (err) {
       const message = sanitizeErrorMessage(err?.message ?? String(err));
       // A wall-clock timeout (sentinel-tagged by withTimeout) is terminal
