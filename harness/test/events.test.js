@@ -15,6 +15,7 @@ import {
   blockedReasonCounts,
   fileFailureCounts,
   FILE_FAILURE_MIN_FEATURES,
+  waveReliability,
 } from '../events.js';
 
 test('reduce on empty history → null phase, no markers, no approvals', () => {
@@ -545,4 +546,101 @@ test('fileFailureCounts is pure — frozen inputs, no filesystem, only the mappi
   const source = readFileSync(fileURLToPath(new URL('../events.js', import.meta.url)), 'utf8');
   const foldSource = source.slice(source.indexOf('export const FILE_FAILURE_MIN_FEATURES'));
   assert.doesNotMatch(foldSource, /\bfs\b|readFile|readdir|require\(|import /);
+});
+
+// ── waveReliability (Wave 4, AC#5) ───────────────────────────────────────────
+// Expected values are HAND-COMPUTED from the fixture lines. Each (feature, wave)
+// pair's attempts span every deliver run of that feature:
+//   legacy   — w1: [success]; w2: [fail-tests, success]; w3: [fail-timeout]
+//   enriched — w1: [success]; w2: [fail-tests, fail-scope, success] (two runs);
+//              w3: [abort-user] (hook-vetoed attempt, still an attempt)
+//   mixed    — w1: [fail-protocol, success]; w2: [no-changes]; w3: [fail-tests, fail-tests]
+const ZERO_RELIABILITY = { perPosition: {}, features: 0 };
+const slot = (attempts, firstAttemptSuccess, retried, samples) => ({ attempts, firstAttemptSuccess, retried, samples });
+const RELIABILITY_PER_FEATURE = {
+  legacy: { perPosition: { 1: slot(1, 1, 0, 1), 2: slot(2, 0, 1, 1), 3: slot(1, 0, 0, 1) }, features: 1 },
+  enriched: { perPosition: { 1: slot(1, 1, 0, 1), 2: slot(3, 0, 1, 1), 3: slot(1, 0, 0, 1) }, features: 1 },
+  mixed: { perPosition: { 1: slot(2, 0, 1, 1), 2: slot(1, 0, 0, 1), 3: slot(2, 0, 1, 1) }, features: 1 },
+};
+
+test('waveReliability returns literal per-position counts across the fixture corpus', () => {
+  const history = deepFreeze(loadAllInsightsFixtures());
+  assert.deepStrictEqual(waveReliability(history), {
+    perPosition: { 1: slot(4, 2, 1, 3), 2: slot(6, 0, 2, 3), 3: slot(4, 0, 1, 3) },
+    features: 3,
+  });
+});
+
+test('waveReliability reports a single-feature history at its true n (no floor in the fold)', () => {
+  for (const feature of INSIGHTS_FIXTURE_FEATURES) {
+    const history = deepFreeze(loadInsightsFixture(feature));
+    assert.deepStrictEqual(waveReliability(history), RELIABILITY_PER_FEATURE[feature], feature);
+  }
+});
+
+test('waveReliability never reads usage — throwing usage getters and a guarding Proxy change nothing', () => {
+  const expected = waveReliability(deepFreeze(loadAllInsightsFixtures()));
+  const withThrowingGetters = loadAllInsightsFixtures().map((event) => {
+    if (!event.data) return event;
+    const data = { ...event.data };
+    delete data.usage;
+    Object.defineProperty(data, 'usage', {
+      enumerable: true,
+      get() {
+        throw new Error('waveReliability must not read usage');
+      },
+    });
+    return { ...event, data };
+  });
+  assert.deepStrictEqual(waveReliability(withThrowingGetters), expected);
+  const read = new Set();
+  const proxied = loadAllInsightsFixtures().map((event) =>
+    event.data
+      ? {
+          ...event,
+          data: new Proxy(event.data, {
+            get(target, key) {
+              read.add(key);
+              if (key === 'usage') throw new Error('waveReliability must not read usage');
+              return target[key];
+            },
+          }),
+        }
+      : event,
+  );
+  assert.deepStrictEqual(waveReliability(proxied), expected);
+  assert.ok(!read.has('usage'));
+  assert.deepStrictEqual([...read].sort(), ['outcome', 'wave']);
+});
+
+test('waveReliability is zeroed on empty / null / non-array / wave-attempt-free input', () => {
+  for (const input of [[], null, undefined, 'x', 7, {}, { length: 2 }]) {
+    assert.deepStrictEqual(waveReliability(input), ZERO_RELIABILITY);
+  }
+  const waveFree = deepFreeze([
+    { feature: 'a', type: 'plan-created' },
+    { feature: 'a', type: 'wave-complete', data: { wave: 1, outcome: 'success' } },
+    { feature: 'a', type: 'wave-failed', data: { wave: 2, reason: 'doom-loop' } },
+  ]);
+  assert.deepStrictEqual(waveReliability(waveFree), ZERO_RELIABILITY);
+  const unplaceable = deepFreeze([
+    null,
+    { type: 'wave-attempt', data: { wave: 1, outcome: 'success' } },
+    { feature: '', type: 'wave-attempt', data: { wave: 1, outcome: 'success' } },
+    { feature: 'a', type: 'wave-attempt' },
+    { feature: 'a', type: 'wave-attempt', data: { outcome: 'success' } },
+    { feature: 'a', type: 'wave-attempt', data: { wave: '1', outcome: 'success' } },
+    { feature: 'a', type: 'wave-attempt', data: { wave: Number.NaN, outcome: 'success' } },
+  ]);
+  assert.deepStrictEqual(waveReliability(unplaceable), ZERO_RELIABILITY);
+});
+
+test('waveReliability keys pairs by feature — same wave in two features is two samples', () => {
+  const history = deepFreeze([
+    { feature: 'a', type: 'wave-attempt', data: { wave: 1 } },
+    { feature: 'a', type: 'wave-attempt', data: { wave: 1, outcome: 'success' } },
+    { feature: 'b', type: 'wave-attempt', data: { wave: 1, outcome: 'success' } },
+  ]);
+  // Feature a's first attempt has no outcome → not a first-attempt success.
+  assert.deepStrictEqual(waveReliability(history), { perPosition: { 1: slot(3, 1, 1, 2) }, features: 2 });
 });

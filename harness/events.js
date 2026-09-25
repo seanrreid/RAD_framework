@@ -506,3 +506,71 @@ export function fileFailureCounts(history, taskFiles, minFeatures = FILE_FAILURE
   }
   return out;
 }
+
+/**
+ * Group `wave-attempt` events into (feature, wave) pairs, in history order.
+ * Reads ONLY `type`, `feature`, `data.wave`, and `data.outcome` — never `usage`.
+ * @returns {Map<string,{ wave: string, feature: string, attempts: number, firstOutcome: string|null }>}
+ */
+function collectWavePairs(history) {
+  const pairs = new Map();
+  for (const event of history) {
+    if (!event || event.type !== 'wave-attempt' || !event.data) continue;
+    if (typeof event.feature !== 'string' || event.feature === '') continue;
+    const wave = event.data.wave;
+    if (typeof wave !== 'number' || !Number.isFinite(wave)) continue;
+    const key = JSON.stringify([event.feature, wave]);
+    let pair = pairs.get(key);
+    if (!pair) {
+      const outcome = typeof event.data.outcome === 'string' ? event.data.outcome : null;
+      pair = { wave: String(wave), feature: event.feature, attempts: 0, firstOutcome: outcome };
+      pairs.set(key, pair);
+    }
+    pair.attempts += 1;
+  }
+  return pairs;
+}
+
+/**
+ * Pure fold over an event history → per-WAVE-POSITION reliability counts, the
+ * raw material for first-attempt success rate and retry rate. Counting is
+ * deterministic and carries its sample size alongside every figure; NO
+ * threshold or minimum-history floor is applied here (a single-feature history
+ * reports its true n — suppression is the caller's presentation decision).
+ *
+ * A "pair" is one (feature, wave) combination observed in `wave-attempt`
+ * events, spanning every deliver run of that feature (a resumed wave's later
+ * attempts extend the same pair). Hook-vetoed attempts are attempts too.
+ * `perPosition` is keyed by `String(data.wave)`; for each position:
+ *   - `samples`             — number of (feature, wave) pairs observed there
+ *   - `attempts`            — total `wave-attempt` events at that position
+ *   - `firstAttemptSuccess` — pairs whose FIRST attempt (history order) had
+ *                             `data.outcome === 'success'`
+ *   - `retried`             — pairs with more than one attempt
+ * `features` is the number of distinct features contributing at least one pair.
+ * Attempts lacking a string `feature` or a finite numeric `data.wave` cannot be
+ * placed in a pair and contribute nothing. The fold deliberately never reads
+ * `data.usage`: recorded input tokens are the uncached remainder, so spend is not
+ * comparable across waves (#63/#121). Zeroed shape on [] / null / non-array /
+ * wave-attempt-free input; never throws.
+ *
+ * @param {Event[]} history - in-memory event array (no I/O performed)
+ * @returns {{ perPosition: Object<string,{ attempts: number, firstAttemptSuccess: number,
+ *   retried: number, samples: number }>, features: number }}
+ */
+export function waveReliability(history) {
+  const out = { perPosition: {}, features: 0 };
+  if (!Array.isArray(history)) return out;
+  const features = new Set();
+  for (const pair of collectWavePairs(history).values()) {
+    features.add(pair.feature);
+    const slot = out.perPosition[pair.wave] || { attempts: 0, firstAttemptSuccess: 0, retried: 0, samples: 0 };
+    slot.samples += 1;
+    slot.attempts += pair.attempts;
+    if (pair.firstOutcome === 'success') slot.firstAttemptSuccess += 1;
+    if (pair.attempts > 1) slot.retried += 1;
+    out.perPosition[pair.wave] = slot;
+  }
+  out.features = features.size;
+  return out;
+}
