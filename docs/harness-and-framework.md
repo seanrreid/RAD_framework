@@ -205,6 +205,57 @@ whole point: **the shell is replaceable; the core is not.**
 
 ---
 
+## Prompt surfaces as a feedback-loop target
+
+The event log records more than whether a wave passed; some outcomes say *why the
+agent went wrong*, and several of those point at the instructions the agent was
+given rather than at the code it touched:
+
+- a recurring **`fail-protocol`** means agents keep missing the WAVE_RESULT format
+  — the return-format instructions in the wave prompt are unclear;
+- a recurring **`fail-scope`** means agents keep drifting outside the declared file
+  set — the plan template's scope guidance is not landing;
+- recurring **`blocked_spec`** / **`blocked_intent`** mean tasks keep arriving
+  ambiguous or mis-aimed — `/rad-plan`'s task-authoring guidance is the lever.
+
+Fixing the code does nothing for these; the durable fix is a clarity edit to the
+prompt surface that shaped the behavior. That makes prompt surfaces a legitimate
+feedback-loop target, alongside the code-legibility signal (which points at code)
+and the model-tiering advisory (which points at model choice).
+
+**How the routing works.** `/rad-insights` Step 4g
+(`.claude/commands/shared/rad-insights.md`) reads counts from the existing pure
+folds — `outcomeCounts`, `failReasonCounts`, `blockedReasonCounts` in
+`harness/events.js` — and looks each signal up in a single data table,
+`PROMPT_SURFACE_MAP`:
+
+| Signal | Prompt surface |
+|---|---|
+| `fail-protocol` | `harness/adapters/agent/contract.js` `buildWavePrompt` return-format block (prose mirror in `.claude/commands/team/rad-deliver.md`) |
+| `fail-scope` | `.claude/commands/team/rad-plan.md` plan template, `## Files in Scope` guidance |
+| `blocked_spec`, `blocked_intent` | `.claude/commands/team/rad-plan.md` task template (`What:` / `Validate:`) and wave rules |
+
+A signal renders a proposal only once its aggregate count reaches the named
+`PROMPT_SIGNAL_THRESHOLD`; each proposal names the target file, the observed
+counts, and the affected features. A threshold-crossing signal with no row renders
+an explicit "unmapped signal" line rather than being dropped or guessed onto a
+surface, and when nothing crosses the threshold the section says so. Every output
+is a suggestion — the skill never edits a target file. Routing a new signal is one
+new table row, never new branching logic.
+
+**The #112 constraint any `fail-protocol` edit must preserve.** The wave-prompt
+template carries a prefix-ordering constraint (#112): it is ordered so a retry
+*extends* a prompt prefix instead of *rewriting* one, which keeps the stable part
+of the prompt cacheable across attempts. A clarity edit to the return-format
+instructions is exactly the kind of change that can silently reorder the
+template — moving volatile, per-attempt content ahead of stable content — and undo
+that property without failing any functional test. Any proposal acting on a
+`fail-protocol` signal must therefore keep the stable-before-volatile ordering
+intact; the Step 4g table carries this as a note on the `fail-protocol` row so the
+constraint travels with every proposal.
+
+---
+
 ## Anchor index
 
 | Concept | File | Anchor |
