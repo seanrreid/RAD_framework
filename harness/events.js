@@ -396,3 +396,38 @@ export function hookVetoCounts(history) {
   }
   return out;
 }
+
+// The per-task blocked statuses a wave agent may self-classify with (the
+// WAVE_RESULT task `status` vocabulary, docs/rad-wave-contract.md). Only these
+// three are bucketed; complete / done_with_concerns / anything else is ignored.
+const BLOCKED_TASK_STATUSES = ['blocked_code', 'blocked_spec', 'blocked_intent'];
+
+/**
+ * Pure fold over an event history → per-task blocked-reason distribution read
+ * from `wave-attempt` events' OPTIONAL `data.tasks` array. Each task whose
+ * `status` is one of BLOCKED_TASK_STATUSES increments its bucket.
+ * `enrichedAttempts` counts attempts that carried a non-empty `tasks` array, so
+ * callers can tell "no blocked tasks" (enrichedAttempts > 0, zero buckets) from
+ * "no enriched events at all" (enrichedAttempts === 0). Legacy attempts (no
+ * `tasks`), malformed task entries, and non-array input contribute nothing.
+ *
+ * @param {Event[]} history - in-memory event array (no I/O performed)
+ * @returns {{ blocked_code: number, blocked_spec: number, blocked_intent: number,
+ *   enrichedAttempts: number }}
+ */
+export function blockedReasonCounts(history) {
+  const out = { enrichedAttempts: 0 };
+  for (const status of BLOCKED_TASK_STATUSES) out[status] = 0;
+  if (!Array.isArray(history)) return out;
+  for (const event of history) {
+    if (!event || event.type !== 'wave-attempt' || !event.data) continue;
+    const tasks = event.data.tasks;
+    if (!Array.isArray(tasks) || tasks.length === 0) continue;
+    out.enrichedAttempts += 1;
+    for (const task of tasks) {
+      const status = task && typeof task.status === 'string' ? task.status : null;
+      if (status !== null && BLOCKED_TASK_STATUSES.includes(status)) out[status] += 1;
+    }
+  }
+  return out;
+}

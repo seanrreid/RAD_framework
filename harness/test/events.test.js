@@ -12,6 +12,7 @@ import {
   failReasonCounts,
   retryCounts,
   hookVetoCounts,
+  blockedReasonCounts,
 } from '../events.js';
 
 test('reduce on empty history → null phase, no markers, no approvals', () => {
@@ -186,6 +187,8 @@ test('hookVetoCounts counts hook-veto events and provenance-tagged attempts sepa
   assert.equal(counts.vetoedAttempts, 1);
 });
 
+const ZERO_BLOCKED = { blocked_code: 0, blocked_spec: 0, blocked_intent: 0, enrichedAttempts: 0 };
+
 test('insights helpers return zeroed shapes on empty, non-array, and wave-event-free histories', () => {
   const approvedOnly = [
     { feature: 'f', type: 'approved', actor: 'architect', role: 'architect', ts: 't1' },
@@ -206,6 +209,7 @@ test('insights helpers return zeroed shapes on empty, non-array, and wave-event-
     assert.deepEqual(failReasonCounts(history), { total: 0, reasons: {} });
     assert.deepEqual(retryCounts(history), { total: 0, retriedWaves: 0, perWave: {} });
     assert.deepEqual(hookVetoCounts(history), { vetoes: 0, vetoedAttempts: 0 });
+    assert.deepEqual(blockedReasonCounts(history), ZERO_BLOCKED);
   }
 });
 
@@ -416,4 +420,39 @@ test('regression fence — the fixture corpus covers legacy, enriched, and mixed
   for (const status of ['complete', 'done_with_concerns', 'blocked_code', 'blocked_spec', 'blocked_intent']) {
     assert.ok(statuses.has(status), `corpus carries a ${status} task`);
   }
+});
+
+// ── blockedReasonCounts (Wave 2, AC#3) ───────────────────────────────────────
+// Expected values are HAND-COMPUTED from the fixture lines:
+//   legacy   — no attempt carries `tasks` → zeroed, enrichedAttempts 0.
+//   enriched — 5 attempts, all with tasks; blocked tasks: one blocked_code
+//              (wave 2 try 1), one blocked_spec (wave 2 try 2), one
+//              blocked_intent (wave 3); complete/done_with_concerns ignored.
+//   mixed    — 5 attempts, 2 with tasks (wave 1 try 2: two completes; wave 3
+//              try 1: one blocked_code); the 3 legacy attempts contribute nothing.
+const BLOCKED_EXPECTED = {
+  legacy: ZERO_BLOCKED,
+  enriched: { blocked_code: 1, blocked_spec: 1, blocked_intent: 1, enrichedAttempts: 5 },
+  mixed: { blocked_code: 1, blocked_spec: 0, blocked_intent: 0, enrichedAttempts: 2 },
+};
+
+test('blockedReasonCounts buckets per-task blocked statuses on every fixture', () => {
+  for (const feature of INSIGHTS_FIXTURE_FEATURES) {
+    const history = deepFreeze(loadInsightsFixture(feature));
+    assert.deepStrictEqual(blockedReasonCounts(history), BLOCKED_EXPECTED[feature], `blockedReasonCounts on ${feature}`);
+  }
+});
+
+test('blockedReasonCounts is zeroed on tasks-free attempts and ignores malformed task data', () => {
+  const tasksFree = [{ type: 'wave-attempt', data: { wave: 1, outcome: 'success' } }, { type: 'wave-attempt' }];
+  assert.deepStrictEqual(blockedReasonCounts(tasksFree), ZERO_BLOCKED);
+  const malformed = deepFreeze([
+    { type: 'wave-attempt', data: { wave: 1, tasks: [] } },
+    { type: 'wave-attempt', data: { wave: 1, tasks: 'blocked_code' } },
+    { type: 'wave-attempt', data: { wave: 2, tasks: [null, { status: 7 }, { status: 'blocked_other' }, { title: 'x' }] } },
+    { type: 'wave-complete', data: { wave: 2, tasks: [{ status: 'blocked_code' }] } },
+    null,
+  ]);
+  // Only the wave-2 attempt carries a non-empty tasks array; none of its entries is a known blocked status.
+  assert.deepStrictEqual(blockedReasonCounts(malformed), { ...ZERO_BLOCKED, enrichedAttempts: 1 });
 });
