@@ -168,11 +168,15 @@ plan_cited_anchors() {
   # absorbs ONLY the benign non-zero from the read-loop / pipefail at EOF — the
   # sole error source (grep) was already classified above, so nothing is hidden.
   result=$(printf '%s\n' "$raw" | while IFS= read -r token; do
-      case "$token" in *//*) continue ;; esac              # drop URL host:port
+      # Leading `(` on every pattern: bash 3.2 mis-parses a bare `pat)` inside
+      # `$( ... )` as closing the substitution (syntax error at source time).
+      case "$token" in
+        (*//*) continue ;;                                  # drop URL host:port
+      esac
       path=$(strip_task_file_lines "$token")
       case "$path" in
-        */*) echo "$path" ;;                                # has a directory sep
-        *.*) echo "$path" | grep -qE "\.${RAD_ANCHOR_EXT}\$" \
+        (*/*) echo "$path" ;;                               # has a directory sep
+        (*.*) echo "$path" | grep -qE "\.${RAD_ANCHOR_EXT}\$" \
                && { resolve_anchor_path "$path" \
                     || printf '%s\n' "$RAD_ANCHOR_RESOLVE_FAILED"; } ;;
       esac

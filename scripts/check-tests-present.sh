@@ -25,13 +25,17 @@ UNRESOLVABLE=()
 # ── Parse ## Tests to Write ───────────────────────────────────────────────────
 # Expected format: - [ ] description — path/to/test_file.ext
 # Also handles:    - [x] description — path/to/test_file.ext
+# The description may itself contain em-dashes: the path is the text after the
+# FINAL separator, so a line ending in a bare separator stays unresolvable.
+
+FILE_SEPARATOR='— '
 
 while IFS= read -r line; do
-  if [[ "$line" =~ —[[:space:]]+([^[:space:]].+)$ ]]; then
-    testfile="${BASH_REMATCH[1]}"
-    # Strip Markdown backticks (authors commonly wrap the path) and trailing space.
+  if [[ "$line" =~ —[[:space:]]+[^[:space:]]. ]]; then
+    testfile="${line##*"$FILE_SEPARATOR"}"
+    # Strip Markdown backticks (authors commonly wrap the path) and surrounding space.
     testfile="${testfile//\`/}"
-    testfile=$(echo "$testfile" | sed 's/[[:space:]]*$//')
+    testfile=$(echo "$testfile" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
 
     if [[ -z "$testfile" || "$testfile" == "[file]" ]]; then
       UNRESOLVABLE+=("$line")

@@ -57,7 +57,10 @@ echo "✓ A2: listed file missing → exit 1"
 printf '## Tests to Write\n- [ ] t with no file path\n' > "$TMP/unresolvable.md"
 code=$(run_check "$TMP/unresolvable.md")
 [[ "$code" -eq 0 ]] || fail "A3: unresolvable-only line should exit 0 (got $code)"
-bash "$SCRIPT" "$TMP/unresolvable.md" 2>/dev/null | grep -q "No file path found" \
+# Capture before matching: piping straight into `grep -q` lets grep exit early,
+# the script dies on SIGPIPE (141), and pipefail turns a match into a failure.
+out=$(bash "$SCRIPT" "$TMP/unresolvable.md" 2>/dev/null)  # exit 0 asserted above
+printf '%s\n' "$out" | grep -q "No file path found" \
   || fail "A3: unresolvable line not reported in output"
 echo "✓ A3: unresolvable line reported, non-fatal → exit 0"
 
@@ -76,6 +79,28 @@ code=$(run_check "$TMP/tick-present.md")
 code=$(run_check "$TMP/tick-missing.md")
 [[ "$code" -eq 1 ]] || fail "A5: backtick-wrapped missing path should exit 1 (got $code)"
 echo "✓ A5: backtick-wrapped paths resolve (present → 0, missing → 1)"
+
+# A6: an em-dash inside the description — the path is the text after the FINAL
+# separator. Present → exit 0; missing → exit 1 and the reported name is only the
+# path (not "rest of description — path"). A trailing bare separator after an
+# em-dash description stays unresolvable (non-fatal).
+A6_MISSING="scripts/does-not-exist-a6.sh"
+printf '## Tests to Write\n- [ ] parse — then resolve — %s\n' "$HERE/get-default-branch.sh" > "$TMP/dash-present.md"
+printf '## Tests to Write\n- [ ] parse — then resolve — `%s`\n' "$A6_MISSING"            > "$TMP/dash-missing.md"
+printf '## Tests to Write\n- [ ] parse — then resolve — \n'                                > "$TMP/dash-bare.md"
+code=$(run_check "$TMP/dash-present.md")
+[[ "$code" -eq 0 ]] || fail "A6: em-dash description with present path should exit 0 (got $code)"
+code=$(run_check "$TMP/dash-missing.md")
+[[ "$code" -eq 1 ]] || fail "A6: em-dash description with missing path should exit 1 (got $code)"
+out=$(bash "$SCRIPT" "$TMP/dash-missing.md" 2>&1 || true)  # exit 1 asserted just above
+printf '%s\n' "$out" | grep -qx "  ✗ $A6_MISSING" \
+  || fail "A6: missing name should be exactly '$A6_MISSING', got: [$out]"
+code=$(run_check "$TMP/dash-bare.md")
+[[ "$code" -eq 0 ]] || fail "A6: trailing bare separator should be unresolvable, exit 0 (got $code)"
+out=$(bash "$SCRIPT" "$TMP/dash-bare.md" 2>/dev/null)  # exit 0 asserted above
+printf '%s\n' "$out" | grep -q "No file path found" \
+  || fail "A6: trailing bare separator not reported as unresolvable"
+echo "✓ A6: em-dash in description → path after final separator (present → 0, missing → 1 naming only the path)"
 
 # ── Part B: stale-reference guard ─────────────────────────────────────────────
 # SELF-MATCH HAZARD, and the approach chosen:
