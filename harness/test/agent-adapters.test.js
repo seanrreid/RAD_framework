@@ -11,6 +11,7 @@ import {
   PREFLIGHT_PROMPT,
   PREFLIGHT_TIMEOUT_MS,
 } from '../adapters/agent/command.js';
+import { withTimeout } from '../adapters/agent/contract.js';
 import { createRunWave } from '../adapters/agent/sdk.js';
 import { deliverCommand } from '../cli.js';
 import { deliverSpine } from '../spine.js';
@@ -446,6 +447,124 @@ test('probeCommand — timeout resolves not-ok', async () => {
     assert.equal(result.ok, false);
     assert.ok(result.error.includes('timed out after 50ms'), result.error);
   });
+});
+
+// ===========================================================================
+// Kill-on-timeout — deliver-path-robustness AC#1 / AC#2 / AC#3
+// ===========================================================================
+
+/** How long a hanging fake sleeps before it would write its marker. */
+const HANG_SLEEP_MS = 30_000;
+/** Adapter deadline for the kill tests — long enough for node to start. */
+const KILL_TEST_TIMEOUT_MS = 1_000;
+/** "Promptly": far under HANG_SLEEP_MS, with headroom for a loaded CI box. */
+const PROMPT_RESOLVE_CEILING_MS = 10_000;
+
+function isAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    if (err.code === 'ESRCH') return false;
+    throw err;
+  }
+}
+
+/** Poll until `pid` is gone or `withinMs` elapses; returns final liveness. */
+async function waitForDeath(pid, withinMs) {
+  const deadline = Date.now() + withinMs;
+  while (isAlive(pid) && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  return isAlive(pid);
+}
+
+/**
+ * A fake agent that records its PID, then sleeps HANG_SLEEP_MS and would write
+ * `marker` afterwards. With `trapTerm` it ignores SIGTERM (armed before the PID
+ * file exists, so a readable PID implies the trap is live).
+ */
+function hangingAgent(dir, { trapTerm = false } = {}) {
+  const pidFile = join(dir, 'agent.pid');
+  const marker = join(dir, 'marker.txt');
+  const cmd = fakeCmd(
+    dir,
+    trapTerm ? 'hang-trap.js' : 'hang-pid.js',
+    `const fs=require('fs');` +
+      (trapTerm ? `process.on('SIGTERM',()=>{});` : '') +
+      `fs.writeFileSync(${JSON.stringify(pidFile)},String(process.pid));` +
+      `setTimeout(()=>fs.writeFileSync(${JSON.stringify(marker)},'late'),${HANG_SLEEP_MS});\n`,
+  );
+  return { cmd, pidFile, marker };
+}
+
+/** Run `fn(agent)` and always reap the fake by PID so no stray process leaks. */
+async function withHangingAgent(dir, opts, fn) {
+  const agent = hangingAgent(dir, opts);
+  const fs = await import('node:fs');
+  try {
+    return await fn(agent, () => Number(fs.readFileSync(agent.pidFile, 'utf8')));
+  } finally {
+    if (fs.existsSync(agent.pidFile)) {
+      const pid = Number(fs.readFileSync(agent.pidFile, 'utf8'));
+      if (isAlive(pid)) process.kill(pid, 'SIGKILL');
+    }
+  }
+}
+
+test('probeCommand — timeout kills the agent, never writes the marker, resolves promptly', async () => {
+  await withTempDir(async (dir) => {
+    await withHangingAgent(dir, {}, async (agent, readPid) => {
+      const started = Date.now();
+      const result = await probeCommand({ cmd: agent.cmd, repoRoot: dir, timeoutMs: KILL_TEST_TIMEOUT_MS });
+      assert.ok(Date.now() - started < PROMPT_RESOLVE_CEILING_MS, 'resolved promptly after the deadline');
+      assert.equal(result.ok, false);
+      assert.equal(result.error, `agent preflight timed out after ${KILL_TEST_TIMEOUT_MS}ms`);
+      assert.equal(await waitForDeath(readPid(), 3_000), false, 'agent PID is gone after the timeout');
+      const fs = await import('node:fs');
+      assert.equal(fs.existsSync(agent.marker), false, 'post-timeout marker never written');
+    });
+  });
+});
+
+test('command adapter — wave timeout kills the agent and keeps the exact wave message', async () => {
+  await withTempDir(async (dir) => {
+    await withHangingAgent(dir, {}, async (agent, readPid) => {
+      const runWave = createCommandAdapter({ cmd: agent.cmd, repoRoot: dir, timeoutMs: KILL_TEST_TIMEOUT_MS });
+      const started = Date.now();
+      const result = await runWave(WAVE, PLAN_CTX);
+      assert.ok(Date.now() - started < PROMPT_RESOLVE_CEILING_MS, 'resolved promptly after the deadline');
+      assert.equal(result.outcome, 'fail-timeout', '_isRadTimeout still routes to fail-timeout');
+      assert.equal(result.tasks[0].error, `wave timed out after ${KILL_TEST_TIMEOUT_MS}ms`);
+      assert.equal(await waitForDeath(readPid(), 3_000), false, 'agent PID is gone after the timeout');
+      const fs = await import('node:fs');
+      assert.equal(fs.existsSync(agent.marker), false, 'post-timeout marker never written');
+    });
+  });
+});
+
+test('command adapter — a SIGTERM-ignoring agent is SIGKILLed after the grace', async () => {
+  await withTempDir(async (dir) => {
+    await withHangingAgent(dir, { trapTerm: true }, async (agent, readPid) => {
+      const runWave = createCommandAdapter({
+        cmd: agent.cmd, repoRoot: dir, timeoutMs: KILL_TEST_TIMEOUT_MS, killGraceMs: 200,
+      });
+      const result = await runWave(WAVE, PLAN_CTX);
+      assert.equal(result.outcome, 'fail-timeout');
+      const pid = readPid();
+      assert.equal(await waitForDeath(pid, 3_000), false, 'agent PID is gone after the SIGKILL grace');
+    });
+  });
+});
+
+test('withTimeout — label names the timeout; default stays "wave"; sentinel set on both', async () => {
+  const never = () => new Promise(() => {});
+  const waveErr = await withTimeout(never(), 10).catch((e) => e);
+  assert.equal(waveErr.message, 'wave timed out after 10ms');
+  assert.equal(waveErr._isRadTimeout, true);
+  const probeErr = await withTimeout(never(), 10, undefined, 'agent preflight').catch((e) => e);
+  assert.equal(probeErr.message, 'agent preflight timed out after 10ms');
+  assert.equal(probeErr._isRadTimeout, true);
 });
 
 test('probeCommand — child gets the probe prompt on stdin and only the allow-listed env', async () => {
