@@ -482,9 +482,12 @@ surfaces as a feedback-loop target").
 
 The routing is ONE table — `PROMPT_SURFACE_MAP` in the snippet below. It is data:
 to route a new signal, add a row; never add a special case elsewhere. Counts come
-from the existing folds — `outcomeCounts` (Step 4c), `failReasonCounts` (Step 4c)
-and `blockedReasonCounts` (Step 4d) in `harness/events.js`; this step only
-compares them with the threshold and looks up the table. Same invocation
+from folds in `harness/events.js` — `attemptOutcomeCounts`, `failReasonCounts`
+(Step 4c) and `blockedReasonCounts` (Step 4d); this step only compares them with
+the threshold and looks up the table. `outcome:*` rows read `attemptOutcomeCounts`,
+NOT `outcomeCounts`: the spine records the outcome only on `wave-attempt` events
+(`wave-complete` carries `{ wave }` alone), so wave-complete outcomes never show
+a failure on a real log. Same invocation
 convention as Steps 4c–4f: run from the repo root; `RAD_STATE_DIR` (default
 `.agents/state`) exists only for fixture testing. This step only reads; it writes
 nothing.
@@ -493,7 +496,7 @@ nothing.
 node --input-type=module -e '
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
-const { outcomeCounts, failReasonCounts, blockedReasonCounts } =
+const { attemptOutcomeCounts, failReasonCounts, blockedReasonCounts } =
   await import("./harness/events.js");
 
 // Minimum aggregate count before a signal renders a proposal. Below it, a
@@ -551,13 +554,18 @@ let enrichedAttempts = 0;
 for (const feature of features) {
   const history = readFileSync(join(stateDir, feature, "events.jsonl"), "utf8")
     .split("\n").filter(Boolean).map((l) => JSON.parse(l));
-  const outcomes = outcomeCounts(history);
+  const attempts = attemptOutcomeCounts(history);
   const failReasons = failReasonCounts(history);
   const blocked = blockedReasonCounts(history);
-  waveEvents += outcomes.total + failReasons.total;
+  waveEvents += attempts.counts.total + failReasons.total;
   enrichedAttempts += blocked.enrichedAttempts;
-  for (const [k, n] of Object.entries(outcomes))
-    if (!NON_SIGNAL_OUTCOMES.has(k)) add(`outcome:${k}`, feature, n);
+  // Attribute each outcome to the features the fold saw record it (the event
+  // `feature` field); fall back to the state-dir name if none was recorded.
+  for (const [k, n] of Object.entries(attempts.counts)) {
+    if (NON_SIGNAL_OUTCOMES.has(k)) continue;
+    const named = attempts.features[k] || [];
+    add(`outcome:${k}`, named.length === 1 ? named[0] : feature, n);
+  }
   for (const [r, n] of Object.entries(failReasons.reasons)) add(`wave-failed:${r}`, feature, n);
   for (const k of BLOCKED_KEYS) add(`blocked:${k}`, feature, blocked[k]);
 }
@@ -581,8 +589,8 @@ console.log(JSON.stringify({
 
 Reading the output:
 
-- **Signal names** — `outcome:<outcome>` (from `outcomeCounts`, i.e.
-  `wave-complete` outcomes), `wave-failed:<reason>` (from `failReasonCounts`),
+- **Signal names** — `outcome:<outcome>` (from `attemptOutcomeCounts`, i.e.
+  `wave-attempt` outcomes, one per attempt), `wave-failed:<reason>` (from `failReasonCounts`),
   `blocked:<status>` (from `blockedReasonCounts`). `count` is the aggregate
   across features; `features` names each affected feature with its own count.
 - **`proposals`** — signals at or above `threshold`
@@ -593,11 +601,12 @@ Reading the output:
   They render an explicit "unmapped signal" line — never dropped, never guessed
   onto a surface.
 - Signals below the threshold appear in neither list and render nothing.
-- **`noWaveData: true`** — no `wave-complete` / `wave-failed` event anywhere;
+- **`noWaveData: true`** — no `wave-attempt` / `wave-failed` event anywhere;
   **`noEnrichedData: true`** — no per-task data, so `blocked:*` signals cannot
   be measured. Both are degradation states, not a clean record.
-- `outcome:*` signals count `wave-complete` outcomes only (the `outcomeCounts`
-  contract); an outcome recorded solely on a `wave-attempt` is not counted here.
+- `outcome:*` signals count `wave-attempt` outcomes (the `attemptOutcomeCounts`
+  contract) — every attempt, so a wave retried twice on `fail-protocol` counts 2.
+  `wave-complete` events are never counted: the spine writes no outcome on them.
 
 ### Step 5: Synthesize and output report
 
@@ -752,7 +761,7 @@ Deferred until usage carries cache-token fields (#63/#121).
 [If noWaveData: true AND noEnrichedData: true, render EXACTLY this line and nothing
  else in the section:]
 No wave data yet — prompt-surface proposals will populate after /rad-deliver runs
-record wave-complete / wave-failed events and per-task wave-attempt data.
+record wave-attempt / wave-failed events and per-task wave-attempt data.
 
 [Otherwise, one block per `proposals` entry, highest count first:]
 #### Proposal: [signal] — [count] occurrence(s) (threshold: [threshold])
@@ -834,7 +843,7 @@ Auto-cleared by the severity gate: [N] change(s)
 - Per-wave-position reliability (Step 4f) MUST come from `waveReliability` in
   `harness/events.js`; the `TIERING_MIN_FEATURES` floor lives in the skill, never the
   fold. The Model Tiering section never shows a spend figure and never edits a plan
-- Prompt-surface routing (Step 4g) reads counts ONLY from `outcomeCounts`,
+- Prompt-surface routing (Step 4g) reads counts ONLY from `attemptOutcomeCounts`,
   `failReasonCounts` and `blockedReasonCounts`; routing lives ONLY in the
   `PROMPT_SURFACE_MAP` table and the threshold ONLY in `PROMPT_SIGNAL_THRESHOLD`.
   Proposals are suggestions — never edit a target file. Any `fail-protocol`

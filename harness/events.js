@@ -574,3 +574,41 @@ export function waveReliability(history) {
   out.features = features.size;
   return out;
 }
+
+/**
+ * Pure fold over an event history → counts of `wave-attempt` events keyed by
+ * `data.outcome` across the frozen 7-outcome vocabulary, plus `unknown` and
+ * `total`, and per outcome the DISTINCT features that recorded it.
+ *
+ * Why attempts, not wave-complete: the spine records the resolved outcome ONLY
+ * on `wave-attempt` (`data.outcome`); `wave-complete` carries `data: { wave }`
+ * alone, so `outcomeCounts` cannot see a failure outcome on a real spine log.
+ * Every attempt counts (a retried wave contributes one entry per attempt). A
+ * missing or out-of-vocabulary outcome is bucketed as `unknown`, same as
+ * `outcomeCounts`. `features[outcome]` lists string `feature` values in
+ * first-seen order; an attempt with no string feature is counted but names no
+ * feature. Never reads `data.usage`. Zeroed shape on [] / null / non-array /
+ * wave-attempt-free input; never throws.
+ *
+ * @param {Event[]} history - in-memory event array (no I/O performed)
+ * @returns {{ counts: Object<string, number>, features: Object<string, string[]> }}
+ */
+export function attemptOutcomeCounts(history) {
+  const counts = {};
+  for (const outcome of OUTCOME_VOCAB) counts[outcome] = 0;
+  counts.unknown = 0;
+  counts.total = 0;
+  const features = {};
+  if (!Array.isArray(history)) return { counts, features };
+  for (const event of history) {
+    if (!event || event.type !== 'wave-attempt') continue;
+    counts.total += 1;
+    const raw = event.data && typeof event.data.outcome === 'string' ? event.data.outcome : null;
+    const outcome = raw !== null && OUTCOME_VOCAB.has(raw) ? raw : 'unknown';
+    counts[outcome] += 1;
+    if (typeof event.feature !== 'string' || event.feature === '') continue;
+    const seen = features[outcome] || (features[outcome] = []);
+    if (!seen.includes(event.feature)) seen.push(event.feature);
+  }
+  return { counts, features };
+}
