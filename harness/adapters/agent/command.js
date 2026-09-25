@@ -47,6 +47,17 @@ const ENV_ALLOW_LIST = ['PATH', 'HOME', 'LANG', 'LC_ALL', 'TMPDIR', 'TERM', 'USE
  * killed rather than buffered into an OOM before the wall-clock timeout fires. */
 const MAX_OUTPUT_BYTES = 10 * 1024 * 1024; // 10 MB
 
+/** Cap on the stderr/stdout excerpt carried into a non-zero-exit error (#117). */
+const EXIT_EXCERPT_CHARS = 500;
+
+/**
+ * Outcome for a run that never produced a protocol reply — the agent could not
+ * be spawned, or exited non-zero with no WAVE_RESULT block (not logged in, bad
+ * flag, missing binary). The matrix maps it to `abort`: a retry re-runs the
+ * same broken startup, so it must not take the `fail-tests` revision path.
+ */
+const STARTUP_FAILURE_OUTCOME = 'fail-protocol';
+
 /** Build the allow-listed env handed to the spawned child. */
 function buildChildEnv() {
   const env = {};
@@ -54,6 +65,27 @@ function buildChildEnv() {
     if (process.env[key] !== undefined) env[key] = process.env[key];
   }
   return env;
+}
+
+/**
+ * Summarize a non-zero exit for the event log (#117 format, unchanged). Stderr
+ * wins when non-empty; when a CLI reports its failure on stdout instead (e.g.
+ * "Not logged in"), fall back to a sanitized, capped, `(stdout)`-tagged excerpt.
+ *
+ * @param {{ code: number|null, stdout: string, stderr: string }} run
+ * @returns {string}
+ */
+function describeExitFailure(run) {
+  const stderrSummary = sanitizeErrorMessage((run.stderr || '').slice(0, EXIT_EXCERPT_CHARS));
+  const summary = stderrSummary
+    ? stderrSummary
+    : `(stdout) ${sanitizeErrorMessage((run.stdout || '').slice(0, EXIT_EXCERPT_CHARS))}`.trim();
+  return `command exited with code ${run.code}: ${summary}`.trim();
+}
+
+/** Hand-built terminal result carrying one synthetic failed task. */
+function terminalFailure(outcome, waveId, message) {
+  return { outcome, status: 'failed', tasks: syntheticFailure(waveId, message).tasks };
 }
 
 /**
@@ -205,32 +237,26 @@ export function createCommandAdapter({ cmd, repoRoot, model, timeoutMs = 600000 
       // 'fail-timeout' for this driven adapter — never misread a spawn-level
       // ETIMEDOUT as our deadline by parsing the message string.
       if (err && err._isRadTimeout) {
-        return { stdout: '', terminal: { outcome: 'fail-timeout', status: 'failed', tasks: syntheticFailure(waveId, message).tasks } };
+        return { stdout: '', terminal: terminalFailure('fail-timeout', waveId, message) };
       }
-      // Spawn-level failure (ENOENT, etc.) — classify and surface terminally.
-      const parsed = syntheticFailure(waveId, message);
-      return { stdout: '', terminal: toWaveResult(parsed) };
+      // Spawn-level failure (ENOENT, empty cmd): the agent never started.
+      return { stdout: '', terminal: terminalFailure(STARTUP_FAILURE_OUTCOME, waveId, message) };
     }
 
     // A runaway agent that blew the output cap was killed — terminal protocol fail.
     if (run.truncated) {
       const message = `command output exceeded ${MAX_OUTPUT_BYTES} bytes — process killed`;
-      return { stdout: run.stdout, terminal: { outcome: 'fail-protocol', status: 'failed', tasks: syntheticFailure(waveId, message).tasks } };
+      return { stdout: run.stdout, terminal: terminalFailure('fail-protocol', waveId, message) };
     }
 
     if (run.code !== 0) {
-      // Stderr wins when non-empty (today's behavior, unchanged). When a CLI
-      // reports its failure on stdout instead (e.g. "Not logged in"), fall
-      // back to a sanitized, capped stdout excerpt so the failure reason
-      // still reaches the event log.
-      const rawStderr = (run.stderr || '').slice(0, 500);
-      const stderrSummary = sanitizeErrorMessage(rawStderr);
-      const summary = stderrSummary
-        ? stderrSummary
-        : `(stdout) ${sanitizeErrorMessage((run.stdout || '').slice(0, 500))}`.trim();
-      const message = `command exited with code ${run.code}: ${summary}`.trim();
-      const parsed = syntheticFailure(waveId, message);
-      return { stdout: run.stdout, terminal: toWaveResult(parsed) };
+      const message = describeExitFailure(run);
+      // With a WAVE_RESULT block the agent ran and reported, so the failure stays
+      // on today's retryable path; without one it never got going — no retry.
+      if (extractWaveResultBlock(run.stdout || '')) {
+        return { stdout: run.stdout, terminal: toWaveResult(syntheticFailure(waveId, message)) };
+      }
+      return { stdout: run.stdout, terminal: terminalFailure(STARTUP_FAILURE_OUTCOME, waveId, message) };
     }
 
     return { stdout: run.stdout, terminal: null };

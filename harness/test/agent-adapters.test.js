@@ -8,6 +8,8 @@ import { fileURLToPath } from 'node:url';
 import { createCommandAdapter } from '../adapters/agent/command.js';
 import { createRunWave } from '../adapters/agent/sdk.js';
 import { deliverCommand } from '../cli.js';
+import { deliverSpine } from '../spine.js';
+import { loadMatrix } from '../matrix.js';
 
 const NODE = process.execPath;
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -208,6 +210,126 @@ test('command adapter — stdout fallback excerpt is capped at 500 bytes and san
       error.includes('[REDACTED]') && !error.includes('S'.repeat(20)),
       `excerpt should be sanitized like the stderr path; got ${error}`,
     );
+  });
+});
+
+// ===========================================================================
+// Command adapter — startup failure classification (agent-startup-preflight AC#1, AC#2)
+// ===========================================================================
+
+test('command adapter — non-zero exit with empty output is fail-protocol', async () => {
+  await withTempDir(async (dir) => {
+    const cmd = fakeCmd(dir, 'silent-fail.js', 'process.exit(1);\n');
+    const runWave = createCommandAdapter({ cmd, repoRoot: dir });
+    const result = await runWave(WAVE, PLAN_CTX);
+    assert.equal(result.outcome, 'fail-protocol');
+    assert.equal(result.status, 'failed');
+    assert.ok(result.tasks[0].error.includes('code 1'), `got ${result.tasks[0].error}`);
+  });
+});
+
+test('command adapter — non-zero exit with stdout-only reason is fail-protocol and keeps the #117 excerpt', async () => {
+  await withTempDir(async (dir) => {
+    const cmd = fakeCmd(
+      dir,
+      'not-logged-in.js',
+      `process.stdout.write('Not logged in - please run /login');process.exit(3);\n`,
+    );
+    const runWave = createCommandAdapter({ cmd, repoRoot: dir });
+    const result = await runWave(WAVE, PLAN_CTX);
+    assert.equal(result.outcome, 'fail-protocol');
+    assert.equal(result.status, 'failed');
+    assert.equal(
+      result.tasks[0].error,
+      'command exited with code 3: (stdout) Not logged in - please run /login',
+    );
+  });
+});
+
+test('command adapter — ENOENT spawn error is fail-protocol', async () => {
+  await withTempDir(async (dir) => {
+    const cmd = join(dir, 'no-such-agent-binary');
+    const runWave = createCommandAdapter({ cmd, repoRoot: dir });
+    const result = await runWave(WAVE, PLAN_CTX);
+    assert.equal(result.outcome, 'fail-protocol');
+    assert.equal(result.status, 'failed');
+    assert.ok(result.tasks[0].error.includes('ENOENT'), `got ${result.tasks[0].error}`);
+  });
+});
+
+test('command adapter — whitespace-only cmd (empty argv) is fail-protocol', async () => {
+  await withTempDir(async (dir) => {
+    const runWave = createCommandAdapter({ cmd: '   ', repoRoot: dir });
+    const result = await runWave(WAVE, PLAN_CTX);
+    assert.equal(result.outcome, 'fail-protocol');
+    assert.ok(result.tasks[0].error.includes('empty cmd'), `got ${result.tasks[0].error}`);
+  });
+});
+
+test('command adapter — non-zero exit WITH a WAVE_RESULT block keeps the retryable path', async () => {
+  await withTempDir(async (dir) => {
+    const cmd = fakeCmd(
+      dir,
+      'reported-fail.js',
+      `process.stdout.write(${JSON.stringify(GOOD_RESULT)});process.stderr.write('tests red');process.exit(2);\n`,
+    );
+    const runWave = createCommandAdapter({ cmd, repoRoot: dir });
+    const result = await runWave(WAVE, PLAN_CTX);
+    assert.equal(result.outcome, 'fail-tests');
+    assert.equal(result.status, 'failed');
+    assert.equal(result.tasks[0].error, 'command exited with code 2: tests red');
+  });
+});
+
+/** Minimal in-memory StateStore for driving deliverSpine (mirrors spine.test.js). */
+function makeSpineState(plan) {
+  const appended = [];
+  return {
+    appended,
+    async gate() { return { passed: true, reason: 'ok', satisfiedBy: { actor: 'architect' } }; },
+    append(event) { appended.push(event); },
+    plan() { return plan; },
+    history() { return appended; },
+    phase() { return null; },
+    list() { return []; },
+  };
+}
+
+test('deliverSpine + command adapter — an agent that can never start stops after ONE attempt via matrix abort', async () => {
+  await withTempDir(async (dir) => {
+    const counter = join(dir, 'count.txt');
+    const cmd = fakeCmd(
+      dir,
+      'never-starts.js',
+      `require('fs').appendFileSync(${JSON.stringify(counter)},'x');` +
+        `process.stdout.write('Not logged in');process.exit(1);\n`,
+    );
+    const adapter = createCommandAdapter({ cmd, repoRoot: dir });
+    let attempts = 0;
+    const runWave = async (wave, planCtx) => {
+      attempts += 1;
+      return adapter(wave, planCtx ?? PLAN_CTX);
+    };
+    const state = makeSpineState({ waves: [{ n: 1 }] });
+    let t = 0;
+    const result = await deliverSpine({
+      feature: 'demo',
+      state,
+      docs: {},
+      matrix: loadMatrix(),
+      gates: {},
+      runWave,
+      sh: () => ({ status: 0 }),
+      now: () => `t${t++}`,
+    });
+    assert.equal(result.stopped, 'matrix');
+    assert.equal(result.action, 'abort');
+    assert.equal(attempts, 1, 'the spine must not retry a startup failure');
+    const fs = await import('node:fs');
+    assert.equal(fs.readFileSync(counter, 'utf8').length, 1, 'the agent must be spawned exactly once');
+    const failed = state.appended.filter((e) => e.type === 'wave-failed');
+    assert.equal(failed.length, 1);
+    assert.deepEqual(failed[0].data, { wave: 1, action: 'abort' });
   });
 });
 
