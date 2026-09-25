@@ -470,9 +470,138 @@ Reading the output:
 - There is deliberately no spend figure in this output: the fold never reads
   `usage` (see the Model Tiering section for why).
 
+### Step 4g: Route recurring signals to prompt surfaces
+
+Some failure signals point at the INSTRUCTIONS the wave agent was given, not at
+the code it touched: a recurring `fail-protocol` says the WAVE_RESULT format
+instructions are unclear, a recurring `fail-scope` says the plan's scope guidance
+is, and recurring `blocked_spec` / `blocked_intent` say the tasks themselves were
+under-specified or mis-aimed. This step routes each such signal to the one prompt
+surface that shaped it (rationale: `docs/harness-and-framework.md`, "Prompt
+surfaces as a feedback-loop target").
+
+The routing is ONE table — `PROMPT_SURFACE_MAP` in the snippet below. It is data:
+to route a new signal, add a row; never add a special case elsewhere. Counts come
+from the existing folds — `outcomeCounts` (Step 4c), `failReasonCounts` (Step 4c)
+and `blockedReasonCounts` (Step 4d) in `harness/events.js`; this step only
+compares them with the threshold and looks up the table. Same invocation
+convention as Steps 4c–4f: run from the repo root; `RAD_STATE_DIR` (default
+`.agents/state`) exists only for fixture testing. This step only reads; it writes
+nothing.
+
+```bash
+node --input-type=module -e '
+import { readFileSync, readdirSync, existsSync } from "node:fs";
+import { join } from "node:path";
+const { outcomeCounts, failReasonCounts, blockedReasonCounts } =
+  await import("./harness/events.js");
+
+// Minimum aggregate count before a signal renders a proposal. Below it, a
+// signal describes one bad wave, not an instruction that keeps misleading.
+const PROMPT_SIGNAL_THRESHOLD = 3;
+
+// THE mapping table: signal -> the prompt surface that shaped it.
+const PROMPT_SURFACE_MAP = {
+  "outcome:fail-protocol": {
+    target: "harness/adapters/agent/contract.js",
+    section: "buildWavePrompt \"## Return format\" block (prose mirror: .claude/commands/team/rad-deliver.md \"## Return format\")",
+    note: "Preserve the #112 prefix-ordering constraint: order the template so a retry extends a prefix instead of rewriting one.",
+  },
+  "outcome:fail-scope": {
+    target: ".claude/commands/team/rad-plan.md",
+    section: "Step 3 plan template, \"## Files in Scope\" guidance comment",
+    note: null,
+  },
+  "blocked:blocked_spec": {
+    target: ".claude/commands/team/rad-plan.md",
+    section: "Step 3 task template (What:/Validate:) and \"Wave rules\"",
+    note: null,
+  },
+  "blocked:blocked_intent": {
+    target: ".claude/commands/team/rad-plan.md",
+    section: "Step 3 task template (What:/Validate:) and \"Wave rules\"",
+    note: null,
+  },
+};
+
+// Outcome keys that are not failure signals.
+const NON_SIGNAL_OUTCOMES = new Set(["success", "unknown", "total"]);
+const BLOCKED_KEYS = ["blocked_code", "blocked_spec", "blocked_intent"];
+
+const stateDir = process.env.RAD_STATE_DIR || ".agents/state";
+const features = existsSync(stateDir)
+  ? readdirSync(stateDir, { withFileTypes: true })
+      .filter((d) => d.isDirectory())
+      .map((d) => d.name)
+      .filter((f) => existsSync(join(stateDir, f, "events.jsonl")))
+      .sort()
+  : [];
+
+// signal -> { count, features: { feature: n } }
+const signals = {};
+const add = (signal, feature, n) => {
+  if (n <= 0) return;
+  const s = signals[signal] || (signals[signal] = { count: 0, features: {} });
+  s.count += n;
+  s.features[feature] = (s.features[feature] || 0) + n;
+};
+
+let waveEvents = 0;
+let enrichedAttempts = 0;
+for (const feature of features) {
+  const history = readFileSync(join(stateDir, feature, "events.jsonl"), "utf8")
+    .split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  const outcomes = outcomeCounts(history);
+  const failReasons = failReasonCounts(history);
+  const blocked = blockedReasonCounts(history);
+  waveEvents += outcomes.total + failReasons.total;
+  enrichedAttempts += blocked.enrichedAttempts;
+  for (const [k, n] of Object.entries(outcomes))
+    if (!NON_SIGNAL_OUTCOMES.has(k)) add(`outcome:${k}`, feature, n);
+  for (const [r, n] of Object.entries(failReasons.reasons)) add(`wave-failed:${r}`, feature, n);
+  for (const k of BLOCKED_KEYS) add(`blocked:${k}`, feature, blocked[k]);
+}
+
+const crossing = Object.entries(signals)
+  .filter(([, s]) => s.count >= PROMPT_SIGNAL_THRESHOLD)
+  .sort(([a, x], [b, y]) => y.count - x.count || a.localeCompare(b));
+const proposals = crossing.filter(([sig]) => PROMPT_SURFACE_MAP[sig])
+  .map(([signal, s]) => ({ signal, ...s, ...PROMPT_SURFACE_MAP[signal] }));
+const unmapped = crossing.filter(([sig]) => !PROMPT_SURFACE_MAP[sig])
+  .map(([signal, s]) => ({ signal, ...s }));
+
+console.log(JSON.stringify({
+  threshold: PROMPT_SIGNAL_THRESHOLD,
+  noWaveData: waveEvents === 0,
+  noEnrichedData: enrichedAttempts === 0,
+  proposals, unmapped,
+}, null, 2));
+'
+```
+
+Reading the output:
+
+- **Signal names** — `outcome:<outcome>` (from `outcomeCounts`, i.e.
+  `wave-complete` outcomes), `wave-failed:<reason>` (from `failReasonCounts`),
+  `blocked:<status>` (from `blockedReasonCounts`). `count` is the aggregate
+  across features; `features` names each affected feature with its own count.
+- **`proposals`** — signals at or above `threshold`
+  (`PROMPT_SIGNAL_THRESHOLD`) that have a row in `PROMPT_SURFACE_MAP`; each
+  carries the `target` file, the `section` within it, and any `note`.
+- **`unmapped`** — signals at or above the threshold with NO row in the table
+  (e.g. `outcome:fail-tests`, `blocked:blocked_code`, `wave-failed:doom-loop`).
+  They render an explicit "unmapped signal" line — never dropped, never guessed
+  onto a surface.
+- Signals below the threshold appear in neither list and render nothing.
+- **`noWaveData: true`** — no `wave-complete` / `wave-failed` event anywhere;
+  **`noEnrichedData: true`** — no per-task data, so `blocked:*` signals cannot
+  be measured. Both are degradation states, not a clean record.
+- `outcome:*` signals count `wave-complete` outcomes only (the `outcomeCounts`
+  contract); an outcome recorded solely on a `wave-attempt` is not counted here.
+
 ### Step 5: Synthesize and output report
 
-Using the data from Steps 3–4f, write the following report. Populate each section
+Using the data from Steps 3–4g, write the following report. Populate each section
 with real numbers and real pattern names — do not leave placeholders.
 
 ```markdown
@@ -618,6 +747,31 @@ uncached remainder and `normalizeUsage` drops the cache fields, so relative spen
 varies with cache-hit rate and scheduling rather than with what a wave costs.
 Deferred until usage carries cache-token fields (#63/#121).
 
+### Prompt-Surface Proposals
+[From Step 4g. Omit this section entirely if no per-feature events.jsonl exists.]
+[If noWaveData: true AND noEnrichedData: true, render EXACTLY this line and nothing
+ else in the section:]
+No wave data yet — prompt-surface proposals will populate after /rad-deliver runs
+record wave-complete / wave-failed events and per-task wave-attempt data.
+
+[Otherwise, one block per `proposals` entry, highest count first:]
+#### Proposal: [signal] — [count] occurrence(s) (threshold: [threshold])
+Target: `[target]` — [section]
+Affected features: [feature (n), ... from `features`]
+[If note is non-null, render it verbatim:] Constraint: [note]
+> Suggestion — review the named instructions for clarity; never auto-applied.
+
+[One line per `unmapped` entry:]
+Unmapped signal: [signal] — [count] occurrence(s) across [feature (n), ...]; no
+prompt surface is mapped for it in PROMPT_SURFACE_MAP (Step 4g).
+
+[If proposals and unmapped are both empty:]
+No signal crossed the prompt-surface threshold ([threshold]) — no proposal.
+[If noEnrichedData: true (and wave data exists), add:]
+blocked_spec / blocked_intent could not be evaluated — no wave-attempt event
+carries per-task data yet.
+[Suggestion only — name the target file and section; never edit it.]
+
 ### Recommended Focus Areas
 [Top 2–3 patterns that are both frequent and high-severity. Each as one sentence:
  "Address [category] — appears in [N] cycles ([%]) and always blocks architect review."]
@@ -680,6 +834,11 @@ Auto-cleared by the severity gate: [N] change(s)
 - Per-wave-position reliability (Step 4f) MUST come from `waveReliability` in
   `harness/events.js`; the `TIERING_MIN_FEATURES` floor lives in the skill, never the
   fold. The Model Tiering section never shows a spend figure and never edits a plan
+- Prompt-surface routing (Step 4g) reads counts ONLY from `outcomeCounts`,
+  `failReasonCounts` and `blockedReasonCounts`; routing lives ONLY in the
+  `PROMPT_SURFACE_MAP` table and the threshold ONLY in `PROMPT_SIGNAL_THRESHOLD`.
+  Proposals are suggestions — never edit a target file. Any `fail-protocol`
+  proposal must preserve the wave-prompt template's #112 prefix-ordering constraint
 - All-zero reliability counts are the "no wave data yet" path, not an error — render
   the zeros text from the template and move on
 - Findings Recurrence (Step 3b) outputs are suggestions only — never edit CLAUDE.md
