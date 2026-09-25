@@ -27,7 +27,7 @@ import { evaluateGate } from './gates.js';
 import { planFingerprint } from './plan-fingerprint.js';
 import { makeWorktreeLifecycle } from './adapters/worktree.js';
 import { deliverSpine } from './spine.js';
-import { createCommandAdapter } from './adapters/agent/command.js';
+import { createCommandAdapter, probeCommand } from './adapters/agent/command.js';
 import { sanitizeErrorMessage } from './adapters/agent/contract.js';
 import { loadMatrix } from './matrix.js';
 
@@ -75,6 +75,12 @@ const SUBCOMMANDS = {
     run: (argv, ctx) => architectureApproveCommand(argv, ctx),
   },
 };
+
+/**
+ * The ONLY RAD_AGENT_PREFLIGHT value that skips the command-path startup probe.
+ * Unset, empty, or any other value runs it (fail-closed: a typo never disables).
+ */
+const PREFLIGHT_OFF = 'off';
 
 /** The harness package root (where cli.js lives). */
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -388,6 +394,25 @@ export function parsePlanCtx(text) {
 }
 
 /**
+ * Run the command-path startup probe unless RAD_AGENT_PREFLIGHT is exactly
+ * PREFLIGHT_OFF. On failure, writes the operator-facing reason to stderr.
+ *
+ * @param {string} cmd - the configured RAD_AGENT_CMD
+ * @param {string} repoRoot
+ * @returns {Promise<boolean>} true when the probe passed or was skipped
+ */
+async function preflightPassed(cmd, repoRoot) {
+  if (process.env.RAD_AGENT_PREFLIGHT === PREFLIGHT_OFF) return true;
+  const probe = await probeCommand({ cmd, repoRoot });
+  if (probe.ok) return true;
+  process.stderr.write(
+    'rad deliver: RAD_AGENT_CMD failed to start under the adapter env ' +
+    `(it must authenticate without inherited env vars): ${probe.error}\n`,
+  );
+  return false;
+}
+
+/**
  * `deliver <feature> [--model <model-id>]`.
  *
  * Reads the approved plan, constructs an SDK-backed runWave, and drives
@@ -490,6 +515,11 @@ export async function deliverCommand(argv, ctx) {
       return 1;
     }
     const adapter = createCommandAdapter({ cmd, repoRoot, model });
+    // Startup preflight: prove the agent CLI can authenticate under the
+    // allow-listed adapter env BEFORE worktree creation or any event append, so
+    // an env-dependent credential fails fast with a clear message instead of as
+    // a Wave-1 failure. Unreachable with an injected ctx.runWave (tests).
+    if (!(await preflightPassed(cmd, repoRoot))) return 1;
     // Same attempt-context fold as the sdk branch above — both adapters take
     // (wave, planCtx), so the spine's second argument rides in the plan context.
     runWave = (wave, attemptCtx) => adapter(wave, { ...planCtx, ...attemptCtx });
