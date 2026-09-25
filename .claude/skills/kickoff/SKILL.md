@@ -67,17 +67,6 @@ so everything in that section is genuinely pre-plan. If it prints
 `(no pre-plan research; N consumed)` or `(no research artifacts)`, report the group
 as none.
 
-**Auto-clear count.** The severity-routed approval gate records each policy
-auto-clear as an `approved` event with `recordedBy === 'policy'` in the per-feature
-audit logs. Count them across the feature event logs and surface one line —
-`Auto-cleared: N changes since last session` — in the report below. Skip silently
-if the count is zero or no event logs exist.
-
-```bash
-jq -r 'select(.type=="approved" and .recordedBy=="policy")' \
-  .agents/state/*/events.jsonl 2>/dev/null | jq -s 'length'
-```
-
 ### 4. (Optional) Triage open issues
 
 If a platform CLI is available (`gh` or `glab`), list a few open issues so the
@@ -103,8 +92,6 @@ Summarize in this shape, then ask what to focus on:
 - 🔍 {slug} — pending plan → /rad-plan {slug}
 - ⏸ {slug} — parked
 {or: "- none — no pre-plan research"}
-
-Auto-cleared: {N} changes since last session   {omit this line entirely if N is 0}
 
 ## Suggested focus
 {the most actionable item — an approved plan to deliver, a pending one to approve, or research ready to design/plan}

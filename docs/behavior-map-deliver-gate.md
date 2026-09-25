@@ -186,15 +186,11 @@ Three consequences worth stating plainly:
 - **Proxy approval passes by construction.** An event with `actor: architect` and
   `recordedBy: someone-else` satisfies the gate; both fields are preserved and
   surfaced through `satisfiedBy` (`gates.js:101-113`).
-- **Policy auto-clear is shape-identical.** `recordPolicyApproval` writes
-  `actor: 'severity-gate'`, `role: 'architect'`, `recordedBy: 'policy'`, and the
-  fold accepts it exactly like a human approval
-  (`git-state-store.js:432-445`). It deliberately branches *around*
-  `check-role.sh` — a runtime role check on a machine identity is meaningless
-  (`:410-427`). **The trust boundary moves to config time:**
-  `RAD_LOW_RISK_PATTERNS` plus the non-configurable self-protected path set in
-  `scripts/lib/plan-paths.sh`. This is the one path where no human sees the
-  change.
+- **Every approval has a human behind it.** The severity-routed policy
+  auto-clear that once wrote a machine approval was removed (#137); the only
+  write path is `recordApproval`, which freezes a role verified by
+  `check-role.sh`. CI's `check-approval-integrity.sh` additionally rejects any
+  approval carrying the retired machine identity.
 
 ### State change
 
@@ -263,7 +259,6 @@ harness/gates.js:77-122                     the fold
 harness/plan-fingerprint.js:27-59           what the fingerprint covers (body only)
 harness/transitions.js:94-131               duplicate + missing-role rules
 harness/adapters/git-state-store.js:375-408 write-time role freeze
-harness/adapters/git-state-store.js:432-445 policy auto-clear
 harness/spine.js:335-338                    in-process gate
 .github/workflows/ci.yml:88-128             deliver-PR job
 ```
@@ -280,10 +275,11 @@ file:
    fingerprint proves they approved *this text*. Legacy events without one pass
    (`check-plan-approved.sh:97-100`). That exception is correct today and should
    be removed once no unfingerprinted approval can still be in flight.
-2. **The policy auto-clear path is the only one with no human in the loop**, and
-   its trust boundary is a config-time regex, not a runtime check. It is
-   documented as such in `CLAUDE.md`; this map is where that shows up as a
-   *behavior*, next to the five paths that do check.
+2. **Every path to an `approved` event has a human in the loop.** Severity
+   routing — the one path that let a config-time regex stand in for the
+   architect — was removed (#137), and the integrity check now rejects any
+   approval shaped like its output. Plan approval is a human judgment by
+   design, not a step awaiting automation.
 3. **Presence and execution are different gates and neither replaces the other**
    (`spine.js:374-386`, issue #91). A wave can create every promised test file,
    have all of them fail, and still advance — unless the plan declared a

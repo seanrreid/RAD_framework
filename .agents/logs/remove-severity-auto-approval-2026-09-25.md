@@ -1,0 +1,16 @@
+# Execution Log: Remove Severity Auto-Approval
+Plan: .agents/plans/remove-severity-auto-approval.md
+Started: 2026-09-25
+Branch: rad/remove-severity-auto-approval
+Executor role: architect
+
+## Steps
+
+| Step | Wave | Task | Status | Commit | Time |
+|------|------|------|--------|--------|------|
+| 1 | 1 | 1.1 Remove the auto-approval code path | complete | 3a60cd3 | 16:53 |
+| 2 | 1 | 1.2 Remove the classifier; reword script references | complete | 0f7f4c4 | 16:53 |
+| 3 | 1 | 1.3 Integrity check rejects machine approvals | complete | 70a981f | 16:53 |
+| 4 | 2 | 2.1 Agents, CLAUDE.md and config (atomic) | complete | 733c20e | 16:56 |
+| 5 | 2 | 2.2 Remove the audit surfaces | complete | 12abe09 | 16:56 |
+| 6 | 3 | 3.1 Docs and the final sweep | complete | f5e31b8 | 16:58 |

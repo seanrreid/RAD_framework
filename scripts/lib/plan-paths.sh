@@ -2,7 +2,7 @@
 # lib/plan-paths.sh
 # Shared helpers for extracting the declared-scope path set from a RAD plan and
 # matching paths against a |-separated extended-regex pattern. ONE source of
-# truth, sourced by both scripts/lint-plan.sh and scripts/classify-low-risk.sh.
+# truth, sourced by scripts/lint-plan.sh.
 #
 # Usage: source this file, then call the functions below. Functions read the
 # plan file path passed as $1 — they do not depend on caller-set globals.

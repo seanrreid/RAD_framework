@@ -201,7 +201,7 @@ t_self_protected_advisory() {
 
   # (a) Default env → advisory present, exit 0.
   ( unset RAD_HIGH_RISK_PATTERNS; run_lint "$plan"
-    printf '%s\n' "$LINT_OUT" | grep -q "self-protected path (RAD machinery — never auto-clearable): harness/gates.js" \
+    printf '%s\n' "$LINT_OUT" | grep -q "self-protected path (RAD machinery — always requires architect review): harness/gates.js" \
       || fail "AC#2: default env did not emit the self-protected advisory"
     [[ "$LINT_CODE" -eq 0 ]] || fail "AC#2: self-protected plan exited $LINT_CODE (expected 0)"
   ) || exit 1
@@ -209,7 +209,7 @@ t_self_protected_advisory() {
 
   # (b) A high-risk override that matches nothing → advisory still fires.
   ( export RAD_HIGH_RISK_PATTERNS="zzz-nomatch"; run_lint "$plan"
-    printf '%s\n' "$LINT_OUT" | grep -q "self-protected path (RAD machinery — never auto-clearable): harness/gates.js" \
+    printf '%s\n' "$LINT_OUT" | grep -q "self-protected path (RAD machinery — always requires architect review): harness/gates.js" \
       || fail "AC#2: no-match RAD_HIGH_RISK_PATTERNS suppressed the self-protected advisory"
     [[ "$LINT_CODE" -eq 0 ]] || fail "AC#2: self-protected plan exited $LINT_CODE (expected 0)"
   ) || exit 1
@@ -217,7 +217,7 @@ t_self_protected_advisory() {
 
   # (c) An emptied high-risk set → advisory still fires (not gated on the env).
   ( export RAD_HIGH_RISK_PATTERNS=""; run_lint "$plan"
-    printf '%s\n' "$LINT_OUT" | grep -q "self-protected path (RAD machinery — never auto-clearable): harness/gates.js" \
+    printf '%s\n' "$LINT_OUT" | grep -q "self-protected path (RAD machinery — always requires architect review): harness/gates.js" \
       || fail "AC#2: empty RAD_HIGH_RISK_PATTERNS suppressed the self-protected advisory"
     [[ "$LINT_CODE" -eq 0 ]] || fail "AC#2: self-protected plan exited $LINT_CODE (expected 0)"
   ) || exit 1
@@ -236,7 +236,7 @@ t_self_protected_advisory() {
 
 # ── Git-backed premise-freshness fixtures ──────────────────────────────────────
 # The freshness advisory queries origin/<default_branch>, so these cases need a
-# real repo with an origin remote (mirrors test-classify-low-risk.sh's fixture).
+# real repo with an origin remote (a local bare origin, like test-plan-paths.sh).
 # Plans are SYNTHETIC (built here), never the real repo's plans — kept hermetic.
 FRESH_OUT=""
 FRESH_CODE=0

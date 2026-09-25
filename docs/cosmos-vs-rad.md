@@ -40,7 +40,7 @@ Organizational Knowledge Layer).
 |-----------|--------|-----|
 | Memory | Vendor-hosted Knowledge Base; soft learned knowledge distilled from interactions | Plain git: `events.jsonl` on branch tips, `findings.jsonl`, plan docs; portable via `RAD_SYNC` |
 | Learning | Learning Flywheel → agent memory/context stores | Findings recurrence → CLAUDE.md conventions and lint rules (deterministic distillation) |
-| Human gating | Three checkpoints, workflow convention | Gates 0–2, fail-closed enforcement (event authority + PreToolUse hook) + severity routing |
+| Human gating | Three checkpoints, workflow convention | Gates 0–2, fail-closed enforcement (event authority + PreToolUse hook); every approval is a human's |
 | Agents | Reference experts + Expert Registry, hosted runtime | Per-step skills + scoped `.claude/agents/`, BYO wave-execution agent (`RAD_AGENT`) |
 | Model routing | Prism: dynamic per-request cost/quality routing | Static per-wave `Model:` tiering declared in the approved plan + `RAD_TOKEN_BUDGET` |
 | Environments | Laptops, dev VMs, Augment cloud, org clouds | Main checkout by default; opt-in `RAD_WORKTREE` isolation |
@@ -99,10 +99,10 @@ Two real differences:
    `approved` event on the branch tip is the sole gate authority, checked by a
    pure fold and additionally blocked by a deterministic PreToolUse hook.
    Cosmos's checkpoints read as workflow convention.
-2. **Granularity.** Severity routing (`RAD_LOW_RISK_PATTERNS`) goes a step past
-   fixed checkpoints: the human is invoked only when the change needs judgment,
-   and the routing decision is deterministic and fail-closed rather than
-   model-judged.
+2. **No auto-clear.** Every plan approval is a human's. RAD briefly carried
+   severity routing that let low-risk plans skip the architect; it was removed
+   (#137) because plan review is where human judgment has the most leverage,
+   so RAD keeps that gate human rather than automating it away.
 
 One idea worth chewing on from their side: Cosmos frames deep code review as
 **optimized for recall, not precision** — agents read everything, humans are
