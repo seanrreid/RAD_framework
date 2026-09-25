@@ -12,6 +12,7 @@ Executor role: architect
 | 2 | 1 | 1.2 Research visibility in rad-status.sh | ✓ complete | 9515b2f | 12:43 |
 | 3 | 1 | 1.3 Wave rationale and docs wording | ✓ complete | 653f001 | 12:43 |
 | 4 | 1 | 1.2 Research visibility in rad-status.sh (revision: suppress consumed research) | ✓ complete | fb6194e, d33fbd3 | 12:50 |
+| 5 | 2 | 2.1 Kickoff reporting and research status vocabulary | ✓ complete | 7646c2b | 12:55 |
 
 ### Architect decision (2026-09-25, mid-delivery)
 Live `rad-status.sh` output after Wave 1 listed 8 research artifacts, 7 of which belong to
