@@ -43,9 +43,11 @@ printf 'key=val\n'         > "$REPO/config/app.conf"
 printf 'module.exports={}\n' > "$REPO/harness/gates.js"
 printf '{}\n'              > "$REPO/.agents/state/demo/events.jsonl"
 
-# write_plan <out> <scope-rows> — minimal plan with the given Files-in-Scope rows.
+# write_plan <out> <scope-rows> [<task-file>] — minimal plan with the given
+# Files-in-Scope rows and, when <task-file> is given, one task whose `File:` line
+# carries that value verbatim (the classifier unions task File: paths into scope).
 write_plan() {
-  local out="$1" scope_rows="$2"
+  local out="$1" scope_rows="$2" task_file="${3:-}"
   {
     cat <<'EOF'
 # Plan: classify-test
@@ -57,6 +59,9 @@ Branch: rad/classify-test
 |------|-------|--------|
 EOF
     [[ -n "$scope_rows" ]] && printf '%s\n' "$scope_rows"
+    if [[ -n "$task_file" ]]; then
+      printf '\n## Waves\n\n### Wave 1\n\n#### Task 1.1: t\nFile: %s\n' "$task_file"
+    fi
   } > "$out"
 }
 
@@ -71,6 +76,10 @@ write_plan "$REPO/.agents/plans/tests-config.md" "$(printf '| tests/unit.test.js
 write_plan "$REPO/.agents/plans/selfprot-harness.md"  "| harness/gates.js | 1 | x |"
 write_plan "$REPO/.agents/plans/selfprot-scripts.md"  "| scripts/classify-low-risk.sh | 1 | x |"
 write_plan "$REPO/.agents/plans/selfprot-state.md"    "| .agents/state/demo/events.jsonl | 1 | x |"
+# #134 regression: the table lists only docs/guide.md, but the task File: line
+# names a second, self-protected file after a comma.
+write_plan "$REPO/.agents/plans/selfprot-multifile.md" "| docs/guide.md | 1 | x |" \
+  "docs/guide.md:1-5, scripts/classify-low-risk.sh"
 # Freshness (rule 0.5) fixtures. src/ghost.js is deliberately NOT created below,
 # so it is absent on origin/main; src/created.js is declared `new file` (exempt).
 write_plan "$REPO/.agents/plans/fresh-present.md" "$(printf '| docs/guide.md | 1 | x |\n| styles/main.css | 1 | x |')"
@@ -262,6 +271,24 @@ t_self_protected_not_low() {
   echo "✓ AC#self-protected-c: .agents/state/ ⇒ not-low"
 }
 
+# ── #134 regression: a self-protected path hidden in a multi-file task File: line ─
+# On main before #134, plan_task_files kept the whole comma-joined value as ONE
+# path ("docs/guide.md:1-5, scripts/classify-low-risk.sh" → a single ^docs/ match),
+# so this plan classified LOW and auto-cleared a change to RAD's own classifier.
+# The comma-splitting helper must surface scripts/classify-low-risk.sh to rule 0.
+# The branch edits only the in-table docs file so rule 4 cannot mask rule 0.
+t_self_protected_multifile_task_line() {
+  branch_edit rad/selfprot-multifile docs/guide.md '# guide selfprot-multifile'
+
+  ( export RAD_LOW_RISK_PATTERNS='^docs/'
+    run_classify ".agents/plans/selfprot-multifile.md" "rad/selfprot-multifile"
+    [[ "$CLASSIFY_CODE" -eq 1 ]] || fail "AC#5: multi-file task line should be not-low (got $CLASSIFY_CODE): $CLASSIFY_OUT"
+    printf '%s\n' "$CLASSIFY_OUT" | grep -q "self-protected path (RAD machinery): scripts/classify-low-risk.sh" \
+      || fail "AC#5: not-low verdict did not name the comma-listed self-protected path: $CLASSIFY_OUT"
+  ) || exit 1
+  echo "✓ AC#5: self-protected path in a comma-separated task File: line ⇒ not-low"
+}
+
 # ── Rule 0 regression: a docs-only plan under the documented default allowlist ──
 # Rule 0 must not disturb the normal LOW path for genuinely inert scopes.
 t_self_protected_docs_regression() {
@@ -325,6 +352,7 @@ t_tests_config_not_cleared
 t_scope_drift_not_low
 t_empty_diff_not_low
 t_self_protected_not_low
+t_self_protected_multifile_task_line
 t_self_protected_docs_regression
 t_fresh_present_still_low
 t_stale_path_not_low
