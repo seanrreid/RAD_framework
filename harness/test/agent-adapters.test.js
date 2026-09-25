@@ -5,9 +5,16 @@ import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
-import { createCommandAdapter } from '../adapters/agent/command.js';
+import {
+  createCommandAdapter,
+  probeCommand,
+  PREFLIGHT_PROMPT,
+  PREFLIGHT_TIMEOUT_MS,
+} from '../adapters/agent/command.js';
 import { createRunWave } from '../adapters/agent/sdk.js';
 import { deliverCommand } from '../cli.js';
+import { deliverSpine } from '../spine.js';
+import { loadMatrix } from '../matrix.js';
 
 const NODE = process.execPath;
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -211,6 +218,126 @@ test('command adapter — stdout fallback excerpt is capped at 500 bytes and san
   });
 });
 
+// ===========================================================================
+// Command adapter — startup failure classification (agent-startup-preflight AC#1, AC#2)
+// ===========================================================================
+
+test('command adapter — non-zero exit with empty output is fail-protocol', async () => {
+  await withTempDir(async (dir) => {
+    const cmd = fakeCmd(dir, 'silent-fail.js', 'process.exit(1);\n');
+    const runWave = createCommandAdapter({ cmd, repoRoot: dir });
+    const result = await runWave(WAVE, PLAN_CTX);
+    assert.equal(result.outcome, 'fail-protocol');
+    assert.equal(result.status, 'failed');
+    assert.ok(result.tasks[0].error.includes('code 1'), `got ${result.tasks[0].error}`);
+  });
+});
+
+test('command adapter — non-zero exit with stdout-only reason is fail-protocol and keeps the #117 excerpt', async () => {
+  await withTempDir(async (dir) => {
+    const cmd = fakeCmd(
+      dir,
+      'not-logged-in.js',
+      `process.stdout.write('Not logged in - please run /login');process.exit(3);\n`,
+    );
+    const runWave = createCommandAdapter({ cmd, repoRoot: dir });
+    const result = await runWave(WAVE, PLAN_CTX);
+    assert.equal(result.outcome, 'fail-protocol');
+    assert.equal(result.status, 'failed');
+    assert.equal(
+      result.tasks[0].error,
+      'command exited with code 3: (stdout) Not logged in - please run /login',
+    );
+  });
+});
+
+test('command adapter — ENOENT spawn error is fail-protocol', async () => {
+  await withTempDir(async (dir) => {
+    const cmd = join(dir, 'no-such-agent-binary');
+    const runWave = createCommandAdapter({ cmd, repoRoot: dir });
+    const result = await runWave(WAVE, PLAN_CTX);
+    assert.equal(result.outcome, 'fail-protocol');
+    assert.equal(result.status, 'failed');
+    assert.ok(result.tasks[0].error.includes('ENOENT'), `got ${result.tasks[0].error}`);
+  });
+});
+
+test('command adapter — whitespace-only cmd (empty argv) is fail-protocol', async () => {
+  await withTempDir(async (dir) => {
+    const runWave = createCommandAdapter({ cmd: '   ', repoRoot: dir });
+    const result = await runWave(WAVE, PLAN_CTX);
+    assert.equal(result.outcome, 'fail-protocol');
+    assert.ok(result.tasks[0].error.includes('empty cmd'), `got ${result.tasks[0].error}`);
+  });
+});
+
+test('command adapter — non-zero exit WITH a WAVE_RESULT block keeps the retryable path', async () => {
+  await withTempDir(async (dir) => {
+    const cmd = fakeCmd(
+      dir,
+      'reported-fail.js',
+      `process.stdout.write(${JSON.stringify(GOOD_RESULT)});process.stderr.write('tests red');process.exit(2);\n`,
+    );
+    const runWave = createCommandAdapter({ cmd, repoRoot: dir });
+    const result = await runWave(WAVE, PLAN_CTX);
+    assert.equal(result.outcome, 'fail-tests');
+    assert.equal(result.status, 'failed');
+    assert.equal(result.tasks[0].error, 'command exited with code 2: tests red');
+  });
+});
+
+/** Minimal in-memory StateStore for driving deliverSpine (mirrors spine.test.js). */
+function makeSpineState(plan) {
+  const appended = [];
+  return {
+    appended,
+    async gate() { return { passed: true, reason: 'ok', satisfiedBy: { actor: 'architect' } }; },
+    append(event) { appended.push(event); },
+    plan() { return plan; },
+    history() { return appended; },
+    phase() { return null; },
+    list() { return []; },
+  };
+}
+
+test('deliverSpine + command adapter — an agent that can never start stops after ONE attempt via matrix abort', async () => {
+  await withTempDir(async (dir) => {
+    const counter = join(dir, 'count.txt');
+    const cmd = fakeCmd(
+      dir,
+      'never-starts.js',
+      `require('fs').appendFileSync(${JSON.stringify(counter)},'x');` +
+        `process.stdout.write('Not logged in');process.exit(1);\n`,
+    );
+    const adapter = createCommandAdapter({ cmd, repoRoot: dir });
+    let attempts = 0;
+    const runWave = async (wave, planCtx) => {
+      attempts += 1;
+      return adapter(wave, planCtx ?? PLAN_CTX);
+    };
+    const state = makeSpineState({ waves: [{ n: 1 }] });
+    let t = 0;
+    const result = await deliverSpine({
+      feature: 'demo',
+      state,
+      docs: {},
+      matrix: loadMatrix(),
+      gates: {},
+      runWave,
+      sh: () => ({ status: 0 }),
+      now: () => `t${t++}`,
+    });
+    assert.equal(result.stopped, 'matrix');
+    assert.equal(result.action, 'abort');
+    assert.equal(attempts, 1, 'the spine must not retry a startup failure');
+    const fs = await import('node:fs');
+    assert.equal(fs.readFileSync(counter, 'utf8').length, 1, 'the agent must be spawned exactly once');
+    const failed = state.appended.filter((e) => e.type === 'wave-failed');
+    assert.equal(failed.length, 1);
+    assert.deepEqual(failed[0].data, { wave: 1, action: 'abort' });
+  });
+});
+
 test('command adapter — child env omits a sentinel but forwards USER (allow-list)', async () => {
   await withTempDir(async (dir) => {
     const SENTINEL = 'RAD_TEST_SENTINEL_SECRET';
@@ -257,6 +384,87 @@ test('command adapter — child env has no USER key when parent USER is unset', 
       assert.equal(result.outcome, 'success', 'child env must have no USER key when parent USER is unset');
     } finally {
       if (savedUser !== undefined) process.env.USER = savedUser;
+    }
+  });
+});
+
+// ===========================================================================
+// probeCommand — agent-startup-preflight AC#3
+// ===========================================================================
+
+test('probeCommand — exports a fixed one-line prompt and a named timeout', () => {
+  assert.equal(PREFLIGHT_PROMPT, 'Reply with the single word OK.');
+  assert.equal(PREFLIGHT_TIMEOUT_MS, 60_000);
+});
+
+test('probeCommand — exit 0 resolves ok without parsing the reply', async () => {
+  await withTempDir(async (dir) => {
+    const cmd = fakeCmd(dir, 'ok.js', `process.stdout.write('definitely not the word');\n`);
+    assert.deepEqual(await probeCommand({ cmd, repoRoot: dir }), { ok: true });
+  });
+});
+
+test('probeCommand — exit 1 with a stdout-only reason resolves not-ok carrying that text', async () => {
+  await withTempDir(async (dir) => {
+    const cmd = fakeCmd(dir, 'nologin.js', `process.stdout.write('Not logged in');process.exit(1);\n`);
+    const result = await probeCommand({ cmd, repoRoot: dir });
+    assert.equal(result.ok, false);
+    assert.equal(result.error, 'command exited with code 1: (stdout) Not logged in');
+  });
+});
+
+test('probeCommand — stdout excerpt is capped and sanitized', async () => {
+  await withTempDir(async (dir) => {
+    const body = `sk-ant-${'S'.repeat(20)} ` + 'pad '.repeat(150) + 'TAIL_SHOULD_BE_CUT';
+    const cmd = fakeCmd(dir, 'long.js', `process.stdout.write(${JSON.stringify(body)});process.exit(4);\n`);
+    const result = await probeCommand({ cmd, repoRoot: dir });
+    assert.equal(result.ok, false);
+    assert.ok(result.error.includes('[REDACTED]') && !result.error.includes('S'.repeat(20)), result.error);
+    assert.ok(!result.error.includes('TAIL_SHOULD_BE_CUT'), result.error);
+  });
+});
+
+test('probeCommand — missing executable resolves not-ok (never throws)', async () => {
+  await withTempDir(async (dir) => {
+    const result = await probeCommand({ cmd: join(dir, 'no-such-agent-binary'), repoRoot: dir });
+    assert.equal(result.ok, false);
+    assert.ok(result.error.includes('ENOENT'), result.error);
+  });
+});
+
+test('probeCommand — empty or whitespace-only cmd resolves not-ok', async () => {
+  assert.equal((await probeCommand({ cmd: '' })).ok, false);
+  const blank = await probeCommand({ cmd: '   ' });
+  assert.equal(blank.ok, false);
+  assert.ok(blank.error.includes('empty cmd'), blank.error);
+});
+
+test('probeCommand — timeout resolves not-ok', async () => {
+  await withTempDir(async (dir) => {
+    const cmd = fakeCmd(dir, 'slow.js', 'setTimeout(() => {}, 2000);\n');
+    const result = await probeCommand({ cmd, repoRoot: dir, timeoutMs: 50 });
+    assert.equal(result.ok, false);
+    assert.ok(result.error.includes('timed out after 50ms'), result.error);
+  });
+});
+
+test('probeCommand — child gets the probe prompt on stdin and only the allow-listed env', async () => {
+  await withTempDir(async (dir) => {
+    const SENTINEL = 'RAD_TEST_PROBE_SENTINEL';
+    process.env[SENTINEL] = 'leak-me-if-you-can';
+    try {
+      const cmd = fakeCmd(
+        dir,
+        'probe-check.js',
+        `let s='';process.stdin.on('data',(d)=>{s+=d;});process.stdin.on('end',()=>{` +
+          `const leaked=process.env[${JSON.stringify(SENTINEL)}]!==undefined;` +
+          `if(s===${JSON.stringify(PREFLIGHT_PROMPT)}&&!leaked){process.exit(0);}` +
+          `process.stdout.write('stdin='+JSON.stringify(s)+' leaked='+leaked);process.exit(1);});\n`,
+      );
+      const result = await probeCommand({ cmd, repoRoot: dir });
+      assert.deepEqual(result, { ok: true }, `probe child saw: ${result.error}`);
+    } finally {
+      delete process.env[SENTINEL];
     }
   });
 });
@@ -470,5 +678,179 @@ test('deliverCommand — command selection requires RAD_AGENT_CMD, not the key',
     assert.equal(code, 1);
     assert.ok(stderr.includes('RAD_AGENT_CMD'));
     assert.ok(!stderr.includes('ANTHROPIC_API_KEY'));
+  });
+});
+
+// ===========================================================================
+// deliverCommand startup preflight — AC#4 / AC#5
+// ===========================================================================
+
+// Every env knob that could steer these deliver runs; saved and restored per test.
+const PREFLIGHT_ENV_KEYS = [
+  'RAD_AGENT', 'RAD_AGENT_CMD', 'RAD_AGENT_PREFLIGHT', 'ANTHROPIC_API_KEY',
+  'RAD_WORKTREE', 'RAD_SYNC', 'RAD_TOKEN_BUDGET',
+];
+
+const PREFLIGHT_FAIL_PREFIX =
+  'rad deliver: RAD_AGENT_CMD failed to start under the adapter env ' +
+  '(it must authenticate without inherited env vars): ';
+
+/** An approved plan that also declares one wave, so the spine calls runWave. */
+function writeApprovedWavePlan(repoRoot, feature) {
+  writeApprovedPlan(repoRoot, feature);
+  const planFile = join(repoRoot, '.agents', 'plans', `${feature}.md`);
+  const waveBlock = '\n\n## Waves\n\n### Wave 1\n\n#### Task 1.1: Do a\nFile: a.js\n';
+  writeFileSync(planFile, waveBlock, { encoding: 'utf8', flag: 'a' });
+}
+
+/** Event types recorded for a feature (the approved seed event included). */
+async function eventTypes(repoRoot, feature) {
+  const fs = await import('node:fs');
+  const file = join(repoRoot, '.agents', 'state', feature, 'events.jsonl');
+  return fs.readFileSync(file, 'utf8').trim().split('\n').map((l) => JSON.parse(l).type);
+}
+
+/**
+ * A fake agent that logs each invocation to `log` ('P' for the preflight
+ * prompt, 'W' for anything else) and exits with the given codes.
+ */
+function loggingAgent(dir, log, { probeExit, waveExit }) {
+  return fakeCmd(
+    dir,
+    'logging-agent.js',
+    `const fs=require('fs');let s='';process.stdin.on('data',(d)=>{s+=d;});` +
+      `process.stdin.on('end',()=>{const p=s===${JSON.stringify(PREFLIGHT_PROMPT)};` +
+      `fs.appendFileSync(${JSON.stringify(log)},p?'P':'W');` +
+      `if(!p||${probeExit}!==0)process.stdout.write('Not logged in');` +
+      `process.exit(p?${probeExit}:${waveExit});});\n`,
+  );
+}
+
+/** Run deliverCommand with a scoped env and captured stderr. */
+async function runDeliver(env, argv, ctx) {
+  const saved = Object.fromEntries(PREFLIGHT_ENV_KEYS.map((k) => [k, process.env[k]]));
+  for (const k of PREFLIGHT_ENV_KEYS) delete process.env[k];
+  Object.assign(process.env, env);
+  let stderr = '';
+  const orig = process.stderr.write.bind(process.stderr);
+  process.stderr.write = (c, ...r) => { stderr += c; return orig(c, ...r); };
+  try {
+    return { code: await deliverCommand(argv, ctx), stderr };
+  } finally {
+    process.stderr.write = orig;
+    for (const k of PREFLIGHT_ENV_KEYS) {
+      if (saved[k] !== undefined) process.env[k] = saved[k]; else delete process.env[k];
+    }
+  }
+}
+
+async function invocations(log) {
+  const fs = await import('node:fs');
+  return fs.existsSync(log) ? fs.readFileSync(log, 'utf8') : '';
+}
+
+test('deliverCommand preflight — a failing probe returns 1 with the exact message and appends no events', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const feature = 'pf-fail';
+    writeApprovedWavePlan(repoRoot, feature);
+    const log = join(repoRoot, 'calls.txt');
+    const cmd = loggingAgent(repoRoot, log, { probeExit: 1, waveExit: 1 });
+
+    const { code, stderr } = await runDeliver({ RAD_AGENT_CMD: cmd }, [feature], { repoRoot, sh: okSh });
+
+    assert.equal(code, 1);
+    assert.ok(stderr.includes(`${PREFLIGHT_FAIL_PREFIX}`), stderr);
+    assert.ok(stderr.includes('Not logged in'), 'the probe error excerpt is surfaced');
+    assert.equal(await invocations(log), 'P', 'only the probe ran — no wave was attempted');
+    assert.deepEqual(await eventTypes(repoRoot, feature), ['approved'], 'no events appended');
+  });
+});
+
+test('deliverCommand preflight — RAD_AGENT_PREFLIGHT=off skips the probe', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const feature = 'pf-off';
+    writeApprovedWavePlan(repoRoot, feature);
+    const log = join(repoRoot, 'calls.txt');
+    const cmd = loggingAgent(repoRoot, log, { probeExit: 1, waveExit: 1 });
+
+    const { code, stderr } = await runDeliver(
+      { RAD_AGENT_CMD: cmd, RAD_AGENT_PREFLIGHT: 'off' }, [feature], { repoRoot, sh: okSh },
+    );
+
+    assert.equal(code, 1, 'the always-failing agent still fails — at Wave 1 instead');
+    assert.ok(!stderr.includes(PREFLIGHT_FAIL_PREFIX), stderr);
+    assert.ok(!(await invocations(log)).includes('P'), 'the probe prompt was never sent');
+    const types = await eventTypes(repoRoot, feature);
+    assert.ok(types.includes('deliver-started'), types.join(','));
+    assert.ok(types.includes('wave-failed'), types.join(','));
+  });
+});
+
+test('deliverCommand preflight — any value other than exactly "off" still probes', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const feature = 'pf-upper-off';
+    writeApprovedWavePlan(repoRoot, feature);
+    const log = join(repoRoot, 'calls.txt');
+    const cmd = loggingAgent(repoRoot, log, { probeExit: 1, waveExit: 1 });
+
+    const { code, stderr } = await runDeliver(
+      { RAD_AGENT_CMD: cmd, RAD_AGENT_PREFLIGHT: 'OFF' }, [feature], { repoRoot, sh: okSh },
+    );
+
+    assert.equal(code, 1);
+    assert.ok(stderr.includes(PREFLIGHT_FAIL_PREFIX), stderr);
+    assert.equal(await invocations(log), 'P');
+  });
+});
+
+test('deliverCommand preflight — a passing probe proceeds to wave execution', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const feature = 'pf-pass';
+    writeApprovedWavePlan(repoRoot, feature);
+    const log = join(repoRoot, 'calls.txt');
+    // Probe succeeds; the wave then fails to start, proving we got past preflight.
+    const cmd = loggingAgent(repoRoot, log, { probeExit: 0, waveExit: 1 });
+
+    const { stderr } = await runDeliver({ RAD_AGENT_CMD: cmd }, [feature], { repoRoot, sh: okSh });
+
+    assert.ok(!stderr.includes(PREFLIGHT_FAIL_PREFIX), stderr);
+    assert.equal(await invocations(log), 'PW', 'probe first, then exactly one wave attempt');
+    const types = await eventTypes(repoRoot, feature);
+    assert.ok(types.includes('deliver-started'), types.join(','));
+  });
+});
+
+test('deliverCommand preflight — RAD_AGENT=sdk never probes RAD_AGENT_CMD', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const feature = 'pf-sdk';
+    // No waves: the SDK adapter is constructed but never called (no network).
+    writeApprovedPlan(repoRoot, feature);
+    const log = join(repoRoot, 'calls.txt');
+    const cmd = loggingAgent(repoRoot, log, { probeExit: 1, waveExit: 1 });
+
+    const { stderr } = await runDeliver(
+      { RAD_AGENT: 'sdk', ANTHROPIC_API_KEY: 'sk-test-not-real', RAD_AGENT_CMD: cmd },
+      [feature],
+      { repoRoot, sh: okSh },
+    );
+
+    assert.ok(!stderr.includes(PREFLIGHT_FAIL_PREFIX), stderr);
+    assert.equal(await invocations(log), '', 'RAD_AGENT_CMD was never spawned');
+    assert.ok((await eventTypes(repoRoot, feature)).includes('deliver-started'));
+  });
+});
+
+test('deliverCommand preflight — an injected ctx.runWave never probes', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const feature = 'pf-injected';
+    writeApprovedPlan(repoRoot, feature);
+    const log = join(repoRoot, 'calls.txt');
+    const cmd = loggingAgent(repoRoot, log, { probeExit: 1, waveExit: 1 });
+    const runWave = async () => { throw new Error('no waves declared — must not be called'); };
+
+    const { stderr } = await runDeliver({ RAD_AGENT_CMD: cmd }, [feature], { repoRoot, sh: okSh, runWave });
+
+    assert.ok(!stderr.includes(PREFLIGHT_FAIL_PREFIX), stderr);
+    assert.equal(await invocations(log), '', 'RAD_AGENT_CMD was never spawned');
   });
 });

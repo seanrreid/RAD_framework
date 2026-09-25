@@ -136,7 +136,9 @@ Run-level failures the adapter detects before/around parsing map directly:
 |---------------------|----------------|
 | wall-clock timeout (deadline exceeded) | `fail-timeout` |
 | missing `WAVE_RESULT` after one reprompt | `fail-protocol` |
-| non-zero exit / spawn error / SDK error result | `fail-tests` (via synthetic failure) |
+| `command`: non-zero exit or spawn error with **no** `WAVE_RESULT` block | `fail-protocol` (matrix `abort` — no retry; a retry re-runs the same broken startup) |
+| `command`: non-zero exit **with** a `WAVE_RESULT` block | `fail-tests` (via synthetic failure, as before) |
+| `sdk`: SDK error result (unchanged) | `fail-tests` (via synthetic failure) |
 
 ---
 
