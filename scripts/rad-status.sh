@@ -163,6 +163,26 @@ collect_research() {
   } | sort
 }
 
+# Research is consumed once a plan exists for its slug (any source, any status)
+# or its header says so; consumed research leaves the pre-plan section.
+RESEARCH_CONSUMED_STATUS="consumed"
+
+# Space-delimited slug set from collect_plans rows (bash 3.2: no assoc arrays).
+plan_slug_set() {
+  local set=" " feature rest
+  while IFS='|' read -r feature rest; do
+    [[ -n "$feature" ]] && set="${set}${feature} "
+  done <<< "$1"
+  printf '%s' "$set"
+}
+
+research_is_consumed() {
+  # $1 = research slug, $2 = research status; reads PLAN_SLUGS
+  [[ "$2" == "$RESEARCH_CONSUMED_STATUS" ]] && return 0
+  case "$PLAN_SLUGS" in *" $1 "*) return 0 ;; esac
+  return 1
+}
+
 # ── Open PRs ──────────────────────────────────────────────────────────────────
 
 collect_prs() {
@@ -230,6 +250,7 @@ cli_available && CLI_STATUS="✓ CLI available"
 
 PLANS=$(collect_plans)
 RESEARCH=$(collect_research)
+PLAN_SLUGS=$(plan_slug_set "$PLANS")
 LOGS=$(collect_logs)
 AGENTS=$(agent_count)
 
@@ -290,7 +311,14 @@ if [[ -z "$RESEARCH" ]]; then
   echo "  (no research artifacts)"
   echo ""
 else
+  RESEARCH_HIDDEN=0
+  RESEARCH_SHOWN=0
   while IFS='|' read -r slug status where; do
+    if research_is_consumed "$slug" "$status"; then
+      RESEARCH_HIDDEN=$((RESEARCH_HIDDEN + 1))
+      continue
+    fi
+    RESEARCH_SHOWN=$((RESEARCH_SHOWN + 1))
     echo "  · $slug"
     echo "    Status: $status"
     echo "    Source: $where"
@@ -302,6 +330,11 @@ else
     esac
     echo ""
   done <<< "$RESEARCH"
+  # Hiding is reported, never silent.
+  if [[ "$RESEARCH_SHOWN" -eq 0 ]]; then
+    echo "  (no pre-plan research; ${RESEARCH_HIDDEN} consumed)"
+    echo ""
+  fi
 fi
 
 # ── Open PRs ──────────────────────────────────────────────────────────────────

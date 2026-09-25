@@ -54,6 +54,12 @@ build_fixture() {
     write_doc .agents/research/parked-idea.md parked
     write_doc .agents/research/odd-state.md   in-limbo
     write_doc .agents/research/README.md      pending-design
+    # Consumed: a plan on base for has-plan; review-plan's plan lives only on
+    # its rad/ tip; done-idea says consumed with no plan anywhere.
+    write_doc .agents/research/has-plan.md    pending-design
+    write_doc .agents/plans/has-plan.md       complete
+    write_doc .agents/research/review-plan.md pending-plan
+    write_doc .agents/research/done-idea.md   consumed
     g add -A && g commit -qm base
     g remote add origin "$origin"
     g push -q origin main
@@ -118,6 +124,29 @@ echo "✓ R5: parked and unrecognised statuses listed without a hint"
 
 printf '%s\n' "$OUT" | grep -q "^  $REVIEW_ICON review-plan$" || fail "R6: Status: review plan lacks the $REVIEW_ICON icon"
 echo "✓ R6: Status: review plan gets the $REVIEW_ICON icon"
+
+# Section text captured once; matched with case, not `printf | grep -q`
+# (SIGPIPE under pipefail).
+SECTION=$(printf '%s\n' "$OUT" | awk '/── Research \(pre-plan\)/{p=1;next} /^── /{p=0} p')
+case "$SECTION" in *"· has-plan"*)    fail "R8: research with a merged plan must be hidden" ;; esac
+case "$SECTION" in *"· review-plan"*) fail "R8: research with a branch-tip plan must be hidden" ;; esac
+echo "✓ R8: research whose slug has a plan (any source) is hidden"
+case "$SECTION" in *"· done-idea"*)   fail "R9: Status: consumed research must be hidden" ;; esac
+case "$SECTION" in *"consumed)"*)     fail "R9: hidden-count line must not render while research is shown" ;; esac
+echo "✓ R9: Status: consumed research (no plan) is hidden"
+
+# All hidden: every artifact is consumed, so the hidden-count line renders.
+HIDDEN="$TMP/hidden"
+git init -q "$HIDDEN"
+install_scripts "$HIDDEN"
+write_doc "$HIDDEN/.agents/research/planned.md" pending-design
+write_doc "$HIDDEN/.agents/plans/planned.md"    in-progress
+write_doc "$HIDDEN/.agents/research/retired.md" consumed
+OUT=$(run_status "$HIDDEN")
+SECTION=$(printf '%s\n' "$OUT" | awk '/── Research \(pre-plan\)/{p=1;next} /^── /{p=0} p')
+case "$SECTION" in *"(no pre-plan research; 2 consumed)"*) ;; *) fail "R10: hidden-count line missing: $SECTION" ;; esac
+case "$SECTION" in *"· "*) fail "R10: no research entry should be listed: $SECTION" ;; esac
+echo "✓ R10: all research hidden yields the hidden-count line"
 
 # Empty state: a repo with no research anywhere.
 EMPTY="$TMP/empty"
