@@ -8,3 +8,5 @@ Executor role: architect
 
 | Step | Wave | Task | Status | Commit | Time |
 |------|------|------|--------|--------|------|
+| 1 | 1 | 1.1 Kill the agent on timeout and label the probe timeout | complete | 92d1f9b | 12:23 |
+| 2 | 1 | 1.2 Configurable preflight timeout | complete | c6b07ad | 12:23 |
