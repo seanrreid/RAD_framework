@@ -1,0 +1,8 @@
+{"feature":"replay-legacy","type":"plan-created","actor":"dev@example.com","ts":"2026-07-01T10:00:00.000Z"}
+{"feature":"replay-legacy","type":"approved","actor":"sean@torchcodelab.com","role":"architect","ts":"2026-07-01T12:00:00.000Z","recordedBy":"sean@torchcodelab.com"}
+{"feature":"replay-legacy","type":"deliver-started","actor":"harness","ts":"2026-07-02T09:00:00.000Z"}
+{"feature":"replay-legacy","type":"wave-attempt","actor":"harness","ts":"2026-07-02T09:10:00.000Z","data":{"wave":1,"outcome":"fail-tests","usage":{"input":100,"output":20,"total":120}}}
+{"feature":"replay-legacy","type":"wave-attempt","actor":"harness","ts":"2026-07-02T09:20:00.000Z","data":{"wave":1,"outcome":"success","tasks":[{"title":"Task 1.1","status":"complete"}],"verify":{"command":"npm test --prefix harness","status":0,"passed":true}}}
+{"feature":"replay-legacy","type":"wave-complete","actor":"harness","ts":"2026-07-02T09:20:01.000Z","data":{"wave":1}}
+{"feature":"replay-legacy","type":"wave-attempt","actor":"harness","ts":"2026-07-02T09:30:00.000Z","data":{"wave":2,"outcome":"fail-scope"}}
+{"feature":"replay-legacy","type":"wave-failed","actor":"harness","ts":"2026-07-02T09:30:01.000Z","data":{"wave":2,"action":"abort"}}

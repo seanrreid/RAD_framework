@@ -1,0 +1,5 @@
+{"feature":"replay-veto","type":"approved","actor":"sean@torchcodelab.com","role":"architect","ts":"2026-07-10T12:00:00.000Z","recordedBy":"sean@torchcodelab.com"}
+{"feature":"replay-veto","type":"deliver-started","actor":"harness","ts":"2026-07-11T09:00:00.000Z"}
+{"feature":"replay-veto","type":"hook-veto","actor":"harness","ts":"2026-07-11T09:10:00.000Z","data":{"point":"post-wave","hook":"scripts/hooks/post-wave/10-policy.sh","outcome":"abort-user","source":"hook"}}
+{"feature":"replay-veto","type":"wave-attempt","actor":"harness","ts":"2026-07-11T09:10:01.000Z","data":{"wave":1,"outcome":"abort-user","source":"hook","point":"post-wave","hook":"scripts/hooks/post-wave/10-policy.sh"}}
+{"feature":"replay-veto","type":"wave-failed","actor":"harness","ts":"2026-07-11T09:10:02.000Z","data":{"wave":1,"action":"abort"}}
