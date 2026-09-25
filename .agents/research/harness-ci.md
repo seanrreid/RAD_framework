@@ -1,7 +1,7 @@
 # Research: Harness CI
 Created: 2026-07-03
 Author: architect
-Status: pending-design
+Status: consumed
 Source: inline — session discussion (2026-07-03) following the agent-reliability-stack
 review; CI-specific ownership/authenticity rulings recorded same session.
 

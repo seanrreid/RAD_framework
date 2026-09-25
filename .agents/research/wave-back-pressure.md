@@ -1,7 +1,7 @@
 # Research: Per-Wave Back-Pressure Contract
 Created: 2026-08-04
 Author: architect
-Status: pending-plan
+Status: consumed
 Source: https://www.humanlayer.dev/blog/skill-issue-harness-engineering-for-coding-agents (inline spec)
 
 > **Scope note.** This is a feature-scoped research artifact, not a project-scoped

@@ -1,7 +1,7 @@
 # Research: Wave-Lifecycle Hooks for the Deliver Spine
 Created: 2026-06-15
 Author: architect
-Status: pending-design
+Status: consumed
 Source: inline (Strands harness-sdk comparison — strands-agents/harness-sdk)
 
 ## Project Summary

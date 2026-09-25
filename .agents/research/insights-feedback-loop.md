@@ -1,7 +1,7 @@
 # Research: Insights Feedback Loop
 Created: 2026-07-03
 Author: architect
-Status: pending-design
+Status: consumed
 Source: .agents/research/agent-reliability-stack-review.md (items 1 + 4, bundled) +
 session ruling (2026-07-03): separable waves; all domains developer-open with an
 events.js read/write-separation constraint.

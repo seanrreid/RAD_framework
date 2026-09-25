@@ -1,7 +1,7 @@
 # Research: Approval-Authority Recording
 Created: 2026-06-23
 Author: architect
-Status: pending-design
+Status: consumed
 Source: GitHub issue #39 (https://github.com/seanrreid/RAD_framework/issues/39) +
 session ruling (2026-06-23): audit-only event, bundle the re-approval gap
 ([[rad-no-reapproval-path]]).
