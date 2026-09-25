@@ -1,7 +1,10 @@
 # Plan: Agent Startup Preflight
 Created: 2026-09-25
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-09-25T15:38:17.081Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/agent-startup-preflight
 Adopted-From: https://github.com/seanrreid/RAD_framework/issues/114
 Issue-Title: Agent adapter gives no diagnosis when RAD_AGENT_CMD cannot authenticate: startup failure is misclassified as blocked_code and retried
