@@ -112,7 +112,12 @@ Issue-Title: [original issue title, if fetched]
 [List every agent called during research. Flag out-of-scope dependencies.]
 
 ## Files in Scope
-<!-- A RENAME DECLARES BOTH PATHS: one row for the source, one for the
+<!-- Lines must be a range (e.g. 45-120) or a single line (e.g. 88) — a bare
+     number counts as ONE line toward the linter's context budget.
+     A task `File:` line may list several comma-separated files, each with an
+     optional `:lines` suffix; an extra range-only part (e.g. `a.js:16-33, 80-96`)
+     is read as another range of the same file.
+     A RENAME DECLARES BOTH PATHS: one row for the source, one for the
      destination. scripts/check-scope.sh builds the declared set from the File
      column only — it never reads this Change prose — so a `git mv` destination
      mentioned only in a Change cell reads as out-of-scope drift and fails the
