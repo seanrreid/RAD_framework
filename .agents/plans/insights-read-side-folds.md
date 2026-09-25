@@ -1,7 +1,8 @@
 # Plan: Insights Read-Side Folds
 Created: 2026-08-20
 Author: architect
-Status: in-progress
+Status: complete
+Completed-At: 2026-09-25T14:14:43Z
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-08-20T18:18:25.487Z
 Recorded-By: sean@torchcodelab.com
