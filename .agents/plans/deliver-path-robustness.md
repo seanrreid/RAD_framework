@@ -1,7 +1,10 @@
 # Plan: Deliver-Path Robustness
 Created: 2026-09-25
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-09-25T16:20:09.567Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/deliver-path-robustness
 Adopted-From: https://github.com/seanrreid/RAD_framework/issues/129
 Issue-Title: Command adapter never kills the agent on timeout (orphaned CLI); probe timeout is hard-coded and mislabelled 'wave timed out'
