@@ -17,6 +17,7 @@ import {
   FILE_FAILURE_MIN_FEATURES,
   waveReliability,
   attemptOutcomeCounts,
+  cacheUsage,
 } from '../events.js';
 
 test('reduce on empty history → null phase, no markers, no approvals', () => {
@@ -124,24 +125,36 @@ test('reduce throws on a non-array history', () => {
 //   wave-complete  → data.{ wave }
 //   hook-veto      → data.{ point, hook, outcome, source }
 
-test('outcomeCounts folds wave-complete events across the 7-outcome vocabulary + unknown', () => {
+test('outcomeCounts counts each (feature, wave) pair by its LAST wave-attempt outcome; ignores wave-complete', () => {
   const history = [
-    // Spine-shaped wave-complete: data carries only { wave } → unknown bucket.
-    { feature: 'f', type: 'wave-complete', actor: 'harness', ts: 't1', data: { wave: 1 } },
-    // Outcome-carrying variants (tolerated shape) land in their vocab bucket.
-    { feature: 'f', type: 'wave-complete', actor: 'harness', ts: 't2', data: { wave: 2, outcome: 'success' } },
-    { feature: 'f', type: 'wave-complete', actor: 'harness', ts: 't3', data: { wave: 3, outcome: 'success' } },
-    // Out-of-vocabulary outcome → unknown, never a new key.
-    { feature: 'f', type: 'wave-complete', actor: 'harness', ts: 't4', data: { wave: 4, outcome: 'bogus' } },
-    // Non-wave-complete events contribute nothing.
-    { feature: 'f', type: 'wave-attempt', actor: 'harness', ts: 't5', data: { wave: 4, outcome: 'success' } },
+    // f/1: fail-tests then success → one pair, terminal 'success'.
+    { feature: 'f', type: 'wave-attempt', actor: 'harness', ts: 't1', data: { wave: 1, outcome: 'fail-tests' } },
+    { feature: 'f', type: 'wave-attempt', actor: 'harness', ts: 't2', data: { wave: 1, outcome: 'success' } },
+    // f/2: success then fail-timeout (resumed run) → terminal 'fail-timeout'.
+    { feature: 'f', type: 'wave-attempt', actor: 'harness', ts: 't3', data: { wave: 2, outcome: 'success' } },
+    { feature: 'f', type: 'wave-attempt', actor: 'harness', ts: 't4', data: { wave: 2, outcome: 'fail-timeout' } },
+    // f/3: last attempt carries no outcome → unknown (not the earlier success).
+    { feature: 'f', type: 'wave-attempt', actor: 'harness', ts: 't5', data: { wave: 3, outcome: 'success' } },
+    { feature: 'f', type: 'wave-attempt', actor: 'harness', ts: 't6', data: { wave: 3 } },
+    // f/4: out-of-vocabulary outcome → unknown, never a new key.
+    { feature: 'f', type: 'wave-attempt', actor: 'harness', ts: 't7', data: { wave: 4, outcome: 'bogus' } },
+    // g/1: same wave number, different feature → its own pair.
+    { feature: 'g', type: 'wave-attempt', actor: 'harness', ts: 't8', data: { wave: 1, outcome: 'abort-user' } },
+    // wave-complete is ignored even when it carries an outcome.
+    { feature: 'f', type: 'wave-complete', actor: 'harness', ts: 't9', data: { wave: 5, outcome: 'success' } },
+    // Unplaceable attempts (no feature / non-numeric wave) contribute nothing.
+    { type: 'wave-attempt', actor: 'harness', ts: 't10', data: { wave: 6, outcome: 'success' } },
+    { feature: 'f', type: 'wave-attempt', actor: 'harness', ts: 't11', data: { wave: '7', outcome: 'success' } },
   ];
+  // Pairs: f/1 success, f/2 fail-timeout, f/3 unknown, f/4 unknown, g/1 abort-user
+  //   → success 1, fail-timeout 1, abort-user 1, unknown 2, total 5 (= pair count).
   const counts = outcomeCounts(history);
-  assert.equal(counts.success, 2);
+  assert.equal(counts.success, 1);
+  assert.equal(counts['fail-timeout'], 1);
+  assert.equal(counts['abort-user'], 1);
   assert.equal(counts.unknown, 2);
-  assert.equal(counts.total, 4);
+  assert.equal(counts.total, 5);
   assert.equal(counts['fail-tests'], 0);
-  assert.equal(counts['abort-user'], 0);
   assert.equal('bogus' in counts, false);
 });
 
@@ -266,16 +279,21 @@ const EXPECTED = {
   },
   resumeFrom: new Set([1, 2]),
   totalUsage: { input: 15, output: 8, total: 23 },
+  // outcomeCounts counts each (feature, wave) pair's LAST wave-attempt outcome
+  // (#122 — wave-complete carries no outcome on a real spine log, so the fold
+  // now ignores it). Pairs: legacy/1 last=success; legacy/2 fail-tests→success,
+  // last=success; legacy/3 last=abort-user → success 2, abort-user 1, total 3.
+  // tasks/verify are still never read, so the parity claim itself is unchanged.
   outcomeCounts: {
-    success: 1,
+    success: 2,
     'fail-tests': 0,
     'fail-scope': 0,
     'fail-protocol': 0,
     'fail-timeout': 0,
     'no-changes': 0,
-    'abort-user': 0,
-    unknown: 1,
-    total: 2,
+    'abort-user': 1,
+    unknown: 0,
+    total: 3,
   },
   failReasonCounts: { total: 1, reasons: { 'abort-user': 1 } },
   retryCounts: { total: 4, retriedWaves: 1, perWave: { 1: 1, 2: 2, 3: 1 } },
@@ -340,7 +358,9 @@ test('phaseOf is pure — no filesystem access (only the passed array matters)',
 // `tasks` on every attempt; mixed = both shapes interleaved). The expected
 // objects below are HAND-COMPUTED from the fixture lines — never recomputed
 // from the folds under test — so any later change that moves an existing fold's
-// output on these logs turns this test red.
+// output on these logs turns this test red. (outcomeCounts' literals moved ONCE,
+// deliberately, in #122: it now counts terminal wave-attempt outcomes per
+// (feature, wave) pair instead of outcome-less wave-complete events.)
 const INSIGHTS_FIXTURE_DIR = fileURLToPath(new URL('./fixtures/insights/', import.meta.url));
 const INSIGHTS_FIXTURE_FEATURES = ['legacy', 'enriched', 'mixed'];
 
@@ -372,8 +392,10 @@ const FENCE_EXPECTED = {
   legacy: {
     // Usage: 140 + (80+20, no explicit total) = 240; the 2nd wave-2 and wave-3 attempts carry none.
     totalUsage: { input: 180, output: 60, total: 240 },
-    // wave-complete 1 is 'success'; wave-complete 2 has no outcome → unknown.
-    outcomeCounts: outcomesWith({ success: 1, unknown: 1, total: 2 }),
+    // Terminal attempt per (feature, wave) pair (lines 5, 7-8, 10):
+    //   w1 success; w2 fail-tests→success = success; w3 fail-timeout
+    //   → success 2, fail-timeout 1, total 3 pairs.
+    outcomeCounts: outcomesWith({ success: 2, 'fail-timeout': 1, total: 3 }),
     // The wave-3 surface terminal records { wave, action } with no reason.
     failReasonCounts: { total: 1, reasons: { unknown: 1 } },
     retryCounts: { total: 4, retriedWaves: 1, perWave: { 1: 1, 2: 2, 3: 1 } },
@@ -382,7 +404,10 @@ const FENCE_EXPECTED = {
   enriched: {
     // Usage: 250 + 150 + 75 + 50; the resumed wave-2 attempt carries none.
     totalUsage: { input: 420, output: 105, total: 525 },
-    outcomeCounts: outcomesWith({ success: 2, total: 2 }),
+    // Terminal attempt per pair (lines 4, 6-7-10, 13):
+    //   w1 success; w2 fail-tests→fail-scope→success = success; w3 abort-user
+    //   → success 2, abort-user 1, total 3 pairs.
+    outcomeCounts: outcomesWith({ success: 2, 'abort-user': 1, total: 3 }),
     failReasonCounts: { total: 2, reasons: { 'budget-exhausted': 1, 'abort-user': 1 } },
     retryCounts: { total: 5, retriedWaves: 1, perWave: { 1: 1, 2: 3, 3: 1 } },
     // One post-wave veto: a hook-veto event AND a provenance-tagged attempt.
@@ -391,7 +416,10 @@ const FENCE_EXPECTED = {
   mixed: {
     // Usage: 60 + 90 + (30+5, no explicit total) + (total-only 40) = 225.
     totalUsage: { input: 150, output: 35, total: 225 },
-    outcomeCounts: outcomesWith({ success: 1, 'no-changes': 1, total: 2 }),
+    // Terminal attempt per pair (lines 4-5, 7, 9-10):
+    //   w1 fail-protocol→success = success; w2 no-changes; w3 fail-tests→fail-tests
+    //   → success 1, no-changes 1, fail-tests 1, total 3 pairs.
+    outcomeCounts: outcomesWith({ success: 1, 'no-changes': 1, 'fail-tests': 1, total: 3 }),
     // doom-loop terminal, then a pre-wave-veto abort with { wave, action } only.
     failReasonCounts: { total: 2, reasons: { 'doom-loop': 1, unknown: 1 } },
     retryCounts: { total: 5, retriedWaves: 2, perWave: { 1: 2, 2: 1, 3: 2 } },
@@ -760,4 +788,113 @@ test('attemptOutcomeCounts never reads usage', () => {
     return { ...event, data };
   });
   assert.deepStrictEqual(attemptOutcomeCounts(guarded), expected);
+});
+
+// ── cacheUsage ───────────────────────────────────────────────────────────────
+// Every expected value below is hand-computed; the arithmetic is in comments.
+
+const CACHE_ZERO = { attempts: [], totals: { cacheRead: 0, input: 0 }, withoutCache: 0 };
+
+test('cacheUsage lists a retry whose ratio drops from positive to 0', () => {
+  const history = deepFreeze([
+    { feature: 'f', type: 'wave-attempt', data: { wave: 1, outcome: 'fail-tests', usage: { input: 200, output: 50, cacheRead: 800 } } },
+    { feature: 'f', type: 'wave-attempt', data: { wave: 1, outcome: 'success', usage: { input: 1000, output: 50, cacheRead: 0 } } },
+  ]);
+  assert.deepStrictEqual(cacheUsage(history), {
+    attempts: [
+      // 800 / (200 + 800) = 800 / 1000 = 0.8
+      { feature: 'f', wave: 1, attempt: 1, cacheRead: 800, input: 200, ratio: 0.8 },
+      // 0 / (1000 + 0) = 0
+      { feature: 'f', wave: 1, attempt: 2, cacheRead: 0, input: 1000, ratio: 0 },
+    ],
+    // cacheRead 800 + 0 = 800; input 200 + 1000 = 1200
+    totals: { cacheRead: 800, input: 1200 },
+    withoutCache: 0,
+  });
+});
+
+test('cacheUsage counts legacy attempts with no usage (or no cacheRead) in withoutCache', () => {
+  const history = deepFreeze([
+    { feature: 'f', type: 'wave-attempt', data: { wave: 1, outcome: 'success' } },
+    { feature: 'f', type: 'wave-attempt', data: { wave: 2, outcome: 'success', usage: { input: 10, output: 5 } } },
+    { feature: 'f', type: 'wave-attempt', data: { wave: 3, outcome: 'success', usage: null } },
+  ]);
+  // 3 placeable attempts, none with a cacheRead → withoutCache 3, nothing listed.
+  assert.deepStrictEqual(cacheUsage(history), { ...CACHE_ZERO, withoutCache: 3 });
+});
+
+test('cacheUsage ratio is null on a zero denominator; missing input is treated as 0', () => {
+  const history = deepFreeze([
+    // input 0 + cacheRead 0 = 0 → null
+    { feature: 'f', type: 'wave-attempt', data: { wave: 1, usage: { input: 0, cacheRead: 0 } } },
+    // input absent → 0; 0 + 0 = 0 → null
+    { feature: 'f', type: 'wave-attempt', data: { wave: 2, usage: { cacheRead: 0 } } },
+    // input absent → 0; 50 / (0 + 50) = 1
+    { feature: 'f', type: 'wave-attempt', data: { wave: 3, usage: { cacheRead: 50 } } },
+  ]);
+  assert.deepStrictEqual(cacheUsage(history), {
+    attempts: [
+      { feature: 'f', wave: 1, attempt: 1, cacheRead: 0, input: 0, ratio: null },
+      { feature: 'f', wave: 2, attempt: 1, cacheRead: 0, input: 0, ratio: null },
+      { feature: 'f', wave: 3, attempt: 1, cacheRead: 50, input: 0, ratio: 1 },
+    ],
+    // cacheRead 0 + 0 + 50 = 50; input 0 + 0 + 0 = 0
+    totals: { cacheRead: 50, input: 0 },
+    withoutCache: 0,
+  });
+});
+
+test('cacheUsage on a mixed history: invalid cacheRead values count as withoutCache, ordinals span them', () => {
+  const history = deepFreeze([
+    { feature: 'a', type: 'wave-complete', data: { wave: 1 } }, // ignored: not an attempt
+    { feature: 'a', type: 'wave-attempt', data: { wave: 1, usage: { input: 100 } } }, // a/1 #1 no cache
+    { feature: 'a', type: 'wave-attempt', data: { wave: 1, usage: { input: 300, cacheRead: 100 } } }, // a/1 #2
+    { feature: 'a', type: 'wave-attempt', data: { wave: 1, usage: { input: 5, cacheRead: -1 } } }, // a/1 #3 negative
+    { feature: 'a', type: 'wave-attempt', data: { wave: 2, usage: { input: 5, cacheRead: Infinity } } }, // a/2 #1 non-finite
+    { feature: 'a', type: 'wave-attempt', data: { wave: 2, usage: { input: 5, cacheRead: '9' } } }, // a/2 #2 string
+    { feature: 'b', type: 'wave-attempt', data: { wave: 1, usage: { input: -7, cacheRead: 30 } } }, // b/1 #1 bad input → 0
+  ]);
+  assert.deepStrictEqual(cacheUsage(history), {
+    attempts: [
+      // 100 / (300 + 100) = 100 / 400 = 0.25
+      { feature: 'a', wave: 1, attempt: 2, cacheRead: 100, input: 300, ratio: 0.25 },
+      // input -7 invalid → 0; 30 / (0 + 30) = 1
+      { feature: 'b', wave: 1, attempt: 1, cacheRead: 30, input: 0, ratio: 1 },
+    ],
+    // cacheRead 100 + 30 = 130; input 300 + 0 = 300
+    totals: { cacheRead: 130, input: 300 },
+    // a/1 #1 (absent) + a/1 #3 (negative) + a/2 #1 (Infinity) + a/2 #2 (string) = 4
+    withoutCache: 4,
+  });
+});
+
+test('cacheUsage skips attempts that cannot be placed in a (feature, wave), as collectWavePairs does', () => {
+  const history = deepFreeze([
+    null,
+    { type: 'wave-attempt', data: { wave: 1, usage: { input: 1, cacheRead: 1 } } }, // no feature
+    { feature: '', type: 'wave-attempt', data: { wave: 1, usage: { input: 1, cacheRead: 1 } } }, // empty feature
+    { feature: 'f', type: 'wave-attempt', data: { usage: { input: 1, cacheRead: 1 } } }, // no wave
+    { feature: 'f', type: 'wave-attempt', data: { wave: 'x', usage: { input: 1 } } }, // non-numeric wave
+    { feature: 'f', type: 'wave-attempt' }, // no data
+  ]);
+  // Every attempt is unplaceable → skipped: nothing listed, nothing in withoutCache.
+  assert.deepStrictEqual(cacheUsage(history), CACHE_ZERO);
+});
+
+test('cacheUsage is zeroed on empty / null / non-array input', () => {
+  for (const input of [[], null, undefined, 'x', 7, {}, { length: 2 }]) {
+    assert.deepStrictEqual(cacheUsage(input), CACHE_ZERO);
+  }
+});
+
+test('cacheUsage reports no cache data on the committed fixture corpus and leaves totalUsage unchanged', () => {
+  const history = deepFreeze(loadAllInsightsFixtures());
+  const usageBefore = totalUsage(history);
+  const out = cacheUsage(history);
+  assert.deepStrictEqual(out.attempts, []);
+  assert.deepStrictEqual(out.totals, { cacheRead: 0, input: 0 });
+  // Fixtures carry no cacheRead → every attempt is withoutCache:
+  // enriched 5 + legacy 4 + mixed 5 = 14 wave-attempt events.
+  assert.equal(out.withoutCache, 14);
+  assert.deepStrictEqual(totalUsage(history), usageBefore);
 });

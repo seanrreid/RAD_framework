@@ -416,17 +416,41 @@ export function sanitizeErrorMessage(msg) {
 }
 
 /**
+ * Optional usage fields carried through `normalizeUsage` ONLY when present and
+ * valid. Each maps a normalized key to the raw keys it may arrive under
+ * (camelCase first, then the SDK's snake_case field). `cost` has no SDK alias.
+ */
+const OPTIONAL_USAGE_FIELDS = [
+  ['cacheRead', ['cacheRead', 'cache_read_input_tokens']],
+  ['cacheWrite', ['cacheWrite', 'cache_creation_input_tokens']],
+  ['cost', ['cost']],
+];
+
+/** A finite, non-negative number — anything else (string, NaN, ±Infinity, <0) is rejected. */
+function isNonNegativeFinite(v) {
+  return typeof v === 'number' && Number.isFinite(v) && v >= 0;
+}
+
+/**
  * Normalize a raw provider usage object into the stable shape the spine records:
- * `{ input, output, total }` (all numbers). Maps the SDK's snake_case token
- * fields (`input_tokens` / `output_tokens` / `total_tokens`) as well as
- * already-normalized `input` / `output` / `total` keys, and derives `total` as
- * input + output when the provider did not supply one.
+ * `{ input, output, total }` (all numbers), plus the OPTIONAL keys `cacheRead`,
+ * `cacheWrite`, and `cost`. Maps the SDK's snake_case token fields
+ * (`input_tokens` / `output_tokens` / `total_tokens` / `cache_read_input_tokens`
+ * / `cache_creation_input_tokens`) as well as already-normalized camelCase keys,
+ * and derives `total` as input + output when the provider did not supply one.
  *
- * Returns `undefined` when no usable usage is present so callers can OMIT the
- * field entirely — usage is OPTIONAL everywhere downstream.
+ * Each optional key is set ONLY when its value is a finite non-negative number;
+ * otherwise the key is ABSENT (never undefined, never 0, never coerced), so a
+ * usage object without cache/cost data is byte-identical to the pre-#121 shape.
+ *
+ * Returns `undefined` when none of input/output/total is usable so callers can
+ * OMIT the field entirely — usage is OPTIONAL everywhere downstream. Cache/cost
+ * fields alone do NOT make usage "usable": that pre-existing contract is kept,
+ * so a cache-only object still returns `undefined`.
  *
  * @param {unknown} raw - a provider usage object, or nothing
- * @returns {{ input: number, output: number, total: number } | undefined}
+ * @returns {{ input: number, output: number, total: number,
+ *   cacheRead?: number, cacheWrite?: number, cost?: number } | undefined}
  */
 export function normalizeUsage(raw) {
   if (!raw || typeof raw !== 'object') return undefined;
@@ -444,7 +468,12 @@ export function normalizeUsage(raw) {
   const inVal = input ?? 0;
   const outVal = output ?? 0;
   const total = explicitTotal ?? inVal + outVal;
-  return { input: inVal, output: outVal, total };
+  const usage = { input: inVal, output: outVal, total };
+  for (const [key, aliases] of OPTIONAL_USAGE_FIELDS) {
+    const value = aliases.map((alias) => raw[alias]).find((v) => v !== undefined && v !== null);
+    if (isNonNegativeFinite(value)) usage[key] = value;
+  }
+  return usage;
 }
 
 // ── Shared resilience helpers (used by every provider adapter in Wave 2) ──

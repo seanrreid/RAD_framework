@@ -305,10 +305,15 @@ export function createCommandAdapter({
    * machine-readable usage, in which case this returns undefined and the field
    * is omitted. A wrapper that DOES know its token counts can emit a single
    * `RAD_USAGE {json}` line (e.g. `RAD_USAGE {"input_tokens":10,"output_tokens":5}`)
-   * which is normalized to `{ input, output, total }`.
+   * which is normalized to `{ input, output, total }`. The line may also carry
+   * the OPTIONAL keys `cache_read_input_tokens` (or `cacheRead`),
+   * `cache_creation_input_tokens` (or `cacheWrite`), and `cost`; each is passed
+   * through as `cacheRead` / `cacheWrite` / `cost` only when it is a finite
+   * non-negative number, and is otherwise absent (see `normalizeUsage`).
    *
    * @param {string} stdout
-   * @returns {{ input: number, output: number, total: number } | undefined}
+   * @returns {{ input: number, output: number, total: number,
+   *   cacheRead?: number, cacheWrite?: number, cost?: number } | undefined}
    */
   function extractUsage(stdout) {
     const match = /^RAD_USAGE\s+(\{.*\})\s*$/m.exec(stdout || '');

@@ -245,11 +245,14 @@ console.log(JSON.stringify({ noWaveData, aggregate: agg, perFeature }, null, 2))
 
 Reading the output:
 
-- **`aggregate.outcomes`** — `wave-complete` events keyed by the frozen 7-outcome
-  vocabulary (`success | fail-tests | fail-scope | fail-protocol | fail-timeout |
-  no-changes | abort-user`), plus `unknown` (missing/out-of-vocabulary outcome —
-  the current spine records `wave-complete` without one) and `total`. Success
-  rate = `success / total` when `total > 0`.
+- **`aggregate.outcomes`** — one count per WAVE: each (feature, wave) pair's
+  TERMINAL `wave-attempt` outcome (its last attempt in history order), keyed by
+  the frozen 7-outcome vocabulary (`success | fail-tests | fail-scope |
+  fail-protocol | fail-timeout | no-changes | abort-user`), plus `unknown`
+  (missing/out-of-vocabulary terminal outcome) and `total`. `total` is the number
+  of (feature, wave) pairs — waves, not attempts and not `wave-complete` events
+  (`wave-complete` carries no outcome and is ignored). A retried wave counts once,
+  by how it ended. Wave success rate = `success / total` when `total > 0`.
 - **`aggregate.failReasons`** — `wave-failed` events grouped by free-form
   `data.reason` (`token-budget`, `doom-loop`, …); a missing reason buckets as
   `unknown`.
@@ -260,9 +263,13 @@ Reading the output:
   emits both; adding them would double-count).
 - **`perFeature[*].spendPerWave`** — per-wave token spend within each feature;
   waves without recorded usage contribute `0`.
-- **`noWaveData: true`** — no wave events exist anywhere. This is the EXPECTED
-  state today: committed event logs contain only `approved` events, so a fresh
-  clone renders the zeros path (see the Reliability template below), not an error.
+- **`noWaveData: true`** — no wave events exist anywhere: no placeable
+  (feature, wave) pair (`outcomes.total === 0`) AND no wave-attempt, wave-failed
+  or hook-veto event at all. An attempt that lacks a feature or wave number cannot
+  form a pair, but it still counts in `retries.total`, so it keeps `noWaveData`
+  false. This is the EXPECTED state today: committed event logs contain only
+  `approved` events, so a fresh clone renders the zeros path (see the Reliability
+  template below), not an error.
 
 ### Step 4d: Fold per-task blocked reasons from the event logs
 
@@ -470,6 +477,76 @@ Reading the output:
 - There is deliberately no spend figure in this output: the fold never reads
   `usage` (see the Model Tiering section for why).
 
+### Step 4f2: Fold per-attempt cache-hit ratios (cache-hit readout)
+
+Wave attempts MAY carry the optional `usage.cacheRead` field (cache tokens read,
+see `docs/rad-wave-contract.md`, `usage`). A retry whose cache-hit ratio collapses
+to 0 after a positive first attempt re-paid for the whole prompt — worth seeing.
+The counting lives in `harness/events.js` (`cacheUsage`) — import it, never
+re-implement it. Same invocation convention as Steps 4c–4f: run from the repo
+root; `RAD_STATE_DIR` (default `.agents/state`) exists only for fixture testing.
+This step only reads; it writes nothing.
+
+```bash
+node --input-type=module -e '
+import { readFileSync, readdirSync, existsSync } from "node:fs";
+import { join } from "node:path";
+const { cacheUsage } = await import("./harness/events.js");
+
+const NO_CACHE_LINE = "no cache data reported";
+const stateDir = process.env.RAD_STATE_DIR || ".agents/state";
+const features = existsSync(stateDir)
+  ? readdirSync(stateDir, { withFileTypes: true })
+      .filter((d) => d.isDirectory())
+      .map((d) => d.name)
+      .filter((f) => existsSync(join(stateDir, f, "events.jsonl")))
+      .sort()
+  : [];
+
+// Attempts are ordered and keyed by (feature, wave), so one concatenated history is safe.
+const history = features.flatMap((feature) =>
+  readFileSync(join(stateDir, feature, "events.jsonl"), "utf8")
+    .split("\n").filter(Boolean).map((l) => JSON.parse(l)));
+const result = cacheUsage(history);
+
+const pct = (r) => (r === null ? null : Math.round(100 * r));
+// Flag a retry whose ratio is 0 after an EARLIER positive attempt in the same (feature, wave).
+const peak = new Map();
+const droppedToZero = [];
+for (const a of result.attempts) {
+  const key = JSON.stringify([a.feature, a.wave]);
+  if (a.ratio === 0 && (peak.get(key) || 0) > 0) droppedToZero.push({ ...a, earlierPeakPct: pct(peak.get(key)) });
+  if (a.ratio !== null && a.ratio > (peak.get(key) || 0)) peak.set(key, a.ratio);
+}
+const denominator = result.totals.input + result.totals.cacheRead;
+const noCacheData = result.attempts.length === 0;
+if (noCacheData) console.log(NO_CACHE_LINE);
+console.log(JSON.stringify({ noCacheData, withoutCache: result.withoutCache,
+  overallRatioPct: denominator === 0 ? null : pct(result.totals.cacheRead / denominator),
+  totals: result.totals,
+  attempts: result.attempts.map((a) => ({ ...a, ratioPct: pct(a.ratio) })),
+  droppedToZero }, null, 2));
+'
+```
+
+Reading the output:
+
+- **`no cache data reported`** (first line, with `noCacheData: true`) — no attempt
+  anywhere carried a valid `usage.cacheRead`. This is the expected state for logs
+  written before the command/SDK adapters reported cache fields (#121). Render the
+  degradation line in the Cache-Hit Readout template, never a 0% ratio.
+- **`attempts[]`** — one entry per attempt that reported `cacheRead`: `feature`,
+  `wave`, `attempt` (1-based ordinal within that (feature, wave), counting every
+  attempt, so it matches the real retry number), `cacheRead`, `input`, and
+  `ratioPct` = `cacheRead / (input + cacheRead)` as a percentage — `null` when
+  both are 0 (nothing to measure, not a 0% hit rate).
+- **`droppedToZero[]`** — retries whose ratio is exactly 0 after an earlier
+  attempt in the same (feature, wave) had a positive ratio (`earlierPeakPct`).
+- **`withoutCache`** — placeable attempts that reported no `cacheRead` (legacy
+  or unreported); they are excluded from every ratio.
+- **`overallRatioPct`** — summed `cacheRead` over summed `input + cacheRead`
+  across the listed attempts only.
+
 ### Step 4g: Route recurring signals to prompt surfaces
 
 Some failure signals point at the INSTRUCTIONS the wave agent was given, not at
@@ -669,8 +746,9 @@ Reliability metrics will populate after the first /rad-deliver run records
 wave-attempt / wave-complete / wave-failed events.
 
 [Otherwise, populate from the aggregate (and perFeature where noted):]
-Wave success rate: [success]/[total] wave-complete events ([Y]%)
-Outcome distribution (frozen 7-outcome vocabulary):
+Wave success rate: [success]/[total] waves ended in success ([Y]%) — each
+(feature, wave)'s terminal attempt; a retried wave counts once, by how it ended
+Terminal-outcome distribution per wave (frozen 7-outcome vocabulary):
 - success: [N]  fail-tests: [N]  fail-scope: [N]  fail-protocol: [N]
 - fail-timeout: [N]  no-changes: [N]  abort-user: [N]  unknown: [N]
 Retry frequency: [total] wave attempts; [retriedWaves] wave(s) needed more than
@@ -752,9 +830,32 @@ Based on [features] features (floor: [minFeatures]):
 
 [Render this note verbatim in every state, including the degradation states:]
 Spend-based tiering advice is deliberately absent. Recorded `input_tokens` is the
-uncached remainder and `normalizeUsage` drops the cache fields, so relative spend
-varies with cache-hit rate and scheduling rather than with what a wave costs.
-Deferred until usage carries cache-token fields (#63/#121).
+uncached remainder, so relative spend varies with cache-hit rate and scheduling
+rather than with what a wave costs. Usage now carries the optional cache fields
+(`cacheRead` / `cacheWrite` / `cost`, #121) — see the Cache-Hit Readout below —
+but spend-derived tiering advice is still deferred (tracked in #65).
+
+### Cache-Hit Readout
+[From Step 4f2. Omit this section entirely if no per-feature events.jsonl exists.]
+[If noCacheData: true, render EXACTLY this line and nothing else in the section —
+ silence would read as a perfect cache, a 0% ratio as a measured miss:]
+no cache data reported — no wave attempt carried `usage.cacheRead`
+([withoutCache] attempt(s) without cache fields).
+
+[Otherwise:]
+Overall cache-hit ratio: [overallRatioPct]% across [attempts.length] attempt(s)
+reporting cache data ([withoutCache] attempt(s) without cache fields excluded)
+Per attempt (cacheRead / (input + cacheRead)):
+- [feature] / Wave [wave] / attempt [attempt] — [ratioPct]% ([cacheRead] cached,
+  [input] uncached)   [ratioPct null: "n/a (no input or cache tokens)"]
+...
+[For each droppedToZero entry, render:]
+⚠ [feature] / Wave [wave] / attempt [attempt] — cache-hit ratio dropped to 0%
+after [earlierPeakPct]% on an earlier attempt; the retry re-sent its whole prompt
+uncached.
+[Suggestion only — never edit plans or prompts. A retry that drops to 0% may
+ point at a changed prompt prefix between attempts or a cache TTL lapse; a
+ reader may choose to investigate the retry prompt's prefix ordering.]
 
 ### Prompt-Surface Proposals
 [From Step 4g. Omit this section entirely if no per-feature events.jsonl exists.]
@@ -843,6 +944,10 @@ Auto-cleared by the severity gate: [N] change(s)
 - Per-wave-position reliability (Step 4f) MUST come from `waveReliability` in
   `harness/events.js`; the `TIERING_MIN_FEATURES` floor lives in the skill, never the
   fold. The Model Tiering section never shows a spend figure and never edits a plan
+- Cache-hit ratios (Step 4f2) MUST come from `cacheUsage` in `harness/events.js`; the
+  skill only derives the retry-dropped-to-0 flag and percentages from its output. With no
+  attempt reporting `cacheRead`, render the explicit "no cache data reported" line —
+  never a 0% ratio and never silence
 - Prompt-surface routing (Step 4g) reads counts ONLY from `attemptOutcomeCounts`,
   `failReasonCounts` and `blockedReasonCounts`; routing lives ONLY in the
   `PROMPT_SURFACE_MAP` table and the threshold ONLY in `PROMPT_SIGNAL_THRESHOLD`.

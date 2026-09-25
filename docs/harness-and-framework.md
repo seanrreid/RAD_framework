@@ -225,9 +225,10 @@ and the model-tiering advisory (which points at model choice).
 
 **How the routing works.** `/rad-insights` Step 4g
 (`.claude/commands/shared/rad-insights.md`) reads counts from the existing pure
-folds — `outcomeCounts`, `failReasonCounts`, `blockedReasonCounts` in
-`harness/events.js` — and looks each signal up in a single data table,
-`PROMPT_SURFACE_MAP`:
+folds — `outcomeCounts` (one count per (feature, wave): that wave's TERMINAL
+`wave-attempt` outcome, so `total` counts waves, not `wave-complete` events),
+`failReasonCounts`, `blockedReasonCounts` in `harness/events.js` — and looks
+each signal up in a single data table, `PROMPT_SURFACE_MAP`:
 
 | Signal | Prompt surface |
 |---|---|

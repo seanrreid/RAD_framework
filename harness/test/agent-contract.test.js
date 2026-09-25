@@ -1,5 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 
 import {
   buildWavePrompt,
@@ -10,7 +13,9 @@ import {
   classifyError,
   withTimeout,
   PRIOR_FAILURE_FIELD_MAX_CHARS,
+  normalizeUsage,
 } from '../adapters/agent/contract.js';
+import { createCommandAdapter } from '../adapters/agent/command.js';
 
 // The fixed matrix outcome vocabulary (harness/matrix.yaml). resultToOutcome
 // and the adapters must only ever emit a string from this set.
@@ -389,4 +394,79 @@ test('buildWavePrompt — AC#4 the cap applies to the reported task error too, n
     'an oversized task error is capped as well',
   );
   assert.ok(prompt.length < baseline.length + PRIOR_FAILURE_FIELD_MAX_CHARS + 500);
+});
+
+// ---------------------------------------------------------------------------
+// normalizeUsage — AC#3 optional cacheRead / cacheWrite / cost passthrough (#121)
+// ---------------------------------------------------------------------------
+
+test('normalizeUsage — snake_case cache_read_input_tokens becomes cacheRead; absent fields stay ABSENT', () => {
+  const usage = normalizeUsage({ input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 100 });
+  assert.deepEqual(usage, { input: 10, output: 5, total: 15, cacheRead: 100 });
+  assert.deepEqual(Object.keys(usage), ['input', 'output', 'total', 'cacheRead']);
+});
+
+test('normalizeUsage — input with no cache/cost data is exactly the pre-#121 shape', () => {
+  const usage = normalizeUsage({ input_tokens: 10, output_tokens: 5 });
+  assert.deepEqual(usage, { input: 10, output: 5, total: 15 });
+  assert.deepEqual(Object.keys(usage), ['input', 'output', 'total']);
+});
+
+test('normalizeUsage — string / negative / NaN / Infinity / null cache and cost values are dropped, never coerced', () => {
+  for (const bad of ['100', -1, Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, null, {}]) {
+    const usage = normalizeUsage({
+      input_tokens: 10,
+      output_tokens: 5,
+      cache_read_input_tokens: bad,
+      cache_creation_input_tokens: bad,
+      cost: bad,
+    });
+    assert.deepEqual(Object.keys(usage), ['input', 'output', 'total'], `dropped for ${String(bad)}`);
+  }
+});
+
+test('normalizeUsage — camelCase cacheRead / cacheWrite accepted; cost passes through; zero is kept', () => {
+  const usage = normalizeUsage({ input: 3, output: 4, cacheRead: 0, cacheWrite: 7, cost: 0.0123 });
+  assert.deepEqual(usage, { input: 3, output: 4, total: 7, cacheRead: 0, cacheWrite: 7, cost: 0.0123 });
+  const snake = normalizeUsage({ input_tokens: 1, output_tokens: 1, cache_creation_input_tokens: 9 });
+  assert.deepEqual(snake, { input: 1, output: 1, total: 2, cacheWrite: 9 });
+});
+
+test('normalizeUsage — cache/cost fields alone keep the existing contract: undefined (usage omitted)', () => {
+  assert.equal(normalizeUsage({ cache_read_input_tokens: 100, cost: 1 }), undefined);
+});
+
+test('command adapter — a RAD_USAGE line carries cacheRead / cacheWrite / cost end to end', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'rad-usage-'));
+  try {
+    const stdout = [
+      'RAD_USAGE {"input_tokens":10,"output_tokens":5,"cache_read_input_tokens":100,"cache_creation_input_tokens":20,"cost":0.5}',
+      'WAVE_RESULT',
+      'wave: 1',
+      'status: complete',
+      'tasks:',
+      '  - title: Task one',
+      '    status: complete',
+      '    commit: abc1234',
+      '    concern: —',
+      '    error: —',
+      'END_WAVE_RESULT',
+    ].join('\n');
+    const script = join(dir, 'usage.js');
+    writeFileSync(script, `process.stdout.write(${JSON.stringify(stdout)});\n`, 'utf8');
+    const runWave = createCommandAdapter({ cmd: `${process.execPath} ${script}`, repoRoot: dir });
+    const wave = { n: 1, type: 'sequential', tasks: [{ title: 'Task one', file: 'a.js', what: 'do a' }] };
+    const planCtx = {
+      feature: 'demo',
+      branch: 'rad/demo',
+      executionLog: '.agents/logs/demo.md',
+      executionNotes: { doNotTouch: [], keyFiles: [], reminders: [] },
+      acceptanceCriteria: ['demo criterion'],
+    };
+    const result = await runWave(wave, planCtx);
+    assert.equal(result.outcome, 'success');
+    assert.deepEqual(result.usage, { input: 10, output: 5, total: 15, cacheRead: 100, cacheWrite: 20, cost: 0.5 });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
