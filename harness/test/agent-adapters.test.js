@@ -807,7 +807,7 @@ test('deliverCommand — command selection requires RAD_AGENT_CMD, not the key',
 // Every env knob that could steer these deliver runs; saved and restored per test.
 const PREFLIGHT_ENV_KEYS = [
   'RAD_AGENT', 'RAD_AGENT_CMD', 'RAD_AGENT_PREFLIGHT', 'ANTHROPIC_API_KEY',
-  'RAD_WORKTREE', 'RAD_SYNC', 'RAD_TOKEN_BUDGET',
+  'RAD_WORKTREE', 'RAD_SYNC', 'RAD_TOKEN_BUDGET', 'RAD_AGENT_PREFLIGHT_TIMEOUT_SECONDS',
 ];
 
 const PREFLIGHT_FAIL_PREFIX =
@@ -971,5 +971,65 @@ test('deliverCommand preflight — an injected ctx.runWave never probes', async 
 
     assert.ok(!stderr.includes(PREFLIGHT_FAIL_PREFIX), stderr);
     assert.equal(await invocations(log), '', 'RAD_AGENT_CMD was never spawned');
+  });
+});
+
+// ===========================================================================
+// RAD_AGENT_PREFLIGHT_TIMEOUT_SECONDS — deliver-path-robustness AC#4
+// ===========================================================================
+
+test('deliverCommand preflight — a valid timeout override sets the probe deadline', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const feature = 'pf-timeout-set';
+    writeApprovedWavePlan(repoRoot, feature);
+    await withHangingAgent(repoRoot, {}, async (agent) => {
+      const started = Date.now();
+      const { code, stderr } = await runDeliver(
+        { RAD_AGENT_CMD: agent.cmd, RAD_AGENT_PREFLIGHT_TIMEOUT_SECONDS: '1' }, [feature], { repoRoot, sh: okSh },
+      );
+      assert.ok(Date.now() - started < PROMPT_RESOLVE_CEILING_MS, 'failed at ~1s, not the 60s default');
+      assert.equal(code, 1);
+      assert.ok(stderr.includes(`${PREFLIGHT_FAIL_PREFIX}agent preflight timed out after 1000ms`), stderr);
+      assert.deepEqual(await eventTypes(repoRoot, feature), ['approved'], 'no events appended');
+    });
+  });
+});
+
+for (const bad of ['abc', '0', '-5', '1.5', '10s', ' 5']) {
+  test(`deliverCommand preflight — malformed timeout ${JSON.stringify(bad)} returns 2 and never probes`, async () => {
+    await withTempRepo(async (repoRoot) => {
+      const feature = 'pf-timeout-bad';
+      writeApprovedWavePlan(repoRoot, feature);
+      const log = join(repoRoot, 'calls.txt');
+      const cmd = loggingAgent(repoRoot, log, { probeExit: 0, waveExit: 1 });
+
+      const { code, stderr } = await runDeliver(
+        { RAD_AGENT_CMD: cmd, RAD_AGENT_PREFLIGHT_TIMEOUT_SECONDS: bad }, [feature], { repoRoot, sh: okSh },
+      );
+
+      assert.equal(code, 2);
+      assert.ok(
+        stderr.includes(`rad deliver: RAD_AGENT_PREFLIGHT_TIMEOUT_SECONDS must be a positive integer (got '${bad}')`),
+        stderr,
+      );
+      assert.equal(await invocations(log), '', 'the probe was never spawned');
+      assert.deepEqual(await eventTypes(repoRoot, feature), ['approved'], 'no events appended');
+    });
+  });
+}
+
+test('deliverCommand preflight — an empty timeout override keeps the default and probes', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const feature = 'pf-timeout-empty';
+    writeApprovedWavePlan(repoRoot, feature);
+    const log = join(repoRoot, 'calls.txt');
+    const cmd = loggingAgent(repoRoot, log, { probeExit: 0, waveExit: 1 });
+
+    const { stderr } = await runDeliver(
+      { RAD_AGENT_CMD: cmd, RAD_AGENT_PREFLIGHT_TIMEOUT_SECONDS: '' }, [feature], { repoRoot, sh: okSh },
+    );
+
+    assert.ok(!stderr.includes('RAD_AGENT_PREFLIGHT_TIMEOUT_SECONDS'), stderr);
+    assert.equal(await invocations(log), 'PW', 'probe ran under the default, then the wave');
   });
 });

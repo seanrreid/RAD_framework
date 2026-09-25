@@ -82,6 +82,17 @@ const SUBCOMMANDS = {
  */
 const PREFLIGHT_OFF = 'off';
 
+/**
+ * Env var overriding the preflight probe deadline, in whole seconds. Unset or
+ * empty keeps the adapter default; anything but digits (no sign, no unit, no
+ * whitespace, no zero) is a hard usage error — mirrors RAD_VERIFY_TIMEOUT_SECONDS
+ * in scripts/check-verify.sh: a typo must never silently restore the default.
+ */
+const PREFLIGHT_TIMEOUT_ENV = 'RAD_AGENT_PREFLIGHT_TIMEOUT_SECONDS';
+const POSITIVE_INTEGER_PATTERN = /^[1-9][0-9]*$/;
+/** Exit code for a malformed deliver configuration value. */
+const USAGE_EXIT_CODE = 2;
+
 /** The harness package root (where cli.js lives). */
 const HERE = dirname(fileURLToPath(import.meta.url));
 /** The repo root is the parent of the harness/ directory. */
@@ -394,22 +405,44 @@ export function parsePlanCtx(text) {
 }
 
 /**
+ * Parse RAD_AGENT_PREFLIGHT_TIMEOUT_SECONDS. Unset/empty → `timeoutMs`
+ * undefined (probeCommand's default applies); malformed → `{ ok: false }`.
+ *
+ * @returns {{ ok: true, timeoutMs?: number } | { ok: false, raw: string }}
+ */
+function preflightTimeoutFromEnv() {
+  const raw = process.env[PREFLIGHT_TIMEOUT_ENV];
+  if (raw === undefined || raw === '') return { ok: true };
+  if (!POSITIVE_INTEGER_PATTERN.test(raw)) return { ok: false, raw };
+  return { ok: true, timeoutMs: Number(raw) * 1000 };
+}
+
+/**
  * Run the command-path startup probe unless RAD_AGENT_PREFLIGHT is exactly
- * PREFLIGHT_OFF. On failure, writes the operator-facing reason to stderr.
+ * PREFLIGHT_OFF. On failure, writes the operator-facing reason to stderr. A
+ * malformed RAD_AGENT_PREFLIGHT_TIMEOUT_SECONDS fails before the probe spawns.
  *
  * @param {string} cmd - the configured RAD_AGENT_CMD
  * @param {string} repoRoot
- * @returns {Promise<boolean>} true when the probe passed or was skipped
+ * @returns {Promise<number|null>} null when the probe passed or was skipped,
+ *   else the deliver exit code (1 probe failed, 2 malformed timeout)
  */
-async function preflightPassed(cmd, repoRoot) {
-  if (process.env.RAD_AGENT_PREFLIGHT === PREFLIGHT_OFF) return true;
-  const probe = await probeCommand({ cmd, repoRoot });
-  if (probe.ok) return true;
+async function preflightExitCode(cmd, repoRoot) {
+  if (process.env.RAD_AGENT_PREFLIGHT === PREFLIGHT_OFF) return null;
+  const timeout = preflightTimeoutFromEnv();
+  if (!timeout.ok) {
+    process.stderr.write(
+      `rad deliver: ${PREFLIGHT_TIMEOUT_ENV} must be a positive integer (got '${timeout.raw}')\n`,
+    );
+    return USAGE_EXIT_CODE;
+  }
+  const probe = await probeCommand({ cmd, repoRoot, timeoutMs: timeout.timeoutMs });
+  if (probe.ok) return null;
   process.stderr.write(
     'rad deliver: RAD_AGENT_CMD failed to start under the adapter env ' +
     `(it must authenticate without inherited env vars): ${probe.error}\n`,
   );
-  return false;
+  return 1;
 }
 
 /**
@@ -519,7 +552,8 @@ export async function deliverCommand(argv, ctx) {
     // allow-listed adapter env BEFORE worktree creation or any event append, so
     // an env-dependent credential fails fast with a clear message instead of as
     // a Wave-1 failure. Unreachable with an injected ctx.runWave (tests).
-    if (!(await preflightPassed(cmd, repoRoot))) return 1;
+    const preflightCode = await preflightExitCode(cmd, repoRoot);
+    if (preflightCode !== null) return preflightCode;
     // Same attempt-context fold as the sdk branch above — both adapters take
     // (wave, planCtx), so the spine's second argument rides in the plan context.
     runWave = (wave, attemptCtx) => adapter(wave, { ...planCtx, ...attemptCtx });
