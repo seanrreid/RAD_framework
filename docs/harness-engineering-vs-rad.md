@@ -109,7 +109,7 @@ doesn't ratchet them into prevention.
 *Update 2026-09-25:* substantially narrowed. `/rad-insights` now detects findings
 recurrence past `RAD_FINDINGS_THRESHOLD` and proposes a concrete CLAUDE.md
 convention or lint rule (`insights-feedback-loop`), and the insights read-side
-folds (in review as [#123](https://github.com/seanrreid/RAD_framework/pull/123)) route recurring
+folds ([#123](https://github.com/seanrreid/RAD_framework/pull/123)) route recurring
 `fail-protocol` / `fail-scope` / `blocked_spec` / `blocked_intent` outcomes to the
 specific prompt surface that likely caused them. What remains is deliberate: every
 proposal is suggestion-only, and a human applies it. RAD's ratchet has a human

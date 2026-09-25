@@ -16,6 +16,43 @@ adapters live alongside it.
 
 ---
 
+## Why waves: outcome-checkpointing vs context-fitting
+
+Waves do two jobs at once, and only one of them is tied to today's model limits.
+Separating them says what stays if a future model could hold a whole plan in one
+context (tracked in [#46](https://github.com/seanrreid/RAD_framework/issues/46)).
+
+**Permanent — outcome-checkpointing.** These are why RAD has waves at all:
+
+- One recorded outcome per wave, resolved against the frozen 7-outcome matrix
+  (`success | fail-tests | fail-scope | fail-protocol | fail-timeout | no-changes | abort-user`).
+- Matrix stop conditions: a wave's outcome decides advance, revise, or surface,
+  before the next wave starts.
+- The token and attempt breakers (`RAD_TOKEN_BUDGET`, the retry budget), which
+  are checked at wave boundaries.
+- Resume from the last `wave-complete`, so an interrupted run restarts at a wave
+  boundary rather than from scratch (see
+  [Resuming interrupted execution](wave-execution.md#resuming-interrupted-execution):
+  "the log is the checkpoint").
+- Per-wave `Verify:` and `Model:` lines, which only make sense with a wave to
+  attach them to.
+
+**Depreciating — context-fitting.** These exist because a model's context is finite:
+
+- The forced fresh agent context per wave
+  (see [Parallel vs sequential](wave-execution.md#parallel-vs-sequential--what-it-actually-means)).
+- Sizing each task to about 50% of a fresh context window
+  (see [Writing good wave plans](wave-execution.md#writing-good-wave-plans)).
+
+If a future model could run a whole plan in one context, only the forced reset
+would become optional. Every permanent property above would still apply, one
+wave at a time. [What waves are](wave-execution.md#what-waves-are) covers the
+mechanics.
+
+This section explains the design. It does not change any execution behaviour.
+
+---
+
 ## The adapter interface
 
 An adapter is a factory that returns a `runWave` function:
