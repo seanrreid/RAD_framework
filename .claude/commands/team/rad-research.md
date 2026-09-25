@@ -140,13 +140,31 @@ If the title is ambiguous, confirm the slug with the user before saving.
 
 ### Step 5: Write the research artifact
 
+Choose the `Status:` by the artifact's intended consumer:
+- `pending-design` — it feeds `/rad-design` (a new agent architecture is needed).
+- `pending-plan` — it feeds `/rad-plan` directly (existing agent boundaries suffice).
+
+Allowed `Status:` values:
+
+| Status | Meaning |
+|--------|---------|
+| `pending-design` | Awaiting `/rad-design` |
+| `pending-plan` | Awaiting `/rad-plan` — skips design |
+| `parked` | Deliberately deferred; no next command |
+| `consumed` | Turned into a plan / delivered work — hidden from the pre-plan list |
+
+`consumed` is set by hand for now once the research has been turned into a plan —
+no command advances it yet. `scripts/rad-status.sh` is the reader: it lists
+pre-plan research with a next-command hint per status, and hides `consumed`
+artifacts and any whose slug already has a plan.
+
 Save to `.agents/research/[slug].md`:
 
 ```markdown
 # Research: [Project Name]
 Created: [YYYY-MM-DD]
 Author: [developer | architect]
-Status: pending-design
+Status: [pending-design | pending-plan]
 Source: [file path | URL | inline]
 
 ## Project Summary
@@ -193,7 +211,8 @@ Platform: [platform]
 Open questions: [N]
 
 Next step:
-  /rad-design [slug]
+  /rad-design [slug]    (Status: pending-design)
+  /rad-plan [slug]      (Status: pending-plan)
 ```
 
 ---

@@ -95,6 +95,94 @@ collect_plans() {
   } | sort
 }
 
+# ── Research inventory ────────────────────────────────────────────────────────
+
+# Research artifacts (.agents/research/<slug>.md) are the pre-plan stage. Same
+# source priority as plans (branch tip > merged on default > local tree), but a
+# research slug need not match its branch's feature, so each branch tip's whole
+# research dir is listed rather than one keyed path.
+
+RESEARCH_DIR=".agents/research"
+
+# Separate from SEEN_FEATURES: a research slug and a plan feature may share a name.
+SEEN_RESEARCH=" "
+
+emit_research_row() {
+  # $1 = research slug, $2 = source label, content on stdin
+  # Must run in the caller's shell (fed by redirection, never on the right of a
+  # pipe) or the SEEN_RESEARCH update is lost in a subshell.
+  local slug="$1" source="$2" status
+  case "$SEEN_RESEARCH" in *" $slug "*) cat >/dev/null; return 0 ;; esac
+  SEEN_RESEARCH="${SEEN_RESEARCH}${slug} "
+  status=$(grep "^Status:" | head -1 | awk '{print $2}' || true)
+  echo "$slug|${status:-unknown}|$source"
+}
+
+# Lists research doc paths in a git tree-ish, README excluded.
+list_research_paths() {
+  git ls-tree -r --name-only "$1" -- "$RESEARCH_DIR" 2>/dev/null \
+    | grep -E "^${RESEARCH_DIR}/.*\.md$" | grep -v '/README\.md$' || true
+}
+
+collect_research() {
+  local base ref branch path
+
+  base=$("$SCRIPT_DIR/get-default-branch.sh" 2>/dev/null || echo main)
+  # One subshell (piped to sort) so SEEN_RESEARCH stays consistent across passes.
+  {
+    # 1. In-flight: research on each rad/ branch tip. A branch cut from the base
+    # carries every merged artifact too; only a doc that is new or changed on the
+    # tip belongs to that branch — an identical blob falls through to pass 2.
+    while read -r ref; do
+      [[ -z "$ref" ]] && continue
+      branch="${ref#origin/}"
+      while read -r path; do
+        [[ -z "$path" ]] && continue
+        if [[ "$(git rev-parse -q --verify "origin/${branch}:${path}" 2>/dev/null)" \
+           == "$(git rev-parse -q --verify "origin/${base}:${path}" 2>/dev/null || true)" ]]; then
+          continue
+        fi
+        emit_research_row "$(basename "$path" .md)" "$branch" \
+          < <(git show "origin/${branch}:${path}" 2>/dev/null || true)
+      done < <(list_research_paths "origin/${branch}")
+    done < <(git branch -r --list "origin/${PREFIX}*" 2>/dev/null | sed 's/^[[:space:]]*//')
+
+    # 2. Merged: research that has landed on the default branch.
+    while read -r path; do
+      [[ -z "$path" ]] && continue
+      emit_research_row "$(basename "$path" .md)" "${base} (merged)" \
+        < <(git show "origin/${base}:${path}" 2>/dev/null || true)
+    done < <(list_research_paths "origin/${base}")
+
+    # 3. Local working tree — research authored locally but not yet pushed.
+    if [[ -d "$RESEARCH_DIR" ]]; then
+      while read -r path; do
+        emit_research_row "$(basename "$path" .md)" "local (unpushed)" < "$path"
+      done < <(find "$RESEARCH_DIR" -name "*.md" ! -name "README.md" 2>/dev/null | sort)
+    fi
+  } | sort
+}
+
+# Research is consumed once a plan exists for its slug (any source, any status)
+# or its header says so; consumed research leaves the pre-plan section.
+RESEARCH_CONSUMED_STATUS="consumed"
+
+# Space-delimited slug set from collect_plans rows (bash 3.2: no assoc arrays).
+plan_slug_set() {
+  local set=" " feature rest
+  while IFS='|' read -r feature rest; do
+    [[ -n "$feature" ]] && set="${set}${feature} "
+  done <<< "$1"
+  printf '%s' "$set"
+}
+
+research_is_consumed() {
+  # $1 = research slug, $2 = research status; reads PLAN_SLUGS
+  [[ "$2" == "$RESEARCH_CONSUMED_STATUS" ]] && return 0
+  case "$PLAN_SLUGS" in *" $1 "*) return 0 ;; esac
+  return 1
+}
+
 # ── Open PRs ──────────────────────────────────────────────────────────────────
 
 collect_prs() {
@@ -161,6 +249,8 @@ CLI_STATUS="⚠ manual mode"
 cli_available && CLI_STATUS="✓ CLI available"
 
 PLANS=$(collect_plans)
+RESEARCH=$(collect_research)
+PLAN_SLUGS=$(plan_slug_set "$PLANS")
 LOGS=$(collect_logs)
 AGENTS=$(agent_count)
 
@@ -189,6 +279,7 @@ else
       pending-review) status_icon="⏳" ;;
       approved)       status_icon="✓" ;;
       in-progress)    status_icon="▶" ;;
+      review)         status_icon="👀" ;;
       complete)       status_icon="✓✓" ;;
       blocked)        status_icon="✗" ;;
       rejected)       status_icon="✗" ;;
@@ -209,6 +300,41 @@ else
     fi
     echo ""
   done <<< "$PLANS"
+fi
+
+# ── Research ──────────────────────────────────────────────────────────────────
+
+echo "── Research (pre-plan) ────────────────"
+echo ""
+
+if [[ -z "$RESEARCH" ]]; then
+  echo "  (no research artifacts)"
+  echo ""
+else
+  RESEARCH_HIDDEN=0
+  RESEARCH_SHOWN=0
+  while IFS='|' read -r slug status where; do
+    if research_is_consumed "$slug" "$status"; then
+      RESEARCH_HIDDEN=$((RESEARCH_HIDDEN + 1))
+      continue
+    fi
+    RESEARCH_SHOWN=$((RESEARCH_SHOWN + 1))
+    echo "  · $slug"
+    echo "    Status: $status"
+    echo "    Source: $where"
+    # Only the two actionable states get a hint; parked and any other value
+    # are listed as-is.
+    case "$status" in
+      pending-design) echo "    Next:   /rad-design $slug" ;;
+      pending-plan)   echo "    Next:   /rad-plan $slug" ;;
+    esac
+    echo ""
+  done <<< "$RESEARCH"
+  # Hiding is reported, never silent.
+  if [[ "$RESEARCH_SHOWN" -eq 0 ]]; then
+    echo "  (no pre-plan research; ${RESEARCH_HIDDEN} consumed)"
+    echo ""
+  fi
 fi
 
 # ── Open PRs ──────────────────────────────────────────────────────────────────

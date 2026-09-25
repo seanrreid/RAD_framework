@@ -1,7 +1,7 @@
 # Research: Portable / Semi-Centralized Process Memory
 Created: 2026-06-23
 Author: architect
-Status: pending-design
+Status: consumed
 Source: session discussion (2026-06-23); shaping brief promoted via /rad-research.
 Follow-up to the portability gap left open in the "central brain / SQLite declined"
 decision. Prior art reviewed: Anthropic "Agentic Coding and Persistent Returns to

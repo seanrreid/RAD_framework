@@ -74,7 +74,7 @@ into its own guardrails.
 now proposes CLAUDE.md conventions and lint rules from findings recurrence
 (`insights-feedback-loop`), and routes recurring wave-failure outcomes to the prompt
 surface that likely caused them
-(in review as [#123](https://github.com/seanrreid/RAD_framework/pull/123)). That is structurally
+([#123](https://github.com/seanrreid/RAD_framework/pull/123)). That is structurally
 CASE's `amendments/`: proposals aimed at the harness, not the product. The
 remaining difference is intentional. CASE's retrospective *writes* learnings
 autonomously; RAD's proposals are suggestion-only and a human applies them.

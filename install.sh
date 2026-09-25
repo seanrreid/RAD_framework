@@ -141,7 +141,22 @@ copy_skills() {
   success "Skills → .claude/skills/"
   info "kickoff   — /kickoff session-start ritual"
   info "wrap      — /wrap session-end ritual"
-  info "rpi-design — /rpi-design agent-architecture design"
+}
+
+# The rpi-design skill was retired (absorbed into /rad-research + /rad-design).
+# `cp -r` never deletes, so an upgrade must remove the stale copy explicitly.
+# Exact relative path only — never a glob.
+STALE_SKILL_RPI_DESIGN=".claude/skills/rpi-design"
+
+remove_stale_skills() {
+  # An empty TARGET_DIR would turn "$TARGET_DIR/.claude/..." into an absolute
+  # path under /, so refuse rather than guess.
+  [[ -n "$TARGET_DIR" ]] || error "remove_stale_skills: TARGET_DIR is empty — refusing to remove anything"
+
+  if [[ -e "$TARGET_DIR/$STALE_SKILL_RPI_DESIGN" ]]; then
+    rm -rf "$TARGET_DIR/$STALE_SKILL_RPI_DESIGN"
+    info "removed stale skill: rpi-design"
+  fi
 }
 
 copy_ai_guardrails() {
@@ -330,6 +345,7 @@ main() {
   create_dirs
   copy_commands
   copy_skills
+  if [[ "$UPGRADE" == "true" ]]; then remove_stale_skills; fi
   copy_ai_guardrails
   copy_scripts
   copy_agents_meta
