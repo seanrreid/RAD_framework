@@ -1,7 +1,10 @@
 # Plan: Wave-Attempt Durability
 Created: 2026-09-25
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-09-25T19:37:07.139Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/wave-attempt-durability
 Adopted-From: https://github.com/seanrreid/RAD_framework/issues/119
 Issue-Title: Record the wave attempt BEFORE running it: a crash mid-wave leaves no event, so resume re-runs blind and the dead attempt escapes the attempt and token budgets
