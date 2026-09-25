@@ -431,3 +431,78 @@ export function blockedReasonCounts(history) {
   }
   return out;
 }
+
+// Default floor for fileFailureCounts: a file must accumulate blocked tasks in
+// at least this many DISTINCT features before it is reported. One feature's
+// failures say more about that plan than about the region of code it touched.
+export const FILE_FAILURE_MIN_FEATURES = 2;
+
+const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
+
+/** Distinct string paths declared for a task title, or [] if none/malformed. */
+function declaredPaths(taskFiles, title) {
+  if (!hasOwn(taskFiles, title) || !Array.isArray(taskFiles[title])) return [];
+  return [...new Set(taskFiles[title].filter((p) => typeof p === 'string' && p !== ''))];
+}
+
+/** Accumulate path -> { failures, features:Set } from blocked tasks in history. */
+function collectFileFailures(history, taskFiles) {
+  const byFile = new Map();
+  for (const event of history) {
+    if (!event || event.type !== 'wave-attempt' || !event.data) continue;
+    if (typeof event.feature !== 'string' || event.feature === '') continue;
+    const tasks = event.data.tasks;
+    if (!Array.isArray(tasks)) continue;
+    for (const task of tasks) {
+      if (!task || !BLOCKED_TASK_STATUSES.includes(task.status) || typeof task.title !== 'string') continue;
+      for (const path of declaredPaths(taskFiles, task.title)) {
+        const entry = byFile.get(path) || { failures: 0, features: new Set() };
+        entry.failures += 1;
+        entry.features.add(event.feature);
+        byFile.set(path, entry);
+      }
+    }
+  }
+  return byFile;
+}
+
+/**
+ * Pure fold over an event history → per-FILE blocked-task counts, aggregated
+ * across features. A "failure" is one task in a `wave-attempt`'s OPTIONAL
+ * `data.tasks` whose status is in BLOCKED_TASK_STATUSES; it is attributed to
+ * every path the CALLER's `taskFiles` mapping declares for that task title (the
+ * fold never reads plan docs — it stays filesystem-free). Attempts with no
+ * `tasks` (legacy/unenriched) cannot be attributed to a file and contribute
+ * nothing; neither do tasks whose title is absent from `taskFiles`, nor events
+ * lacking a string `feature` (a failure that cannot be placed in a feature
+ * cannot count toward the cross-feature floor). `features` is the sorted list
+ * of distinct feature names. Files seen in fewer than `minFeatures` features
+ * are excluded from `files` and counted in `belowFloor`. Zeroed shape on
+ * non-array history or missing/non-object taskFiles; never throws.
+ *
+ * Per-file counts are a CODE-LEGIBILITY signal about that region of the code,
+ * not a verdict on agent performance (#93).
+ *
+ * @param {Event[]} history - in-memory event array (no I/O performed)
+ * @param {Object<string,string[]>} taskFiles - task title -> declared File: paths
+ * @param {number} [minFeatures] - positive-integer floor; anything else → FILE_FAILURE_MIN_FEATURES
+ * @returns {{ files: Object<string,{ failures: number, features: string[] }>,
+ *   belowFloor: number, minFeatures: number }}
+ */
+export function fileFailureCounts(history, taskFiles, minFeatures = FILE_FAILURE_MIN_FEATURES) {
+  const floor = Number.isInteger(minFeatures) && minFeatures > 0 ? minFeatures : FILE_FAILURE_MIN_FEATURES;
+  const out = { files: {}, belowFloor: 0, minFeatures: floor };
+  if (!Array.isArray(history) || !taskFiles || typeof taskFiles !== 'object' || Array.isArray(taskFiles)) {
+    return out;
+  }
+  const byFile = collectFileFailures(history, taskFiles);
+  for (const path of [...byFile.keys()].sort()) {
+    const { failures, features } = byFile.get(path);
+    if (features.size < floor) {
+      out.belowFloor += 1;
+    } else {
+      out.files[path] = { failures, features: [...features].sort() };
+    }
+  }
+  return out;
+}

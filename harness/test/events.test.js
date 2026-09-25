@@ -13,6 +13,8 @@ import {
   retryCounts,
   hookVetoCounts,
   blockedReasonCounts,
+  fileFailureCounts,
+  FILE_FAILURE_MIN_FEATURES,
 } from '../events.js';
 
 test('reduce on empty history → null phase, no markers, no approvals', () => {
@@ -187,6 +189,7 @@ test('hookVetoCounts counts hook-veto events and provenance-tagged attempts sepa
   assert.equal(counts.vetoedAttempts, 1);
 });
 
+const ZERO_FILE_FAILURES = { files: {}, belowFloor: 0, minFeatures: 2 };
 const ZERO_BLOCKED = { blocked_code: 0, blocked_spec: 0, blocked_intent: 0, enrichedAttempts: 0 };
 
 test('insights helpers return zeroed shapes on empty, non-array, and wave-event-free histories', () => {
@@ -210,6 +213,7 @@ test('insights helpers return zeroed shapes on empty, non-array, and wave-event-
     assert.deepEqual(retryCounts(history), { total: 0, retriedWaves: 0, perWave: {} });
     assert.deepEqual(hookVetoCounts(history), { vetoes: 0, vetoedAttempts: 0 });
     assert.deepEqual(blockedReasonCounts(history), ZERO_BLOCKED);
+    assert.deepEqual(fileFailureCounts(history, { t: ['a.js'] }), ZERO_FILE_FAILURES);
   }
 });
 
@@ -455,4 +459,90 @@ test('blockedReasonCounts is zeroed on tasks-free attempts and ignores malformed
   ]);
   // Only the wave-2 attempt carries a non-empty tasks array; none of its entries is a known blocked status.
   assert.deepStrictEqual(blockedReasonCounts(malformed), { ...ZERO_BLOCKED, enrichedAttempts: 1 });
+});
+
+// ── fileFailureCounts (Wave 3, AC#4) ─────────────────────────────────────────
+// Synthetic title -> File: mapping over the fixture corpus. Blocked tasks in the
+// corpus (HAND-COUNTED from the fixture lines):
+//   enriched — "Add blocked-task fold" blocked_code + blocked_spec (wave 2, two
+//              tries); "Update rad-insights Step 4c" blocked_intent (wave 3).
+//   mixed    — "Add blocked-task fold" blocked_code (wave 3 try 1).
+//   legacy   — no `tasks` anywhere → contributes nothing.
+// So: events.js = 3 (blocked-task fold) + 1 (Step 4c) = 4 over {enriched, mixed};
+// events.test.js = 3 over {enriched, mixed}; rad-insights.md = 1 over {enriched}
+// only → below the default floor of 2. "Add fixture corpus" never blocks.
+const SYNTHETIC_TASK_FILES = {
+  'Add blocked-task fold': ['harness/events.js', 'harness/test/events.test.js'],
+  'Update rad-insights Step 4c': ['.claude/commands/shared/rad-insights.md', 'harness/events.js'],
+  'Add fixture corpus': ['harness/test/fixtures/insights/legacy/events.jsonl'],
+};
+
+function loadAllInsightsFixtures() {
+  return INSIGHTS_FIXTURE_FEATURES.flatMap((feature) => loadInsightsFixture(feature));
+}
+
+test('fileFailureCounts reports files failing in >= floor features with literal counts', () => {
+  const history = deepFreeze(loadAllInsightsFixtures());
+  assert.equal(FILE_FAILURE_MIN_FEATURES, 2);
+  assert.deepStrictEqual(fileFailureCounts(history, deepFreeze({ ...SYNTHETIC_TASK_FILES })), {
+    files: {
+      'harness/events.js': { failures: 4, features: ['enriched', 'mixed'] },
+      'harness/test/events.test.js': { failures: 3, features: ['enriched', 'mixed'] },
+    },
+    belowFloor: 1,
+    minFeatures: 2,
+  });
+});
+
+test('fileFailureCounts keeps a single-feature file below the floor', () => {
+  const enrichedOnly = deepFreeze(loadInsightsFixture('enriched'));
+  assert.deepStrictEqual(fileFailureCounts(enrichedOnly, SYNTHETIC_TASK_FILES), {
+    files: {},
+    belowFloor: 3,
+    minFeatures: 2,
+  });
+  // An explicit floor of 1 surfaces every attributed file; the floor is echoed.
+  const floorOne = fileFailureCounts(enrichedOnly, SYNTHETIC_TASK_FILES, 1);
+  assert.equal(floorOne.minFeatures, 1);
+  assert.deepStrictEqual(floorOne.files['.claude/commands/shared/rad-insights.md'], { failures: 1, features: ['enriched'] });
+  // A malformed floor falls back to the named default rather than disabling it.
+  for (const bad of [0, -1, 1.5, '3', null]) {
+    assert.equal(fileFailureCounts([], {}, bad).minFeatures, FILE_FAILURE_MIN_FEATURES);
+  }
+});
+
+test('fileFailureCounts is zeroed on missing/non-object taskFiles and unattributable attempts', () => {
+  const history = deepFreeze(loadAllInsightsFixtures());
+  for (const taskFiles of [undefined, null, 'x', 7, ['harness/events.js'], {}]) {
+    assert.deepStrictEqual(fileFailureCounts(history, taskFiles), ZERO_FILE_FAILURES);
+  }
+  const unattributable = deepFreeze([
+    { feature: 'a', type: 'wave-attempt', data: { wave: 1, outcome: 'fail-tests' } },
+    { type: 'wave-attempt', data: { tasks: [{ title: 't', status: 'blocked_code' }] } },
+    { feature: 'b', type: 'wave-attempt', data: { tasks: [{ title: 'other', status: 'blocked_code' }] } },
+    { feature: 'c', type: 'wave-attempt', data: { tasks: [{ title: 't', status: 'complete' }, null, { status: 'blocked_code' }] } },
+    { feature: 'd', type: 'wave-complete', data: { tasks: [{ title: 't', status: 'blocked_code' }] } },
+    { feature: 'e', type: 'wave-attempt', data: { tasks: [{ title: 'constructor', status: 'blocked_code' }] } },
+    null,
+  ]);
+  assert.deepStrictEqual(fileFailureCounts(unattributable, { t: ['a.js'] }), ZERO_FILE_FAILURES);
+});
+
+test('fileFailureCounts is pure — frozen inputs, no filesystem, only the mapping is consulted', () => {
+  const history = deepFreeze(loadAllInsightsFixtures());
+  const consulted = new Set();
+  const mapping = new Proxy(deepFreeze({ ...SYNTHETIC_TASK_FILES }), {
+    get(target, key) {
+      consulted.add(key);
+      return target[key];
+    },
+  });
+  const first = fileFailureCounts(history, mapping);
+  assert.deepStrictEqual(fileFailureCounts(history, mapping), first);
+  // Only blocked task titles are looked up; the never-blocked title is not.
+  assert.deepStrictEqual([...consulted].sort(), ['Add blocked-task fold', 'Update rad-insights Step 4c']);
+  // The fold and its helpers name no filesystem API (events.js imports only hook-runner.js).
+  const source = readFileSync(fileURLToPath(new URL('../events.js', import.meta.url)), 'utf8');
+  const foldSource = source.slice(source.indexOf('export const FILE_FAILURE_MIN_FEATURES'));
+  assert.doesNotMatch(foldSource, /\bfs\b|readFile|readdir|require\(|import /);
 });
