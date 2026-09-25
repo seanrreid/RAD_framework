@@ -58,6 +58,12 @@ const EXIT_EXCERPT_CHARS = 500;
  */
 const STARTUP_FAILURE_OUTCOME = 'fail-protocol';
 
+/** Fixed one-line preflight prompt. The reply is never parsed — only the exit. */
+export const PREFLIGHT_PROMPT = 'Reply with the single word OK.';
+
+/** Wall-clock ceiling for the preflight probe. */
+export const PREFLIGHT_TIMEOUT_MS = 60_000;
+
 /** Build the allow-listed env handed to the spawned child. */
 function buildChildEnv() {
   const env = {};
@@ -184,6 +190,35 @@ function spawnOnce(cmd, prompt, repoRoot, effectiveModel) {
     }
     child.stdin.end();
   });
+}
+
+/**
+ * Preflight the configured agent CLI: spawn it once through the same
+ * spawnOnce path a real wave uses (identical argv tokenization, allow-listed
+ * env, output cap), feeding PREFLIGHT_PROMPT, and report only whether it
+ * exited 0. Never throws for an agent failure and never parses the reply.
+ *
+ * @param {Object} opts
+ * @param {string} opts.cmd - the agent CLI (same value runWave is built with)
+ * @param {string} [opts.repoRoot] - cwd for the child
+ * @param {number} [opts.timeoutMs] - override for PREFLIGHT_TIMEOUT_MS (tests)
+ * @returns {Promise<{ ok: true } | { ok: false, error: string }>}
+ */
+export async function probeCommand({ cmd, repoRoot, timeoutMs = PREFLIGHT_TIMEOUT_MS } = {}) {
+  if (!cmd) return { ok: false, error: 'probeCommand: cmd is required' };
+  let run;
+  try {
+    run = await withTimeout(spawnOnce(cmd, PREFLIGHT_PROMPT, repoRoot), timeoutMs);
+  } catch (err) {
+    // Spawn error (ENOENT, empty argv) or the wall-clock deadline.
+    const raw = String(err?.message ?? err).slice(0, EXIT_EXCERPT_CHARS);
+    return { ok: false, error: sanitizeErrorMessage(raw) };
+  }
+  if (run.truncated) {
+    return { ok: false, error: `command output exceeded ${MAX_OUTPUT_BYTES} bytes — process killed` };
+  }
+  if (run.code === 0) return { ok: true };
+  return { ok: false, error: describeExitFailure(run) };
 }
 
 /**

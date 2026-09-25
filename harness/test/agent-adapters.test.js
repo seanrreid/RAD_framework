@@ -5,7 +5,12 @@ import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
-import { createCommandAdapter } from '../adapters/agent/command.js';
+import {
+  createCommandAdapter,
+  probeCommand,
+  PREFLIGHT_PROMPT,
+  PREFLIGHT_TIMEOUT_MS,
+} from '../adapters/agent/command.js';
 import { createRunWave } from '../adapters/agent/sdk.js';
 import { deliverCommand } from '../cli.js';
 import { deliverSpine } from '../spine.js';
@@ -379,6 +384,87 @@ test('command adapter — child env has no USER key when parent USER is unset', 
       assert.equal(result.outcome, 'success', 'child env must have no USER key when parent USER is unset');
     } finally {
       if (savedUser !== undefined) process.env.USER = savedUser;
+    }
+  });
+});
+
+// ===========================================================================
+// probeCommand — agent-startup-preflight AC#3
+// ===========================================================================
+
+test('probeCommand — exports a fixed one-line prompt and a named timeout', () => {
+  assert.equal(PREFLIGHT_PROMPT, 'Reply with the single word OK.');
+  assert.equal(PREFLIGHT_TIMEOUT_MS, 60_000);
+});
+
+test('probeCommand — exit 0 resolves ok without parsing the reply', async () => {
+  await withTempDir(async (dir) => {
+    const cmd = fakeCmd(dir, 'ok.js', `process.stdout.write('definitely not the word');\n`);
+    assert.deepEqual(await probeCommand({ cmd, repoRoot: dir }), { ok: true });
+  });
+});
+
+test('probeCommand — exit 1 with a stdout-only reason resolves not-ok carrying that text', async () => {
+  await withTempDir(async (dir) => {
+    const cmd = fakeCmd(dir, 'nologin.js', `process.stdout.write('Not logged in');process.exit(1);\n`);
+    const result = await probeCommand({ cmd, repoRoot: dir });
+    assert.equal(result.ok, false);
+    assert.equal(result.error, 'command exited with code 1: (stdout) Not logged in');
+  });
+});
+
+test('probeCommand — stdout excerpt is capped and sanitized', async () => {
+  await withTempDir(async (dir) => {
+    const body = `sk-ant-${'S'.repeat(20)} ` + 'pad '.repeat(150) + 'TAIL_SHOULD_BE_CUT';
+    const cmd = fakeCmd(dir, 'long.js', `process.stdout.write(${JSON.stringify(body)});process.exit(4);\n`);
+    const result = await probeCommand({ cmd, repoRoot: dir });
+    assert.equal(result.ok, false);
+    assert.ok(result.error.includes('[REDACTED]') && !result.error.includes('S'.repeat(20)), result.error);
+    assert.ok(!result.error.includes('TAIL_SHOULD_BE_CUT'), result.error);
+  });
+});
+
+test('probeCommand — missing executable resolves not-ok (never throws)', async () => {
+  await withTempDir(async (dir) => {
+    const result = await probeCommand({ cmd: join(dir, 'no-such-agent-binary'), repoRoot: dir });
+    assert.equal(result.ok, false);
+    assert.ok(result.error.includes('ENOENT'), result.error);
+  });
+});
+
+test('probeCommand — empty or whitespace-only cmd resolves not-ok', async () => {
+  assert.equal((await probeCommand({ cmd: '' })).ok, false);
+  const blank = await probeCommand({ cmd: '   ' });
+  assert.equal(blank.ok, false);
+  assert.ok(blank.error.includes('empty cmd'), blank.error);
+});
+
+test('probeCommand — timeout resolves not-ok', async () => {
+  await withTempDir(async (dir) => {
+    const cmd = fakeCmd(dir, 'slow.js', 'setTimeout(() => {}, 2000);\n');
+    const result = await probeCommand({ cmd, repoRoot: dir, timeoutMs: 50 });
+    assert.equal(result.ok, false);
+    assert.ok(result.error.includes('timed out after 50ms'), result.error);
+  });
+});
+
+test('probeCommand — child gets the probe prompt on stdin and only the allow-listed env', async () => {
+  await withTempDir(async (dir) => {
+    const SENTINEL = 'RAD_TEST_PROBE_SENTINEL';
+    process.env[SENTINEL] = 'leak-me-if-you-can';
+    try {
+      const cmd = fakeCmd(
+        dir,
+        'probe-check.js',
+        `let s='';process.stdin.on('data',(d)=>{s+=d;});process.stdin.on('end',()=>{` +
+          `const leaked=process.env[${JSON.stringify(SENTINEL)}]!==undefined;` +
+          `if(s===${JSON.stringify(PREFLIGHT_PROMPT)}&&!leaked){process.exit(0);}` +
+          `process.stdout.write('stdin='+JSON.stringify(s)+' leaked='+leaked);process.exit(1);});\n`,
+      );
+      const result = await probeCommand({ cmd, repoRoot: dir });
+      assert.deepEqual(result, { ok: true }, `probe child saw: ${result.error}`);
+    } finally {
+      delete process.env[SENTINEL];
     }
   });
 });
