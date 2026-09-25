@@ -1,5 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   reduce,
   phaseOf,
@@ -9,6 +12,11 @@ import {
   failReasonCounts,
   retryCounts,
   hookVetoCounts,
+  blockedReasonCounts,
+  fileFailureCounts,
+  FILE_FAILURE_MIN_FEATURES,
+  waveReliability,
+  attemptOutcomeCounts,
 } from '../events.js';
 
 test('reduce on empty history → null phase, no markers, no approvals', () => {
@@ -183,6 +191,9 @@ test('hookVetoCounts counts hook-veto events and provenance-tagged attempts sepa
   assert.equal(counts.vetoedAttempts, 1);
 });
 
+const ZERO_FILE_FAILURES = { files: {}, belowFloor: 0, minFeatures: 2 };
+const ZERO_BLOCKED = { blocked_code: 0, blocked_spec: 0, blocked_intent: 0, enrichedAttempts: 0 };
+
 test('insights helpers return zeroed shapes on empty, non-array, and wave-event-free histories', () => {
   const approvedOnly = [
     { feature: 'f', type: 'approved', actor: 'architect', role: 'architect', ts: 't1' },
@@ -203,6 +214,9 @@ test('insights helpers return zeroed shapes on empty, non-array, and wave-event-
     assert.deepEqual(failReasonCounts(history), { total: 0, reasons: {} });
     assert.deepEqual(retryCounts(history), { total: 0, retriedWaves: 0, perWave: {} });
     assert.deepEqual(hookVetoCounts(history), { vetoes: 0, vetoedAttempts: 0 });
+    assert.deepEqual(blockedReasonCounts(history), ZERO_BLOCKED);
+    assert.deepEqual(fileFailureCounts(history, { t: ['a.js'] }), ZERO_FILE_FAILURES);
+    assert.deepEqual(attemptOutcomeCounts(history), { counts: zeroOutcomes, features: {} });
   }
 });
 
@@ -318,4 +332,432 @@ test('phaseOf is pure — no filesystem access (only the passed array matters)',
   assert.equal(phaseOf(history), 'delivered');
   // A second, independent call with empty input is unaffected by the first.
   assert.equal(phaseOf([]), null);
+});
+
+// ── Regression fence over the five insights folds on the fixture corpus ──────
+// harness/test/fixtures/insights is laid out as a RAD_STATE_DIR: one
+// <feature>/events.jsonl per feature (legacy = pre-#89 no `tasks`; enriched =
+// `tasks` on every attempt; mixed = both shapes interleaved). The expected
+// objects below are HAND-COMPUTED from the fixture lines — never recomputed
+// from the folds under test — so any later change that moves an existing fold's
+// output on these logs turns this test red.
+const INSIGHTS_FIXTURE_DIR = fileURLToPath(new URL('./fixtures/insights/', import.meta.url));
+const INSIGHTS_FIXTURE_FEATURES = ['legacy', 'enriched', 'mixed'];
+
+/** Parse one fixture feature's events.jsonl (one event per non-empty line). */
+function loadInsightsFixture(feature) {
+  return readFileSync(join(INSIGHTS_FIXTURE_DIR, feature, 'events.jsonl'), 'utf8')
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+}
+
+/** Outcome-count shape with every bucket zeroed, overridden per fixture. */
+function outcomesWith(overrides) {
+  return {
+    success: 0,
+    'fail-tests': 0,
+    'fail-scope': 0,
+    'fail-protocol': 0,
+    'fail-timeout': 0,
+    'no-changes': 0,
+    'abort-user': 0,
+    unknown: 0,
+    total: 0,
+    ...overrides,
+  };
+}
+
+const FENCE_EXPECTED = {
+  legacy: {
+    // Usage: 140 + (80+20, no explicit total) = 240; the 2nd wave-2 and wave-3 attempts carry none.
+    totalUsage: { input: 180, output: 60, total: 240 },
+    // wave-complete 1 is 'success'; wave-complete 2 has no outcome → unknown.
+    outcomeCounts: outcomesWith({ success: 1, unknown: 1, total: 2 }),
+    // The wave-3 surface terminal records { wave, action } with no reason.
+    failReasonCounts: { total: 1, reasons: { unknown: 1 } },
+    retryCounts: { total: 4, retriedWaves: 1, perWave: { 1: 1, 2: 2, 3: 1 } },
+    hookVetoCounts: { vetoes: 0, vetoedAttempts: 0 },
+  },
+  enriched: {
+    // Usage: 250 + 150 + 75 + 50; the resumed wave-2 attempt carries none.
+    totalUsage: { input: 420, output: 105, total: 525 },
+    outcomeCounts: outcomesWith({ success: 2, total: 2 }),
+    failReasonCounts: { total: 2, reasons: { 'budget-exhausted': 1, 'abort-user': 1 } },
+    retryCounts: { total: 5, retriedWaves: 1, perWave: { 1: 1, 2: 3, 3: 1 } },
+    // One post-wave veto: a hook-veto event AND a provenance-tagged attempt.
+    hookVetoCounts: { vetoes: 1, vetoedAttempts: 1 },
+  },
+  mixed: {
+    // Usage: 60 + 90 + (30+5, no explicit total) + (total-only 40) = 225.
+    totalUsage: { input: 150, output: 35, total: 225 },
+    outcomeCounts: outcomesWith({ success: 1, 'no-changes': 1, total: 2 }),
+    // doom-loop terminal, then a pre-wave-veto abort with { wave, action } only.
+    failReasonCounts: { total: 2, reasons: { 'doom-loop': 1, unknown: 1 } },
+    retryCounts: { total: 5, retriedWaves: 2, perWave: { 1: 2, 2: 1, 3: 2 } },
+    // Pre-wave veto: a hook-veto event with no tagged attempt.
+    hookVetoCounts: { vetoes: 1, vetoedAttempts: 0 },
+  },
+};
+
+test('regression fence — the five insights folds return committed literals on every fixture', () => {
+  for (const feature of INSIGHTS_FIXTURE_FEATURES) {
+    const history = deepFreeze(loadInsightsFixture(feature));
+    assert.ok(history.length > 0, `${feature} fixture is non-empty`);
+    for (const event of history) assert.equal(event.feature, feature, `${feature} fixture feature field`);
+    const expected = FENCE_EXPECTED[feature];
+    assert.deepStrictEqual(totalUsage(history), expected.totalUsage, `totalUsage on ${feature}`);
+    assert.deepStrictEqual(outcomeCounts(history), expected.outcomeCounts, `outcomeCounts on ${feature}`);
+    assert.deepStrictEqual(failReasonCounts(history), expected.failReasonCounts, `failReasonCounts on ${feature}`);
+    assert.deepStrictEqual(retryCounts(history), expected.retryCounts, `retryCounts on ${feature}`);
+    assert.deepStrictEqual(hookVetoCounts(history), expected.hookVetoCounts, `hookVetoCounts on ${feature}`);
+  }
+});
+
+test('regression fence — the fixture corpus covers legacy, enriched, and mixed task shapes', () => {
+  const attempts = (feature) => loadInsightsFixture(feature).filter((e) => e.type === 'wave-attempt');
+  assert.equal(attempts('legacy').some((e) => 'tasks' in e.data), false, 'legacy has no tasks key');
+  assert.equal(attempts('enriched').every((e) => Array.isArray(e.data.tasks)), true, 'enriched always has tasks');
+  const mixed = attempts('mixed');
+  assert.equal(mixed.some((e) => Array.isArray(e.data.tasks)), true, 'mixed has enriched attempts');
+  assert.equal(mixed.some((e) => !('tasks' in e.data)), true, 'mixed has legacy attempts');
+  const statuses = new Set(
+    INSIGHTS_FIXTURE_FEATURES.flatMap((f) => attempts(f).flatMap((e) => (e.data.tasks || []).map((t) => t.status))),
+  );
+  for (const status of ['complete', 'done_with_concerns', 'blocked_code', 'blocked_spec', 'blocked_intent']) {
+    assert.ok(statuses.has(status), `corpus carries a ${status} task`);
+  }
+});
+
+// ── blockedReasonCounts (Wave 2, AC#3) ───────────────────────────────────────
+// Expected values are HAND-COMPUTED from the fixture lines:
+//   legacy   — no attempt carries `tasks` → zeroed, enrichedAttempts 0.
+//   enriched — 5 attempts, all with tasks; blocked tasks: one blocked_code
+//              (wave 2 try 1), one blocked_spec (wave 2 try 2), one
+//              blocked_intent (wave 3); complete/done_with_concerns ignored.
+//   mixed    — 5 attempts, 2 with tasks (wave 1 try 2: two completes; wave 3
+//              try 1: one blocked_code); the 3 legacy attempts contribute nothing.
+const BLOCKED_EXPECTED = {
+  legacy: ZERO_BLOCKED,
+  enriched: { blocked_code: 1, blocked_spec: 1, blocked_intent: 1, enrichedAttempts: 5 },
+  mixed: { blocked_code: 1, blocked_spec: 0, blocked_intent: 0, enrichedAttempts: 2 },
+};
+
+test('blockedReasonCounts buckets per-task blocked statuses on every fixture', () => {
+  for (const feature of INSIGHTS_FIXTURE_FEATURES) {
+    const history = deepFreeze(loadInsightsFixture(feature));
+    assert.deepStrictEqual(blockedReasonCounts(history), BLOCKED_EXPECTED[feature], `blockedReasonCounts on ${feature}`);
+  }
+});
+
+test('blockedReasonCounts is zeroed on tasks-free attempts and ignores malformed task data', () => {
+  const tasksFree = [{ type: 'wave-attempt', data: { wave: 1, outcome: 'success' } }, { type: 'wave-attempt' }];
+  assert.deepStrictEqual(blockedReasonCounts(tasksFree), ZERO_BLOCKED);
+  const malformed = deepFreeze([
+    { type: 'wave-attempt', data: { wave: 1, tasks: [] } },
+    { type: 'wave-attempt', data: { wave: 1, tasks: 'blocked_code' } },
+    { type: 'wave-attempt', data: { wave: 2, tasks: [null, { status: 7 }, { status: 'blocked_other' }, { title: 'x' }] } },
+    { type: 'wave-complete', data: { wave: 2, tasks: [{ status: 'blocked_code' }] } },
+    null,
+  ]);
+  // Only the wave-2 attempt carries a non-empty tasks array; none of its entries is a known blocked status.
+  assert.deepStrictEqual(blockedReasonCounts(malformed), { ...ZERO_BLOCKED, enrichedAttempts: 1 });
+});
+
+// ── fileFailureCounts (Wave 3, AC#4) ─────────────────────────────────────────
+// Synthetic title -> File: mapping over the fixture corpus. Blocked tasks in the
+// corpus (HAND-COUNTED from the fixture lines):
+//   enriched — "Add blocked-task fold" blocked_code + blocked_spec (wave 2, two
+//              tries); "Update rad-insights Step 4c" blocked_intent (wave 3).
+//   mixed    — "Add blocked-task fold" blocked_code (wave 3 try 1).
+//   legacy   — no `tasks` anywhere → contributes nothing.
+// So: events.js = 3 (blocked-task fold) + 1 (Step 4c) = 4 over {enriched, mixed};
+// events.test.js = 3 over {enriched, mixed}; rad-insights.md = 1 over {enriched}
+// only → below the default floor of 2. "Add fixture corpus" never blocks.
+const SYNTHETIC_TASK_FILES = {
+  'Add blocked-task fold': ['harness/events.js', 'harness/test/events.test.js'],
+  'Update rad-insights Step 4c': ['.claude/commands/shared/rad-insights.md', 'harness/events.js'],
+  'Add fixture corpus': ['harness/test/fixtures/insights/legacy/events.jsonl'],
+};
+
+function loadAllInsightsFixtures() {
+  return INSIGHTS_FIXTURE_FEATURES.flatMap((feature) => loadInsightsFixture(feature));
+}
+
+test('fileFailureCounts reports files failing in >= floor features with literal counts', () => {
+  const history = deepFreeze(loadAllInsightsFixtures());
+  assert.equal(FILE_FAILURE_MIN_FEATURES, 2);
+  assert.deepStrictEqual(fileFailureCounts(history, deepFreeze({ ...SYNTHETIC_TASK_FILES })), {
+    files: {
+      'harness/events.js': { failures: 4, features: ['enriched', 'mixed'] },
+      'harness/test/events.test.js': { failures: 3, features: ['enriched', 'mixed'] },
+    },
+    belowFloor: 1,
+    minFeatures: 2,
+  });
+});
+
+test('fileFailureCounts keeps a single-feature file below the floor', () => {
+  const enrichedOnly = deepFreeze(loadInsightsFixture('enriched'));
+  assert.deepStrictEqual(fileFailureCounts(enrichedOnly, SYNTHETIC_TASK_FILES), {
+    files: {},
+    belowFloor: 3,
+    minFeatures: 2,
+  });
+  // An explicit floor of 1 surfaces every attributed file; the floor is echoed.
+  const floorOne = fileFailureCounts(enrichedOnly, SYNTHETIC_TASK_FILES, 1);
+  assert.equal(floorOne.minFeatures, 1);
+  assert.deepStrictEqual(floorOne.files['.claude/commands/shared/rad-insights.md'], { failures: 1, features: ['enriched'] });
+  // A malformed floor falls back to the named default rather than disabling it.
+  for (const bad of [0, -1, 1.5, '3', null]) {
+    assert.equal(fileFailureCounts([], {}, bad).minFeatures, FILE_FAILURE_MIN_FEATURES);
+  }
+});
+
+test('fileFailureCounts is zeroed on missing/non-object taskFiles and unattributable attempts', () => {
+  const history = deepFreeze(loadAllInsightsFixtures());
+  for (const taskFiles of [undefined, null, 'x', 7, ['harness/events.js'], {}]) {
+    assert.deepStrictEqual(fileFailureCounts(history, taskFiles), ZERO_FILE_FAILURES);
+  }
+  const unattributable = deepFreeze([
+    { feature: 'a', type: 'wave-attempt', data: { wave: 1, outcome: 'fail-tests' } },
+    { type: 'wave-attempt', data: { tasks: [{ title: 't', status: 'blocked_code' }] } },
+    { feature: 'b', type: 'wave-attempt', data: { tasks: [{ title: 'other', status: 'blocked_code' }] } },
+    { feature: 'c', type: 'wave-attempt', data: { tasks: [{ title: 't', status: 'complete' }, null, { status: 'blocked_code' }] } },
+    { feature: 'd', type: 'wave-complete', data: { tasks: [{ title: 't', status: 'blocked_code' }] } },
+    { feature: 'e', type: 'wave-attempt', data: { tasks: [{ title: 'constructor', status: 'blocked_code' }] } },
+    null,
+  ]);
+  assert.deepStrictEqual(fileFailureCounts(unattributable, { t: ['a.js'] }), ZERO_FILE_FAILURES);
+});
+
+test('fileFailureCounts is pure — frozen inputs, no filesystem, only the mapping is consulted', () => {
+  const history = deepFreeze(loadAllInsightsFixtures());
+  const consulted = new Set();
+  const mapping = new Proxy(deepFreeze({ ...SYNTHETIC_TASK_FILES }), {
+    get(target, key) {
+      consulted.add(key);
+      return target[key];
+    },
+  });
+  const first = fileFailureCounts(history, mapping);
+  assert.deepStrictEqual(fileFailureCounts(history, mapping), first);
+  // Only blocked task titles are looked up; the never-blocked title is not.
+  assert.deepStrictEqual([...consulted].sort(), ['Add blocked-task fold', 'Update rad-insights Step 4c']);
+  // The fold and its helpers name no filesystem API (events.js imports only hook-runner.js).
+  const source = readFileSync(fileURLToPath(new URL('../events.js', import.meta.url)), 'utf8');
+  const foldSource = source.slice(source.indexOf('export const FILE_FAILURE_MIN_FEATURES'));
+  assert.doesNotMatch(foldSource, /\bfs\b|readFile|readdir|require\(|import /);
+});
+
+// ── waveReliability (Wave 4, AC#5) ───────────────────────────────────────────
+// Expected values are HAND-COMPUTED from the fixture lines. Each (feature, wave)
+// pair's attempts span every deliver run of that feature:
+//   legacy   — w1: [success]; w2: [fail-tests, success]; w3: [fail-timeout]
+//   enriched — w1: [success]; w2: [fail-tests, fail-scope, success] (two runs);
+//              w3: [abort-user] (hook-vetoed attempt, still an attempt)
+//   mixed    — w1: [fail-protocol, success]; w2: [no-changes]; w3: [fail-tests, fail-tests]
+const ZERO_RELIABILITY = { perPosition: {}, features: 0 };
+const slot = (attempts, firstAttemptSuccess, retried, samples) => ({ attempts, firstAttemptSuccess, retried, samples });
+const RELIABILITY_PER_FEATURE = {
+  legacy: { perPosition: { 1: slot(1, 1, 0, 1), 2: slot(2, 0, 1, 1), 3: slot(1, 0, 0, 1) }, features: 1 },
+  enriched: { perPosition: { 1: slot(1, 1, 0, 1), 2: slot(3, 0, 1, 1), 3: slot(1, 0, 0, 1) }, features: 1 },
+  mixed: { perPosition: { 1: slot(2, 0, 1, 1), 2: slot(1, 0, 0, 1), 3: slot(2, 0, 1, 1) }, features: 1 },
+};
+
+test('waveReliability returns literal per-position counts across the fixture corpus', () => {
+  const history = deepFreeze(loadAllInsightsFixtures());
+  assert.deepStrictEqual(waveReliability(history), {
+    perPosition: { 1: slot(4, 2, 1, 3), 2: slot(6, 0, 2, 3), 3: slot(4, 0, 1, 3) },
+    features: 3,
+  });
+});
+
+test('waveReliability reports a single-feature history at its true n (no floor in the fold)', () => {
+  for (const feature of INSIGHTS_FIXTURE_FEATURES) {
+    const history = deepFreeze(loadInsightsFixture(feature));
+    assert.deepStrictEqual(waveReliability(history), RELIABILITY_PER_FEATURE[feature], feature);
+  }
+});
+
+test('waveReliability never reads usage — throwing usage getters and a guarding Proxy change nothing', () => {
+  const expected = waveReliability(deepFreeze(loadAllInsightsFixtures()));
+  const withThrowingGetters = loadAllInsightsFixtures().map((event) => {
+    if (!event.data) return event;
+    const data = { ...event.data };
+    delete data.usage;
+    Object.defineProperty(data, 'usage', {
+      enumerable: true,
+      get() {
+        throw new Error('waveReliability must not read usage');
+      },
+    });
+    return { ...event, data };
+  });
+  assert.deepStrictEqual(waveReliability(withThrowingGetters), expected);
+  const read = new Set();
+  const proxied = loadAllInsightsFixtures().map((event) =>
+    event.data
+      ? {
+          ...event,
+          data: new Proxy(event.data, {
+            get(target, key) {
+              read.add(key);
+              if (key === 'usage') throw new Error('waveReliability must not read usage');
+              return target[key];
+            },
+          }),
+        }
+      : event,
+  );
+  assert.deepStrictEqual(waveReliability(proxied), expected);
+  assert.ok(!read.has('usage'));
+  assert.deepStrictEqual([...read].sort(), ['outcome', 'wave']);
+});
+
+test('waveReliability is zeroed on empty / null / non-array / wave-attempt-free input', () => {
+  for (const input of [[], null, undefined, 'x', 7, {}, { length: 2 }]) {
+    assert.deepStrictEqual(waveReliability(input), ZERO_RELIABILITY);
+  }
+  const waveFree = deepFreeze([
+    { feature: 'a', type: 'plan-created' },
+    { feature: 'a', type: 'wave-complete', data: { wave: 1, outcome: 'success' } },
+    { feature: 'a', type: 'wave-failed', data: { wave: 2, reason: 'doom-loop' } },
+  ]);
+  assert.deepStrictEqual(waveReliability(waveFree), ZERO_RELIABILITY);
+  const unplaceable = deepFreeze([
+    null,
+    { type: 'wave-attempt', data: { wave: 1, outcome: 'success' } },
+    { feature: '', type: 'wave-attempt', data: { wave: 1, outcome: 'success' } },
+    { feature: 'a', type: 'wave-attempt' },
+    { feature: 'a', type: 'wave-attempt', data: { outcome: 'success' } },
+    { feature: 'a', type: 'wave-attempt', data: { wave: '1', outcome: 'success' } },
+    { feature: 'a', type: 'wave-attempt', data: { wave: Number.NaN, outcome: 'success' } },
+  ]);
+  assert.deepStrictEqual(waveReliability(unplaceable), ZERO_RELIABILITY);
+});
+
+test('waveReliability keys pairs by feature — same wave in two features is two samples', () => {
+  const history = deepFreeze([
+    { feature: 'a', type: 'wave-attempt', data: { wave: 1 } },
+    { feature: 'a', type: 'wave-attempt', data: { wave: 1, outcome: 'success' } },
+    { feature: 'b', type: 'wave-attempt', data: { wave: 1, outcome: 'success' } },
+  ]);
+  // Feature a's first attempt has no outcome → not a first-attempt success.
+  assert.deepStrictEqual(waveReliability(history), { perPosition: { 1: slot(3, 1, 1, 2) }, features: 2 });
+});
+
+// ── attemptOutcomeCounts (Wave 5 revision, AC#6) ─────────────────────────────
+// The spine records outcomes ONLY on wave-attempt events; wave-complete carries
+// { wave } alone. Expected values are HAND-COMPUTED from the fixture lines:
+//   legacy   — success, fail-tests, success, fail-timeout
+//   enriched — success, fail-tests, fail-scope, success, abort-user
+//   mixed    — fail-protocol, success, no-changes, fail-tests, fail-tests
+const ATTEMPT_OUTCOMES_PER_FEATURE = {
+  legacy: {
+    counts: outcomesWith({ success: 2, 'fail-tests': 1, 'fail-timeout': 1, total: 4 }),
+    features: { success: ['legacy'], 'fail-tests': ['legacy'], 'fail-timeout': ['legacy'] },
+  },
+  enriched: {
+    counts: outcomesWith({ success: 2, 'fail-tests': 1, 'fail-scope': 1, 'abort-user': 1, total: 5 }),
+    features: {
+      success: ['enriched'],
+      'fail-tests': ['enriched'],
+      'fail-scope': ['enriched'],
+      'abort-user': ['enriched'],
+    },
+  },
+  mixed: {
+    counts: outcomesWith({ success: 1, 'fail-tests': 2, 'fail-protocol': 1, 'no-changes': 1, total: 5 }),
+    features: {
+      'fail-protocol': ['mixed'],
+      success: ['mixed'],
+      'no-changes': ['mixed'],
+      'fail-tests': ['mixed'],
+    },
+  },
+};
+
+test('attemptOutcomeCounts returns literal counts and features on each committed fixture', () => {
+  for (const feature of INSIGHTS_FIXTURE_FEATURES) {
+    const history = deepFreeze(loadInsightsFixture(feature));
+    assert.deepStrictEqual(attemptOutcomeCounts(history), ATTEMPT_OUTCOMES_PER_FEATURE[feature], feature);
+  }
+});
+
+test('attemptOutcomeCounts aggregates distinct features per outcome across the corpus', () => {
+  const out = attemptOutcomeCounts(deepFreeze(loadAllInsightsFixtures()));
+  assert.deepStrictEqual(
+    out.counts,
+    outcomesWith({
+      success: 5,
+      'fail-tests': 4,
+      'fail-scope': 1,
+      'fail-protocol': 1,
+      'fail-timeout': 1,
+      'no-changes': 1,
+      'abort-user': 1,
+      total: 14,
+    }),
+  );
+  assert.deepStrictEqual(out.features['fail-tests'], ['legacy', 'enriched', 'mixed']);
+  assert.deepStrictEqual(out.features['fail-protocol'], ['mixed']);
+});
+
+test('attemptOutcomeCounts ignores wave-complete events — even ones carrying an outcome', () => {
+  const history = deepFreeze([
+    { feature: 'a', type: 'wave-attempt', data: { wave: 1, outcome: 'fail-protocol' } },
+    { feature: 'a', type: 'wave-complete', data: { wave: 1 } },
+    { feature: 'a', type: 'wave-complete', data: { wave: 2, outcome: 'fail-protocol' } },
+    { feature: 'b', type: 'wave-failed', data: { wave: 1, reason: 'doom-loop', outcome: 'fail-scope' } },
+  ]);
+  assert.deepStrictEqual(attemptOutcomeCounts(history), {
+    counts: outcomesWith({ 'fail-protocol': 1, total: 1 }),
+    features: { 'fail-protocol': ['a'] },
+  });
+});
+
+test('attemptOutcomeCounts is zeroed on empty / null / non-array / wave-attempt-free input', () => {
+  const zero = { counts: outcomesWith({}), features: {} };
+  for (const input of [[], null, undefined, 'x', 7, {}, { length: 2 }]) {
+    assert.deepStrictEqual(attemptOutcomeCounts(input), zero);
+  }
+  const attemptFree = deepFreeze([
+    { feature: 'a', type: 'plan-created' },
+    { feature: 'a', type: 'wave-complete', data: { wave: 1 } },
+  ]);
+  assert.deepStrictEqual(attemptOutcomeCounts(attemptFree), zero);
+});
+
+test('attemptOutcomeCounts buckets missing/unknown outcomes and skips feature-less attempts in features', () => {
+  const history = deepFreeze([
+    null,
+    { feature: 'a', type: 'wave-attempt' },
+    { feature: 'a', type: 'wave-attempt', data: { outcome: 'exploded' } },
+    { type: 'wave-attempt', data: { outcome: 'fail-scope' } },
+    { feature: '', type: 'wave-attempt', data: { outcome: 'fail-scope' } },
+    { feature: 'b', type: 'wave-attempt', data: { outcome: 'fail-scope' } },
+    { feature: 'b', type: 'wave-attempt', data: { outcome: 'fail-scope' } },
+  ]);
+  assert.deepStrictEqual(attemptOutcomeCounts(history), {
+    counts: outcomesWith({ unknown: 2, 'fail-scope': 4, total: 6 }),
+    features: { unknown: ['a'], 'fail-scope': ['b'] },
+  });
+});
+
+test('attemptOutcomeCounts never reads usage', () => {
+  const expected = attemptOutcomeCounts(deepFreeze(loadAllInsightsFixtures()));
+  const guarded = loadAllInsightsFixtures().map((event) => {
+    if (!event.data) return event;
+    const data = { ...event.data };
+    delete data.usage;
+    Object.defineProperty(data, 'usage', {
+      enumerable: true,
+      get() {
+        throw new Error('attemptOutcomeCounts must not read usage');
+      },
+    });
+    return { ...event, data };
+  });
+  assert.deepStrictEqual(attemptOutcomeCounts(guarded), expected);
 });

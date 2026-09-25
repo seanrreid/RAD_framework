@@ -396,3 +396,219 @@ export function hookVetoCounts(history) {
   }
   return out;
 }
+
+// The per-task blocked statuses a wave agent may self-classify with (the
+// WAVE_RESULT task `status` vocabulary, docs/rad-wave-contract.md). Only these
+// three are bucketed; complete / done_with_concerns / anything else is ignored.
+const BLOCKED_TASK_STATUSES = ['blocked_code', 'blocked_spec', 'blocked_intent'];
+
+/**
+ * Pure fold over an event history → per-task blocked-reason distribution read
+ * from `wave-attempt` events' OPTIONAL `data.tasks` array. Each task whose
+ * `status` is one of BLOCKED_TASK_STATUSES increments its bucket.
+ * `enrichedAttempts` counts attempts that carried a non-empty `tasks` array, so
+ * callers can tell "no blocked tasks" (enrichedAttempts > 0, zero buckets) from
+ * "no enriched events at all" (enrichedAttempts === 0). Legacy attempts (no
+ * `tasks`), malformed task entries, and non-array input contribute nothing.
+ *
+ * @param {Event[]} history - in-memory event array (no I/O performed)
+ * @returns {{ blocked_code: number, blocked_spec: number, blocked_intent: number,
+ *   enrichedAttempts: number }}
+ */
+export function blockedReasonCounts(history) {
+  const out = { enrichedAttempts: 0 };
+  for (const status of BLOCKED_TASK_STATUSES) out[status] = 0;
+  if (!Array.isArray(history)) return out;
+  for (const event of history) {
+    if (!event || event.type !== 'wave-attempt' || !event.data) continue;
+    const tasks = event.data.tasks;
+    if (!Array.isArray(tasks) || tasks.length === 0) continue;
+    out.enrichedAttempts += 1;
+    for (const task of tasks) {
+      const status = task && typeof task.status === 'string' ? task.status : null;
+      if (status !== null && BLOCKED_TASK_STATUSES.includes(status)) out[status] += 1;
+    }
+  }
+  return out;
+}
+
+// Default floor for fileFailureCounts: a file must accumulate blocked tasks in
+// at least this many DISTINCT features before it is reported. One feature's
+// failures say more about that plan than about the region of code it touched.
+export const FILE_FAILURE_MIN_FEATURES = 2;
+
+const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
+
+/** Distinct string paths declared for a task title, or [] if none/malformed. */
+function declaredPaths(taskFiles, title) {
+  if (!hasOwn(taskFiles, title) || !Array.isArray(taskFiles[title])) return [];
+  return [...new Set(taskFiles[title].filter((p) => typeof p === 'string' && p !== ''))];
+}
+
+/** Accumulate path -> { failures, features:Set } from blocked tasks in history. */
+function collectFileFailures(history, taskFiles) {
+  const byFile = new Map();
+  for (const event of history) {
+    if (!event || event.type !== 'wave-attempt' || !event.data) continue;
+    if (typeof event.feature !== 'string' || event.feature === '') continue;
+    const tasks = event.data.tasks;
+    if (!Array.isArray(tasks)) continue;
+    for (const task of tasks) {
+      if (!task || !BLOCKED_TASK_STATUSES.includes(task.status) || typeof task.title !== 'string') continue;
+      for (const path of declaredPaths(taskFiles, task.title)) {
+        const entry = byFile.get(path) || { failures: 0, features: new Set() };
+        entry.failures += 1;
+        entry.features.add(event.feature);
+        byFile.set(path, entry);
+      }
+    }
+  }
+  return byFile;
+}
+
+/**
+ * Pure fold over an event history → per-FILE blocked-task counts, aggregated
+ * across features. A "failure" is one task in a `wave-attempt`'s OPTIONAL
+ * `data.tasks` whose status is in BLOCKED_TASK_STATUSES; it is attributed to
+ * every path the CALLER's `taskFiles` mapping declares for that task title (the
+ * fold never reads plan docs — it stays filesystem-free). Attempts with no
+ * `tasks` (legacy/unenriched) cannot be attributed to a file and contribute
+ * nothing; neither do tasks whose title is absent from `taskFiles`, nor events
+ * lacking a string `feature` (a failure that cannot be placed in a feature
+ * cannot count toward the cross-feature floor). `features` is the sorted list
+ * of distinct feature names. Files seen in fewer than `minFeatures` features
+ * are excluded from `files` and counted in `belowFloor`. Zeroed shape on
+ * non-array history or missing/non-object taskFiles; never throws.
+ *
+ * Per-file counts are a CODE-LEGIBILITY signal about that region of the code,
+ * not a verdict on agent performance (#93).
+ *
+ * @param {Event[]} history - in-memory event array (no I/O performed)
+ * @param {Object<string,string[]>} taskFiles - task title -> declared File: paths
+ * @param {number} [minFeatures] - positive-integer floor; anything else → FILE_FAILURE_MIN_FEATURES
+ * @returns {{ files: Object<string,{ failures: number, features: string[] }>,
+ *   belowFloor: number, minFeatures: number }}
+ */
+export function fileFailureCounts(history, taskFiles, minFeatures = FILE_FAILURE_MIN_FEATURES) {
+  const floor = Number.isInteger(minFeatures) && minFeatures > 0 ? minFeatures : FILE_FAILURE_MIN_FEATURES;
+  const out = { files: {}, belowFloor: 0, minFeatures: floor };
+  if (!Array.isArray(history) || !taskFiles || typeof taskFiles !== 'object' || Array.isArray(taskFiles)) {
+    return out;
+  }
+  const byFile = collectFileFailures(history, taskFiles);
+  for (const path of [...byFile.keys()].sort()) {
+    const { failures, features } = byFile.get(path);
+    if (features.size < floor) {
+      out.belowFloor += 1;
+    } else {
+      out.files[path] = { failures, features: [...features].sort() };
+    }
+  }
+  return out;
+}
+
+/**
+ * Group `wave-attempt` events into (feature, wave) pairs, in history order.
+ * Reads ONLY `type`, `feature`, `data.wave`, and `data.outcome` — never `usage`.
+ * @returns {Map<string,{ wave: string, feature: string, attempts: number, firstOutcome: string|null }>}
+ */
+function collectWavePairs(history) {
+  const pairs = new Map();
+  for (const event of history) {
+    if (!event || event.type !== 'wave-attempt' || !event.data) continue;
+    if (typeof event.feature !== 'string' || event.feature === '') continue;
+    const wave = event.data.wave;
+    if (typeof wave !== 'number' || !Number.isFinite(wave)) continue;
+    const key = JSON.stringify([event.feature, wave]);
+    let pair = pairs.get(key);
+    if (!pair) {
+      const outcome = typeof event.data.outcome === 'string' ? event.data.outcome : null;
+      pair = { wave: String(wave), feature: event.feature, attempts: 0, firstOutcome: outcome };
+      pairs.set(key, pair);
+    }
+    pair.attempts += 1;
+  }
+  return pairs;
+}
+
+/**
+ * Pure fold over an event history → per-WAVE-POSITION reliability counts, the
+ * raw material for first-attempt success rate and retry rate. Counting is
+ * deterministic and carries its sample size alongside every figure; NO
+ * threshold or minimum-history floor is applied here (a single-feature history
+ * reports its true n — suppression is the caller's presentation decision).
+ *
+ * A "pair" is one (feature, wave) combination observed in `wave-attempt`
+ * events, spanning every deliver run of that feature (a resumed wave's later
+ * attempts extend the same pair). Hook-vetoed attempts are attempts too.
+ * `perPosition` is keyed by `String(data.wave)`; for each position:
+ *   - `samples`             — number of (feature, wave) pairs observed there
+ *   - `attempts`            — total `wave-attempt` events at that position
+ *   - `firstAttemptSuccess` — pairs whose FIRST attempt (history order) had
+ *                             `data.outcome === 'success'`
+ *   - `retried`             — pairs with more than one attempt
+ * `features` is the number of distinct features contributing at least one pair.
+ * Attempts lacking a string `feature` or a finite numeric `data.wave` cannot be
+ * placed in a pair and contribute nothing. The fold deliberately never reads
+ * `data.usage`: recorded input tokens are the uncached remainder, so spend is not
+ * comparable across waves (#63/#121). Zeroed shape on [] / null / non-array /
+ * wave-attempt-free input; never throws.
+ *
+ * @param {Event[]} history - in-memory event array (no I/O performed)
+ * @returns {{ perPosition: Object<string,{ attempts: number, firstAttemptSuccess: number,
+ *   retried: number, samples: number }>, features: number }}
+ */
+export function waveReliability(history) {
+  const out = { perPosition: {}, features: 0 };
+  if (!Array.isArray(history)) return out;
+  const features = new Set();
+  for (const pair of collectWavePairs(history).values()) {
+    features.add(pair.feature);
+    const slot = out.perPosition[pair.wave] || { attempts: 0, firstAttemptSuccess: 0, retried: 0, samples: 0 };
+    slot.samples += 1;
+    slot.attempts += pair.attempts;
+    if (pair.firstOutcome === 'success') slot.firstAttemptSuccess += 1;
+    if (pair.attempts > 1) slot.retried += 1;
+    out.perPosition[pair.wave] = slot;
+  }
+  out.features = features.size;
+  return out;
+}
+
+/**
+ * Pure fold over an event history → counts of `wave-attempt` events keyed by
+ * `data.outcome` across the frozen 7-outcome vocabulary, plus `unknown` and
+ * `total`, and per outcome the DISTINCT features that recorded it.
+ *
+ * Why attempts, not wave-complete: the spine records the resolved outcome ONLY
+ * on `wave-attempt` (`data.outcome`); `wave-complete` carries `data: { wave }`
+ * alone, so `outcomeCounts` cannot see a failure outcome on a real spine log.
+ * Every attempt counts (a retried wave contributes one entry per attempt). A
+ * missing or out-of-vocabulary outcome is bucketed as `unknown`, same as
+ * `outcomeCounts`. `features[outcome]` lists string `feature` values in
+ * first-seen order; an attempt with no string feature is counted but names no
+ * feature. Never reads `data.usage`. Zeroed shape on [] / null / non-array /
+ * wave-attempt-free input; never throws.
+ *
+ * @param {Event[]} history - in-memory event array (no I/O performed)
+ * @returns {{ counts: Object<string, number>, features: Object<string, string[]> }}
+ */
+export function attemptOutcomeCounts(history) {
+  const counts = {};
+  for (const outcome of OUTCOME_VOCAB) counts[outcome] = 0;
+  counts.unknown = 0;
+  counts.total = 0;
+  const features = {};
+  if (!Array.isArray(history)) return { counts, features };
+  for (const event of history) {
+    if (!event || event.type !== 'wave-attempt') continue;
+    counts.total += 1;
+    const raw = event.data && typeof event.data.outcome === 'string' ? event.data.outcome : null;
+    const outcome = raw !== null && OUTCOME_VOCAB.has(raw) ? raw : 'unknown';
+    counts[outcome] += 1;
+    if (typeof event.feature !== 'string' || event.feature === '') continue;
+    const seen = features[outcome] || (features[outcome] = []);
+    if (!seen.includes(event.feature)) seen.push(event.feature);
+  }
+  return { counts, features };
+}
