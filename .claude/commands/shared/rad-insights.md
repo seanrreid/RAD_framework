@@ -400,9 +400,79 @@ Reading the output:
 - Only enriched attempts (Step 4d's `enrichedAttempts`) can be attributed; a
   legacy attempt without per-task data names no task, so it names no file.
 
+### Step 4f: Fold per-wave-position reliability (model-tiering advisory)
+
+Per-Wave `Model:` tiering (see CLAUDE.md "Cost & Frugality") is only worth
+suggesting where history shows a wave position is reliably first-try or reliably
+retried. The counting lives in `harness/events.js` (`waveReliability`) — import
+it, never re-implement it. Same invocation convention as Steps 4c–4e: run from
+the repo root; `RAD_STATE_DIR` (default `.agents/state`) exists only for fixture
+testing. The fold carries sample sizes and applies NO floor; the floor below is
+a presentation decision owned by this skill. This step only reads; it writes
+nothing.
+
+```bash
+node --input-type=module -e '
+import { readFileSync, readdirSync, existsSync } from "node:fs";
+import { join } from "node:path";
+const { waveReliability } = await import("./harness/events.js");
+
+// Minimum DISTINCT features with wave history before any tiering advisory
+// renders. Below it, a rate describes one or two plans, not a wave position.
+const TIERING_MIN_FEATURES = 3;
+
+const stateDir = process.env.RAD_STATE_DIR || ".agents/state";
+const features = existsSync(stateDir)
+  ? readdirSync(stateDir, { withFileTypes: true })
+      .filter((d) => d.isDirectory())
+      .map((d) => d.name)
+      .filter((f) => existsSync(join(stateDir, f, "events.jsonl")))
+      .sort()
+  : [];
+
+// Pairs are keyed by (feature, wave), so one concatenated history is safe.
+const history = features.flatMap((feature) =>
+  readFileSync(join(stateDir, feature, "events.jsonl"), "utf8")
+    .split("\n").filter(Boolean).map((l) => JSON.parse(l)));
+const result = waveReliability(history);
+
+const pct = (n, d) => (d === 0 ? 0 : Math.round((100 * n) / d));
+const positions = Object.entries(result.perPosition).map(([wave, s]) => ({
+  wave: Number(wave),
+  n: s.samples,
+  attempts: s.attempts,
+  firstAttemptSuccessPct: pct(s.firstAttemptSuccess, s.samples),
+  retryPct: pct(s.retried, s.samples),
+}));
+const noWaveData = result.features === 0;
+const advisory = result.features >= TIERING_MIN_FEATURES;
+console.log(JSON.stringify({ noWaveData, advisory, minFeatures: TIERING_MIN_FEATURES,
+  features: result.features, positions }, null, 2));
+'
+```
+
+Reading the output:
+
+- **`positions[].n`** — (feature, wave) pairs observed at that wave position;
+  every rate below is out of this n. A wave resumed across deliver runs is one
+  pair.
+- **`firstAttemptSuccessPct`** — share of pairs whose first attempt recorded
+  outcome `success`.
+- **`retryPct`** — share of pairs that needed more than one attempt.
+  `attempts` is the raw attempt total at that position.
+- **`features`** — distinct features contributing wave attempts ("based on N
+  features").
+- **`advisory: false`** — fewer than `minFeatures` (`TIERING_MIN_FEATURES`)
+  features have wave history. Render the insufficient-history line from the
+  Model Tiering template below, never the rates.
+- **`noWaveData: true`** — no placeable `wave-attempt` event anywhere; same
+  degradation convention as Step 4c.
+- There is deliberately no spend figure in this output: the fold never reads
+  `usage` (see the Model Tiering section for why).
+
 ### Step 5: Synthesize and output report
 
-Using the data from Steps 3–4d, write the following report. Populate each section
+Using the data from Steps 3–4f, write the following report. Populate each section
 with real numbers and real pattern names — do not leave placeholders.
 
 ```markdown
@@ -520,6 +590,34 @@ understand or change safely — not a verdict on agent or developer performance.
 [Suggestion only — name the files; never edit them and never propose an automatic
  change. A reader may choose to add a comment, a README, or a refactor task.]
 
+### Model Tiering Advisory
+[From Step 4f. Omit this section entirely if no per-feature events.jsonl exists.]
+[Pick EXACTLY ONE degradation line when it applies, and render nothing else in
+ the section except the spend note — silence would read as "no tiering needed":]
+[If noWaveData: true:]
+No wave data yet — per-wave-position reliability will populate after the first
+/rad-deliver run records wave-attempt events.
+[Else if advisory: false:]
+Insufficient history for a model-tiering advisory — [features] feature(s) have
+wave history; at least [minFeatures] are needed before per-position rates mean
+anything beyond individual plans.
+
+[Otherwise, one line per position, ascending wave number:]
+Based on [features] features (floor: [minFeatures]):
+- Wave [wave] — first-attempt success [firstAttemptSuccessPct]% (n=[n]),
+  retry rate [retryPct]% (n=[n]), [attempts] attempt(s)
+...
+[Suggestion only — never edit plans. A position with high first-attempt success
+ and a low retry rate MAY be a candidate for a cheaper `Model:` line; a position
+ with a high retry rate may warrant a stronger one. Always quote the n; a
+ position with small n is weak evidence even above the feature floor.]
+
+[Render this note verbatim in every state, including the degradation states:]
+Spend-based tiering advice is deliberately absent. Recorded `input_tokens` is the
+uncached remainder and `normalizeUsage` drops the cache fields, so relative spend
+varies with cache-hit rate and scheduling rather than with what a wave costs.
+Deferred until usage carries cache-token fields (#63/#121).
+
 ### Recommended Focus Areas
 [Top 2–3 patterns that are both frequent and high-severity. Each as one sentence:
  "Address [category] — appears in [N] cycles ([%]) and always blocks architect review."]
@@ -579,6 +677,9 @@ Auto-cleared by the severity gate: [N] change(s)
 - Per-file attribution (Step 4e) MUST come from `fileFailureCounts` in `harness/events.js`;
   the skill only builds the plan-doc title → paths mapping. The section frames counts as a
   code-legibility signal about a region of code (#93), never an agent-performance verdict
+- Per-wave-position reliability (Step 4f) MUST come from `waveReliability` in
+  `harness/events.js`; the `TIERING_MIN_FEATURES` floor lives in the skill, never the
+  fold. The Model Tiering section never shows a spend figure and never edits a plan
 - All-zero reliability counts are the "no wave data yet" path, not an error — render
   the zeros text from the template and move on
 - Findings Recurrence (Step 3b) outputs are suggestions only — never edit CLAUDE.md
