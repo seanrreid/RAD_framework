@@ -17,3 +17,5 @@ Note: a prior run on 2026-08-20 failed at Wave 1 before any code was written
 | 4 | Wave 2 | Blocked-reason subsection in /rad-insights | ✓ complete | c2ed749 | 10:01 |
 | 5 | Wave 3 | Per-file failure attribution fold | ✓ complete | 64c7c3e | 10:04 |
 | 6 | Wave 3 | Code-legibility subsection in /rad-insights | ✓ complete | 61b11ee | 10:04 |
+| 7 | Wave 4 | Outcome-derived reliability fold | ✓ complete | 74a1052 | 10:08 |
+| 8 | Wave 4 | Model-tiering advisory subsection | ✓ complete | 40dafce | 10:08 |
