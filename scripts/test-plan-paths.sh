@@ -10,6 +10,10 @@
 #   - resolve_anchor_path  — bare-basename → repo-relative resolution against the
 #                            tracked-file set (unique match resolves; ambiguous
 #                            and unknown are silent; a git read failure returns 2)
+# …and for lint-plan-file-parsing (#134):
+#   - split_task_file_value — comma-separated task File: values split into paths
+#                            (range-only continuations dropped, prose kept)
+#   - plan_task_files / plan_scope_paths — see every path on a multi-file File: line
 #
 # Self-contained: builds a temp git-repo fixture (git init + a local bare origin
 # so `origin/main` resolves, mirroring test-classify-low-risk.sh), copies
@@ -248,5 +252,72 @@ out=$(plan_cited_anchors "$URL_PLAN")
 [[ "$out" == "foo/bar.js" ]] \
   || fail "plan_cited_anchors: host:// URL token should be dropped, expected only 'foo/bar.js', got: [$out]"
 echo "✓ plan_cited_anchors: git+ssh://host.example/dir:2222 URL token dropped; real anchor kept"
+
+# ── split_task_file_value: comma list → one path per part (#134) ──────────────
+out=$(split_task_file_value "a.js:10-20, b.test.js")
+[[ "$out" == $'a.js\nb.test.js' ]] \
+  || fail "split_task_file_value: 'a.js:10-20, b.test.js' should yield 2 paths, got: [$out]"
+echo "✓ split_task_file_value: 'a.js:10-20, b.test.js' ⇒ a.js + b.test.js"
+
+out=$(split_task_file_value "a.js, b.js:10, c.md:1-2")
+[[ "$out" == $'a.js\nb.js\nc.md' ]] \
+  || fail "split_task_file_value: mixed-suffix 3-file list should yield 3 paths, got: [$out]"
+echo "✓ split_task_file_value: bare / :N / :N-M suffixes ⇒ 3 stripped paths"
+
+out=$(split_task_file_value '`a.js`:5')
+[[ "$out" == "a.js" ]] \
+  || fail "split_task_file_value: backticked '\`a.js\`:5' should yield 'a.js', got: [$out]"
+echo "✓ split_task_file_value: backticks stripped before the :lines suffix"
+
+# ── split_task_file_value edges: placeholder, trailing comma, empty ─────────────
+out=$(split_task_file_value "[path]")
+[[ -z "$out" ]] || fail "split_task_file_value: '[path]' placeholder should emit nothing, got: [$out]"
+out=$(split_task_file_value "a.js, ")
+[[ "$out" == "a.js" ]] || fail "split_task_file_value: trailing comma should add nothing, got: [$out]"
+out=$(split_task_file_value "")
+[[ -z "$out" ]] || fail "split_task_file_value: empty value should emit nothing, got: [$out]"
+echo "✓ split_task_file_value: [path], trailing comma, empty value ⇒ nothing extra"
+
+# ── split_task_file_value: range-only parts continue the previous path ──────────
+out=$(split_task_file_value "harness/events.js:16-33, 80-96")
+[[ "$out" == "harness/events.js" ]] \
+  || fail "split_task_file_value: range continuation '80-96' must not become a path, got: [$out]"
+out=$(split_task_file_value "git-state-store.js:78-80, 98-100, 362-432")
+[[ "$out" == "git-state-store.js" ]] \
+  || fail "split_task_file_value: multi-range continuation must yield one path, got: [$out]"
+echo "✓ split_task_file_value: 'events.js:16-33, 80-96' ⇒ events.js only (ranges dropped)"
+
+# ── split_task_file_value: comma-free value == strip_task_file_lines ────────────
+for v in "src/committed.js:42" "harness/cli.js:290-410" "docs/plain.md"; do
+  [[ "$(split_task_file_value "$v")" == "$(strip_task_file_lines "$v")" ]] \
+    || fail "split_task_file_value: comma-free '$v' must equal strip_task_file_lines output"
+done
+echo "✓ split_task_file_value: comma-free value ⇒ identical to strip_task_file_lines"
+
+# ── split_task_file_value: prose kept as one part (fail closed toward not-low) ──
+out=$(split_task_file_value "tests in x.js")
+[[ "$out" == "tests in x.js" ]] \
+  || fail "split_task_file_value: prose value must be kept as one part, got: [$out]"
+echo "✓ split_task_file_value: prose 'tests in x.js' kept as one part"
+
+# ── plan_task_files / plan_scope_paths: second File: entry reaches the union ───
+MULTI_PLAN="$TMP/multi-file.md"
+cat > "$MULTI_PLAN" <<'EOF'
+# Plan: multi-file
+## Files in Scope
+| File | Lines | Change |
+|------|-------|--------|
+| `a/first.js` | 1-10 | Modify |
+
+#### Task 1.1: Two files on one line
+File: a/first.js:1-10, b/second-only.test.js
+EOF
+out=$(plan_task_files "$MULTI_PLAN")
+[[ "$out" == $'a/first.js\nb/second-only.test.js' ]] \
+  || fail "plan_task_files: expected both File: entries, got: [$out]"
+out=$(plan_scope_paths "$MULTI_PLAN")
+printf '%s\n' "$out" | grep -Fxq "b/second-only.test.js" \
+  || fail "plan_scope_paths: path appearing only as a second task-File entry is missing: [$out]"
+echo "✓ plan_scope_paths: includes b/second-only.test.js (second task-File entry only)"
 
 echo "ALL PASS"
