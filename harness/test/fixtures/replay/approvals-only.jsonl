@@ -1,4 +1,0 @@
-{"feature":"replay-approvals","type":"research-created","actor":"dev@example.com","ts":"2026-06-01T10:00:00.000Z"}
-{"feature":"replay-approvals","type":"plan-created","actor":"dev@example.com","ts":"2026-06-01T11:00:00.000Z"}
-{"feature":"replay-approvals","type":"approved","actor":"sean@torchcodelab.com","role":"architect","ts":"2026-06-02T09:00:00.000Z","recordedBy":"sean@torchcodelab.com","data":{"fingerprint":"a066a8faace2623d10f8dfbcd8db390bb008d5224f09375c39625938eca8043e"}}
-{"feature":"replay-approvals","type":"approved","actor":"sean@torchcodelab.com","role":"architect","ts":"2026-06-03T09:00:00.000Z","recordedBy":"dev@example.com"}

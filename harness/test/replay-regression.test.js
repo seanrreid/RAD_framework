@@ -3,8 +3,10 @@
 // Replays committed, historical-shaped event logs (TODAY's shapes: wave-attempt
 // carries no `attempt` and no `fingerprint`, and there are no `wave-started`
 // events) through the read-side folds, the approval gate, and the stop-condition
-// matrix. Every expected value is a HAND-WRITTEN literal derived from the
-// fixture lines (cited as "L<n>" = line n of the named fixture). Never recompute
+// matrix. All scenarios live in ONE fixture (historical.jsonl), one `feature`
+// per scenario; the loader splits it by `feature`, preserving line order. Every
+// expected value is a HAND-WRITTEN literal derived from the fixture lines (cited
+// as "L<n>" = line n of that scenario's history). Never recompute
 // an expectation with the code under test. If a later change makes one of these
 // fail, that change altered how legacy logs are read — which #119 forbids.
 import { test } from 'node:test';
@@ -23,7 +25,15 @@ import {
 import { evaluateGate, loadGates } from '../gates.js';
 import { resolveOutcome, loadMatrix } from '../matrix.js';
 
-const FIXTURE_DIR = join(fileURLToPath(new URL('.', import.meta.url)), 'fixtures', 'replay');
+const FIXTURE_PATH = join(fileURLToPath(new URL('.', import.meta.url)), 'fixtures', 'replay', 'historical.jsonl');
+// Scenario name -> the `feature` its events carry in the combined fixture.
+const SCENARIO_FEATURES = {
+  'approvals-only': 'replay-approvals',
+  historical: 'replay-legacy',
+  'hook-veto': 'replay-veto',
+  outcomes: 'replay-outcomes',
+  stops: 'replay-stops',
+};
 const ARCHITECT = 'sean@torchcodelab.com';
 const GATE_PASSED_REASON = 'satisfied by approved event from role:architect';
 
@@ -33,9 +43,18 @@ function deepFreeze(value) {
   return Object.freeze(value);
 }
 
+function loadAllEvents() {
+  const raw = readFileSync(FIXTURE_PATH, 'utf8');
+  return raw.split('\n').filter((line) => line.trim() !== '').map((line) => JSON.parse(line));
+}
+
+/** One scenario's history: the combined fixture filtered to its feature, order preserved. */
 function loadReplay(name) {
-  const raw = readFileSync(join(FIXTURE_DIR, `${name}.jsonl`), 'utf8');
-  return deepFreeze(raw.split('\n').filter((line) => line.trim() !== '').map((line) => JSON.parse(line)));
+  const feature = SCENARIO_FEATURES[name];
+  if (!feature) throw new Error(`replay fixture: unknown scenario '${name}'`);
+  const history = loadAllEvents().filter((event) => event.feature === feature);
+  if (history.length === 0) throw new Error(`replay fixture: no events for feature '${feature}' (scenario '${name}')`);
+  return deepFreeze(history);
 }
 
 /** Outcome-count literal: every one of the 7 outcomes + unknown + total, zero unless given. */
