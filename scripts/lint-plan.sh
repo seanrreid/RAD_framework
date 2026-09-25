@@ -160,25 +160,23 @@ if has_section "Files in Scope"; then
 fi
 
 # ── Per-task File: paths exist (advisory) ─────────────────────────────────────
-# Each `#### Task` block carries a `File:` line in a path:lines form
-# (e.g. harness/cli.js:290-410). Strip the trailing :lines suffix and, for any
-# path that is neither a file nor a directory on disk, warn (never error) naming
-# the task and the missing path. Parity with the Files-in-Scope existence check:
-# a directory counts as existing.
-
-# strip_task_file_lines is provided by lib/plan-paths.sh (single source of truth).
+# Each `#### Task` block carries a `File:` line in a path:lines form, possibly
+# listing several comma-separated paths (e.g. `a.js:10-20, b.test.js`). For every
+# path split_task_file_value yields (lib/plan-paths.sh — the one parse, shared
+# with plan_task_files) that is neither a file nor a directory on disk, warn
+# (never error) once, naming the task and the missing path. Parity with the
+# Files-in-Scope existence check: a directory counts as existing.
 
 CURRENT_TASK=""
 while IFS= read -r line; do
   if [[ "$line" =~ ^####\ Task ]]; then
     CURRENT_TASK=$(echo "$line" | sed 's/^####[[:space:]]*//')
   elif [[ "$line" =~ ^File: ]]; then
-    file_val=$(echo "$line" | sed 's/^File:[[:space:]]*//' | sed 's/[[:space:]]*$//')
-    file_path=$(strip_task_file_lines "$file_val")
-    [[ -z "$file_path" || "$file_path" == "[path]" ]] && continue
-    if [[ ! -f "$file_path" && ! -d "$file_path" ]]; then
-      WARNINGS+=("Task '${CURRENT_TASK}' references a File: path that does not exist: $file_path")
-    fi
+    while IFS= read -r file_path; do
+      if [[ ! -f "$file_path" && ! -d "$file_path" ]]; then
+        WARNINGS+=("Task '${CURRENT_TASK}' references a File: path that does not exist: $file_path")
+      fi
+    done < <(split_task_file_value "${line#File:}")
   fi
 done < "$PLAN_FILE"
 
@@ -301,7 +299,8 @@ done < <(
 
 # ── Context budget ────────────────────────────────────────────────────────────
 # Sum line ranges from the Files in Scope table (column 3 = Lines).
-# Range "45-120" → 76 lines. Plain number "150" → 150 lines. Others skipped.
+# Range "45-120" → 76 lines. Plain number "150" → 1 line (a single line
+# reference). Others skipped.
 
 BUDGET_WARN=800
 BUDGET_ERROR=1500
@@ -315,7 +314,7 @@ if has_section "Files in Scope"; then
       TOTAL_LINES=$(( TOTAL_LINES + count ))
       BUDGET_COMPUTED=true
     elif [[ "$lines_val" =~ ^[0-9]+$ ]]; then
-      TOTAL_LINES=$(( TOTAL_LINES + lines_val ))
+      TOTAL_LINES=$(( TOTAL_LINES + 1 ))
       BUDGET_COMPUTED=true
     fi
   done < <(

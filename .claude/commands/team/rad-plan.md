@@ -120,8 +120,12 @@ Branch: rad/[feature-slug]
 [List every agent called during research. Flag any out-of-scope dependencies.]
 
 ## Files in Scope
-<!-- Lines must be a range (e.g. 45-120) or a single number. The linter sums
-     these to compute context budget. Warn at 800 lines, error at 1500.
+<!-- Lines must be a range (e.g. 45-120) or a single line (e.g. 88) — a bare
+     number counts as ONE line. The linter sums these to compute context
+     budget. Warn at 800 lines, error at 1500.
+     A task `File:` line may list several comma-separated files, each with an
+     optional `:lines` suffix; an extra range-only part (e.g. `a.js:16-33, 80-96`)
+     is read as another range of the same file.
      A RENAME DECLARES BOTH PATHS: one row for the source, one for the
      destination. scripts/check-scope.sh builds the declared set from the File
      column only — it never reads this Change prose — so a `git mv` destination

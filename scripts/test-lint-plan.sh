@@ -9,6 +9,9 @@
 #   - missing-in-scope suppression (#100): a path already reported absent from
 #     disk is never ALSO reported as a stale premise
 #   - warnings-only plans still exit 0
+#   - multi-file task File: lines (#134): one warning per missing comma-separated
+#     path, range-only continuations ignored
+#   - context budget (#134): a bare Lines number counts as 1 line; ranges unchanged
 # Self-contained (no external harness): writes temp fixture plans, runs the real
 # lint-plan.sh, and asserts on output/exit code. Runs under bash 3.2+ (set -u safe).
 #
@@ -498,7 +501,72 @@ t_rename_advisory() {
   echo "✓ REN(d): rename cell with no path-shaped token warns about nothing, exit 0"
 }
 
+# ── #134: multi-file task File: lines — one warning per missing part ──────────
+MISSING_FILE_ADVISORY="references a File: path that does not exist"
+SECOND_REAL_PATH="scripts/lib/plan-paths.sh"
+
+t_multi_file_task_line() {
+  # (a) Every comma-separated path exists → no File: warning at all.
+  local plan="$TMP/multi-present.md"
+  write_plan "$plan" "| $REAL_PATH | 1-2 | x |" "$REAL_PATH:10-20, $SECOND_REAL_PATH"
+  run_lint "$plan"
+  printf '%s\n' "$LINT_OUT" | grep -q "$MISSING_FILE_ADVISORY" \
+    && fail "MF(a): all-present multi-file line wrongly warned: $LINT_OUT" || true
+  echo "✓ MF(a): multi-file File: line, all paths present ⇒ no does-not-exist advisory"
+
+  # (b) Second path missing → exactly one warning, naming that path and the task.
+  local plan_b="$TMP/multi-second-missing.md" n
+  write_plan "$plan_b" "| $REAL_PATH | 1-2 | x |" "$REAL_PATH:10-20, src/second-missing-xyz.js"
+  run_lint "$plan_b"
+  n=$(printf '%s\n' "$LINT_OUT" | grep -c "$MISSING_FILE_ADVISORY" || true)
+  [[ "$n" -eq 1 ]] || fail "MF(b): expected exactly 1 File: warning, got $n: $LINT_OUT"
+  printf '%s\n' "$LINT_OUT" | grep -q "Task 'Task 1.1: do the thing' $MISSING_FILE_ADVISORY: src/second-missing-xyz.js" \
+    || fail "MF(b): warning did not name the task and the missing second path: $LINT_OUT"
+  [[ "$LINT_CODE" -eq 0 ]] || fail "MF(b): exited $LINT_CODE (expected 0 — advisory only)"
+  echo "✓ MF(b): second path missing ⇒ exactly one warning naming task + src/second-missing-xyz.js"
+
+  # (c) Range continuation `path:16-33, 80-96` → the ranges are never paths.
+  local plan_c="$TMP/multi-range-continuation.md"
+  write_plan "$plan_c" "| $REAL_PATH | 1-2 | x |" "$REAL_PATH:16-33, 80-96"
+  run_lint "$plan_c"
+  printf '%s\n' "$LINT_OUT" | grep -q "$MISSING_FILE_ADVISORY" \
+    && fail "MF(c): range continuation '80-96' was treated as a missing path: $LINT_OUT" || true
+  echo "✓ MF(c): '$REAL_PATH:16-33, 80-96' range continuation ⇒ no does-not-exist advisory"
+}
+
+# ── #134: context budget — bare number counts as 1 line; ranges unchanged ─────
+BUDGET_ADVISORY="Context budget is large"
+
+t_budget_bare_number() {
+  # (a) A bare Lines value 900 is one line reference, not 900 lines.
+  local plan="$TMP/budget-bare.md"
+  write_plan "$plan" "| $REAL_PATH | 900 | x |" "$REAL_PATH:900"
+  run_lint "$plan"
+  printf '%s\n' "$LINT_OUT" | grep -q "$BUDGET_ADVISORY" \
+    && fail "BUD(a): bare Lines '900' was counted as 900 lines: $LINT_OUT" || true
+  echo "✓ BUD(a): bare Lines '900' ⇒ no budget warning"
+
+  # (a2) It counts as exactly 1 — not 0: a 1-800 range (800, at the threshold)
+  # plus a bare 900 totals 801 and tips over the warn line.
+  local plan_a2="$TMP/budget-bare-plus-range.md"
+  write_plan "$plan_a2" "$(printf '| %s | 1-800 | x |\n| %s | 900 | x |' "$REAL_PATH" "$SECOND_REAL_PATH")" "$REAL_PATH:1-800"
+  run_lint "$plan_a2"
+  printf '%s\n' "$LINT_OUT" | grep -q "$BUDGET_ADVISORY: ~801 lines" \
+    || fail "BUD(a2): range 1-800 + bare 900 should total ~801 lines: $LINT_OUT"
+  echo "✓ BUD(a2): range 1-800 + bare '900' ⇒ ~801 lines (bare number adds exactly 1)"
+
+  # (b) A range 1-900 is still counted in full (900 > 800 warn threshold).
+  local plan_b="$TMP/budget-range.md"
+  write_plan "$plan_b" "| $REAL_PATH | 1-900 | x |" "$REAL_PATH:1-900"
+  run_lint "$plan_b"
+  printf '%s\n' "$LINT_OUT" | grep -q "$BUDGET_ADVISORY: ~900 lines" \
+    || fail "BUD(b): range '1-900' should still warn at ~900 lines: $LINT_OUT"
+  echo "✓ BUD(b): range '1-900' still counted ⇒ ~900-line budget warning"
+}
+
 t_missing_task_file
+t_multi_file_task_line
+t_budget_bare_number
 t_high_risk_advisory
 t_exit_zero_invariance
 t_self_protected_advisory

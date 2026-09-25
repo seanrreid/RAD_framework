@@ -19,6 +19,28 @@ strip_task_file_lines() {
   esac
 }
 
+# A comma-separated part that is only a line range (`80-96` or `42`) continues
+# the previous part's path (`events.js:16-33, 80-96`) — it is never a path.
+readonly RAD_RANGE_ONLY_PART_RE='^[0-9]+(-[0-9]+)?$'
+
+# split_task_file_value <value>
+# Split one task File: value on commas and print each path, one per line: each
+# part is trimmed, backtick-stripped, and has its :lines suffix removed via
+# strip_task_file_lines. Only empty, `[path]`, and range-only parts are dropped —
+# a prose part is kept as-is so the classifier still sees it (fail closed toward
+# not-low). A comma-free value yields exactly strip_task_file_lines' output. Safe
+# because no tracked repo path contains a comma.
+split_task_file_value() {
+  local part
+  printf '%s\n' "$1" | tr ',' '\n' | while IFS= read -r part; do
+    part=$(printf '%s' "$part" | tr -d '`' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+    part=$(strip_task_file_lines "$part")
+    [[ -z "$part" || "$part" == "[path]" ]] && continue
+    [[ "$part" =~ $RAD_RANGE_ONLY_PART_RE ]] && continue
+    printf '%s\n' "$part"
+  done
+}
+
 # plan_files_in_scope <plan-file>
 # Print the Files-in-Scope table paths (column 2), one per line, skipping the
 # header, separator, and placeholder rows. Whitespace and backticks stripped.
@@ -35,17 +57,15 @@ plan_files_in_scope() {
 }
 
 # plan_task_files <plan-file>
-# Print each per-task `File:` path (with the :lines suffix stripped), one per
-# line, skipping empty and placeholder values.
+# Print every per-task `File:` path, one per line. A File: line may list several
+# comma-separated paths; split_task_file_value emits each (suffixes stripped,
+# empty / placeholder / range-only parts dropped).
 plan_task_files() {
   local plan_file="$1"
-  local line file_val file_path
+  local line
   while IFS= read -r line; do
     [[ "$line" == File:* ]] || continue
-    file_val=$(echo "$line" | sed 's/^File:[[:space:]]*//' | sed 's/[[:space:]]*$//')
-    file_path=$(strip_task_file_lines "$file_val")
-    [[ -z "$file_path" || "$file_path" == "[path]" ]] && continue
-    echo "$file_path"
+    split_task_file_value "${line#File:}"
   done < "$plan_file"
 }
 
