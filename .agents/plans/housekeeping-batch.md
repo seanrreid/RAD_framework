@@ -1,7 +1,10 @@
 # Plan: Housekeeping Batch
 Created: 2026-09-25
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-09-25T16:38:10.946Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/housekeeping-batch
 Adopted-From: https://github.com/seanrreid/RAD_framework/issues/88
 Issue-Title: Prune stale .claude/skills/: rpi-design survived its absorption into /rad-research + /rad-design
