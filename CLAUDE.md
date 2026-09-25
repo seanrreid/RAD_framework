@@ -126,14 +126,20 @@ credentials or the OS keychain, not an env-injected token (an exported
 
 ```
 RAD_AGENT_PREFLIGHT: off   # exactly `off` skips the startup probe; unset/anything else runs it
+RAD_AGENT_PREFLIGHT_TIMEOUT_SECONDS: <positive integer>   # probe deadline (default 60)
 ```
 
 Before Wave 1, `rad deliver` runs a **startup preflight** on the command path: it
 spawns `RAD_AGENT_CMD` once under the same env with one tiny prompt (one small
 model call per deliver). If it exits non-zero, cannot spawn, or times out,
 deliver exits 1 with `RAD_AGENT_CMD failed to start under the adapter env (it
-must authenticate without inherited env vars): <error>` — before any worktree or
-event is created. The SDK path and an injected `runWave` never probe. If your
+must authenticate without inherited env vars): <error>` — before any event is
+appended (in worktree mode the probe runs inside the new worktree, which is then
+preserved). The SDK path and an injected `runWave` never probe.
+`RAD_AGENT_PREFLIGHT_TIMEOUT_SECONDS` sets the probe deadline (default **60**); a
+malformed value (non-numeric, zero, negative) is a hard error — **exit 2**, never
+a silent fall back. It is not validated when `RAD_AGENT_PREFLIGHT=off`, since no
+probe runs. If your
 agent genuinely needs an env-injected credential, configure a **wrapper script**
 as `RAD_AGENT_CMD` that loads the secret itself and execs the agent — keeping
 re-injection an explicit operator act (the allow-list is deliberately not
@@ -243,6 +249,16 @@ When `RAD_WORKTREE` is set, `/rad-deliver` isolates the run into a git worktree 
 work branch (create → active → complete-on-success / preserve-on-failure). A
 `.rad-worktree.json` marker guards teardown — the lifecycle refuses to remove an
 unmarked dir. v1 requires the work branch not already be checked out in the main tree.
+
+In worktree mode the approved gate, the plan doc, and the event log are all read from
+the **work branch**, not the main checkout: the gate is evaluated over the branch tip's
+log (`git show <branch>:.agents/state/<feature>/events.jsonl`) before any worktree is
+created (fail-closed if unapproved or absent), then the plan, state store, agent, and
+spine are rooted at the worktree — so events are written in the worktree (on the work
+branch) and the main tree is left unmodified. Keep the main checkout on the default
+branch; the work branch (`RAD_BRANCH_PREFIX` + feature, default `rad/<feature>`) must
+not be checked out there. This is what makes Lane B plans (plan + approval only on the
+work branch) deliverable under isolation.
 Unset/empty = OFF (today's behavior). See `docs/rad-cli.md` for the full lifecycle.
 
 ### Portable Sync
