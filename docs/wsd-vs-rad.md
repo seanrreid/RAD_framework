@@ -149,10 +149,11 @@ to the conflict-resolution semantics:
   specific" but may never "silently weaken baseline safety rules."
 
 That last clause is the same monotonicity property RAD enforces mechanically
-elsewhere: `RAD_SELF_PROTECTED_PATTERN` in `scripts/lib/plan-paths.sh` refuses to
-classify a plan touching RAD's own machinery as low-risk **before** consulting the
-operator allowlist, so no `RAD_LOW_RISK_PATTERNS` value — including `.*` — can
-clear a change to the thing doing the clearing.
+elsewhere: `RAD_SELF_PROTECTED_PATTERN` in `scripts/lib/plan-paths.sh` makes
+`scripts/lint-plan.sh` flag any plan touching RAD's own machinery for architect
+review regardless of `RAD_HIGH_RISK_PATTERNS`, so no operator setting can quiet
+the warning on a change to the thing doing the checking. (RAD no longer has any
+auto-approval path at all — severity routing was removed in #137.)
 
 **Nothing to adopt here.** The convergence is close enough that it mostly confirms
 both frameworks found the same shape for the same reason.
