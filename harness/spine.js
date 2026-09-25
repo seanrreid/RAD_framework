@@ -28,7 +28,7 @@
 
 import { resolveOutcome } from './matrix.js';
 import { fingerprint } from './fingerprint.js';
-import { resumeFrom, totalUsage } from './events.js';
+import { resumeFrom, totalUsage, findOrphanAttempts, priorAttemptState } from './events.js';
 import { OUTCOME_VOCAB } from './hook-runner.js';
 
 /** The fail-closed aborting outcome a veto resolves to when its token is somehow
@@ -47,6 +47,16 @@ function safeVetoOutcome(outcome) {
 /** Bounded attempt budget per wave — the hard ceiling. The doom-loop breaker is
  * the early exit; this cap only bites when every attempt fails *differently*. */
 const MAX_ATTEMPTS = 3;
+
+/** Reason stamped on the synthetic wave-attempt and the wave-failed a resume
+ * appends when it converges an orphan (a `wave-started` whose attempt never
+ * recorded a `wave-attempt` — the process died mid-agent, issue #119). */
+const ORPHAN_REASON = 'orphaned';
+
+/** The EXISTING outcome an orphan converges to. The matrix routes it to
+ * `surface`: a crashed attempt is handed to the operator, never silently
+ * retried (its in-flight work and token spend are unrecoverable). */
+const ORPHAN_OUTCOME = 'fail-timeout';
 
 /** Matrix actions whose attempt is fingerprinted for the doom-loop breaker. */
 const FINGERPRINTED_ACTIONS = new Set(['retry', 'revision']);
@@ -222,6 +232,38 @@ function attemptData({ wave, attempt, outcome, result, evidence, vetoSource, pri
 }
 
 /**
+ * Converge every orphaned attempt of `wave` (issue #119) BEFORE its attempt
+ * loop: each gets a synthetic `wave-attempt {wave, attempt, outcome:
+ * 'fail-timeout', reason: 'orphaned'}`, the outcome is routed through the matrix
+ * (→ `surface`), and one `wave-failed {wave, action, reason: 'orphaned'}` is
+ * appended. Idempotent: the synthetic wave-attempt matches its `wave-started`,
+ * so a second resume finds no orphan. Returns the existing matrix-terminal
+ * result shape, or null when the wave has no orphan.
+ */
+function convergeOrphans({ history, wave, matrix, state, feature, now }) {
+  const orphans = findOrphanAttempts(history).filter((o) => o.wave === wave.n);
+  if (orphans.length === 0) return null;
+  for (const { attempt } of orphans) {
+    state.append({
+      feature,
+      type: 'wave-attempt',
+      actor: 'harness',
+      ts: now(),
+      data: { wave: wave.n, attempt, outcome: ORPHAN_OUTCOME, reason: ORPHAN_REASON },
+    });
+  }
+  const { action } = resolveOutcome('implement', ORPHAN_OUTCOME, matrix);
+  state.append({
+    feature,
+    type: 'wave-failed',
+    actor: 'harness',
+    ts: now(),
+    data: { wave: wave.n, action, reason: ORPHAN_REASON },
+  });
+  return { stopped: 'matrix', ok: false, wave: wave.n, action, outcome: ORPHAN_OUTCOME };
+}
+
+/**
  * Run the deliver spine for one feature.
  *
  * @param {Object} args
@@ -352,7 +394,19 @@ export async function deliverSpine({
       }
     }
 
-    let lastPrint = null;
+    // ── Orphan convergence (#119): an attempt whose process died mid-agent left
+    // a `wave-started` with no `wave-attempt`. Surface it to the operator via
+    // the matrix before any new attempt runs. Its token spend was never
+    // recorded, so the budget breaker under-counts it — that is unrecoverable. ──
+    const orphaned = convergeOrphans({ history, wave, matrix, state, feature, now });
+    if (orphaned) return orphaned;
+
+    // ── Resume seeding (#119): continue the attempt budget and the doom-loop
+    // fingerprint from attempts recorded since the wave's last terminal
+    // wave-failed. After a terminal stop the wave re-runs with a full budget; a
+    // legacy log (no fingerprint) seeds null and cannot trip the breaker. ──
+    const prior = priorAttemptState(history, wave.n);
+    let lastPrint = prior.lastPrint;
     let advanced = false;
     // Back-pressure (issue #90): the previous attempt's captured failure, fed to
     // the NEXT attempt so a retry differs by more than model nondeterminism.
@@ -360,7 +414,7 @@ export async function deliverSpine({
     // capture is exactly today's behavior.
     let priorFailure = null;
 
-    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    for (let attempt = prior.attempts + 1; attempt <= maxAttempts; attempt += 1) {
       // ── Hook: pre-wave (veto-capable point). Fired BEFORE runWave. A veto here
       // aborts the wave without running the agent: route the veto outcome through
       // the existing matrix and terminate the same way an agent-emitted outcome
