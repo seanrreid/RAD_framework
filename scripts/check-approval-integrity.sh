@@ -85,6 +85,7 @@ PARSED=$(printf '%s' "$EVENTS_JSONL" | node -e '
   const lines = fs.readFileSync(0, "utf8").split("\n");
   let approvedLine = 0;   // 1-based line number of the gating approved event
   let fingerprint = "";
+  let policy = 0;         // gating approval was recorded by a machine policy
   let staleClaim = 0;     // last ownership event is owner-claimed, unreleased
   for (let i = 0; i < lines.length; i += 1) {
     const raw = lines[i];
@@ -102,6 +103,9 @@ PARSED=$(printf '%s' "$EVENTS_JSONL" | node -e '
       approvedLine = i + 1; // latest approved wins (re-approval histories)
       fingerprint = (ev.data && typeof ev.data.fingerprint === "string")
         ? ev.data.fingerprint : "";
+      // Machine-policy provenance (the retired severity-gate auto-clear): a
+      // human architect must record every approval, so this can never gate.
+      policy = (ev.actor === "severity-gate" || ev.recordedBy === "policy") ? 1 : 0;
     } else if (ev.type === "owner-claimed") {
       staleClaim = 1;
     } else if (ev.type === "owner-released") {
@@ -111,6 +115,7 @@ PARSED=$(printf '%s' "$EVENTS_JSONL" | node -e '
   process.stdout.write("parse_error=0\n");
   process.stdout.write("approved_line=" + approvedLine + "\n");
   process.stdout.write("fingerprint=" + fingerprint + "\n");
+  process.stdout.write("policy=" + policy + "\n");
   process.stdout.write("stale_claim=" + staleClaim + "\n");
 ') || { echo "FAIL: could not parse event log '${EVENTS_FILE}' at ${EVENTS_REF}. Failing closed."; exit 1; }
 
@@ -118,6 +123,7 @@ PARSE_ERROR=$(printf '%s\n' "$PARSED" | sed -n 's/^parse_error=//p')
 APPROVED_LINE=$(printf '%s\n' "$PARSED" | sed -n 's/^approved_line=//p')
 STORED_FP=$(printf '%s\n' "$PARSED" | sed -n 's/^fingerprint=//p')
 STALE_CLAIM=$(printf '%s\n' "$PARSED" | sed -n 's/^stale_claim=//p')
+POLICY_APPROVAL=$(printf '%s\n' "$PARSED" | sed -n 's/^policy=//p')
 
 if [[ -z "$PARSE_ERROR" || "$PARSE_ERROR" != "0" ]]; then
   echo "FAIL: unparseable event at ${EVENTS_FILE}:${PARSE_ERROR:-?} (${EVENTS_REF}). Failing closed."
@@ -126,6 +132,12 @@ fi
 
 if [[ -z "$APPROVED_LINE" || "$APPROVED_LINE" == "0" ]]; then
   echo "FAIL: no approved event found in ${EVENTS_FILE} at ${EVENTS_REF}. Failing closed."
+  exit 1
+fi
+
+# Missing/empty policy flag is ambiguity, not a pass — only an explicit 0 clears.
+if [[ "$POLICY_APPROVAL" != "0" ]]; then
+  echo "FAIL: approval was recorded by a machine policy, not a human architect. Failing closed."
   exit 1
 fi
 

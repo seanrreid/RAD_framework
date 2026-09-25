@@ -46,7 +46,7 @@ Branch: rad/feature
 |------|-------|--------|
 | src/in-scope.js | 1-2 | x |
 '
-for f in f1 f2 f3 f4 f6 f7 f8; do
+for f in f1 f2 f3 f4 f6 f7 f8 f9; do
   printf '%s' "$PLAN_BODY" > "$REPO/.agents/plans/$f.md"
 done
 
@@ -174,5 +174,19 @@ code=$(run_check rad/f8)
 [[ "$code" -eq 0 ]] || { cat "$TMP/out"; fail "case 8: legacy no-fingerprint approval should exit 0 (got $code)"; }
 grep -q "^warn:" "$TMP/out" || fail "case 8: expected a legacy warn line"
 echo "✓ case 8: legacy approved event without fingerprint warns but passes (exit 0)"
+
+# ── Case 9: machine-policy approval, architect-committed → 1 ──────────────────
+# A severity-gate / recordedBy:policy approval must never gate, even when the
+# commit that introduced it is authored by the configured architect.
+git -C "$REPO" checkout -q -b rad/f9 main
+mkdir -p "$REPO/.agents/state/f9"
+printf '{"feature":"f9","type":"approved","actor":"severity-gate","role":"architect","ts":"2026-07-01T00:00:00.000Z","recordedBy":"policy","data":{"fingerprint":"%s"}}\n' "$FP" \
+  > "$REPO/.agents/state/f9/events.jsonl"
+commit_as "$ARCH_EMAIL" "approve f9 (machine policy)"
+code=$(run_check rad/f9)
+[[ "$code" -eq 1 ]] || { cat "$TMP/out"; fail "case 9: machine-policy approval should exit 1 (got $code)"; }
+grep -q "FAIL: approval was recorded by a machine policy, not a human architect. Failing closed." "$TMP/out" \
+  || { cat "$TMP/out"; fail "case 9: expected machine-policy FAIL message"; }
+echo "✓ case 9: machine-policy approval fails closed even when architect-committed (exit 1)"
 
 echo "ALL PASS"
