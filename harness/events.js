@@ -283,14 +283,21 @@ export function totalUsage(history) {
 import { OUTCOME_VOCAB } from './hook-runner.js';
 
 /**
- * Pure fold over an event history → counts of `wave-complete` events keyed by
- * `data.outcome` across the frozen 7-outcome vocabulary (success | fail-tests |
- * fail-scope | fail-protocol | fail-timeout | no-changes | abort-user), plus an
- * `unknown` bucket and a `total`. Outcome is OPTIONAL on the wire: the current
- * spine records `wave-complete` with `data: { wave }` only, so a missing or
- * out-of-vocabulary outcome is BUCKETED AS `unknown` (never skipped, never
- * thrown) — the total always equals the number of wave-complete events seen.
- * Intended for the insights layer to report per-feature reliability.
+ * Pure fold over an event history → counts of TERMINAL wave outcomes keyed by
+ * the frozen 7-outcome vocabulary (success | fail-tests | fail-scope |
+ * fail-protocol | fail-timeout | no-changes | abort-user), plus an `unknown`
+ * bucket and a `total`.
+ *
+ * Why attempts, not wave-complete: the spine records the resolved outcome ONLY
+ * on `wave-attempt` (`data.outcome`); `wave-complete` carries `data: { wave }`
+ * alone and is IGNORED here. `wave-attempt` events are grouped into (feature,
+ * wave) pairs (the same grouping `waveReliability` uses) and each pair
+ * contributes exactly ONE count: the outcome of its LAST attempt in history
+ * order. So `total` equals the number of pairs, and a retried wave counts once,
+ * by how it ended. A missing or out-of-vocabulary last outcome is bucketed as
+ * `unknown` (never skipped, never thrown). Attempts lacking a string `feature`
+ * or a finite numeric `data.wave` cannot be placed in a pair and contribute
+ * nothing. Zeroed shape on [] / null / non-array / wave-attempt-free input.
  *
  * @param {Event[]} history - in-memory event array (no I/O performed)
  * @returns {{ success: number, 'fail-tests': number, 'fail-scope': number,
@@ -303,10 +310,9 @@ export function outcomeCounts(history) {
   counts.unknown = 0;
   counts.total = 0;
   if (!Array.isArray(history)) return counts;
-  for (const event of history) {
-    if (!event || event.type !== 'wave-complete') continue;
+  for (const pair of collectWavePairs(history).values()) {
     counts.total += 1;
-    const outcome = event.data && typeof event.data.outcome === 'string' ? event.data.outcome : null;
+    const outcome = pair.lastOutcome;
     if (outcome !== null && OUTCOME_VOCAB.has(outcome)) {
       counts[outcome] += 1;
     } else {
@@ -510,7 +516,10 @@ export function fileFailureCounts(history, taskFiles, minFeatures = FILE_FAILURE
 /**
  * Group `wave-attempt` events into (feature, wave) pairs, in history order.
  * Reads ONLY `type`, `feature`, `data.wave`, and `data.outcome` — never `usage`.
- * @returns {Map<string,{ wave: string, feature: string, attempts: number, firstOutcome: string|null }>}
+ * `firstOutcome` is fixed by the pair's first attempt; `lastOutcome` is
+ * overwritten by every attempt, so it ends as the pair's terminal outcome.
+ * @returns {Map<string,{ wave: string, feature: string, attempts: number,
+ *   firstOutcome: string|null, lastOutcome: string|null }>}
  */
 function collectWavePairs(history) {
   const pairs = new Map();
@@ -520,13 +529,14 @@ function collectWavePairs(history) {
     const wave = event.data.wave;
     if (typeof wave !== 'number' || !Number.isFinite(wave)) continue;
     const key = JSON.stringify([event.feature, wave]);
+    const outcome = typeof event.data.outcome === 'string' ? event.data.outcome : null;
     let pair = pairs.get(key);
     if (!pair) {
-      const outcome = typeof event.data.outcome === 'string' ? event.data.outcome : null;
-      pair = { wave: String(wave), feature: event.feature, attempts: 0, firstOutcome: outcome };
+      pair = { wave: String(wave), feature: event.feature, attempts: 0, firstOutcome: outcome, lastOutcome: null };
       pairs.set(key, pair);
     }
     pair.attempts += 1;
+    pair.lastOutcome = outcome;
   }
   return pairs;
 }
@@ -582,8 +592,10 @@ export function waveReliability(history) {
  *
  * Why attempts, not wave-complete: the spine records the resolved outcome ONLY
  * on `wave-attempt` (`data.outcome`); `wave-complete` carries `data: { wave }`
- * alone, so `outcomeCounts` cannot see a failure outcome on a real spine log.
- * Every attempt counts (a retried wave contributes one entry per attempt). A
+ * alone, so it cannot carry a failure outcome on a real spine log.
+ * Every attempt counts (a retried wave contributes one entry per attempt) —
+ * unlike `outcomeCounts`, which counts only each (feature, wave) pair's LAST
+ * attempt. A
  * missing or out-of-vocabulary outcome is bucketed as `unknown`, same as
  * `outcomeCounts`. `features[outcome]` lists string `feature` values in
  * first-seen order; an attempt with no string feature is counted but names no

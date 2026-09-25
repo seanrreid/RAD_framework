@@ -124,24 +124,36 @@ test('reduce throws on a non-array history', () => {
 //   wave-complete  → data.{ wave }
 //   hook-veto      → data.{ point, hook, outcome, source }
 
-test('outcomeCounts folds wave-complete events across the 7-outcome vocabulary + unknown', () => {
+test('outcomeCounts counts each (feature, wave) pair by its LAST wave-attempt outcome; ignores wave-complete', () => {
   const history = [
-    // Spine-shaped wave-complete: data carries only { wave } → unknown bucket.
-    { feature: 'f', type: 'wave-complete', actor: 'harness', ts: 't1', data: { wave: 1 } },
-    // Outcome-carrying variants (tolerated shape) land in their vocab bucket.
-    { feature: 'f', type: 'wave-complete', actor: 'harness', ts: 't2', data: { wave: 2, outcome: 'success' } },
-    { feature: 'f', type: 'wave-complete', actor: 'harness', ts: 't3', data: { wave: 3, outcome: 'success' } },
-    // Out-of-vocabulary outcome → unknown, never a new key.
-    { feature: 'f', type: 'wave-complete', actor: 'harness', ts: 't4', data: { wave: 4, outcome: 'bogus' } },
-    // Non-wave-complete events contribute nothing.
-    { feature: 'f', type: 'wave-attempt', actor: 'harness', ts: 't5', data: { wave: 4, outcome: 'success' } },
+    // f/1: fail-tests then success → one pair, terminal 'success'.
+    { feature: 'f', type: 'wave-attempt', actor: 'harness', ts: 't1', data: { wave: 1, outcome: 'fail-tests' } },
+    { feature: 'f', type: 'wave-attempt', actor: 'harness', ts: 't2', data: { wave: 1, outcome: 'success' } },
+    // f/2: success then fail-timeout (resumed run) → terminal 'fail-timeout'.
+    { feature: 'f', type: 'wave-attempt', actor: 'harness', ts: 't3', data: { wave: 2, outcome: 'success' } },
+    { feature: 'f', type: 'wave-attempt', actor: 'harness', ts: 't4', data: { wave: 2, outcome: 'fail-timeout' } },
+    // f/3: last attempt carries no outcome → unknown (not the earlier success).
+    { feature: 'f', type: 'wave-attempt', actor: 'harness', ts: 't5', data: { wave: 3, outcome: 'success' } },
+    { feature: 'f', type: 'wave-attempt', actor: 'harness', ts: 't6', data: { wave: 3 } },
+    // f/4: out-of-vocabulary outcome → unknown, never a new key.
+    { feature: 'f', type: 'wave-attempt', actor: 'harness', ts: 't7', data: { wave: 4, outcome: 'bogus' } },
+    // g/1: same wave number, different feature → its own pair.
+    { feature: 'g', type: 'wave-attempt', actor: 'harness', ts: 't8', data: { wave: 1, outcome: 'abort-user' } },
+    // wave-complete is ignored even when it carries an outcome.
+    { feature: 'f', type: 'wave-complete', actor: 'harness', ts: 't9', data: { wave: 5, outcome: 'success' } },
+    // Unplaceable attempts (no feature / non-numeric wave) contribute nothing.
+    { type: 'wave-attempt', actor: 'harness', ts: 't10', data: { wave: 6, outcome: 'success' } },
+    { feature: 'f', type: 'wave-attempt', actor: 'harness', ts: 't11', data: { wave: '7', outcome: 'success' } },
   ];
+  // Pairs: f/1 success, f/2 fail-timeout, f/3 unknown, f/4 unknown, g/1 abort-user
+  //   → success 1, fail-timeout 1, abort-user 1, unknown 2, total 5 (= pair count).
   const counts = outcomeCounts(history);
-  assert.equal(counts.success, 2);
+  assert.equal(counts.success, 1);
+  assert.equal(counts['fail-timeout'], 1);
+  assert.equal(counts['abort-user'], 1);
   assert.equal(counts.unknown, 2);
-  assert.equal(counts.total, 4);
+  assert.equal(counts.total, 5);
   assert.equal(counts['fail-tests'], 0);
-  assert.equal(counts['abort-user'], 0);
   assert.equal('bogus' in counts, false);
 });
 
@@ -266,16 +278,21 @@ const EXPECTED = {
   },
   resumeFrom: new Set([1, 2]),
   totalUsage: { input: 15, output: 8, total: 23 },
+  // outcomeCounts counts each (feature, wave) pair's LAST wave-attempt outcome
+  // (#122 — wave-complete carries no outcome on a real spine log, so the fold
+  // now ignores it). Pairs: legacy/1 last=success; legacy/2 fail-tests→success,
+  // last=success; legacy/3 last=abort-user → success 2, abort-user 1, total 3.
+  // tasks/verify are still never read, so the parity claim itself is unchanged.
   outcomeCounts: {
-    success: 1,
+    success: 2,
     'fail-tests': 0,
     'fail-scope': 0,
     'fail-protocol': 0,
     'fail-timeout': 0,
     'no-changes': 0,
-    'abort-user': 0,
-    unknown: 1,
-    total: 2,
+    'abort-user': 1,
+    unknown: 0,
+    total: 3,
   },
   failReasonCounts: { total: 1, reasons: { 'abort-user': 1 } },
   retryCounts: { total: 4, retriedWaves: 1, perWave: { 1: 1, 2: 2, 3: 1 } },
@@ -340,7 +357,9 @@ test('phaseOf is pure — no filesystem access (only the passed array matters)',
 // `tasks` on every attempt; mixed = both shapes interleaved). The expected
 // objects below are HAND-COMPUTED from the fixture lines — never recomputed
 // from the folds under test — so any later change that moves an existing fold's
-// output on these logs turns this test red.
+// output on these logs turns this test red. (outcomeCounts' literals moved ONCE,
+// deliberately, in #122: it now counts terminal wave-attempt outcomes per
+// (feature, wave) pair instead of outcome-less wave-complete events.)
 const INSIGHTS_FIXTURE_DIR = fileURLToPath(new URL('./fixtures/insights/', import.meta.url));
 const INSIGHTS_FIXTURE_FEATURES = ['legacy', 'enriched', 'mixed'];
 
@@ -372,8 +391,10 @@ const FENCE_EXPECTED = {
   legacy: {
     // Usage: 140 + (80+20, no explicit total) = 240; the 2nd wave-2 and wave-3 attempts carry none.
     totalUsage: { input: 180, output: 60, total: 240 },
-    // wave-complete 1 is 'success'; wave-complete 2 has no outcome → unknown.
-    outcomeCounts: outcomesWith({ success: 1, unknown: 1, total: 2 }),
+    // Terminal attempt per (feature, wave) pair (lines 5, 7-8, 10):
+    //   w1 success; w2 fail-tests→success = success; w3 fail-timeout
+    //   → success 2, fail-timeout 1, total 3 pairs.
+    outcomeCounts: outcomesWith({ success: 2, 'fail-timeout': 1, total: 3 }),
     // The wave-3 surface terminal records { wave, action } with no reason.
     failReasonCounts: { total: 1, reasons: { unknown: 1 } },
     retryCounts: { total: 4, retriedWaves: 1, perWave: { 1: 1, 2: 2, 3: 1 } },
@@ -382,7 +403,10 @@ const FENCE_EXPECTED = {
   enriched: {
     // Usage: 250 + 150 + 75 + 50; the resumed wave-2 attempt carries none.
     totalUsage: { input: 420, output: 105, total: 525 },
-    outcomeCounts: outcomesWith({ success: 2, total: 2 }),
+    // Terminal attempt per pair (lines 4, 6-7-10, 13):
+    //   w1 success; w2 fail-tests→fail-scope→success = success; w3 abort-user
+    //   → success 2, abort-user 1, total 3 pairs.
+    outcomeCounts: outcomesWith({ success: 2, 'abort-user': 1, total: 3 }),
     failReasonCounts: { total: 2, reasons: { 'budget-exhausted': 1, 'abort-user': 1 } },
     retryCounts: { total: 5, retriedWaves: 1, perWave: { 1: 1, 2: 3, 3: 1 } },
     // One post-wave veto: a hook-veto event AND a provenance-tagged attempt.
@@ -391,7 +415,10 @@ const FENCE_EXPECTED = {
   mixed: {
     // Usage: 60 + 90 + (30+5, no explicit total) + (total-only 40) = 225.
     totalUsage: { input: 150, output: 35, total: 225 },
-    outcomeCounts: outcomesWith({ success: 1, 'no-changes': 1, total: 2 }),
+    // Terminal attempt per pair (lines 4-5, 7, 9-10):
+    //   w1 fail-protocol→success = success; w2 no-changes; w3 fail-tests→fail-tests
+    //   → success 1, no-changes 1, fail-tests 1, total 3 pairs.
+    outcomeCounts: outcomesWith({ success: 1, 'no-changes': 1, 'fail-tests': 1, total: 3 }),
     // doom-loop terminal, then a pre-wave-veto abort with { wave, action } only.
     failReasonCounts: { total: 2, reasons: { 'doom-loop': 1, unknown: 1 } },
     retryCounts: { total: 5, retriedWaves: 2, perWave: { 1: 2, 2: 1, 3: 2 } },
