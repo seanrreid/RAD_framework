@@ -21,3 +21,4 @@ Note: a prior run on 2026-08-20 failed at Wave 1 before any code was written
 | 8 | Wave 4 | Model-tiering advisory subsection | ✓ complete | 40dafce | 10:08 |
 | 9 | Wave 5 | Outcome to prompt-surface mapping table | ✓ complete | aff876d | 10:11 |
 | 10 | Wave 5 | Document the mapping rationale | ✓ complete | fc365f9 | 10:11 |
+| 11 | Wave 5 | Outcome to prompt-surface mapping table (revision: source outcome rows from wave-attempt via attemptOutcomeCounts) | ✓ complete | df3206f | 10:13 |
