@@ -41,6 +41,23 @@ research_block() {
     | awk -v s="  · $2" '$0==s{p=1} p&&/^$/{exit} p'
 }
 
+# Prints the Active Plans section body (header excluded).
+plans_section() {
+  printf '%s\n' "$1" | awk '/── Active Plans/{p=1;next} /^── /{p=0} p'
+}
+
+# Prints one plan row's block: its "  <icon> slug" header line up to the next
+# row header. Not "up to the blank line": a zero-count Waves/Tasks field can
+# render across lines and break the block early.
+plan_block() {
+  printf '%s\n' "$1" | awk -v s="$2" '/^  [^ ]/{if(p)exit; if($NF==s)p=1} p'
+}
+
+# Counts plan-row header lines for a slug ("  <icon> slug") in a plans section.
+plan_row_count() {
+  printf '%s\n' "$1" | awk -v s="$2" '/^  [^ ]/ && $NF==s {n++} END{print n+0}'
+}
+
 build_fixture() {
   local origin="$TMP/origin.git" work="$TMP/work"
   git init -q --bare "$origin"
@@ -78,7 +95,15 @@ build_fixture() {
     g add -A && g commit -qm plan
     g push -q origin rad/review-plan
 
+    # In-flight plan on its rad/ tip AND an unpushed local copy: the tip wins.
     g checkout -q main
+    g checkout -qb rad/in-flight
+    write_doc .agents/plans/in-flight.md in-progress
+    g add -A && g commit -qm plan
+    g push -q origin rad/in-flight
+
+    g checkout -q main
+    write_doc .agents/plans/in-flight.md pending-review
     g fetch -q origin
   )
 }
@@ -124,6 +149,29 @@ echo "✓ R5: parked and unrecognised statuses listed without a hint"
 
 printf '%s\n' "$OUT" | grep -q "^  $REVIEW_ICON review-plan$" || fail "R6: Status: review plan lacks the $REVIEW_ICON icon"
 echo "✓ R6: Status: review plan gets the $REVIEW_ICON icon"
+
+# Plan de-dup (#132): has-plan is committed on main (so on origin/main AND in the
+# local tree). Sections are captured once and counted, not `printf | grep -q`.
+PLANS_OUT=$(plans_section "$OUT")
+n=$(plan_row_count "$PLANS_OUT" has-plan)
+[[ "$n" == "1" ]] || fail "R11: has-plan listed $n times in Active Plans, want exactly 1: $PLANS_OUT"
+b=$(plan_block "$PLANS_OUT" has-plan)
+case "$b" in *"Branch: main (merged)"*) ;; *) fail "R11: has-plan not credited to base: $b" ;; esac
+case "$b" in *"local (unpushed)"*) fail "R11: has-plan credited to the local tree: $b" ;; esac
+echo "✓ R11: plan on base + local tree listed once, as main (merged)"
+
+n=$(plan_row_count "$PLANS_OUT" in-flight)
+[[ "$n" == "1" ]] || fail "R12: in-flight listed $n times in Active Plans, want exactly 1: $PLANS_OUT"
+b=$(plan_block "$PLANS_OUT" in-flight)
+case "$b" in *"Branch: rad/in-flight"*) ;; *) fail "R12: in-flight not credited to its branch tip: $b" ;; esac
+case "$b" in *"Status: in-progress"*) ;; *) fail "R12: tip status not shown: $b" ;; esac
+echo "✓ R12: plan on rad/ tip + local tree listed once, branch tip wins"
+
+n=$(plan_row_count "$PLANS_OUT" research-only)
+[[ "$n" == "0" ]] || fail "R13: plan-less rad/ tip rendered a phantom plan row: $PLANS_OUT"
+n=$(plan_row_count "$PLANS_OUT" 0)
+[[ "$n" == "0" ]] || fail "R13: a zero Waves/Tasks count split a row into phantom '0' rows: $PLANS_OUT"
+echo "✓ R13: no phantom plan rows (plan-less rad/ tip, zero-count plans)"
 
 # Section text captured once; matched with case, not `printf | grep -q`
 # (SIGPIPE under pipefail).

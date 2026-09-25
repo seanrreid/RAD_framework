@@ -47,6 +47,9 @@ SEEN_FEATURES=" "
 
 emit_plan_row() {
   # $1 = feature slug, $2 = source label, content on stdin
+  # Must run in the caller's shell (fed by redirection, never on the right of a
+  # pipe) or the SEEN_FEATURES update is lost in a subshell and a plan present
+  # on several sources is listed once per source.
   local feature="$1" source="$2" content status author waves tasks adopted_from
   case "$SEEN_FEATURES" in *" $feature "*) cat >/dev/null; return 0 ;; esac
   SEEN_FEATURES="${SEEN_FEATURES}${feature} "
@@ -55,8 +58,10 @@ emit_plan_row() {
   status=$(printf '%s\n' "$content"       | grep "^Status:"       | head -1 | awk '{print $2}' || echo "unknown")
   author=$(printf '%s\n' "$content"       | grep "^Author:"       | head -1 | sed 's/^Author:[[:space:]]*//' || echo "")
   adopted_from=$(printf '%s\n' "$content" | grep "^Adopted-From:" | head -1 | sed 's/^Adopted-From:[[:space:]]*//' || echo "")
-  waves=$(printf '%s\n' "$content"        | grep -c "^### Wave"  || echo "0")
-  tasks=$(printf '%s\n' "$content"        | grep -c "^#### Task" || echo "0")
+  # grep -c always prints the count (0 included) but exits 1 on no match, so the
+  # fallback must print nothing — `|| echo 0` yields "0\n0" and splits the row.
+  waves=$(printf '%s\n' "$content"        | grep -c "^### Wave"  || true)
+  tasks=$(printf '%s\n' "$content"        | grep -c "^#### Task" || true)
 
   echo "$feature|${status:-unknown}|$author|$waves|$tasks|$source|$adopted_from"
 }
@@ -64,16 +69,21 @@ emit_plan_row() {
 collect_plans() {
   local base ref branch feature path
 
-  # The three passes run in one subshell (piped to sort) so SEEN_FEATURES stays
-  # consistent across them. Priority: branch tip > merged on default > local tree.
+  # The three passes share one group (piped to sort); emit_plan_row runs in that
+  # group's shell — fed by redirection, never piped into — so SEEN_FEATURES
+  # carries across passes. Priority: branch tip > merged on default > local tree.
   {
-    # 1. In-flight: one plan per rad/ branch tip on origin (canonical).
+    # 1. In-flight: one plan per rad/ branch tip on origin (canonical). A tip
+    # with no plan doc (e.g. research only) is not a plan source: skip it so it
+    # neither renders an empty row nor shadows a lower-priority copy.
     while read -r ref; do
       [[ -z "$ref" ]] && continue
       branch="${ref#origin/}"
       feature="${branch#"$PREFIX"}"
-      git show "origin/${branch}:.agents/plans/${feature}.md" 2>/dev/null \
-        | emit_plan_row "$feature" "$branch" || true
+      path=".agents/plans/${feature}.md"
+      git cat-file -e "origin/${branch}:${path}" 2>/dev/null || continue
+      emit_plan_row "$feature" "$branch" \
+        < <(git show "origin/${branch}:${path}" 2>/dev/null || true) || true
     done < <(git branch -r --list "origin/${PREFIX}*" 2>/dev/null | sed 's/^[[:space:]]*//')
 
     # 2. Merged: plan docs that have landed on the default branch.
@@ -81,8 +91,8 @@ collect_plans() {
     while read -r path; do
       [[ -z "$path" ]] && continue
       feature=$(basename "$path" .md)
-      git show "origin/${base}:${path}" 2>/dev/null \
-        | emit_plan_row "$feature" "${base} (merged)" || true
+      emit_plan_row "$feature" "${base} (merged)" \
+        < <(git show "origin/${base}:${path}" 2>/dev/null || true) || true
     done < <(git ls-tree -r --name-only "origin/${base}" -- .agents/plans 2>/dev/null | grep -E '\.agents/plans/.*\.md$' | grep -v 'README.md' || true)
 
     # 3. Local working tree — a plan authored locally but not yet pushed.
