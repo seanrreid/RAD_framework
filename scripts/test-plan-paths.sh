@@ -235,4 +235,18 @@ grep -q "plan_cited_anchors: anchor resolution failed" "$RESOLVE_ERR_LOG" \
   || fail "plan_cited_anchors: read failure did not log a reason: [$(cat "$RESOLVE_ERR_LOG")]"
 echo "✓ plan_cited_anchors: resolve read failure ⇒ exit 2, never a silent 'no anchors'"
 
+# ── plan_cited_anchors: scheme://host URL token dropped (bash 3.2 case parse) ──
+# `git+ssh://host.example/dir:2222` greps to the token `//host.example/dir:2222`,
+# which is slash-bearing and would pass the directory-sep filter — only the
+# `(*//*)` URL guard drops it. Guards the 3.2-safe rewrite of that guard.
+URL_PLAN="$TMP/url-anchor.md"
+cat > "$URL_PLAN" <<'EOF'
+# Plan: url-anchor
+Clone from git+ssh://host.example/dir:2222 then edit foo/bar.js:7.
+EOF
+out=$(plan_cited_anchors "$URL_PLAN")
+[[ "$out" == "foo/bar.js" ]] \
+  || fail "plan_cited_anchors: host:// URL token should be dropped, expected only 'foo/bar.js', got: [$out]"
+echo "✓ plan_cited_anchors: git+ssh://host.example/dir:2222 URL token dropped; real anchor kept"
+
 echo "ALL PASS"
