@@ -1,7 +1,10 @@
 # Plan: Insights Data Accuracy
 Created: 2026-09-25
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-09-25T18:01:59.077Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/insights-data-accuracy
 Adopted-From: https://github.com/seanrreid/RAD_framework/issues/122
 Issue-Title: outcomeCounts folds wave-complete.data.outcome, which the spine never writes: /rad-insights Reliability reports every outcome as unknown
