@@ -16,7 +16,7 @@
 #   - plan_task_files / plan_scope_paths — see every path on a multi-file File: line
 #
 # Self-contained: builds a temp git-repo fixture (git init + a local bare origin
-# so `origin/main` resolves, mirroring test-classify-low-risk.sh), copies
+# so `origin/main` resolves), copies
 # lib/plan-paths.sh into it, commits a baseline, then sources the lib and asserts
 # each helper directly. Runs under bash 3.2+ (set -euo pipefail safe).
 #

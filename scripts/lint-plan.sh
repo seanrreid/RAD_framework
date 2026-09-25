@@ -218,7 +218,7 @@ fi
 while IFS= read -r path; do
   [[ -z "$path" ]] && continue
   if path_is_self_protected "$path"; then
-    WARNINGS+=("self-protected path (RAD machinery — never auto-clearable): $path")
+    WARNINGS+=("self-protected path (RAD machinery — always requires architect review): $path")
   fi
 done < <(plan_scope_paths "$PLAN_FILE")
 
