@@ -1,7 +1,10 @@
 # Plan: Lint-Plan File Parsing
 Created: 2026-09-25
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-09-25T18:43:13.351Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/lint-plan-file-parsing
 Adopted-From: https://github.com/seanrreid/RAD_framework/issues/134
 Issue-Title: lint-plan.sh: multi-file task File: lines are never split (paths silently dropped from the classifier), and a bare Lines number counts as N lines
