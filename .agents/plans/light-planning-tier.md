@@ -1,7 +1,10 @@
 # Plan: Light Planning Tier (/rad-plan --light)
 Created: 2026-09-28
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-09-28T15:30:34.192Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/light-planning-tier
 Adopted-From: https://github.com/seanrreid/RAD_framework/issues/81
 Issue-Title: Tiered planning entry (/rad-plan --light) so process cost tracks task size (WSFF 80/20)
