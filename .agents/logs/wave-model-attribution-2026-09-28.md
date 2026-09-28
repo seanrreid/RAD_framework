@@ -13,3 +13,4 @@ Executor role: architect
 | 3 | Wave 2 | Tiered fixture log | ✓ complete | 7963964 | 13:01 UTC |
 | 4 | Wave 2 | modelTierSpend + modelTierAdvisories folds | ✓ complete | 1f0f94b | 13:03 UTC |
 | 5 | Wave 3 | /rad-insights spend-by-model step and render | ⚠ done_with_concerns | 75eeccb | 13:06 UTC |
+| 6 | Wave 3 | Reconcile spend note and split empty-advisory line (follow-up) | ✓ complete | 685bc46 | 13:08 UTC |
