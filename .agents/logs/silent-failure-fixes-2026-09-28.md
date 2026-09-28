@@ -8,3 +8,5 @@ Executor role: architect
 
 | Step | Wave | Task | Status | Commit | Time |
 |------|------|------|--------|--------|------|
+| 1 | Wave 1 | Empty Files in Scope table fails loudly | ✓ complete (re-lint of 49 files: identical) | 06fd2dc | 16:32 UTC |
+| 2 | Wave 1 | defaultSh reports spawn failures as 127/126 | ✓ complete | 96744a4 | 16:32 UTC |
