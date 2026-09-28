@@ -178,6 +178,11 @@ confirmation prompt:
   plan (markers are resolve-only — they cannot be waived). A high-risk finding must
   be resolved (remove the path) or waived with a justified bullet in the plan's
   `## Waivers` section.
+- **`light-tier:` blockers** — a `Tier: light` plan beyond a light limit (more
+  than 1 wave, more than 3 tasks, or a high-risk or self-protected path). These
+  **cannot be waived**. The fix is to shrink the plan back within the limits, or
+  promote it to standard: remove `Tier: light` and add the standard sections.
+  Then re-run `/rad-approve`.
 - **Applied waivers** — list each with its justification. Judge every justification
   yourself: approving the plan accepts the waiver. Waivers are frozen into the
   `approved` event, so editing `## Waivers` after approval changes the plan
