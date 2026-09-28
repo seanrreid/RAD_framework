@@ -255,3 +255,109 @@ path_exists_on_ref() {
   git cat-file -e "${ref}:${path}" >/dev/null 2>&1 && return 0
   return 1
 }
+
+# ── Approval blockers ────────────────────────────────────────────────────────
+# Parsing for the approval-blocker check (scripts/check-approval-blockers.sh).
+# ONE source of truth: markers, high-risk findings, and waivers are parsed ONLY
+# here. Each helper fails closed (non-zero + stderr) on a missing/unreadable plan
+# so a caller can never mistake "could not read" for "nothing found".
+
+# Built-in high-risk pattern, used when RAD_HIGH_RISK_PATTERNS is UNSET. Must stay
+# byte-identical to the default in scripts/lint-plan.sh (which still carries its
+# own copy this wave; Wave 2 routes lint through plan_high_risk_pattern).
+readonly RAD_HIGH_RISK_DEFAULT_PATTERN='auth|payment|billing|migration|secret|credential|token'
+
+# Prefix of every high-risk finding id; the rest of the id is the scope path.
+readonly RAD_HIGH_RISK_FINDING_PREFIX='high-risk:'
+
+# require_readable_plan <caller> <plan-file>
+# Return 0 iff <plan-file> is a readable regular file; else name the caller and
+# the plan on stderr and return 2.
+require_readable_plan() {
+  local caller="$1" plan_file="$2"
+  if [[ -z "$plan_file" || ! -f "$plan_file" || ! -r "$plan_file" ]]; then
+    echo "$caller: plan file missing or unreadable: '$plan_file'" >&2
+    return 2
+  fi
+}
+
+# plan_clarification_markers <plan-file>
+# Print `<line>\t<question>` for every `[NEEDS CLARIFICATION: <question>]` marker
+# OUTSIDE a ``` fenced block (a line beginning with three backticks toggles the
+# fence). Several markers on one line are each reported; the question is trimmed
+# and may be empty (an empty question still counts). An unterminated marker (no
+# closing `]`) counts too, with the rest of the line as its question — a marker
+# is never silently dropped. No markers → no output, exit 0.
+plan_clarification_markers() {
+  local plan_file="$1"
+  require_readable_plan plan_clarification_markers "$plan_file" || return
+  awk '
+    function trim(s) { gsub(/^[ \t]+|[ \t\r]+$/, "", s); return s }
+    /^```/ { fenced = !fenced; next }
+    fenced { next }
+    {
+      rest = $0; open = "[NEEDS CLARIFICATION:"
+      while ((i = index(rest, open)) > 0) {
+        rest = substr(rest, i + length(open))
+        j = index(rest, "]")
+        q = (j > 0) ? substr(rest, 1, j - 1) : rest
+        print NR "\t" trim(q)
+        if (j == 0) break
+        rest = substr(rest, j + 1)
+      }
+    }
+  ' "$plan_file"
+}
+
+# plan_high_risk_pattern
+# Print the effective high-risk pattern: RAD_HIGH_RISK_PATTERNS when SET (an
+# empty value disables the check — prints nothing), the built-in default when
+# UNSET. `${var-default}` (no colon) is what distinguishes empty from unset.
+plan_high_risk_pattern() {
+  printf '%s' "${RAD_HIGH_RISK_PATTERNS-$RAD_HIGH_RISK_DEFAULT_PATTERN}"
+}
+
+# plan_high_risk_findings <plan-file>
+# Print `high-risk:<path>` for every plan_scope_paths entry matching the
+# effective high-risk pattern (path_matches — the same matcher and path union as
+# the lint advisory), de-duplicated. Disabled pattern → no output, exit 0.
+plan_high_risk_findings() {
+  local plan_file="$1" pattern paths path
+  require_readable_plan plan_high_risk_findings "$plan_file" || return
+  pattern=$(plan_high_risk_pattern)
+  [[ -z "$pattern" ]] && return 0
+  # Readability was checked above, so plan_scope_paths' only non-zero is the
+  # benign pipefail from its `grep -v` filters when the plan declares no paths —
+  # an empty path set, not an error.
+  paths=$(plan_scope_paths "$plan_file") || true
+  [[ -z "$paths" ]] && return 0
+  while IFS= read -r path; do
+    [[ -z "$path" ]] && continue
+    if path_matches "$path" "$pattern"; then
+      printf '%s%s\n' "$RAD_HIGH_RISK_FINDING_PREFIX" "$path"
+    fi
+  done <<< "$paths" | sort -u
+}
+
+# plan_waivers <plan-file>
+# Print `<id>\t<justification>` for every `- <id>: <justification>` bullet in the
+# `## Waivers` section (body ends at the next `## ` heading). Split on the FIRST
+# ": " so a justification may itself contain ": ". id and justification are
+# trimmed; a bullet with an empty id or empty justification is dropped (an
+# unjustified waiver is no waiver). No section → no output, exit 0.
+plan_waivers() {
+  local plan_file="$1"
+  require_readable_plan plan_waivers "$plan_file" || return
+  awk '
+    function trim(s) { gsub(/^[ \t]+|[ \t\r]+$/, "", s); return s }
+    /^## / { in_waivers = ($0 ~ /^## Waivers[ \t\r]*$/); next }
+    !in_waivers || !/^[ \t]*- / { next }
+    {
+      body = $0; sub(/^[ \t]*- /, "", body)
+      k = index(body, ": ")
+      if (k == 0) next
+      id = trim(substr(body, 1, k - 1)); why = trim(substr(body, k + 2))
+      if (id != "" && why != "") print id "\t" why
+    }
+  ' "$plan_file"
+}
