@@ -690,14 +690,19 @@ t_fenced_waiver_ignored() {
 t_blocker_no_new_output() {
   # No markers, no high-risk paths, no ## Waivers → no blocker section, no
   # waiver lines; a fully clean plan still prints the one-line success message.
-  local plan="$TMP/blk-none.md"
-  write_plan "$plan" "| $CLEAN_PATH | 1-2 | x |" "$CLEAN_PATH:1-2"
-  ( unset RAD_HIGH_RISK_PATTERNS; run_lint "$plan"; assert_no_blockers "NONE"
-    printf '%s\n' "$LINT_OUT" | grep -qE "waiver|\(id: " \
-      && fail "NONE: unexpected waiver/id output: $LINT_OUT" || true
-    printf '%s\n' "$LINT_OUT" | grep -qF "✓ blk-none.md — plan is valid" \
-      || fail "NONE: clean plan lost its success line: $LINT_OUT"
-    [[ "$LINT_CODE" -eq 0 ]] || fail "NONE: exited $LINT_CODE (expected 0)"
+  # Runs in the hermetic GREPO fixture (local bare origin) so origin/main always
+  # resolves: in the real checkout an unresolvable base ref (e.g. a CI runner)
+  # adds a freshness warning, which correctly suppresses the success line.
+  local plan="$GREPO/.agents/plans/blk-none.md"
+  write_plan "$plan" "| src/app.js | 1-2 | x |" "src/app.js:1-2"
+  ( unset RAD_HIGH_RISK_PATTERNS; run_lint_in_repo "$GREPO" ".agents/plans/blk-none.md"
+    printf '%s\n' "$FRESH_OUT" | grep -qF "$BLOCKER_HEADING" \
+      && fail "NONE: clean plan printed the blocker section: $FRESH_OUT" || true
+    printf '%s\n' "$FRESH_OUT" | grep -qE "waiver|\(id: " \
+      && fail "NONE: unexpected waiver/id output: $FRESH_OUT" || true
+    printf '%s\n' "$FRESH_OUT" | grep -qF "✓ blk-none.md — plan is valid" \
+      || fail "NONE: clean plan lost its success line: $FRESH_OUT"
+    [[ "$FRESH_CODE" -eq 0 ]] || fail "NONE: exited $FRESH_CODE (expected 0)"
   ) || exit 1
   echo "✓ NONE: plan with no markers/high-risk/waivers ⇒ no new output, success line intact"
 
