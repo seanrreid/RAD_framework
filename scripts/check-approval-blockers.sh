@@ -5,8 +5,13 @@
 #     fenced block and outside an inline code span (resolve-only — markers can
 #     NEVER be waived), or
 #   - a high-risk path finding (`high-risk:<path>`, RAD_HIGH_RISK_PATTERNS) with
-#     no matching `- <id>: <justification>` bullet under `## Waivers`.
-# The self-protected advisory is deliberately NOT a blocker.
+#     no matching `- <id>: <justification>` bullet under `## Waivers`, or
+#   - a light-tier violation (`light-tier: <reason>`, plan_light_violations): a
+#     `Tier: light` plan exceeding a light bound — too many waves or tasks, or a
+#     high-risk or self-protected scope path. NON-WAIVABLE: these never pass
+#     through applied_waivers; the fix is to shrink the plan or drop the tier.
+# For a standard plan (no `Tier: light`) the self-protected advisory is
+# deliberately NOT a blocker.
 #
 # All parsing lives in lib/plan-paths.sh (one source of truth); this script only
 # combines the helpers' output. A waiver applies iff its id equals a CURRENT
@@ -62,11 +67,15 @@ applied_waivers() {
   done <<< "$waivers"
 }
 
-# report_blockers <markers> <findings> <applied>
+# Appended to every light-tier blocker: the only two ways to clear one.
+readonly LIGHT_TIER_HINT='(shrink the plan or remove "Tier: light" to make it a standard plan)'
+
+# report_blockers <markers> <findings> <applied> <light-violations>
 # Name every blocker on stderr; print the blocker count on stdout (captured by
-# the caller, never reaching the script's own stdout).
+# the caller, never reaching the script's own stdout). Light-tier violations are
+# counted unconditionally — <applied> is never consulted for them.
 report_blockers() {
-  local markers="$1" findings="$2" applied="$3" line question id count=0
+  local markers="$1" findings="$2" applied="$3" light="$4" line question id count=0
   if [[ -n "$markers" ]]; then
     while IFS=$'\t' read -r line question; do
       echo "✗ clarification marker at line $line: $question" >&2
@@ -80,17 +89,24 @@ report_blockers() {
       count=$((count + 1))
     done <<< "$findings"
   fi
+  if [[ -n "$light" ]]; then
+    while IFS= read -r line; do
+      echo "✗ $line $LIGHT_TIER_HINT" >&2
+      count=$((count + 1))
+    done <<< "$light"
+  fi
   echo "$count"
 }
 
 main() {
-  local plan_file="${1:-}" markers findings waivers applied blockers
+  local plan_file="${1:-}" markers findings waivers applied light blockers
   validate_plan_arg "$#" "$plan_file"
   markers=$(plan_clarification_markers "$plan_file") || die "could not read clarification markers"
   findings=$(plan_high_risk_findings "$plan_file") || die "could not compute high-risk findings"
   waivers=$(plan_waivers "$plan_file") || die "could not read ## Waivers"
   applied=$(applied_waivers "$findings" "$waivers") || die "could not match waivers to findings"
-  blockers=$(report_blockers "$markers" "$findings" "$applied") || die "could not report blockers"
+  light=$(plan_light_violations "$plan_file") || die "could not compute light-tier violations"
+  blockers=$(report_blockers "$markers" "$findings" "$applied" "$light") || die "could not report blockers"
   if [[ "$blockers" -gt 0 ]]; then
     echo "$SELF: $blockers approval blocker(s) in $plan_file" >&2
     exit "$EXIT_BLOCKED"
