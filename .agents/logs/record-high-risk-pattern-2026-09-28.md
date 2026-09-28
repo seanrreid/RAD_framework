@@ -10,4 +10,6 @@ Executor role: architect
 |------|------|------|--------|--------|------|
 | 1 | Wave 1 | Default-pattern predicate and the blocker script's tag line | ✓ complete | 9da88e2 | 19:41 UTC |
 | 2 | Wave 2 | recordApproval freezes highRiskPattern | ✓ complete | 4123c6b | 19:43 UTC |
-| 3 | Wave 2 | rad approve parses the tag | ✓ complete | (this commit) | 19:44 UTC |
+| 3 | Wave 2 | rad approve parses the tag | ✓ complete | 4c202a0 | 19:44 UTC |
+| 4 | Wave 3 | Integrity-check advisory | ✓ complete | 7b3a60c | 19:48 UTC |
+| 5 | Wave 3 | /rad-approve prose and CLAUDE.md note | ✓ complete | 9ee20ef | 19:48 UTC |
