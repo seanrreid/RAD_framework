@@ -61,6 +61,18 @@ the review report. These are **advisory only** — they surface plan-quality
 warnings for the architect's attention but do **not** gate the review or block
 architect review. This is separate from the Step 2 scope check.
 
+Also run the approval-blocker check and include its result:
+
+```bash
+scripts/check-approval-blockers.sh "$PLAN"
+```
+
+List any blockers it names on stderr (exit 1) — unresolved clarification markers
+and un-waived `high-risk:<path>` findings — and every applied waiver it prints on
+stdout with its justification. This is advisory here too, but note in the report
+that remaining blockers **will block `/rad-approve`**: `rad approve` refuses until
+each marker is answered and each high-risk finding is resolved or waived.
+
 ### Step 3: Plan fidelity check
 
 For each task in the plan, verify the implementation matches the description:
