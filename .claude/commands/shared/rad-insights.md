@@ -614,8 +614,13 @@ Reading the output:
   `unrecorded`. `downgrade` — the `default` group succeeded first-attempt in
   every wave. `upgrade` — a group retried in at least 50% of its waves
   (`UPGRADE_RETRY_RATE`); the retried count R is `groups[model].retried`.
-- **`advisories: []`** — no group qualifies. Render the insufficient-history line
-  from the Spend by model template below, never an empty list.
+- **`advisories: []`** — no advisory fired. Never render an empty list; render
+  exactly one of two lines from the Spend by model template below. If no
+  non-`unrecorded` group has at least `minFeatures` features, render the
+  insufficient-history line (F = the largest such group's `features`, 0 if none).
+  Otherwise the floor was met and nothing crossed a threshold: render the
+  "No spend advisories: N group(s) met the floor" line, N = the count of
+  non-`unrecorded` groups at or above `minFeatures`.
 
 ### Step 4g: Route recurring signals to prompt surfaces
 
@@ -899,11 +904,11 @@ Based on [features] features (floor: [minFeatures]):
  position with small n is weak evidence even above the feature floor.]
 
 [Render this note verbatim in every state, including the degradation states:]
-Spend-based tiering advice is deliberately absent. Recorded `input_tokens` is the
-uncached remainder, so relative spend varies with cache-hit rate and scheduling
-rather than with what a wave costs. Usage now carries the optional cache fields
-(`cacheRead` / `cacheWrite` / `cost`, #121) — see the Cache-Hit Readout below —
-but spend-derived tiering advice is still deferred (tracked in #65).
+The per-position rates above are outcome-only — they carry no spend. Spend-derived
+tiering advice lives in the Spend by model subsection below (Step 4f3), grouped by
+the recorded wave model. Recorded `input_tokens` is the uncached remainder, so
+token totals vary with cache-hit rate and scheduling — see the Cache-Hit Readout
+below (`cacheRead` / `cacheWrite` / `cost`, #121).
 
 #### Spend by model
 [From Step 4f3. Render in every state of the section above, including its
@@ -920,10 +925,15 @@ but spend-derived tiering advice is still deferred (tracked in #65).
 [kind upgrade:]
 - `[model]` waves retried in [groups[model].retried] of [waves] (≥ 50%) across
   [features] features — consider a stronger model or splitting the wave
-[If advisories is empty, render EXACTLY this line instead — F is the largest
- `features` among groups other than `unrecorded` (0 if none):]
+[If advisories is empty, render EXACTLY ONE of these two lines instead. F is the
+ largest `features` among groups other than `unrecorded` (0 if none); N is the
+ count of non-`unrecorded` groups whose `features` ≥ minFeatures.]
+[If N is 0 (no non-`unrecorded` group reaches the floor):]
 Insufficient history for spend advisories ([F] of [minFeatures] features with
 recorded models)
+[Else (N ≥ 1 — the floor was met but nothing crossed a threshold):]
+No spend advisories: [N] group(s) met the [minFeatures] floor and none crossed a
+downgrade or upgrade threshold.
 
 [Render this caveat verbatim in every state:]
 `default` means the deliver default model, whatever it was when the wave ran — not
