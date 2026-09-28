@@ -1,7 +1,7 @@
 # Plan: Tighten the Default High-Risk Pattern
 Created: 2026-09-28
 Author: architect
-Status: approved
+Status: in-progress
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-09-28T15:55:27.906Z
 Recorded-By: sean@torchcodelab.com
