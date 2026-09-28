@@ -8,3 +8,4 @@ Executor role: architect
 
 | Step | Wave | Task | Status | Commit | Time |
 |------|------|------|--------|--------|------|
+| 1 | Wave 1 | Wave, layer and mockup helpers | ✓ complete | aa0fa9f | 15:07 UTC |
