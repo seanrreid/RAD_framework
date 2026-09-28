@@ -105,6 +105,10 @@ Branch: rad/[feature-slug]
 
 ## Context
 [2–3 sentences: what exists today and what needs to change]
+<!-- If a mockup for this feature exists at .agents/mockups/<feature>.html
+     (written by /rad-research or /rad-design), reference its path here, e.g.
+     "Mockup: .agents/mockups/<feature>.html". scripts/lint-plan.sh warns if a
+     referenced mockup is missing on disk. Optional — omit if none exists. -->
 
 ## Scope
 | In scope | Out of scope |
@@ -203,6 +207,12 @@ Depends on: Wave 1 complete
 - Max 3 tasks per wave. If more needed, add another wave.
 - Max 5 waves total. If more needed, split into two plans.
 - Every task's `Validate:` field must cite a specific `AC#N` — no floating tasks.
+- Prefer vertical slices: each wave should land a testable end-to-end increment
+  (one workflow's schema + service + API + UI together) rather than a
+  stack-ordered sequence (all schema → all service → all UI), which pushes
+  integration risk into the last wave. This is a preference, not a rule — pure
+  refactors and harness-internal work may be horizontal. `scripts/lint-plan.sh`
+  advises (never blocks) when a plan's waves look stack-ordered.
 
 **Open questions become clarification markers.** Any open question or unmade
 decision MUST be written inline, where it applies, as a marker on a single line:
