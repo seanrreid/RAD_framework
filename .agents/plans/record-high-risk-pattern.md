@@ -1,7 +1,10 @@
 # Plan: Record a Non-Default High-Risk Pattern in the Approved Event
 Created: 2026-09-28
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-09-28T19:38:12.423Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/record-high-risk-pattern
 Adopted-From: https://github.com/seanrreid/RAD_framework/issues/144
 Issue-Title: Record the effective high-risk pattern in the approved event when it differs from the default
