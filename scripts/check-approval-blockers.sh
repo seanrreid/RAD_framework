@@ -2,7 +2,8 @@
 # check-approval-blockers.sh
 # Decides whether a RAD plan carries approval blockers. A blocker is either:
 #   - an unresolved `[NEEDS CLARIFICATION: <question>]` marker outside a ```
-#     fenced block (resolve-only — markers can NEVER be waived), or
+#     fenced block and outside an inline code span (resolve-only — markers can
+#     NEVER be waived), or
 #   - a high-risk path finding (`high-risk:<path>`, RAD_HIGH_RISK_PATTERNS) with
 #     no matching `- <id>: <justification>` bullet under `## Waivers`.
 # The self-protected advisory is deliberately NOT a blocker.

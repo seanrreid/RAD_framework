@@ -183,21 +183,21 @@ done < "$PLAN_FILE"
 # ── High-risk path advisory ───────────────────────────────────────────────────
 # Over the union of Files-in-Scope paths and task `File:` paths, warn (never
 # error) for any path matching a high-risk pattern, advising close architect
-# review. RAD_HIGH_RISK_PATTERNS overrides the generic default (a |-separated
-# extended-regex alternation of generic infra-risk terms).
-RAD_HIGH_RISK_PATTERNS="${RAD_HIGH_RISK_PATTERNS:-auth|payment|billing|migration|secret|credential|token}"
+# review. The pattern comes from plan_high_risk_pattern (lib/plan-paths.sh — the
+# one source shared with check-approval-blockers.sh): RAD_HIGH_RISK_PATTERNS
+# narrows it, and empty falls back to the default, so it is never disabled. Each
+# warning carries the finding id a `## Waivers` bullet must name.
+HIGH_RISK_PATTERN=$(plan_high_risk_pattern)
 
 HIGH_RISK_HIT=false
-if [[ -n "$RAD_HIGH_RISK_PATTERNS" ]]; then
-  # Union of Files-in-Scope and task File: paths (de-duped) via the shared helper.
-  while IFS= read -r path; do
-    [[ -z "$path" ]] && continue
-    if path_matches "$path" "$RAD_HIGH_RISK_PATTERNS"; then
-      WARNINGS+=("High-risk path in scope — flag for close architect review: $path")
-      HIGH_RISK_HIT=true
-    fi
-  done < <(plan_scope_paths "$PLAN_FILE")
-fi
+# Union of Files-in-Scope and task File: paths (de-duped) via the shared helper.
+while IFS= read -r path; do
+  [[ -z "$path" ]] && continue
+  if path_matches "$path" "$HIGH_RISK_PATTERN"; then
+    WARNINGS+=("High-risk path in scope — flag for close architect review: $path (id: ${RAD_HIGH_RISK_FINDING_PREFIX}${path})")
+    HIGH_RISK_HIT=true
+  fi
+done < <(plan_scope_paths "$PLAN_FILE")
 
 # ── Program Design section advisory ───────────────────────────────────────────
 # A "large" plan (>=3 waves, or at least one high-risk path in scope) is advised
@@ -362,11 +362,91 @@ if has_section "Tests to Write"; then
   [[ "$TEST_COUNT" -eq 0 ]] && ERRORS+=("## Tests to Write is empty — every plan must specify tests")
 fi
 
+# ── Approval blockers ─────────────────────────────────────────────────────────
+# Mirrors scripts/check-approval-blockers.sh so the author sees blockers before
+# /rad-approve: unresolved clarification markers (resolve-only, never waivable)
+# and high-risk findings with no `## Waivers` bullet. ALL parsing is delegated to
+# the lib/plan-paths.sh helpers. Blockers are reported, never counted toward the
+# exit code (ERRORS alone drive it). A helper that fails is an ERROR — fail closed:
+# a scan that could not run must never read as "no blockers".
+BLOCKERS=()
+# Newline-delimited sets (bash 3.2: no associative arrays).
+HIGH_RISK_FINDINGS=""
+WAIVER_IDS=""
+# A waiver id with this prefix names a clarification marker, which can't be waived.
+CLARIFY_WAIVER_PREFIX="clarify"
+
+# blocker_scan_failed <helper> <rc> — record a helper failure as an ERROR. Called
+# in the parent shell (never inside $(...)) so the ERRORS append is not lost.
+blocker_scan_failed() {
+  ERRORS+=("approval-blocker scan failed: $1 exited $2 for $PLAN_FILE — blockers could not be verified")
+}
+
+collect_marker_blockers() {
+  local markers line question rc=0
+  markers=$(plan_clarification_markers "$PLAN_FILE") || rc=$?
+  [[ "$rc" -eq 0 ]] || { blocker_scan_failed plan_clarification_markers "$rc"; return 0; }
+  while IFS=$'\t' read -r line question; do
+    [[ -z "$line" ]] && continue
+    BLOCKERS+=("clarification marker at line $line: $question")
+  done <<< "$markers"
+}
+
+collect_high_risk_blockers() {
+  local waivers id rc=0
+  HIGH_RISK_FINDINGS=$(plan_high_risk_findings "$PLAN_FILE") || rc=$?
+  [[ "$rc" -eq 0 ]] || { blocker_scan_failed plan_high_risk_findings "$rc"; return 0; }
+  waivers=$(plan_waivers "$PLAN_FILE") || rc=$?
+  [[ "$rc" -eq 0 ]] || { blocker_scan_failed plan_waivers "$rc"; return 0; }
+  WAIVER_IDS=$(printf '%s\n' "$waivers" | cut -f1)
+  while IFS= read -r id; do
+    [[ -z "$id" ]] && continue
+    printf '%s\n' "$WAIVER_IDS" | grep -Fxq -e "$id" && continue
+    BLOCKERS+=("$id — waive under ## Waivers or remove the path")
+  done <<< "$HIGH_RISK_FINDINGS"
+}
+
+# Waivers that apply to nothing: a clarify id (markers are resolve-only) or an id
+# matching no current finding (stale). Neither is applied by the blocker check.
+collect_waiver_warnings() {
+  local id
+  while IFS= read -r id; do
+    [[ -z "$id" ]] && continue
+    if [[ "$id" == "$CLARIFY_WAIVER_PREFIX"* ]]; then
+      WARNINGS+=("waiver '$id' names a clarification marker — markers can't be waived — answer the question and delete the marker")
+    elif ! printf '%s\n' "$HIGH_RISK_FINDINGS" | grep -Fxq -e "$id"; then
+      WARNINGS+=("stale waiver: '$id' matches no current finding — remove it from ## Waivers")
+    fi
+  done <<< "$WAIVER_IDS"
+}
+
+# A `- <id>:` bullet with nothing after the colon. plan_waivers drops it (an
+# unjustified waiver is no waiver), so it is detected here from the raw section.
+# A bullet holding ": " has a justification (plan_waivers splits on the first
+# ": "), even one that itself ends in a colon.
+collect_empty_justification_warnings() {
+  local bullet
+  has_section "Waivers" || return 0
+  while IFS= read -r bullet; do
+    [[ "$bullet" =~ ^[[:space:]]*-[[:space:]] ]] || continue
+    bullet=$(printf '%s' "$bullet" | sed 's/^[[:space:]]*-[[:space:]]*//; s/[[:space:]]*$//')
+    [[ "$bullet" == *: && "$bullet" != *": "* && -n "${bullet%:}" ]] || continue
+    WARNINGS+=("waiver '${bullet%:}' has an empty justification — it is not applied; give a reason after the colon")
+  done < <(section_content "Waivers")
+}
+
+collect_marker_blockers
+collect_high_risk_blockers
+collect_waiver_warnings
+collect_empty_justification_warnings
+
 # ── Output ────────────────────────────────────────────────────────────────────
 
 PLAN_NAME=$(basename "$PLAN_FILE")
 
-if [[ "${#ERRORS[@]}" -eq 0 && "${#WARNINGS[@]}" -eq 0 ]]; then
+# The "plan is valid" one-liner is reserved for a plan with nothing to report —
+# blockers included, so a blocked plan never reads as clean.
+if [[ "${#ERRORS[@]}" -eq 0 && "${#WARNINGS[@]}" -eq 0 && "${#BLOCKERS[@]}" -eq 0 ]]; then
   BUDGET_MSG=""
   $BUDGET_COMPUTED && BUDGET_MSG=", budget: ~${TOTAL_LINES}L"
   echo "✓ $PLAN_NAME — plan is valid (waves: $WAVE_COUNT${BUDGET_MSG})"
@@ -388,6 +468,14 @@ if [[ "${#WARNINGS[@]}" -gt 0 ]]; then
   echo "Warnings (verify before execution):"
   for warn in "${WARNINGS[@]}"; do
     echo "  ⚠ $warn"
+  done
+fi
+
+if [[ "${#BLOCKERS[@]}" -gt 0 ]]; then
+  echo ""
+  echo "Approval blockers (resolve or waive before /rad-approve):"
+  for blocker in "${BLOCKERS[@]}"; do
+    echo "  ⛔ $blocker"
   done
 fi
 
