@@ -1,9 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, readFileSync, existsSync, appendFileSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, existsSync, appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { createGitStateStore } from '../adapters/git-state-store.js';
+import { createGitStateStore, defaultSh } from '../adapters/git-state-store.js';
 import { TransitionError } from '../transitions.js';
 
 // Async so an async `fn` is fully awaited BEFORE the temp dir is removed. With a
@@ -290,4 +290,35 @@ test('recordApproval throws on malformed waivers and appends nothing', async () 
       assert.equal(existsSync(eventsFile(repoRoot, 'demo')), false, `${label}: nothing written`);
     });
   }
+});
+
+// ── defaultSh exit-code mapping (#142) ────────────────────────────────────
+// A spawn failure must never masquerade as a script's own exit 1.
+test('defaultSh: missing executable (ENOENT) → 127, stderr names the failure', () => {
+  const r = defaultSh('/nonexistent/x');
+  assert.equal(r.status, 127);
+  assert.match(r.stderr, /^ENOENT: /);
+});
+
+test('defaultSh: file without the exec bit (EACCES) → 126, stderr names the failure', async () => {
+  await withTempRepo((dir) => {
+    const file = join(dir, 'noexec.sh');
+    writeFileSync(file, '#!/bin/sh\nexit 0\n', { mode: 0o644 });
+    const r = defaultSh(file);
+    assert.equal(r.status, 126);
+    assert.match(r.stderr, /^EACCES: /);
+  });
+});
+
+test('defaultSh: a child that ran keeps its real exit code (3 and 1)', async () => {
+  await withTempRepo((dir) => {
+    for (const code of [3, 1]) {
+      const file = join(dir, `exit${code}.sh`);
+      writeFileSync(file, `#!/bin/sh\necho out\necho err >&2\nexit ${code}\n`, { mode: 0o755 });
+      const r = defaultSh(file);
+      assert.equal(r.status, code, `exit ${code} preserved`);
+      assert.equal(r.stdout, 'out\n');
+      assert.equal(r.stderr, 'err\n');
+    }
+  });
 });

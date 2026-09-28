@@ -40,11 +40,23 @@ import { validateTransition } from '../transitions.js';
 // imports matrix.js eagerly — so js-yaml is optional only for StateStore-only
 // consumers, not for the harness as a whole.
 
+// Shell-convention exit codes for a child that never ran. Reported only when the
+// spawn itself failed (err.status is not a number) so a missing or non-executable
+// script can never be mistaken for a script's own exit 1 (e.g. "blockers remain").
+const SPAWN_NOT_FOUND_EXIT = 127; // ENOENT: command/script does not exist
+const SPAWN_NOT_EXECUTABLE_EXIT = 126; // EACCES: exists but cannot be executed
+const SPAWN_OTHER_FAILURE_EXIT = 1; // any other spawn failure (still non-zero, fail-closed)
+const SPAWN_ERROR_EXITS = { ENOENT: SPAWN_NOT_FOUND_EXIT, EACCES: SPAWN_NOT_EXECUTABLE_EXIT };
+
 /**
  * Default shell-out helper: run a script/command synchronously and capture its
  * result. Returns `{ status, stdout, stderr }` (does NOT throw on non-zero exit,
  * so the caller can branch on the exit code — guardrail scripts use exit codes
  * as pass/fail). Injectable for testing.
+ *
+ * When the child ran, `status` is its REAL exit code. When the spawn itself
+ * failed, `status` follows shell convention — 127 for ENOENT, 126 for EACCES,
+ * 1 for any other spawn error — and `stderr` is `<err.code>: <err.message>`.
  *
  * @param {string} file - executable/script path
  * @param {string[]} [args]
@@ -60,10 +72,17 @@ function defaultSh(file, args = [], opts = {}) {
     });
     return { status: 0, stdout: stdout ?? '', stderr: '' };
   } catch (err) {
+    if (typeof err.status === 'number') {
+      return {
+        status: err.status,
+        stdout: err.stdout ? String(err.stdout) : '',
+        stderr: err.stderr ? String(err.stderr) : String(err.message ?? ''),
+      };
+    }
     return {
-      status: typeof err.status === 'number' ? err.status : 1,
-      stdout: err.stdout ? String(err.stdout) : '',
-      stderr: err.stderr ? String(err.stderr) : String(err.message ?? ''),
+      status: SPAWN_ERROR_EXITS[err.code] ?? SPAWN_OTHER_FAILURE_EXIT,
+      stdout: '',
+      stderr: `${err.code ?? 'spawn-error'}: ${err.message ?? ''}`,
     };
   }
 }

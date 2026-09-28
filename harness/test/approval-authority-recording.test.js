@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 import { approveCommand } from '../cli.js';
-import { createGitStateStore } from '../adapters/git-state-store.js';
+import { createGitStateStore, defaultSh } from '../adapters/git-state-store.js';
 import { evaluateGate } from '../gates.js';
 import { planFingerprint } from '../plan-fingerprint.js';
 import { validateTransition, TransitionError } from '../transitions.js';
@@ -479,7 +479,8 @@ const BLOCKER_SCRIPT_RE = /check-approval-blockers\.sh$/;
 const PROXY_ARGS = ['--on-behalf-of', 'arch@example.com', '--evidence', 'slack thread'];
 
 // Run approveCommand with a fake sh whose check-approval-blockers.sh response is
-// `blocker` (an sh result object, or a function called in its place). Returns
+// `blocker` (an sh result object, or a function called in its place with the
+// same (file, args, opts)). Returns
 // the exit code, captured stderr, the parsed events (null when no log), the plan
 // text, and every blocker-script call seen.
 async function approveWithBlocker(blocker, extraArgs = []) {
@@ -497,7 +498,7 @@ async function approveWithBlocker(blocker, extraArgs = []) {
       const sh = (file, args, opts) => {
         if (BLOCKER_SCRIPT_RE.test(file)) {
           blockerCalls.push({ file, args, opts });
-          return typeof blocker === 'function' ? blocker() : blocker;
+          return typeof blocker === 'function' ? blocker(file, args, opts) : blocker;
         }
         if (file === 'git' && args[0] === 'config') return { status: 0, stdout: 'arch@example.com\n', stderr: '' };
         return { status: 0, stdout: '', stderr: '' };
@@ -586,4 +587,14 @@ test('AC#6: empty exit-0 stdout → approved event has no waivers key (today\'s 
   const [event] = r.events;
   assert.deepEqual(Object.keys(event.data), ['fingerprint']);
   assert.deepEqual(Object.keys(event).sort(), ['actor', 'data', 'feature', 'recordedBy', 'role', 'ts', 'type']);
+});
+
+// #142 — the REAL defaultSh runs the blocker call against a repo root that has
+// no scripts/check-approval-blockers.sh. The spawn fails with ENOENT → 127, which
+// must read as a failed check, never as "unresolved approval blockers" (exit 1).
+test('#142: missing blocker script via real defaultSh → exit 127 refusal, nothing written', async () => {
+  const r = await approveWithBlocker((file, args, opts) => defaultSh(file, args, opts));
+  assertRefusedNoWrite(r, /rad approve: refused — approval blocker check failed \(exit 127: ENOENT/);
+  assert.doesNotMatch(r.stderr, /unresolved approval blockers/);
+  assert.equal(r.blockerCalls.length, 1);
 });
