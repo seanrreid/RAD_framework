@@ -15,6 +15,8 @@
 #   - approval blockers: markers (fenced / inline-span skipped) and un-waived
 #     high-risk ids listed, never changing the exit code; stale, empty and
 #     clarify-naming waivers warned; fenced example waivers ignored
+#   - stack-order wave advisory (layered waves only; mixed/single/unknown silent)
+#   - missing-mockup advisory (present, absent, fenced refs)
 # Self-contained (no external harness): writes temp fixture plans, runs the real
 # lint-plan.sh, and asserts on output/exit code. Runs under bash 3.2+ (set -u safe).
 #
@@ -720,6 +722,107 @@ t_blocker_no_new_output() {
   echo "✓ NONE(b): blocker-only plan prints the blocker section, not the success line, exit 0"
 }
 
+# ── Stack-order wave advisory ──────────────────────────────────────────────────
+# write_wave_plan <out> <wave1-File> [<wave2-File> ...] — a write_plan fixture with
+# one wave per argument, each wave's task carrying that argument as its File:
+# value. The advisory reasons about path strings only, so paths need not exist.
+write_wave_plan() {
+  local out="$1"; shift
+  local files
+  # `|`-joined, not newline-joined: BSD awk rejects a newline in a -v value.
+  files=$(IFS='|'; printf '%s' "$*")
+  # A scope row is required: an empty Files-in-Scope table aborts lint (pre-existing).
+  write_plan "$out" "| $REAL_PATH | 1-2 | x |" "" "$#"
+  awk -v files="$files" '
+    BEGIN { n = split(files, f, "|") }
+    { print }
+    /^#### Task [0-9]+\.1:/ { w++; if (w <= n) print "File: " f[w] }
+  ' "$out" > "$out.tmp" && mv "$out.tmp" "$out"
+}
+
+STACK_ORDER_LINE="waves look stack-ordered"
+
+# assert_stack_order <label> <plan> <expected-summary|""> — "" asserts silence.
+assert_stack_order() {
+  local label="$1" plan="$2" expected="$3"
+  run_lint "$plan"
+  if [[ -n "$expected" ]]; then
+    printf '%s\n' "$LINT_OUT" | grep -qF "⚠ $STACK_ORDER_LINE ($expected) — prefer vertical slices that each land a testable end-to-end increment; dismiss if this is a refactor" \
+      || fail "$label: expected stack-order advisory ($expected): $LINT_OUT"
+    [[ $(printf '%s\n' "$LINT_OUT" | grep -cF "$STACK_ORDER_LINE") -eq 1 ]] \
+      || fail "$label: stack-order advisory not emitted exactly once: $LINT_OUT"
+  else
+    printf '%s\n' "$LINT_OUT" | grep -qF "$STACK_ORDER_LINE" \
+      && fail "$label: unexpected stack-order advisory: $LINT_OUT" || true
+  fi
+  [[ "$LINT_CODE" -eq 0 ]] || fail "$label: exited $LINT_CODE (expected 0)"
+}
+
+t_stack_order_advisory() {
+  local p="$TMP/so"
+  write_wave_plan "$p-layered.md" "db/schema.sql" "src/services/user.js" "src/components/User.tsx"
+  assert_stack_order "SO(a) layered" "$p-layered.md" "Wave 1: schema, Wave 2: service, Wave 3: ui"
+  echo "✓ SO(a): schema/service/ui across 3 waves ⇒ one advisory naming all three, exit 0"
+
+  write_wave_plan "$p-mixed.md" "db/schema.sql, src/services/user.js" "src/components/User.tsx"
+  assert_stack_order "SO(b) mixed" "$p-mixed.md" ""
+  echo "✓ SO(b): a wave mixing layers ⇒ no advisory, exit 0"
+
+  write_wave_plan "$p-single.md" "db/schema.sql"
+  assert_stack_order "SO(c) single" "$p-single.md" ""
+  echo "✓ SO(c): single wave ⇒ no advisory, exit 0"
+
+  write_wave_plan "$p-unknown.md" "db/schema.sql" "src/services/user.js" "lib/thing.js"
+  assert_stack_order "SO(d) unknown" "$p-unknown.md" ""
+  echo "✓ SO(d): any unknown path ⇒ no advisory, exit 0"
+
+  write_wave_plan "$p-same.md" "db/schema.sql" "db/seed.sql"
+  assert_stack_order "SO(e) same layer" "$p-same.md" ""
+  echo "✓ SO(e): repeated same layer ⇒ no advisory, exit 0"
+
+  write_wave_plan "$p-withtest.md" "db/schema.sql, tests/schema.test.js" "src/components/User.tsx"
+  assert_stack_order "SO(f) test alongside" "$p-withtest.md" "Wave 1: schema, Wave 2: ui"
+  echo "✓ SO(f): a test file beside schema files still reads as schema ⇒ advisory fires, exit 0"
+
+  write_wave_plan "$p-testonly.md" "tests/a.test.js" "src/components/User.tsx"
+  assert_stack_order "SO(g) test-only wave" "$p-testonly.md" ""
+  echo "✓ SO(g): a wave with only test paths ⇒ no advisory, exit 0"
+}
+
+# ── Missing-mockup advisory ────────────────────────────────────────────────────
+# Runs in GREPO so the mockup path resolves from a controlled repo root.
+t_missing_mockup_advisory() {
+  mkdir -p "$GREPO/.agents/mockups"
+  printf '<html></html>\n' > "$GREPO/.agents/mockups/present.html"
+  local base="$GREPO/.agents/plans"
+  write_plan "$base/mk-missing.md" "| src/app.js | 1-2 | x |" "src/app.js:1-2" 1 false \
+    'Mockup: `.agents/mockups/absent.html`'
+  ( run_lint_in_repo "$GREPO" ".agents/plans/mk-missing.md"
+    printf '%s\n' "$FRESH_OUT" | grep -qF "⚠ mockup referenced but missing: .agents/mockups/absent.html" \
+      || fail "MK(a): missing mockup not warned: $FRESH_OUT"
+    [[ "$FRESH_CODE" -eq 0 ]] || fail "MK(a): exited $FRESH_CODE (expected 0)"
+  ) || exit 1
+  echo "✓ MK(a): referenced-but-missing mockup ⇒ advisory, exit 0"
+
+  write_plan "$base/mk-present.md" "| src/app.js | 1-2 | x |" "src/app.js:1-2" 1 false \
+    'Mockup: `.agents/mockups/present.html`'
+  ( run_lint_in_repo "$GREPO" ".agents/plans/mk-present.md"
+    printf '%s\n' "$FRESH_OUT" | grep -qF "mockup referenced but missing" \
+      && fail "MK(b): present mockup warned: $FRESH_OUT" || true
+    [[ "$FRESH_CODE" -eq 0 ]] || fail "MK(b): exited $FRESH_CODE (expected 0)"
+  ) || exit 1
+  echo "✓ MK(b): present mockup ⇒ no advisory, exit 0"
+
+  write_plan "$base/mk-fenced.md" "| src/app.js | 1-2 | x |" "src/app.js:1-2" 1 false \
+    "$(printf '```\n.agents/mockups/absent.html\n```')"
+  ( run_lint_in_repo "$GREPO" ".agents/plans/mk-fenced.md"
+    printf '%s\n' "$FRESH_OUT" | grep -qF "mockup referenced but missing" \
+      && fail "MK(c): fenced mockup ref warned: $FRESH_OUT" || true
+    [[ "$FRESH_CODE" -eq 0 ]] || fail "MK(c): exited $FRESH_CODE (expected 0)"
+  ) || exit 1
+  echo "✓ MK(c): fenced mockup ref ⇒ no advisory, exit 0"
+}
+
 t_missing_task_file
 t_multi_file_task_line
 t_budget_bare_number
@@ -739,4 +842,6 @@ t_blocker_high_risk
 t_waiver_warnings
 t_fenced_waiver_ignored
 t_blocker_no_new_output
+t_stack_order_advisory
+t_missing_mockup_advisory
 echo "ALL PASS"
