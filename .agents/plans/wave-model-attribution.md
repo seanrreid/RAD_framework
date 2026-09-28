@@ -1,7 +1,10 @@
 # Plan: Wave Model Attribution + Spend-Tiering Advisories
 Created: 2026-09-28
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-09-28T12:52:13.484Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/wave-model-attribution
 Adopted-From: https://github.com/seanrreid/RAD_framework/issues/139, https://github.com/seanrreid/RAD_framework/issues/65
 Issue-Title: wave-started never records model (#139) + Per-wave model-tier advisories from historical outcome/usage data (#65, spend half)
