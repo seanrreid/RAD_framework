@@ -128,6 +128,15 @@ The plan goes through `/rad-approve` before execution, same as any other plan.
 - Non-goals are listed — they prevent scope creep during execution
 - Out-of-scope dependencies are flagged, not worked around
 
+**Vertical slices and mockups (both optional, advisory).** Prefer waves that each
+land a testable end-to-end increment — one workflow's schema, service, API, and UI
+together — over stack-ordered waves that defer all integration to the last wave;
+`scripts/lint-plan.sh` warns (never blocks) when waves look stack-ordered, and pure
+refactors or harness-internal work may stay horizontal. For features with a
+user-visible surface, `/rad-research` can offer an HTML mockup saved under
+`.agents/mockups/`; `/rad-design` and `/rad-plan` then reference it, and the plan
+lint warns if a referenced mockup is missing on disk.
+
 ---
 
 ## Approving a plan (architect)

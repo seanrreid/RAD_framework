@@ -123,9 +123,25 @@ A few things the spec won't tell me:
 
 5. **Delivery target:** Any deadlines or phasing requirements that should influence
    how we scope the agent architecture?
+
+6. **Mockup (optional, only if the spec has a user-visible surface):** Want a quick
+   HTML mockup of the key screen(s) before we plan? Use HTML mockups, not prose,
+   for UX where a misunderstanding is expensive. Skip if not useful.
 ```
 
+Omit question 6 when the spec has no user-visible surface (APIs, CLIs with no
+new output, harness-internal work).
+
 Wait for answers. If any answer is unclear, ask one targeted follow-up.
+
+If the mockup offer is accepted, write a single self-contained HTML file (inline
+CSS, no external dependencies needed) to the path below, using the slug from
+Step 4, and list it in the artifact's `## Mockup` section. A mockup is never
+required — if declined or not applicable, write nothing and omit the section.
+
+```
+.agents/mockups/<slug>.html
+```
 
 ---
 
@@ -196,6 +212,10 @@ default_branch: main
 
 ## Open Questions
 - [anything unresolved — or "None"]
+
+## Mockup
+<!-- OPTIONAL. Include only if a mockup was written in Step 3; otherwise omit. -->
+.agents/mockups/[slug].html
 ```
 
 ---

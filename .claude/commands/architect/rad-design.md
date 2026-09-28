@@ -56,6 +56,10 @@ No research artifact found for '[slug]'.
 Run /rad-research first to produce one.
 ```
 
+If the research artifact has a `## Mockup` section, read the listed mockup file
+too — it shows the user-visible surface the agent boundaries must serve. A missing
+section means no mockup; that is fine and never blocks design.
+
 ### Step 2: Design the agent hierarchy
 
 From the research artifact, design the full agent hierarchy. Produce:
@@ -127,6 +131,7 @@ Research: .agents/research/[slug].md
 
 ## Notes
 [anything the architect should consider before approving — gaps, risks, open questions]
+[if the research artifact listed a mockup: "Mockup: .agents/mockups/[slug].html" — omit otherwise]
 ```
 
 ### Step 4: Present the design for inline approval
