@@ -20,6 +20,10 @@
 #   - plan_waivers               — `- <id>: <justification>` bullets in ## Waivers
 #   - plan_waivers_section       — fence-free raw ## Waivers body (fenced
 #                                  headings/bullets never count)
+# …and for vertical-slices-and-mockups:
+#   - plan_wave_task_files — `<wave>\t<path>` per task File: path under ### Wave N
+#   - path_layer           — one-word layer classification in fixed precedence
+#   - plan_mockup_refs     — unfenced .agents/mockups/*.html|.htm refs, first-seen
 #
 # Self-contained: builds a temp git-repo fixture (git init + a local bare origin
 # so `origin/main` resolves), copies
@@ -461,5 +465,92 @@ for fn in plan_clarification_markers plan_high_risk_findings plan_waivers plan_w
   grep -q "missing or unreadable" "$TMP/err.txt" || fail "$fn: missing plan must explain on stderr"
 done
 echo "✓ blocker helpers: missing plan file ⇒ non-zero + stderr message"
+
+
+# ── plan_wave_task_files: per-wave File: paths ──────────────────────────────
+WAVE_PLAN="$TMP/waves.md"
+cat > "$WAVE_PLAN" <<'PLAN'
+# Plan: waves
+File: before/any-wave.js
+## Wave Plan
+### Wave 1
+#### Task 1.1: two files
+File: db/migrations/001.sql:1-20, src/models/user.js:5, 80-96
+#### Task 1.2: placeholder
+File: [path]
+### Wave 2: services
+#### Task 2.1
+File: `src/services/billing.js`
+### Wave
+File: unnumbered/wave.js
+### Wave 12
+File: src/components/Button.tsx
+## Acceptance Criteria
+File: after/wave-plan.js
+PLAN
+out=$(plan_wave_task_files "$WAVE_PLAN")
+expected="1${TAB}db/migrations/001.sql
+1${TAB}src/models/user.js
+2${TAB}src/services/billing.js
+12${TAB}src/components/Button.tsx"
+[[ "$out" == "$expected" ]] || fail "plan_wave_task_files: unexpected output: [$out]"
+echo "✓ plan_wave_task_files: multi-file lines split per wave; pre-wave, unnumbered-wave and post-section File: lines ignored"
+
+NOWAVE_PLAN="$TMP/nowaves.md"
+printf '# Plan\nFile: src/a.js\n#### Task 1.1\nFile: src/b.js\n' > "$NOWAVE_PLAN"
+out=$(plan_wave_task_files "$NOWAVE_PLAN")
+[[ -z "$out" ]] || fail "plan_wave_task_files: no waves should print nothing, got: [$out]"
+echo "✓ plan_wave_task_files: no waves ⇒ empty, exit 0"
+
+# ── path_layer: one word per path, fixed precedence ─────────────────────────
+check_layer() {
+  local got
+  got=$(path_layer "$1")
+  [[ "$got" == "$2" ]] || fail "path_layer '$1': expected $2, got [$got]"
+}
+check_layer db/migrations/001.sql schema
+check_layer prisma/app.prisma schema
+check_layer src/api/users.js api
+check_layer api/openapi.yaml api
+check_layer src/components/Button.tsx ui
+check_layer src/styles/main.css ui
+check_layer src/services/billing.js service
+check_layer src/services/billing.test.js test
+check_layer tests/unit/billing.js test
+check_layer src/components/api/Button.tsx api
+check_layer db/migrations/001.test.sql test
+check_layer harness/cli.js unknown
+check_layer scripts/x.sh unknown
+check_layer docs/a.md unknown
+check_layer "" unknown
+echo "✓ path_layer: each layer classified, precedence test > schema > api > ui > service, RAD paths unknown"
+
+# ── plan_mockup_refs: unfenced refs, backticks count, first-seen dedup ──────
+MOCKUP_PLAN="$TMP/mockups.md"
+cat > "$MOCKUP_PLAN" <<'PLAN'
+# Plan: mockups
+See `.agents/mockups/zeta.html` and .agents/mockups/alpha.htm for layout.
+```
+.agents/mockups/fenced.html is an example only
+```
+Again `.agents/mockups/zeta.html`, plus .agents/mockups/notes.md (not html).
+PLAN
+out=$(plan_mockup_refs "$MOCKUP_PLAN")
+expected=".agents/mockups/zeta.html
+.agents/mockups/alpha.htm"
+[[ "$out" == "$expected" ]] || fail "plan_mockup_refs: unexpected output: [$out]"
+echo "✓ plan_mockup_refs: backticked ref counted, .htm accepted, fenced ref ignored, duplicates collapsed in first-seen order"
+
+out=$(plan_mockup_refs "$NOWAVE_PLAN")
+[[ -z "$out" ]] || fail "plan_mockup_refs: no refs should print nothing, got: [$out]"
+echo "✓ plan_mockup_refs: no refs ⇒ empty, exit 0"
+
+for fn in plan_wave_task_files plan_mockup_refs; do
+  if "$fn" "$TMP/does-not-exist.md" 2>"$TMP/err.txt"; then
+    fail "$fn: missing plan file must return non-zero"
+  fi
+  grep -q "missing or unreadable" "$TMP/err.txt" || fail "$fn: missing plan must explain on stderr"
+done
+echo "✓ wave/mockup helpers: missing plan file ⇒ non-zero + stderr message"
 
 echo "ALL PASS"
