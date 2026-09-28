@@ -12,3 +12,4 @@ Executor role: architect
 | 2 | Wave 1 | check-approval-blockers.sh | ✓ complete | ad4c485 | 13:48 UTC |
 | 3 | Wave 1 | Apply the amendment to the helpers | ✓ complete | 0dbd0f3 | 14:12 UTC |
 | 4 | Wave 2 | lint-plan.sh blockers section and waiver warnings | ⚠ done_with_concerns | 65d2b52 | 14:21 UTC |
+| 5 | Wave 2 | Fix-up: waiver parsing skips fenced blocks (fail-open) | ✓ complete | e6ffc3b | 14:25 UTC |
