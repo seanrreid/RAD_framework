@@ -97,7 +97,7 @@ This task has no unit-testable surface (docs).
 Validate: AC#4 — read-through; `grep -c "auth|payment|billing|migration|secret|credential|token" CLAUDE.md .env.example scripts/lib/plan-paths.sh` returns 0 for each file.
 
 ## Tests to Write
-- [ ] 19-path match/no-match regression table under the default, with unset and empty env — scripts/test-plan-paths.sh
+- [ ] 18-path match/no-match regression table under the default, with unset and empty env — scripts/test-plan-paths.sh
 
 ## Non-Goals
 - Case-insensitive matching.
