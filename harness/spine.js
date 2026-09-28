@@ -199,15 +199,23 @@ function capturePriorFailure({ attempt, outcome, output, result, wave, state, fe
   }
 }
 
+/** A model id is declared only when it is a non-empty string; otherwise null. */
+function declaredModel(value) {
+  return typeof value === 'string' && value !== '' ? value : null;
+}
+
 /**
  * Record that attempt `attempt` of `wave` is about to run the agent. Appended
  * AFTER the pre-wave hooks pass (a vetoed attempt never ran) and immediately
  * BEFORE runWave, so a crash mid-agent leaves a `wave-started` with no matching
  * `wave-attempt` — the orphan a later resume converges. `model` is spread only
- * when the wave descriptor declares one, so the key is absent otherwise.
+ * when one is declared — the plan's `Model:` map (`waveModels`, keyed by wave
+ * number) wins over a descriptor-level `wave.model` — so the key is absent
+ * otherwise. An empty-string or non-string value counts as undeclared.
  */
-function appendWaveStarted({ state, feature, now, wave, attempt }) {
-  const model = typeof wave.model === 'string' && wave.model !== '' ? { model: wave.model } : {};
+function appendWaveStarted({ state, feature, now, wave, attempt, waveModels }) {
+  const declared = declaredModel(waveModels[wave.n]) ?? declaredModel(wave.model);
+  const model = declared ? { model: declared } : {};
   state.append({
     feature,
     type: 'wave-started',
@@ -299,6 +307,12 @@ function convergeOrphans({ history, wave, matrix, state, feature, now, runHooks 
  *   The spine never executes the command itself: it hands it to
  *   scripts/check-verify.sh through the injected `sh` port, which owns the
  *   allow-listed env, the timeout, and the output cap.
+ * @param {Record<number, string>} [args.waveModels] - optional per-wave model ids,
+ *   keyed by wave number (parsed from the plan's `Model:` lines by cli.js
+ *   parseWaveModels and passed through, exactly as waveVerify is). Recorded as
+ *   `model` on each `wave-started`. A wave ABSENT from the map (or mapped to an
+ *   empty/non-string value) records no `model` key — so a plan declaring no
+ *   `Model:` anywhere produces the event sequence it did before this existed.
  * @param {(point: string, ctx: Object) => { ran: Array, veto: (Object|null), failures: Array }} [args.runHooks]
  *   wave-lifecycle hook runner (from createHookRunner). OBSERVE-ONLY in this wave:
  *   fired at six lifecycle points, its observations/failures are recorded as
@@ -326,6 +340,7 @@ export async function deliverSpine({
   maxAttempts = MAX_ATTEMPTS,
   tokenBudget = null,
   waveVerify = {},
+  waveModels = {},
   runHooks = NOOP_HOOKS,
   hookPreflight = NOOP_PREFLIGHT,
 }) {
@@ -451,7 +466,7 @@ export async function deliverSpine({
         return { stopped: 'hook-veto', ok: false, wave: wave.n, action, outcome: vetoOutcome, point: 'pre-wave' };
       }
 
-      appendWaveStarted({ state, feature, now, wave, attempt });
+      appendWaveStarted({ state, feature, now, wave, attempt, waveModels });
 
       // ADDITIVE second argument: attempt context. A runWave that ignores it is
       // unchanged; one that reads it can make attempt N+1 differ from attempt N.
