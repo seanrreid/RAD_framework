@@ -44,10 +44,16 @@ split_task_file_value() {
 # plan_files_in_scope <plan-file>
 # Print the Files-in-Scope table paths (column 2), one per line, skipping the
 # header, separator, and placeholder rows. Whitespace and backticks stripped.
+# A table with no data rows prints nothing and returns 0; a missing/unreadable
+# plan returns non-zero with a stderr message.
 plan_files_in_scope() {
   local plan_file="$1"
+  require_readable_plan plan_files_in_scope "$plan_file" || return
+  # grep exits 1 when it selects no lines — an empty table, not an error — so
+  # only exit 1 is accepted; a real grep error (exit >=2) still fails the pipeline.
   awk '/^## Files in Scope/{found=1; next} /^## /{found=0} found && /^\|/' "$plan_file" \
-    | grep -v "^| *File" | grep -v "^|[-| ]*$" \
+    | { grep -v "^| *File" || [ $? -eq 1 ]; } \
+    | { grep -v "^|[-| ]*$" || [ $? -eq 1 ]; } \
     | awk -F'|' '{print $2}' \
     | while IFS= read -r path; do
         path=$(echo "$path" | tr -d '`' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
