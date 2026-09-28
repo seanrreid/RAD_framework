@@ -1,7 +1,7 @@
 # Plan: Light Planning Tier (/rad-plan --light)
 Created: 2026-09-28
 Author: architect
-Status: approved
+Status: in-progress
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-09-28T15:30:34.192Z
 Recorded-By: sean@torchcodelab.com
