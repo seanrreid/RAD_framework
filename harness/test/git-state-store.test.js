@@ -292,6 +292,53 @@ test('recordApproval throws on malformed waivers and appends nothing', async () 
   }
 });
 
+// ── highRiskPattern provenance (record-high-risk-pattern AC#4) ──────────────
+const CUSTOM_PATTERN = '(^|/)(vault|keys?)([/_.-]|$)|^infra/';
+
+test('recordApproval freezes highRiskPattern verbatim into data', async () => {
+  await withTempRepo((repoRoot) => {
+    const store = createGitStateStore({ repoRoot, sh: passSh });
+    const waivers = [{ id: 'high-risk:src/vault/x.js', justification: 'reviewed' }];
+    store.recordApproval({
+      feature: 'demo', actor: 'architect', ts: 't0', fingerprint: 'fp', waivers, highRiskPattern: CUSTOM_PATTERN,
+    });
+    const [ev] = store.history('demo');
+    assert.deepEqual(ev.data, { fingerprint: 'fp', waivers, highRiskPattern: CUSTOM_PATTERN });
+  });
+});
+
+test('recordApproval with highRiskPattern omitted is deep-equal to one without the key', async () => {
+  const record = async (extra) => withTempRepo((repoRoot) => {
+    const store = createGitStateStore({ repoRoot, sh: passSh });
+    store.recordApproval({ feature: 'demo', actor: 'architect', ts: 't0', fingerprint: 'fp', ...extra });
+    return store.history('demo');
+  });
+  const baseline = await record({});
+  assert.equal('highRiskPattern' in baseline[0].data, false);
+  assert.deepEqual(await record({ highRiskPattern: undefined }), baseline);
+  // Bare approval with no pattern still carries no data key.
+  await withTempRepo((repoRoot) => {
+    const store = createGitStateStore({ repoRoot, sh: passSh });
+    store.recordApproval({ feature: 'demo', actor: 'architect', ts: 't0' });
+    assert.equal('data' in store.history('demo')[0], false);
+  });
+});
+
+test('recordApproval throws on a malformed highRiskPattern and appends nothing', async () => {
+  const malformed = [['empty', ''], ['null', null], ['number', 42], ['object', { p: 'x' }]];
+  for (const [label, highRiskPattern] of malformed) {
+    await withTempRepo((repoRoot) => {
+      const store = createGitStateStore({ repoRoot, sh: passSh });
+      assert.throws(
+        () => store.recordApproval({ feature: 'demo', actor: 'architect', ts: 't0', highRiskPattern }),
+        /recordApproval: highRiskPattern must be a non-empty string/,
+        label,
+      );
+      assert.equal(existsSync(eventsFile(repoRoot, 'demo')), false, `${label}: nothing written`);
+    });
+  }
+});
+
 // ── defaultSh exit-code mapping (#142) ────────────────────────────────────
 // A spawn failure must never masquerade as a script's own exit 1.
 test('defaultSh: missing executable (ENOENT) → 127, stderr names the failure', () => {
