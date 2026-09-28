@@ -1,7 +1,7 @@
 # Plan: Wave Model Attribution + Spend-Tiering Advisories
 Created: 2026-09-28
 Author: architect
-Status: approved
+Status: in-progress
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-09-28T12:52:13.484Z
 Recorded-By: sean@torchcodelab.com
