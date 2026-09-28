@@ -8,3 +8,5 @@ Executor role: architect
 
 | Step | Wave | Task | Status | Commit | Time |
 |------|------|------|--------|--------|------|
+| 1 | Wave 1 | Spine records the declared wave model | ✓ complete | 1eff96a | 12:58 UTC |
+| 2 | Wave 1 | Deliver passes the parsed map to the spine | ✓ complete | b9b9301 | 12:58 UTC |
