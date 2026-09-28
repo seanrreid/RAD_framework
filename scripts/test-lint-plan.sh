@@ -14,7 +14,7 @@
 #   - context budget (#134): a bare Lines number counts as 1 line; ranges unchanged
 #   - approval blockers: markers (fenced / inline-span skipped) and un-waived
 #     high-risk ids listed, never changing the exit code; stale, empty and
-#     clarify-naming waivers warned
+#     clarify-naming waivers warned; fenced example waivers ignored
 # Self-contained (no external harness): writes temp fixture plans, runs the real
 # lint-plan.sh, and asserts on output/exit code. Runs under bash 3.2+ (set -u safe).
 #
@@ -661,6 +661,32 @@ t_waiver_warnings() {
   echo "✓ WV: stale, empty-justification and clarify-naming waivers each get a ⚠ warning, exit 0"
 }
 
+t_fenced_waiver_ignored() {
+  # (a) A fenced example ## Waivers block → no stale-waiver warning (it is not a
+  # waiver at all), and it does not waive the real high-risk finding.
+  local plan="$TMP/blk-fenced-waiver.md"
+  write_plan "$plan" "| $REAL_PATH | 1-2 | x |" "$RISKY_PATH:1-20" 1 false \
+    "$(printf '\n```markdown\n## Waivers\n- high-risk:scripts/token-budget.sh: example\n- %s: example\n```' "$RISKY_ID")"
+  ( unset RAD_HIGH_RISK_PATTERNS; run_lint "$plan"
+    printf '%s\n' "$LINT_OUT" | grep -q "stale waiver" \
+      && fail "FW(a): fenced example drew a stale-waiver warning: $LINT_OUT" || true
+    printf '%s\n' "$LINT_OUT" | grep -qF "  ⛔ $RISKY_ID — waive under ## Waivers or remove the path" \
+      || fail "FW(a): fenced example waived the real finding: $LINT_OUT"
+  ) || exit 1
+  echo "✓ FW(a): fenced example ## Waivers ⇒ no stale-waiver warning, blocker stands"
+
+  # (b) A fenced empty-justification bullet inside the real section is not reported.
+  local empty="$TMP/blk-fenced-empty.md"
+  write_plan "$empty" "| $REAL_PATH | 1-2 | x |" "$RISKY_PATH:1-20" 1 false \
+    "$(printf '\n## Waivers\n- %s: reviewed\n```\n- high-risk:src/auth/y.js:\n```' "$RISKY_ID")"
+  ( unset RAD_HIGH_RISK_PATTERNS; run_lint "$empty"
+    printf '%s\n' "$LINT_OUT" | grep -q "empty justification" \
+      && fail "FW(b): fenced bullet drew an empty-justification warning: $LINT_OUT" || true
+    assert_no_blockers "FW(b)"
+  ) || exit 1
+  echo "✓ FW(b): fenced empty-justification bullet ⇒ no warning; real waiver still applies"
+}
+
 t_blocker_no_new_output() {
   # No markers, no high-risk paths, no ## Waivers → no blocker section, no
   # waiver lines; a fully clean plan still prints the one-line success message.
@@ -706,5 +732,6 @@ t_freshness_unresolvable_ref
 t_blocker_markers
 t_blocker_high_risk
 t_waiver_warnings
+t_fenced_waiver_ignored
 t_blocker_no_new_output
 echo "ALL PASS"

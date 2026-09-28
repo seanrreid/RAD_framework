@@ -18,6 +18,8 @@
 #   - plan_clarification_markers — live (unfenced) [NEEDS CLARIFICATION:] markers
 #   - plan_high_risk_findings    — high-risk:<path> ids (default / custom / empty)
 #   - plan_waivers               — `- <id>: <justification>` bullets in ## Waivers
+#   - plan_waivers_section       — fence-free raw ## Waivers body (fenced
+#                                  headings/bullets never count)
 #
 # Self-contained: builds a temp git-repo fixture (git init + a local bare origin
 # so `origin/main` resolves), copies
@@ -417,7 +419,42 @@ out=$(plan_waivers "$RISK_PLAN")
 [[ -z "$out" ]] || fail "plan_waivers: no ## Waivers section should print nothing, got: [$out]"
 echo "✓ plan_waivers: no section ⇒ empty, exit 0"
 
-for fn in plan_clarification_markers plan_high_risk_findings plan_waivers; do
+FENCED_WAIVER_PLAN="$TMP/fenced-waivers.md"
+cat > "$FENCED_WAIVER_PLAN" <<'PLAN'
+# Plan: fenced waivers
+```markdown
+## Waivers
+- high-risk:fenced/heading.js: inside a fenced example section
+```
+## Waivers
+- high-risk:real/one.js: real before fence
+```
+- high-risk:fenced/bullet.js: fenced inside the real section
+## Foo
+```
+- high-risk:real/two.js: real after fenced heading
+## Next
+- high-risk:after/next.js: past the section
+PLAN
+out=$(plan_waivers "$FENCED_WAIVER_PLAN")
+expected="high-risk:real/one.js${TAB}real before fence
+high-risk:real/two.js${TAB}real after fenced heading"
+[[ "$out" == "$expected" ]] || fail "plan_waivers: fence handling wrong: [$out]"
+echo "✓ plan_waivers: fenced ## Waivers ignored, fenced bullets ignored, fenced ## Foo does not end the section"
+
+out=$(plan_waivers_section "$FENCED_WAIVER_PLAN")
+expected="- high-risk:real/one.js: real before fence
+- high-risk:real/two.js: real after fenced heading"
+[[ "$out" == "$expected" ]] || fail "plan_waivers_section: fenced content leaked: [$out]"
+echo "✓ plan_waivers_section: raw body carries no fence lines or fenced content"
+
+FENCE_ONLY_PLAN="$TMP/fence-only-waivers.md"
+printf '# Plan\n```\n## Waivers\n- high-risk:x.js: example\n```\n' > "$FENCE_ONLY_PLAN"
+out=$(plan_waivers "$FENCE_ONLY_PLAN")
+[[ -z "$out" ]] || fail "plan_waivers: a fenced-only ## Waivers must yield nothing, got: [$out]"
+echo "✓ plan_waivers: ## Waivers only inside a fence ⇒ empty, exit 0"
+
+for fn in plan_clarification_markers plan_high_risk_findings plan_waivers plan_waivers_section; do
   if "$fn" "$TMP/does-not-exist.md" 2>"$TMP/err.txt"; then
     fail "$fn: missing plan file must return non-zero"
   fi

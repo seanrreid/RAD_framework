@@ -263,12 +263,17 @@ path_exists_on_ref() {
 # so a caller can never mistake "could not read" for "nothing found".
 
 # Built-in high-risk pattern, used when RAD_HIGH_RISK_PATTERNS is unset OR empty.
-# Must stay byte-identical to the default in scripts/lint-plan.sh (which still
-# carries its own copy this wave; Wave 2 routes lint through plan_high_risk_pattern).
+# The ONLY copy: scripts/lint-plan.sh reads it through plan_high_risk_pattern.
 readonly RAD_HIGH_RISK_DEFAULT_PATTERN='auth|payment|billing|migration|secret|credential|token'
 
 # Prefix of every high-risk finding id; the rest of the id is the scope path.
 readonly RAD_HIGH_RISK_FINDING_PREFIX='high-risk:'
+
+# A line beginning with three backticks toggles a ``` fenced code block. Shared
+# (passed to awk as -v fence_re) by plan_clarification_markers and
+# plan_waivers_section so both skip fenced examples by the SAME rule — a fenced
+# example must never count as a marker, a section heading, or a waiver.
+readonly RAD_FENCE_LINE_RE='^```'
 
 # require_readable_plan <caller> <plan-file>
 # Return 0 iff <plan-file> is a readable regular file; else name the caller and
@@ -298,7 +303,7 @@ require_readable_plan() {
 plan_clarification_markers() {
   local plan_file="$1"
   require_readable_plan plan_clarification_markers "$plan_file" || return
-  awk '
+  awk -v fence_re="$RAD_FENCE_LINE_RE" '
     function trim(s) { gsub(/^[ \t]+|[ \t\r]+$/, "", s); return s }
     function run_at(s, p,   n) {
       for (n = 0; substr(s, p + n, 1) == "`"; n++) ;
@@ -325,7 +330,7 @@ plan_clarification_markers() {
       }
       return out
     }
-    /^```/ { fenced = !fenced; next }
+    $0 ~ fence_re { fenced = !fenced; next }
     fenced { next }
     {
       rest = strip_spans($0); open = "[NEEDS CLARIFICATION:"
@@ -370,19 +375,38 @@ plan_high_risk_findings() {
   done <<< "$paths" | sort -u
 }
 
+# plan_waivers_section <plan-file>
+# Print the raw, fence-free body of the `## Waivers` section: every line after the
+# heading up to the next `## ` heading, with ``` fenced blocks (fence lines and
+# their content) removed. Fence-aware in both directions: a `## Waivers` heading
+# inside a fence is NOT a section start, and a `## ` heading inside a fence does
+# NOT end the real section. The ONE reader of the section — plan_waivers and
+# lint-plan.sh's empty-justification warning both consume it. No section → no
+# output, exit 0; unreadable plan → exit 2.
+plan_waivers_section() {
+  local plan_file="$1"
+  require_readable_plan plan_waivers_section "$plan_file" || return
+  awk -v fence_re="$RAD_FENCE_LINE_RE" '
+    $0 ~ fence_re { fenced = !fenced; next }
+    fenced { next }
+    /^## / { in_waivers = ($0 ~ /^## Waivers[ \t\r]*$/); next }
+    in_waivers { print }
+  ' "$plan_file"
+}
+
 # plan_waivers <plan-file>
 # Print `<id>\t<justification>` for every `- <id>: <justification>` bullet in the
-# `## Waivers` section (body ends at the next `## ` heading). Split on the FIRST
-# ": " so a justification may itself contain ": ". id and justification are
-# trimmed; a bullet with an empty id or empty justification is dropped (an
-# unjustified waiver is no waiver). No section → no output, exit 0.
+# fence-free `## Waivers` body (plan_waivers_section). Split on the FIRST ": " so
+# a justification may itself contain ": ". id and justification are trimmed; a
+# bullet with an empty id or empty justification is dropped (an unjustified
+# waiver is no waiver). No section → no output, exit 0.
 plan_waivers() {
-  local plan_file="$1"
-  require_readable_plan plan_waivers "$plan_file" || return
-  awk '
+  local plan_file="$1" body
+  body=$(plan_waivers_section "$plan_file") || return
+  [[ -z "$body" ]] && return 0
+  printf '%s\n' "$body" | awk '
     function trim(s) { gsub(/^[ \t]+|[ \t\r]+$/, "", s); return s }
-    /^## / { in_waivers = ($0 ~ /^## Waivers[ \t\r]*$/); next }
-    !in_waivers || !/^[ \t]*- / { next }
+    !/^[ \t]*- / { next }
     {
       body = $0; sub(/^[ \t]*- /, "", body)
       k = index(body, ": ")
@@ -390,5 +414,5 @@ plan_waivers() {
       id = trim(substr(body, 1, k - 1)); why = trim(substr(body, k + 2))
       if (id != "" && why != "") print id "\t" why
     }
-  ' "$plan_file"
+  '
 }

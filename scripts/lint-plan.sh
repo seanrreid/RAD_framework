@@ -421,18 +421,20 @@ collect_waiver_warnings() {
 }
 
 # A `- <id>:` bullet with nothing after the colon. plan_waivers drops it (an
-# unjustified waiver is no waiver), so it is detected here from the raw section.
-# A bullet holding ": " has a justification (plan_waivers splits on the first
-# ": "), even one that itself ends in a colon.
+# unjustified waiver is no waiver), so it is detected here from the raw section —
+# read through plan_waivers_section, the same fence-aware reader plan_waivers
+# uses, so a fenced example bullet is never reported. A bullet holding ": " has a
+# justification (plan_waivers splits on the first ": "), even one ending in a colon.
 collect_empty_justification_warnings() {
-  local bullet
-  has_section "Waivers" || return 0
+  local section bullet rc=0
+  section=$(plan_waivers_section "$PLAN_FILE") || rc=$?
+  [[ "$rc" -eq 0 ]] || { blocker_scan_failed plan_waivers_section "$rc"; return 0; }
   while IFS= read -r bullet; do
     [[ "$bullet" =~ ^[[:space:]]*-[[:space:]] ]] || continue
     bullet=$(printf '%s' "$bullet" | sed 's/^[[:space:]]*-[[:space:]]*//; s/[[:space:]]*$//')
     [[ "$bullet" == *: && "$bullet" != *": "* && -n "${bullet%:}" ]] || continue
     WARNINGS+=("waiver '${bullet%:}' has an empty justification — it is not applied; give a reason after the colon")
-  done < <(section_content "Waivers")
+  done <<< "$section"
 }
 
 collect_marker_blockers

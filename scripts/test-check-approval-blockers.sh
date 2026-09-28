@@ -96,6 +96,26 @@ expect "matching waiver" 0
   || fail "matching waiver: stdout mismatch, got: [$(cat "$OUT")]"
 echo "✓ matching waiver ⇒ exit 0, exact '<id>\\t<justification>' on stdout"
 
+# ── fenced example waiver only (fail-open regression) ─────────────────────────
+# A ``` fenced example holding a `## Waivers` heading and a bullet naming the REAL
+# high-risk path must not be applied — the blocker stands.
+FENCED_WAIVER=$'```markdown\n## Waivers\n- '"$RISK_ID"$': example only\n```'
+write_plan "$TMP/fenced-waiver.md" "$RISK_PATH" "$FENCED_WAIVER"
+run_check -- "$TMP/fenced-waiver.md"
+expect "fenced waiver only" 1; expect_empty_stdout "fenced waiver only"
+grep -qF "un-waived high-risk finding: $RISK_ID" "$ERR" \
+  || fail "fenced waiver only: stderr must name $RISK_ID, got: [$(cat "$ERR")]"
+echo "✓ waiver only inside a fenced example ⇒ exit 1 (not applied)"
+
+# Same plan plus a real section → only the real waiver applies.
+write_plan "$TMP/fenced-plus-real.md" "$RISK_PATH" \
+  "$FENCED_WAIVER"$'\n\n## Waivers\n- '"$RISK_ID"': the real waiver'
+run_check -- "$TMP/fenced-plus-real.md"
+expect "fenced + real waiver" 0
+[[ "$(cat "$OUT")" == "$RISK_ID${TAB}the real waiver" ]] \
+  || fail "fenced + real waiver: stdout must hold only the real waiver, got: [$(cat "$OUT")]"
+echo "✓ fenced example + real ## Waivers ⇒ exit 0, only the real waiver on stdout"
+
 # ── stale waiver alone (+ clarify-named waiver) ───────────────────────────────
 write_plan "$TMP/stale.md" "docs/readme.md" \
   $'## Waivers\n- high-risk:gone/token.js: path was removed\n- clarify:1: cannot waive a marker'
