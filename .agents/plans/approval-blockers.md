@@ -1,7 +1,7 @@
 # Plan: Approval Blockers — Clarification Markers + Justify-or-Waive
 Created: 2026-09-28
 Author: architect
-Status: in-progress
+Status: pending-review
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-09-28T13:43:10.057Z
 Recorded-By: sean@torchcodelab.com
@@ -30,6 +30,10 @@ Research confirmed the write path is small:
 - The plan fingerprint covers the whole body from the first `##`, so a `## Waivers` edit changes it. The existing fingerprint-differ re-approval rule (`transitions.js:101-116`) already handles it.
 - `check-plan-approved.sh` already fails closed on a post-approval body edit.
 
+**Amendment (2026-09-28, during delivery, architect decisions after Wave 1):**
+4. **Inline code spans are skipped too.** A marker inside a single-backtick span on a line doesn't count, in addition to ```` ``` ```` fences. Plans that describe the syntax inline would otherwise block themselves; this plan exited 1 with 8 descriptive markers.
+5. **Empty `RAD_HIGH_RISK_PATTERNS` means the default, not "disabled".** The high-risk check can be narrowed but never switched off. That is what `lint-plan.sh:188` (`${…:-default}`) already does, so lint's behavior stays the same. CLAUDE.md's "Empty disables the check" was wrong, and it is corrected. Lint and the blocker check share one resolver, `plan_high_risk_pattern`.
+
 **One structural constraint:** markers can't be lint **errors**. `/rad-plan` refuses to commit a plan that has lint errors, and a plan with open questions must stay committable so the team can discuss it. So blockers are a third lint category, shown by `lint-plan.sh` and enforced only by `rad approve`.
 
 ## Scope
@@ -44,21 +48,21 @@ Research confirmed the write path is small:
 
 ## Acceptance Criteria
 
-1. `plan_clarification_markers <plan>` prints one `<line>\t<question>` per `[NEEDS CLARIFICATION: <question>]` occurrence outside fenced code blocks. A marker inside a ```` ``` ```` fence is not reported, and one on a line after the closing fence is. An empty question `[NEEDS CLARIFICATION: ]` still counts as a marker. A plan with no markers prints nothing and returns 0.
-2. `plan_high_risk_findings <plan>` prints one stable ID `high-risk:<path>` per scope path matching `RAD_HIGH_RISK_PATTERNS` (default when unset, disabled when empty), using the same matcher and the same `plan_scope_paths` union that the existing high-risk advisory uses. `plan_waivers <plan>` prints one `<id>\t<justification>` per `- <id>: <justification>` bullet in `## Waivers`, splitting on the first `": "`. A bullet with an empty justification is dropped (never an applied waiver). No `## Waivers` section prints nothing.
+1. `plan_clarification_markers <plan>` prints one `<line>\t<question>` per `[NEEDS CLARIFICATION: <question>]` occurrence outside fenced code blocks. A marker inside a ```` ``` ```` fence or inside a single-backtick inline code span is not reported, and one on a line after the closing fence (or outside the span on the same line) is. An empty question `[NEEDS CLARIFICATION: ]` still counts as a marker. A plan with no markers prints nothing and returns 0.
+2. `plan_high_risk_findings <plan>` prints one stable ID `high-risk:<path>` per scope path matching `RAD_HIGH_RISK_PATTERNS` (the built-in default when unset **or empty**, so the check can't be disabled), resolved by the shared `plan_high_risk_pattern`, using the same matcher and the same `plan_scope_paths` union that the existing high-risk advisory uses. `plan_waivers <plan>` prints one `<id>\t<justification>` per `- <id>: <justification>` bullet in `## Waivers`, splitting on the first `": "`. A bullet with an empty justification is dropped (never an applied waiver). No `## Waivers` section prints nothing.
 3. `scripts/check-approval-blockers.sh <plan>`:
    - **Exit 0** when no blockers remain. Stdout has exactly one `<id>\t<justification>` line per waiver that matches a current high-risk finding.
    - **Exit 1** when any marker or un-waived high-risk finding remains. Each is named on stderr (the line number for markers, the ID for findings), and stdout is empty.
    - **Exit 2** for a missing, unreadable or empty plan file, or a usage error, with a clear message. It never exits 0 on error.
    - A waiver whose ID matches no current finding (stale), or that names a `clarify` item, is never applied and never blocks.
-4. `lint-plan.sh` prints a new `Approval blockers (resolve or waive before /rad-approve):` section listing every unresolved marker (`line N`) and un-waived high-risk finding (its ID). The existing high-risk warning line includes the finding ID. Stale waivers, empty-justification waivers and waivers naming a marker get `⚠` warnings. Blockers never change `lint-plan.sh`'s exit code. For a plan with no markers, no high-risk paths and no `## Waivers` section, the output is identical to today's apart from the ID now shown in any high-risk warning line.
+4. `lint-plan.sh` prints a new `Approval blockers (resolve or waive before /rad-approve):` section listing every unresolved marker (`line N`) and un-waived high-risk finding (its ID). The existing high-risk warning line includes the finding ID, and lint resolves the pattern through the shared `plan_high_risk_pattern` (no duplicate default string). Stale waivers, empty-justification waivers and waivers naming a marker get `⚠` warnings. Blockers never change `lint-plan.sh`'s exit code. For a plan with no markers, no high-risk paths and no `## Waivers` section, the output is identical to today's apart from the ID now shown in any high-risk warning line.
 5. `recordApproval` accepts an optional `waivers: Array<{id, justification}>` and freezes it as `data.waivers` only when it is a non-empty array. With `waivers` omitted or `[]`, the appended event deep-equals today's.
 6. `rad approve` runs `check-approval-blockers.sh` after the role/proxy checks and before `recordApproval`, in default and proxy modes alike.
    - **Exit 1:** approve exits 1, relays the blockers on stderr, and writes nothing: no event, no plan-doc Status change.
    - **Any other non-zero exit or a spawn error:** approve refuses fail-closed and writes nothing.
    - **Exit 0:** approve records the parsed waivers.
    - A plan with no blockers and no waivers produces an `approved` event identical to today's.
-7. `/rad-approve` shows outstanding blockers and applied waivers (with justifications) in its review summary before the confirmation prompt, and says the CLI refusal is final. `/rad-review` shows them as advisory. `/rad-plan` and `/rad-adopt` require open questions to be written as inline `[NEEDS CLARIFICATION: …]` markers and never silently assumed. `/rad-adopt` keeps `## Issue Gaps` for assumptions the planner **did** make. CLAUDE.md Approval Rules lists the two new requirements.
+7. `/rad-approve` shows outstanding blockers and applied waivers (with justifications) in its review summary before the confirmation prompt, and says the CLI refusal is final. `/rad-review` shows them as advisory. `/rad-plan` and `/rad-adopt` require open questions to be written as inline `[NEEDS CLARIFICATION: …]` markers and never silently assumed. `/rad-adopt` keeps `## Issue Gaps` for assumptions the planner **did** make. CLAUDE.md Approval Rules lists the two new requirements, and CLAUDE.md "Plan Lint — High-Risk Paths" says an empty value falls back to the default (the check can be narrowed, never disabled).
 8. `npm test --prefix harness` and every `scripts/test-*.sh` pass, including under `/bin/bash` 3.2 for the shell tests.
 
 ## Agent Scope
@@ -88,6 +92,7 @@ Research confirmed the write path is small:
 | .claude/commands/team/rad-review.md | 53-63 | Step 2b: blockers advisory |
 | .claude/commands/team/rad-plan.md | 93-205 | Marker convention + `## Waivers` in the template |
 | .claude/commands/team/rad-adopt.md | 160-176 | Marker convention next to Issue Gaps |
+| CLAUDE.md | 289-307 | High-Risk Paths: empty falls back to the default |
 | CLAUDE.md | 383-395 | Approval Rules: two new requirements |
 
 ## Program Design
@@ -215,6 +220,18 @@ What: New script that sources `lib/plan-paths.sh`. Validate args and the plan (m
 - a missing file, an empty file and no args (exit 2)
 Validate: AC#3 — `bash scripts/test-check-approval-blockers.sh` and `/bin/bash scripts/test-check-approval-blockers.sh` pass.
 
+#### Task 1.3: Apply the amendment to the helpers
+File: scripts/lib/plan-paths.sh:240-257, scripts/test-plan-paths.sh:300-323, scripts/test-check-approval-blockers.sh:1-200
+What: Apply amendment decisions 4 and 5.
+- `plan_clarification_markers` also ignores markers inside single-backtick inline code spans on a line, while still reporting a marker outside a span on the same line.
+- `plan_high_risk_pattern` treats an empty `RAD_HIGH_RISK_PATTERNS` as unset (`${…:-default}`).
+- Update the test cases:
+  - Add: an inline-span marker is not reported; a line with one span marker and one plain marker reports one.
+  - Change the empty-pattern cases in both test files so that empty gives the default. In `test-check-approval-blockers.sh`, `RAD_HIGH_RISK_PATTERNS=''` with a high-risk path now exits 1.
+  - Add a narrowed custom pattern that doesn't match: exit 0.
+- Confirm `check-approval-blockers.sh .agents/plans/approval-blockers.md` no longer reports the inline descriptive markers.
+Validate: AC#1, AC#2, AC#3 — both test files pass under `bash` and `/bin/bash`.
+
 ### Wave 2 — sequential
 Verify: bash scripts/test-lint-plan.sh && /bin/bash scripts/test-lint-plan.sh && for t in scripts/test-*.sh; do bash "$t" >/dev/null || exit 1; done
 Tasks in this wave must run in sequence.
@@ -223,6 +240,7 @@ Tasks in this wave must run in sequence.
 File: scripts/lint-plan.sh:185-200, 360-394, scripts/test-lint-plan.sh:560-581
 What:
 - Append the finding ID to the existing high-risk warning line (`… (id: high-risk:<path>)`).
+- Replace lint's own default at `:188` with the shared `plan_high_risk_pattern`. Behavior is unchanged: empty still gives the default.
 - Add a `BLOCKERS=()` array filled from the Wave 1 helpers: unresolved markers as `clarification marker at line N: <question>`, and un-waived findings as `<id>`.
 - Print an `Approval blockers (resolve or waive before /rad-approve):` section with a `⛔` prefix after the warnings section, and only when the array is non-empty.
 - Add `⚠` warnings for stale waivers, empty-justification waivers and waivers naming `clarify`.
@@ -278,14 +296,15 @@ File: .claude/commands/team/rad-plan.md:93-205, .claude/commands/team/rad-adopt.
 What:
 - In the `/rad-plan` template and generation rules: any open question or unmade decision **must** be written inline as `[NEEDS CLARIFICATION: <question>]` and never silently resolved by assumption. Add an optional `## Waivers` section to the template, with the `- high-risk:<path>: <justification>` format, and note that markers can't be waived.
 - In `/rad-adopt`: the same marker rule, and distinguish it from `## Issue Gaps`, which records assumptions the planner did make.
+- In CLAUDE.md "Plan Lint — High-Risk Paths" (:306): replace "Empty disables the check." with "Empty falls back to the default — the check can be narrowed, never disabled."
 - In CLAUDE.md Approval Rules: add two checklist items, "No unresolved `[NEEDS CLARIFICATION]` markers (enforced by `rad approve`)" and "Every high-risk path finding resolved or waived in `## Waivers`, and waivers are frozen into the `approved` event".
 
 Show examples inside fenced blocks so they don't trip the lint. This task has no unit-testable surface (prompt prose and config docs).
 Validate: AC#7 — `scripts/lint-plan.sh` on this plan still shows no errors, and the harness and script suites stay green.
 
 ## Tests to Write
-- [ ] marker helper: outside/inside/after fence, two per line, empty question, none — scripts/test-plan-paths.sh
-- [ ] high-risk finding IDs: default, custom, empty pattern — scripts/test-plan-paths.sh
+- [ ] marker helper: outside/inside/after fence, inline span, span + plain on one line, two per line, empty question, none — scripts/test-plan-paths.sh
+- [ ] high-risk finding IDs: default, custom, empty pattern falls back to default — scripts/test-plan-paths.sh
 - [ ] waiver parser: valid, empty justification, `: ` in justification, no section, bounded section — scripts/test-plan-paths.sh
 - [ ] blocker script exit 0/1/2 contract across all fixture cases — scripts/test-check-approval-blockers.sh
 - [ ] lint blockers section, fenced marker, waived finding, waiver warnings, unchanged clean output — scripts/test-lint-plan.sh
@@ -306,7 +325,7 @@ Validate: AC#7 — `scripts/lint-plan.sh` on this plan still shows no errors, an
 None
 
 ## Risks
-- **Environment-dependent gate.** High-risk findings come from `RAD_HIGH_RISK_PATTERNS` in the approving architect's env, so a machine with the pattern set to empty sees no high-risk blockers. That matches how the advisory already behaves and is inside the operator trust boundary, and the frozen `waivers` make the waived case auditable. The unwaived-because-disabled case leaves no trace (see Issue Gaps).
+- **Environment-dependent gate.** High-risk findings come from `RAD_HIGH_RISK_PATTERNS` in the approving architect's env. The check can't be disabled, since empty falls back to the default, but it can be narrowed to a pattern that matches nothing. That is inside the operator trust boundary, and nothing records the narrowing (see Issue Gaps).
 - **The default pattern is broad.** `token` matches paths such as a token-budget script. Expect occasional justified waivers. That is the mechanism working as designed, not noise.
 - **Existing approve tests use a shared `sh` fake.** The new script call must be routed as a pass-through, or every existing approve test breaks. The plan permits only that edit.
 - **Plans that document the convention** (this one included) must keep literal markers inside fenced blocks. The fence skip handles that, and Task 4.2 follows it.
@@ -315,6 +334,6 @@ None
 - **[ASSUMPTION — #68]** Finding IDs are `high-risk:<path>`: stable across edits, readable, with no hashing. There is one ID per path, even when several task `File:` lines cite that path.
 - **[ASSUMPTION — #68]** A waiver whose ID matches no current finding is stale. `lint-plan.sh` warns, and it never blocks and is never frozen. Only waivers that match a current finding go into the event.
 - **[ASSUMPTION — #69]** A marker is the literal `[NEEDS CLARIFICATION:` … `]` on a single line. Multi-line markers aren't supported, and an unclosed `[NEEDS CLARIFICATION:` with no `]` isn't matched. The convention text tells planners to keep a marker on one line.
-- **[ASSUMPTION — #69]** Only triple-backtick fences are skipped. Inline single-backtick code and `~~~` fences aren't. Inline backticks are still counted, so a prose mention must be fenced or reworded.
-- **[ASSUMPTION]** When `RAD_HIGH_RISK_PATTERNS` is empty, the high-risk blocker is disabled for that approval and nothing records that it was disabled. Recording the effective pattern in the event is left for a follow-up.
+- **[DECIDED — #69, amendment 4]** Triple-backtick fences and single-backtick inline spans are skipped. `~~~` fences aren't.
+- **[DECIDED — amendment 5]** An empty `RAD_HIGH_RISK_PATTERNS` falls back to the default, so the blocker can't be disabled. A narrowed pattern isn't recorded in the event; recording the effective pattern is left for a follow-up.
 - **[ASSUMPTION]** `/rad-review` and `/rad-approve` prose changes are validated by reading them through. Their behavior is enforced and tested at the CLI (Wave 3).
