@@ -1,7 +1,10 @@
 # Plan: Silent-Failure Fixes (empty scope table, missing blocker script)
 Created: 2026-09-28
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-09-28T16:21:28.554Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/silent-failure-fixes
 Adopted-From: https://github.com/seanrreid/RAD_framework/issues/145, https://github.com/seanrreid/RAD_framework/issues/142
 Issue-Title: lint-plan.sh exits 1 with no output on an empty Files in Scope table (#145) + defaultSh maps a missing script to exit 1, so rad approve mislabels it (#142)
