@@ -1,7 +1,8 @@
 # Plan: Approval Blockers — Clarification Markers + Justify-or-Waive
 Created: 2026-09-28
 Author: architect
-Status: approved
+Status: complete
+Completed-At: 2026-09-28T14:49:54Z
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-09-28T14:47:59.365Z
 Recorded-By: sean@torchcodelab.com
