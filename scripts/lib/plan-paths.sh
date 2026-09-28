@@ -366,6 +366,15 @@ plan_high_risk_pattern() {
   printf '%s' "${RAD_HIGH_RISK_PATTERNS:-$RAD_HIGH_RISK_DEFAULT_PATTERN}"
 }
 
+# plan_high_risk_pattern_is_default
+# Exit 0 iff the effective pattern (plan_high_risk_pattern) is exactly the
+# built-in default — RAD_HIGH_RISK_PATTERNS unset, empty, or set to the default
+# string verbatim; else exit 1. Compares the EFFECTIVE pattern, never the raw env,
+# so the empty-falls-back rule has one definition.
+plan_high_risk_pattern_is_default() {
+  [[ "$(plan_high_risk_pattern)" == "$RAD_HIGH_RISK_DEFAULT_PATTERN" ]]
+}
+
 # plan_high_risk_findings <plan-file>
 # Print `high-risk:<path>` for every plan_scope_paths entry matching the
 # effective high-risk pattern (path_matches — the same matcher and path union as

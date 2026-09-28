@@ -589,6 +589,53 @@ test('AC#6: empty exit-0 stdout → approved event has no waivers key (today\'s 
   assert.deepEqual(Object.keys(event).sort(), ['actor', 'data', 'feature', 'recordedBy', 'role', 'ts', 'type']);
 });
 
+// ── high-risk-pattern provenance tag (record-high-risk-pattern AC#3) ────────
+const TAG_PATTERN = '(^|/)(vault|keys?)([/_.-]|$)|^infra/';
+
+test('AC#3: tag + waiver → data.highRiskPattern verbatim and data.waivers', async () => {
+  const stdout = `high-risk-pattern\t${TAG_PATTERN}\nhigh-risk:infra/a.tf\treviewed\n`;
+  const r = await approveWithBlocker({ status: 0, stdout, stderr: '' });
+  assert.equal(r.code, 0, `expected exit 0; stderr: ${r.stderr}`);
+  assert.equal(r.events[0].data.highRiskPattern, TAG_PATTERN);
+  assert.deepEqual(r.events[0].data.waivers, [{ id: 'high-risk:infra/a.tf', justification: 'reviewed' }]);
+});
+
+test('AC#3: tag alone → data.highRiskPattern only, no waivers key', async () => {
+  const r = await approveWithBlocker({ status: 0, stdout: `high-risk-pattern\t${TAG_PATTERN}\n`, stderr: '' });
+  assert.equal(r.code, 0, `expected exit 0; stderr: ${r.stderr}`);
+  assert.deepEqual(Object.keys(r.events[0].data).sort(), ['fingerprint', 'highRiskPattern']);
+  assert.equal(r.events[0].data.highRiskPattern, TAG_PATTERN);
+});
+
+test('AC#3: no tag → approved event has no highRiskPattern key', async () => {
+  const r = await approveWithBlocker({ status: 0, stdout: 'high-risk:a\tok\n', stderr: '' });
+  assert.equal(r.code, 0, `expected exit 0; stderr: ${r.stderr}`);
+  assert.equal('highRiskPattern' in r.events[0].data, false);
+});
+
+test('AC#3: duplicate tag → fail-closed refusal, nothing written', async () => {
+  const stdout = `high-risk-pattern\t${TAG_PATTERN}\nhigh-risk-pattern\tother\n`;
+  const r = await approveWithBlocker({ status: 0, stdout, stderr: '' });
+  assertRefusedNoWrite(r, /rad approve: refused — approval blocker check failed \(duplicate high-risk-pattern line\)/);
+});
+
+test('AC#3: empty tag value → fail-closed refusal, nothing written', async () => {
+  const r = await approveWithBlocker({ status: 0, stdout: 'high-risk-pattern\t\n', stderr: '' });
+  assertRefusedNoWrite(r, /rad approve: refused — approval blocker check failed \(empty high-risk-pattern value\)/);
+});
+
+test('AC#3: tag line without a TAB → fail-closed refusal, nothing written', async () => {
+  const r = await approveWithBlocker({ status: 0, stdout: 'high-risk-pattern\n', stderr: '' });
+  assertRefusedNoWrite(r, /rad approve: refused — approval blocker check failed \(malformed waiver line/);
+});
+
+test('AC#3: first field "high-risk-patternX" is a waiver id, not the tag', async () => {
+  const r = await approveWithBlocker({ status: 0, stdout: 'high-risk-patternX\tjust\n', stderr: '' });
+  assert.equal(r.code, 0, `expected exit 0; stderr: ${r.stderr}`);
+  assert.deepEqual(r.events[0].data.waivers, [{ id: 'high-risk-patternX', justification: 'just' }]);
+  assert.equal('highRiskPattern' in r.events[0].data, false);
+});
+
 // #142 — the REAL defaultSh runs the blocker call against a repo root that has
 // no scripts/check-approval-blockers.sh. The spawn fails with ENOENT → 127, which
 // must read as a failed check, never as "unresolved approval blockers" (exit 1).

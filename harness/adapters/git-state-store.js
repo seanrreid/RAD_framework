@@ -138,6 +138,20 @@ function assertValidWaivers(waivers) {
   });
 }
 
+/**
+ * The optional high-risk pattern must be absent or a non-empty string — it is
+ * provenance for WHICH matcher the blocker check ran under, so a present-but-
+ * blank or non-string value is a caller bug, never silently dropped.
+ */
+function assertValidHighRiskPattern(highRiskPattern) {
+  if (highRiskPattern === undefined) return;
+  if (!isNonEmptyString(highRiskPattern)) {
+    throw new Error(
+      `recordApproval: highRiskPattern must be a non-empty string, got ${JSON.stringify(highRiskPattern)}`,
+    );
+  }
+}
+
 /** Path to a feature's event log, relative to repoRoot. */
 function eventsPath(repoRoot, feature) {
   return join(repoRoot, '.agents', 'state', feature, 'events.jsonl');
@@ -413,12 +427,19 @@ export function createGitStateStore({
    * identical to one recorded without the key. A non-array or malformed entry
    * throws before anything is written (never silently dropped).
    *
-   * @param {{ feature: string, actor: string, requiredRole?: string, recordedBy?: string, ts?: string, evidence?: Object, fingerprint?: string, waivers?: Array<{id: string, justification: string}> }} a
+   * The optional `highRiskPattern` (the NON-DEFAULT effective high-risk pattern
+   * scripts/check-approval-blockers.sh reported via its `high-risk-pattern` tag
+   * line) is frozen into `data.highRiskPattern` verbatim ONLY when present —
+   * omitted yields an event identical to one recorded without the key. A present
+   * value that is not a non-empty string throws before anything is written.
+   *
+   * @param {{ feature: string, actor: string, requiredRole?: string, recordedBy?: string, ts?: string, evidence?: Object, fingerprint?: string, waivers?: Array<{id: string, justification: string}>, highRiskPattern?: string }} a
    */
-  function recordApproval({ feature, actor, requiredRole = 'architect', recordedBy, ts, evidence, fingerprint, waivers } = {}) {
+  function recordApproval({ feature, actor, requiredRole = 'architect', recordedBy, ts, evidence, fingerprint, waivers, highRiskPattern } = {}) {
     if (!feature) throw new Error('recordApproval: feature is required');
     if (!actor) throw new Error('recordApproval: actor is required');
     assertValidWaivers(waivers);
+    assertValidHighRiskPattern(highRiskPattern);
 
     // Verify role at write-time. The `actor` is the identity whose authority we
     // are freezing — in proxy mode the runner (recordedBy) is not the one being
@@ -447,6 +468,7 @@ export function createGitStateStore({
     if (evidence !== undefined) data.evidence = evidence;
     if (fingerprint !== undefined) data.fingerprint = fingerprint;
     if (waivers !== undefined && waivers.length > 0) data.waivers = waivers;
+    if (highRiskPattern !== undefined) data.highRiskPattern = highRiskPattern;
     if (Object.keys(data).length > 0) event.data = data;
 
     append(event);

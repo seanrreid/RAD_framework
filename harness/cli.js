@@ -858,24 +858,43 @@ const BLOCKERS_REMAIN_EXIT = 1;
 const WAIVER_FIELD_SEPARATOR = '\t';
 
 /**
- * Parse check-approval-blockers.sh exit-0 stdout into `[{id, justification}]`.
- * Blank lines are ignored; a non-blank line without a TAB throws (the caller
- * fails closed — an unparseable waiver must never be silently dropped).
+ * First TAB field of the provenance line check-approval-blockers.sh prints when
+ * the effective high-risk pattern is non-default. Matched EXACTLY — a line whose
+ * first field merely starts with this string is an ordinary waiver id.
  */
-function parseWaiverLines(stdout) {
+const HIGH_RISK_PATTERN_TAG = 'high-risk-pattern';
+
+/**
+ * Parse check-approval-blockers.sh exit-0 stdout into
+ * `{ waivers: [{id, justification}], highRiskPattern?: string }`.
+ * Blank lines are ignored. Throws (the caller fails closed — nothing unparseable
+ * is ever silently dropped) on: a non-blank line without a TAB, a second
+ * `high-risk-pattern` tag, or a tag with an empty value. The pattern value is
+ * kept verbatim (it contains regex metacharacters such as | ( ) ^ $).
+ */
+function parseBlockerStdout(stdout) {
   const waivers = [];
+  let highRiskPattern;
   for (const line of String(stdout ?? '').split('\n')) {
     if (line.trim() === '') continue;
     const sep = line.indexOf(WAIVER_FIELD_SEPARATOR);
     if (sep === -1) throw new Error(`malformed waiver line (no TAB): ${JSON.stringify(line)}`);
-    waivers.push({ id: line.slice(0, sep), justification: line.slice(sep + 1) });
+    const first = line.slice(0, sep);
+    const rest = line.slice(sep + 1);
+    if (first !== HIGH_RISK_PATTERN_TAG) {
+      waivers.push({ id: first, justification: rest });
+      continue;
+    }
+    if (highRiskPattern !== undefined) throw new Error(`duplicate ${HIGH_RISK_PATTERN_TAG} line`);
+    if (rest === '') throw new Error(`empty ${HIGH_RISK_PATTERN_TAG} value`);
+    highRiskPattern = rest;
   }
-  return waivers;
+  return highRiskPattern === undefined ? { waivers } : { waivers, highRiskPattern };
 }
 
 /**
  * Run check-approval-blockers.sh against the plan doc. Returns
- * `{ ok: true, waivers }` ONLY on exit 0 with parseable stdout; every other
+ * `{ ok: true, waivers, highRiskPattern? }` ONLY on exit 0 with parseable stdout; every other
  * outcome (blockers, any other status, a thrown spawn, bad stdout) is
  * `{ ok: false, message }` — the approve boundary fails closed.
  */
@@ -901,7 +920,7 @@ function checkApprovalBlockers(sh, repoRoot, planFile) {
     return failed(`exit ${result.status}: ${String(result.stderr ?? '').trim()}`);
   }
   try {
-    return { ok: true, waivers: parseWaiverLines(result.stdout) };
+    return { ok: true, ...parseBlockerStdout(result.stdout) };
   } catch (err) {
     return failed(err.message);
   }
@@ -1057,6 +1076,7 @@ export async function approveCommand(argv, ctx) {
       evidence: proxy ? evidence : undefined,
       fingerprint: planHash,
       waivers: blockers.waivers,
+      highRiskPattern: blockers.highRiskPattern,
     });
   } catch (err) {
     process.stderr.write(`rad approve: cannot record approval — ${err.message}\n`);

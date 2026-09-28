@@ -307,7 +307,9 @@ The default matches whole path segments, not substrings — so `authority` and
 
 Set `RAD_HIGH_RISK_PATTERNS` to override the default with your own `|`-separated
 extended-regex alternation. Empty falls back to the default — the check can be
-narrowed, never disabled.
+narrowed, never disabled. An approval recorded under a non-default pattern freezes it
+into the `approved` event as `approved.data.highRiskPattern`, and CI prints an
+advisory for it (never blocks).
 
 The lint warning stays advisory, but an un-waived high-risk finding now blocks
 `rad approve` (see Approval Rules).

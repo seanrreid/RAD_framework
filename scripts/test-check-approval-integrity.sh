@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # test-check-approval-integrity.sh
 # Regression tests for check-approval-integrity.sh: ancestry, fingerprint,
-# gate, authenticity, override, ownership advisory, and merged-history cases.
+# gate, authenticity, override, ownership + high-risk-pattern advisories, and
+# merged-history cases.
 # Self-contained (no external harness): builds a temp git-repo fixture and runs
 # the REAL script (from this repo's scripts/) with the fixture as cwd, so the
 # harness CLI resolves from the real repo. Runs under bash 3.2+ (set -u safe).
@@ -46,7 +47,7 @@ Branch: rad/feature
 |------|-------|--------|
 | src/in-scope.js | 1-2 | x |
 '
-for f in f1 f2 f3 f4 f6 f7 f8 f9; do
+for f in f1 f2 f3 f4 f6 f7 f8 f9 f10 f11; do
   printf '%s' "$PLAN_BODY" > "$REPO/.agents/plans/$f.md"
 done
 
@@ -99,6 +100,10 @@ approved_event f1 "$FP" > "$REPO/.agents/state/f1/events.jsonl"
 commit_as "$ARCH_EMAIL" "approve f1"
 code=$(run_check rad/f1)
 [[ "$code" -eq 0 ]] || { cat "$TMP/out"; fail "case 1: approved+ancestor should exit 0 (got $code)"; }
+CASE1_CODE="$code"
+if grep -q "non-default high-risk pattern" "$TMP/out"; then
+  cat "$TMP/out"; fail "case 1: no data.highRiskPattern must print no high-risk advisory"
+fi
 echo "✓ case 1: approved + ancestor + matching fingerprint passes (exit 0)"
 
 # ── Case 2: no approved event in the log → 1 ───────────────────────────────────
@@ -188,5 +193,38 @@ code=$(run_check rad/f9)
 grep -q "FAIL: approval was recorded by a machine policy, not a human architect. Failing closed." "$TMP/out" \
   || { cat "$TMP/out"; fail "case 9: expected machine-policy FAIL message"; }
 echo "✓ case 9: machine-policy approval fails closed even when architect-committed (exit 1)"
+
+# ── Case 10: gating event carries data.highRiskPattern → advisory, same exit ──
+# The pattern holds regex/shell metacharacters; it must print verbatim.
+HR_PATTERN='(^|[/_.-])(auth|tokens?)([/_.-]|$)'
+git -C "$REPO" checkout -q -b rad/f10 main
+mkdir -p "$REPO/.agents/state/f10"
+printf '{"feature":"f10","type":"approved","actor":"%s","role":"architect","ts":"2026-07-01T00:00:00.000Z","recordedBy":"%s","data":{"fingerprint":"%s","highRiskPattern":"%s"}}\n' \
+  "$ARCH_EMAIL" "$ARCH_EMAIL" "$FP" "$HR_PATTERN" > "$REPO/.agents/state/f10/events.jsonl"
+commit_as "$ARCH_EMAIL" "approve f10 (non-default high-risk pattern)"
+code=$(run_check rad/f10)
+[[ "$code" -eq "$CASE1_CODE" ]] || { cat "$TMP/out"; fail "case 10: advisory must not change the exit code (got $code, want $CASE1_CODE)"; }
+grep -qxF "advisory: approval recorded under a non-default high-risk pattern: ${HR_PATTERN}" "$TMP/out" \
+  || { cat "$TMP/out"; fail "case 10: expected the verbatim high-risk-pattern advisory line"; }
+grep -q "^PASS:" "$TMP/out" || { cat "$TMP/out"; fail "case 10: expected PASS"; }
+echo "✓ case 10: data.highRiskPattern prints the verbatim advisory and still exits 0"
+
+# ── Case 11: only the GATING (latest) approved event decides ──────────────────
+# An earlier approval under a custom pattern, re-approved without one → silent.
+git -C "$REPO" checkout -q -b rad/f11 main
+mkdir -p "$REPO/.agents/state/f11"
+{
+  printf '{"feature":"f11","type":"approved","actor":"%s","role":"architect","ts":"2026-07-01T00:00:00.000Z","recordedBy":"%s","data":{"fingerprint":"old","highRiskPattern":"%s"}}\n' \
+    "$ARCH_EMAIL" "$ARCH_EMAIL" "$HR_PATTERN"
+  printf '{"feature":"f11","type":"approved","actor":"%s","role":"architect","ts":"2026-07-02T00:00:00.000Z","recordedBy":"%s","data":{"fingerprint":"%s"}}\n' \
+    "$ARCH_EMAIL" "$ARCH_EMAIL" "$FP"
+} > "$REPO/.agents/state/f11/events.jsonl"
+commit_as "$ARCH_EMAIL" "approve + re-approve f11"
+code=$(run_check rad/f11)
+[[ "$code" -eq 0 ]] || { cat "$TMP/out"; fail "case 11: re-approval should exit 0 (got $code)"; }
+if grep -q "non-default high-risk pattern" "$TMP/out"; then
+  cat "$TMP/out"; fail "case 11: a superseded approval's pattern must not print an advisory"
+fi
+echo "✓ case 11: only the gating approved event's highRiskPattern is reported"
 
 echo "ALL PASS"

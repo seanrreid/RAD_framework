@@ -131,7 +131,10 @@ scripts/check-approval-blockers.sh "$PLAN_FILE"
 ```
 
 Exit 0 means no blockers remain; stdout lists one `<id>\t<justification>` line per
-applied waiver. Exit 1 means blockers remain — each is named on stderr: an
+applied waiver. When the effective high-risk pattern (`RAD_HIGH_RISK_PATTERNS`,
+empty → default) differs from the built-in default, stdout begins with one extra
+`high-risk-pattern\t<pattern>` line — this is the narrowed pattern the approval will
+be recorded under, **not** a waiver. Exit 1 means blockers remain — each is named on stderr: an
 unresolved clarification marker, or an un-waived `high-risk:<path>` finding. Exit 2
 is a usage or unreadable-plan error — stop and surface it. Do not stop on exit 1;
 carry the blockers and waivers into the Step 3 summary.
@@ -167,6 +170,8 @@ Waves: [N] | Tasks: [total] | ACs: [count] | Out-of-scope deps: [yes/no]
 Blockers & Waivers
   Blockers: [none | one line per blocker from check-approval-blockers.sh stderr]
   Waivers:  [none | one line per applied waiver: high-risk:<path> — <justification>]
+  [only if stdout had a high-risk-pattern line:]
+  Recorded under a non-default high-risk pattern: <pattern>
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
@@ -187,6 +192,11 @@ confirmation prompt:
   yourself: approving the plan accepts the waiver. Waivers are frozen into the
   `approved` event, so editing `## Waivers` after approval changes the plan
   fingerprint and requires re-approval.
+- **Non-default high-risk pattern** — if stdout began with a
+  `high-risk-pattern\t<pattern>` line, render it as `Recorded under a non-default
+  high-risk pattern: <pattern>` so you see the narrowing. Never list it as a waiver.
+  Judge whether the narrowed pattern is acceptable: `rad approve` freezes it into
+  the `approved` event as `highRiskPattern`, and CI surfaces it as an advisory.
 
 After rendering the review summary, scan the plan's wave structure for slop-risk
 signals before presenting the confirmation prompt. This is a **read-only analysis**
