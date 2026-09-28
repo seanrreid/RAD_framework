@@ -299,8 +299,11 @@ paths and emits an advisory **warning** (never an error) for any path matching a
 high-risk pattern, flagging it for close architect review. The built-in default is:
 
 ```
-auth|payment|billing|migration|secret|credential|token
+(^|[/_.-])(o?auth(n|z|entication|enticate|orization|orize)?|payments?|billing|migrations?|secrets?|credentials?|tokens?)([/_.-]|[A-Z0-9]|$)
 ```
+
+The default matches whole path segments, not substrings — so `authority` and
+`tokenizer` are not flagged, but `auth/`, `authentication`, and `migrations/` are.
 
 Set `RAD_HIGH_RISK_PATTERNS` to override the default with your own `|`-separated
 extended-regex alternation. Empty falls back to the default — the check can be
