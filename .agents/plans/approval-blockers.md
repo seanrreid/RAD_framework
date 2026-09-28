@@ -1,7 +1,7 @@
 # Plan: Approval Blockers — Clarification Markers + Justify-or-Waive
 Created: 2026-09-28
 Author: architect
-Status: in-progress
+Status: pending-review
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-09-28T14:08:51.010Z
 Recorded-By: sean@torchcodelab.com
@@ -33,6 +33,8 @@ Research confirmed the write path is small:
 **Amendment (2026-09-28, during delivery, architect decisions after Wave 1):**
 4. **Inline code spans are skipped too.** A marker inside a single-backtick span on a line doesn't count, in addition to ```` ``` ```` fences. Plans that describe the syntax inline would otherwise block themselves; this plan exited 1 with 8 descriptive markers.
 5. **Empty `RAD_HIGH_RISK_PATTERNS` means the default, not "disabled".** The high-risk check can be narrowed but never switched off. That is what `lint-plan.sh:188` (`${…:-default}`) already does, so lint's behavior stays the same. CLAUDE.md's "Empty disables the check" was wrong, and it is corrected. Lint and the blocker check share one resolver, `plan_high_risk_pattern`.
+
+**Amendment 6 (2026-09-28, after Wave 3):** two more existing approve tests fake the shell and send unknown scripts to the real runner: `harness/test/cli.test.js` (the AC#2 approve test) and `harness/test/portable-process-memory.test.js` (the RAD_SYNC-unset approve test). Their fakes needed the same pass-through route for `check-approval-blockers.sh` (exit 0, empty stdout) and nothing else. They are declared in scope here so the scope check passes on the plan's word, not on a bypass. The `rad-plan.md` range is also widened to cover the Rules bullet that Task 4.2 asks for.
 
 **One structural constraint:** markers can't be lint **errors**. `/rad-plan` refuses to commit a plan that has lint errors, and a plan with open questions must stay committable so the team can discuss it. So blockers are a third lint category, shown by `lint-plan.sh` and enforced only by `rad approve`.
 
@@ -88,9 +90,12 @@ Research confirmed the write path is small:
 | harness/cli.js | 940-1030 | Blocker check before `recordApproval`; pass waivers |
 | harness/test/approval-authority-recording.test.js | 1-60 | Route the new script in the shared `sh` fake (pass-through only) |
 | harness/test/approval-authority-recording.test.js | 430-469 | Append refusal / waiver / fail-closed tests |
+| harness/test/cli.test.js | 1-120 | Shell-fake pass-through route for the blocker script only (amendment 6) |
+| harness/test/portable-process-memory.test.js | 1-200 | Shell-fake pass-through route for the blocker script only (amendment 6) |
 | .claude/commands/architect/rad-approve.md | 110-235 | Show blockers + waivers; CLI refusal is final |
 | .claude/commands/team/rad-review.md | 53-63 | Step 2b: blockers advisory |
 | .claude/commands/team/rad-plan.md | 93-205 | Marker convention + `## Waivers` in the template |
+| .claude/commands/team/rad-plan.md | 266-285 | Rules bullet for the marker convention |
 | .claude/commands/team/rad-adopt.md | 160-176 | Marker convention next to Issue Gaps |
 | CLAUDE.md | 289-307 | High-Risk Paths: empty falls back to the default |
 | CLAUDE.md | 383-395 | Approval Rules: two new requirements |
