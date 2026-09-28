@@ -247,6 +247,9 @@ test('AC#2 — approve records approved event and gate passes (temp-repo fixture
       if (file === roleScript || (typeof file === 'string' && file.endsWith('check-role.sh'))) {
         return { status: 0, stdout: '', stderr: '' };
       }
+      if (typeof file === 'string' && file.endsWith('check-approval-blockers.sh')) {
+        return { status: 0, stdout: '', stderr: '' };
+      }
       return defaultSh(file, args, opts);
     };
 

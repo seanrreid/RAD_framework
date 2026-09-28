@@ -850,6 +850,63 @@ function writePlanStatus(planFile, fields) {
   writeFileSync(planFile, lines.join('\n'), 'utf8');
 }
 
+/** Approval-blocker check script, resolved under `<repoRoot>/scripts/`. */
+const APPROVAL_BLOCKERS_SCRIPT = 'check-approval-blockers.sh';
+/** check-approval-blockers.sh exit code meaning "blockers remain" (0 = clear). */
+const BLOCKERS_REMAIN_EXIT = 1;
+/** Separator between a waiver id and its justification on a stdout line. */
+const WAIVER_FIELD_SEPARATOR = '\t';
+
+/**
+ * Parse check-approval-blockers.sh exit-0 stdout into `[{id, justification}]`.
+ * Blank lines are ignored; a non-blank line without a TAB throws (the caller
+ * fails closed — an unparseable waiver must never be silently dropped).
+ */
+function parseWaiverLines(stdout) {
+  const waivers = [];
+  for (const line of String(stdout ?? '').split('\n')) {
+    if (line.trim() === '') continue;
+    const sep = line.indexOf(WAIVER_FIELD_SEPARATOR);
+    if (sep === -1) throw new Error(`malformed waiver line (no TAB): ${JSON.stringify(line)}`);
+    waivers.push({ id: line.slice(0, sep), justification: line.slice(sep + 1) });
+  }
+  return waivers;
+}
+
+/**
+ * Run check-approval-blockers.sh against the plan doc. Returns
+ * `{ ok: true, waivers }` ONLY on exit 0 with parseable stdout; every other
+ * outcome (blockers, any other status, a thrown spawn, bad stdout) is
+ * `{ ok: false, message }` — the approve boundary fails closed.
+ */
+function checkApprovalBlockers(sh, repoRoot, planFile) {
+  const script = join(repoRoot, 'scripts', APPROVAL_BLOCKERS_SCRIPT);
+  const failed = (detail) => ({
+    ok: false,
+    message: `rad approve: refused — approval blocker check failed (${detail})\n`,
+  });
+  let result;
+  try {
+    result = sh(script, [planFile], { cwd: repoRoot });
+  } catch (err) {
+    return failed(`spawn error: ${err.message}`);
+  }
+  if (result.status === BLOCKERS_REMAIN_EXIT) {
+    return {
+      ok: false,
+      message: `rad approve: refused — unresolved approval blockers\n${result.stderr ?? ''}`,
+    };
+  }
+  if (result.status !== 0) {
+    return failed(`exit ${result.status}: ${String(result.stderr ?? '').trim()}`);
+  }
+  try {
+    return { ok: true, waivers: parseWaiverLines(result.stdout) };
+  } catch (err) {
+    return failed(err.message);
+  }
+}
+
 /**
  * `approve <feature> [--on-behalf-of <name>] [--evidence <text>]`.
  *
@@ -975,6 +1032,14 @@ export async function approveCommand(argv, ctx) {
     recordedBy = runningUser;
   }
 
+  // Blocker check runs in BOTH modes, after authority is established and before
+  // any write. Only exit 0 from the script permits recording (fail-closed).
+  const blockers = checkApprovalBlockers(sh, repoRoot, planFile);
+  if (!blockers.ok) {
+    process.stderr.write(blockers.message);
+    return 1;
+  }
+
   // The event-log actor is the human identity (approvedBy); recordApproval freezes
   // the verified role token into the event's `role` field at write-time.
   const actor = approvedBy;
@@ -991,6 +1056,7 @@ export async function approveCommand(argv, ctx) {
       ts,
       evidence: proxy ? evidence : undefined,
       fingerprint: planHash,
+      waivers: blockers.waivers,
     });
   } catch (err) {
     process.stderr.write(`rad approve: cannot record approval — ${err.message}\n`);
