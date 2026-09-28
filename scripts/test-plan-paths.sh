@@ -14,6 +14,12 @@
 #   - split_task_file_value — comma-separated task File: values split into paths
 #                            (range-only continuations dropped, prose kept)
 #   - plan_task_files / plan_scope_paths — see every path on a multi-file File: line
+# …and for approval-blockers:
+#   - plan_clarification_markers — live (unfenced) [NEEDS CLARIFICATION:] markers
+#   - plan_high_risk_findings    — high-risk:<path> ids (default / custom / empty)
+#   - plan_waivers               — `- <id>: <justification>` bullets in ## Waivers
+#   - plan_waivers_section       — fence-free raw ## Waivers body (fenced
+#                                  headings/bullets never count)
 #
 # Self-contained: builds a temp git-repo fixture (git init + a local bare origin
 # so `origin/main` resolves), copies
@@ -319,5 +325,141 @@ out=$(plan_scope_paths "$MULTI_PLAN")
 printf '%s\n' "$out" | grep -Fxq "b/second-only.test.js" \
   || fail "plan_scope_paths: path appearing only as a second task-File entry is missing: [$out]"
 echo "✓ plan_scope_paths: includes b/second-only.test.js (second task-File entry only)"
+
+# ── Approval blockers (approval-blockers): markers / findings / waivers ─────────
+TAB=$'\t'
+MARKER_PLAN="$TMP/markers.md"
+cat > "$MARKER_PLAN" <<'PLAN'
+# Plan: markers
+Outside [NEEDS CLARIFICATION: which store?] here.
+```
+Fenced [NEEDS CLARIFICATION: not me] line.
+```
+After [NEEDS CLARIFICATION: after fence] line.
+Two [NEEDS CLARIFICATION: first] and [NEEDS CLARIFICATION: second] markers.
+Empty [NEEDS CLARIFICATION:] question.
+Span `[NEEDS CLARIFICATION: in span]` only.
+Mixed `[NEEDS CLARIFICATION: spanned]` and [NEEDS CLARIFICATION: plain] here.
+Unpaired ` then [NEEDS CLARIFICATION: after unpaired] counts.
+Double ``[NEEDS CLARIFICATION: in double span]`` and ```` ``` ```` then [NEEDS CLARIFICATION: after quad] counts.
+PLAN
+out=$(plan_clarification_markers "$MARKER_PLAN")
+expected="2${TAB}which store?
+6${TAB}after fence
+7${TAB}first
+7${TAB}second
+8${TAB}
+10${TAB}plain
+11${TAB}after unpaired
+12${TAB}after quad"
+[[ "$out" == "$expected" ]] \
+  || fail "plan_clarification_markers: unexpected output: [$out]"
+echo "✓ plan_clarification_markers: outside / after-fence / two-per-line / empty reported; fenced skipped"
+echo "✓ plan_clarification_markers: inline-span marker skipped; plain marker beside a span reported"
+echo "✓ plan_clarification_markers: marker after an unpaired backtick reported; N-backtick runs close only on N"
+
+NO_MARKER_PLAN="$TMP/no-markers.md"
+printf '# Plan\nNothing to clarify.\n```\n[NEEDS CLARIFICATION: fenced only]\n```\n' > "$NO_MARKER_PLAN"
+out=$(plan_clarification_markers "$NO_MARKER_PLAN")
+[[ -z "$out" ]] || fail "plan_clarification_markers: no live markers should print nothing, got: [$out]"
+echo "✓ plan_clarification_markers: no markers (or fenced only) ⇒ empty, exit 0"
+
+RISK_PLAN="$TMP/risk.md"
+cat > "$RISK_PLAN" <<'PLAN'
+# Plan: risk
+## Files in Scope
+| File | Lines | Change |
+|------|-------|--------|
+| `src/auth/login.js` | 1-10 | Modify |
+| `docs/readme.md` | 1 | Modify |
+
+#### Task 1.1: t
+File: src/auth/login.js:1-10, lib/widget.js
+PLAN
+out=$(unset RAD_HIGH_RISK_PATTERNS; plan_high_risk_findings "$RISK_PLAN")
+[[ "$out" == "high-risk:src/auth/login.js" ]] \
+  || fail "plan_high_risk_findings: default pattern should flag auth path once, got: [$out]"
+echo "✓ plan_high_risk_findings: unset env ⇒ built-in default, de-duplicated"
+
+out=$(RAD_HIGH_RISK_PATTERNS='widget|readme' plan_high_risk_findings "$RISK_PLAN")
+[[ "$out" == $'high-risk:docs/readme.md\nhigh-risk:lib/widget.js' ]] \
+  || fail "plan_high_risk_findings: custom pattern mismatch, got: [$out]"
+echo "✓ plan_high_risk_findings: custom RAD_HIGH_RISK_PATTERNS honored"
+
+out=$(RAD_HIGH_RISK_PATTERNS='' plan_high_risk_findings "$RISK_PLAN")
+[[ "$out" == "high-risk:src/auth/login.js" ]] \
+  || fail "plan_high_risk_findings: empty pattern must fall back to the default, got: [$out]"
+[[ "$(RAD_HIGH_RISK_PATTERNS='' plan_high_risk_pattern)" == "$RAD_HIGH_RISK_DEFAULT_PATTERN" ]] \
+  || fail "plan_high_risk_pattern: empty RAD_HIGH_RISK_PATTERNS must print the default"
+echo "✓ plan_high_risk_findings: empty RAD_HIGH_RISK_PATTERNS ⇒ built-in default (never disabled)"
+
+out=$(RAD_HIGH_RISK_PATTERNS='no-such-path-zzz' plan_high_risk_findings "$RISK_PLAN")
+[[ -z "$out" ]] || fail "plan_high_risk_findings: narrowed non-matching pattern should flag nothing, got: [$out]"
+echo "✓ plan_high_risk_findings: narrowed pattern matching nothing ⇒ empty"
+
+WAIVER_PLAN="$TMP/waivers.md"
+cat > "$WAIVER_PLAN" <<'PLAN'
+# Plan: waivers
+- high-risk:outside/section.js: not in the section
+## Waivers
+- high-risk:src/auth/login.js: reviewed by security
+- high-risk:empty.js:
+- high-risk:colon.js: reason: with a colon
+not a bullet: ignored
+## Next
+- high-risk:after/next.js: past the section
+PLAN
+out=$(plan_waivers "$WAIVER_PLAN")
+expected="high-risk:src/auth/login.js${TAB}reviewed by security
+high-risk:colon.js${TAB}reason: with a colon"
+[[ "$out" == "$expected" ]] || fail "plan_waivers: unexpected output: [$out]"
+echo "✓ plan_waivers: valid kept, empty justification dropped, first ': ' split, section ends at next ##"
+
+out=$(plan_waivers "$RISK_PLAN")
+[[ -z "$out" ]] || fail "plan_waivers: no ## Waivers section should print nothing, got: [$out]"
+echo "✓ plan_waivers: no section ⇒ empty, exit 0"
+
+FENCED_WAIVER_PLAN="$TMP/fenced-waivers.md"
+cat > "$FENCED_WAIVER_PLAN" <<'PLAN'
+# Plan: fenced waivers
+```markdown
+## Waivers
+- high-risk:fenced/heading.js: inside a fenced example section
+```
+## Waivers
+- high-risk:real/one.js: real before fence
+```
+- high-risk:fenced/bullet.js: fenced inside the real section
+## Foo
+```
+- high-risk:real/two.js: real after fenced heading
+## Next
+- high-risk:after/next.js: past the section
+PLAN
+out=$(plan_waivers "$FENCED_WAIVER_PLAN")
+expected="high-risk:real/one.js${TAB}real before fence
+high-risk:real/two.js${TAB}real after fenced heading"
+[[ "$out" == "$expected" ]] || fail "plan_waivers: fence handling wrong: [$out]"
+echo "✓ plan_waivers: fenced ## Waivers ignored, fenced bullets ignored, fenced ## Foo does not end the section"
+
+out=$(plan_waivers_section "$FENCED_WAIVER_PLAN")
+expected="- high-risk:real/one.js: real before fence
+- high-risk:real/two.js: real after fenced heading"
+[[ "$out" == "$expected" ]] || fail "plan_waivers_section: fenced content leaked: [$out]"
+echo "✓ plan_waivers_section: raw body carries no fence lines or fenced content"
+
+FENCE_ONLY_PLAN="$TMP/fence-only-waivers.md"
+printf '# Plan\n```\n## Waivers\n- high-risk:x.js: example\n```\n' > "$FENCE_ONLY_PLAN"
+out=$(plan_waivers "$FENCE_ONLY_PLAN")
+[[ -z "$out" ]] || fail "plan_waivers: a fenced-only ## Waivers must yield nothing, got: [$out]"
+echo "✓ plan_waivers: ## Waivers only inside a fence ⇒ empty, exit 0"
+
+for fn in plan_clarification_markers plan_high_risk_findings plan_waivers plan_waivers_section; do
+  if "$fn" "$TMP/does-not-exist.md" 2>"$TMP/err.txt"; then
+    fail "$fn: missing plan file must return non-zero"
+  fi
+  grep -q "missing or unreadable" "$TMP/err.txt" || fail "$fn: missing plan must explain on stderr"
+done
+echo "✓ blocker helpers: missing plan file ⇒ non-zero + stderr message"
 
 echo "ALL PASS"

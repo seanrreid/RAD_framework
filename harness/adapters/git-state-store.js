@@ -100,6 +100,25 @@ function assertSafeFeature(feature) {
   }
 }
 
+/**
+ * Throw unless `waivers` is absent or an array of `{id, justification}` pairs of
+ * non-empty strings. A malformed waiver must refuse the approval, never be dropped.
+ */
+function assertValidWaivers(waivers) {
+  if (waivers === undefined) return;
+  if (!Array.isArray(waivers)) {
+    throw new Error(`recordApproval: waivers must be an array, got ${JSON.stringify(waivers)}`);
+  }
+  waivers.forEach((w, i) => {
+    if (!w || !isNonEmptyString(w.id) || !isNonEmptyString(w.justification)) {
+      throw new Error(
+        `recordApproval: waivers[${i}] must be {id, justification} with non-empty strings, ` +
+          `got ${JSON.stringify(w)}`,
+      );
+    }
+  });
+}
+
 /** Path to a feature's event log, relative to repoRoot. */
 function eventsPath(repoRoot, feature) {
   return join(repoRoot, '.agents', 'state', feature, 'events.jsonl');
@@ -369,11 +388,18 @@ export function createGitStateStore({
    * re-attestation transition rule to distinguish a true duplicate from a
    * legitimate re-approval after a plan edit. It is data-only (the fold ignores it).
    *
-   * @param {{ feature: string, actor: string, requiredRole?: string, recordedBy?: string, ts?: string, evidence?: Object, fingerprint?: string }} a
+   * The optional `waivers` (the `{id, justification}` pairs that
+   * scripts/check-approval-blockers.sh reported as applied) are frozen into
+   * `data.waivers` verbatim ONLY when non-empty — omitted or `[]` yields an event
+   * identical to one recorded without the key. A non-array or malformed entry
+   * throws before anything is written (never silently dropped).
+   *
+   * @param {{ feature: string, actor: string, requiredRole?: string, recordedBy?: string, ts?: string, evidence?: Object, fingerprint?: string, waivers?: Array<{id: string, justification: string}> }} a
    */
-  function recordApproval({ feature, actor, requiredRole = 'architect', recordedBy, ts, evidence, fingerprint } = {}) {
+  function recordApproval({ feature, actor, requiredRole = 'architect', recordedBy, ts, evidence, fingerprint, waivers } = {}) {
     if (!feature) throw new Error('recordApproval: feature is required');
     if (!actor) throw new Error('recordApproval: actor is required');
+    assertValidWaivers(waivers);
 
     // Verify role at write-time. The `actor` is the identity whose authority we
     // are freezing — in proxy mode the runner (recordedBy) is not the one being
@@ -401,6 +427,7 @@ export function createGitStateStore({
     const data = {};
     if (evidence !== undefined) data.evidence = evidence;
     if (fingerprint !== undefined) data.fingerprint = fingerprint;
+    if (waivers !== undefined && waivers.length > 0) data.waivers = waivers;
     if (Object.keys(data).length > 0) event.data = data;
 
     append(event);

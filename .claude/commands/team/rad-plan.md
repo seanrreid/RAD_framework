@@ -190,6 +190,11 @@ Depends on: Wave 1 complete
 
 ## Risks
 [Anything that could break existing behavior]
+
+## Waivers
+<!-- OPTIONAL. Only for high-risk path findings you are deliberately keeping.
+     One bullet per finding: `- high-risk:<path>: <justification>`.
+     Clarification markers cannot be waived — answer them in the plan. -->
 ```
 
 **Wave rules:**
@@ -198,6 +203,23 @@ Depends on: Wave 1 complete
 - Max 3 tasks per wave. If more needed, add another wave.
 - Max 5 waves total. If more needed, split into two plans.
 - Every task's `Validate:` field must cite a specific `AC#N` — no floating tasks.
+
+**Open questions become clarification markers.** Any open question or unmade
+decision MUST be written inline, where it applies, as a marker on a single line:
+`[NEEDS CLARIFICATION: <question>]`. Never resolve one silently by assumption. A
+marker stays in the plan until the answer is written in its place.
+
+The optional `## Waivers` section records a justified waiver for each high-risk
+path finding (`scripts/lint-plan.sh` lists them) the plan deliberately keeps:
+
+```markdown
+## Waivers
+- high-risk:src/auth/session.js: touches only the session-expiry constant; no credential handling
+```
+
+Markers are resolve-only — they can never be waived. `/rad-approve` refuses while
+any blocker remains: an unresolved marker, or a high-risk finding that is neither
+removed nor waived.
 
 The optional `## Program Design` section (signatures, a call-stack sketch, and a
 file-tree diff) is recommended for large/medium plans and skippable for small ones
@@ -272,6 +294,8 @@ Run /rad-deliver .agents/plans/[feature-slug].md once approved.
 - Cap the sub-agent at 10 searches — split the plan if the feature needs more
 - Every plan must have at least 2 non-goals and at least 1 acceptance criterion
 - Every Wave task's `Validate:` must cite an `AC#N`
+- Write every open question or unmade decision as an inline one-line
+  `[NEEDS CLARIFICATION: <question>]` marker — never silently assume an answer
 - Cut the `rad/[feature]` branch from the default branch and commit the plan there —
   never commit the plan to the default branch, and never open a plan PR
 - Do not run `/rad-deliver` yourself — wait for the architect to run `/rad-approve`

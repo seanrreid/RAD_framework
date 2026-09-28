@@ -303,7 +303,11 @@ auth|payment|billing|migration|secret|credential|token
 ```
 
 Set `RAD_HIGH_RISK_PATTERNS` to override the default with your own `|`-separated
-extended-regex alternation. Empty disables the check.
+extended-regex alternation. Empty falls back to the default — the check can be
+narrowed, never disabled.
+
+The lint warning stays advisory, but an un-waived high-risk finding now blocks
+`rad approve` (see Approval Rules).
 
 ### Self-Protected Paths
 
@@ -392,6 +396,8 @@ Approval requires:
 - [ ] Architect review and approval (recorded on the work-branch tip)
 - [ ] All files within declared agent scope (checked by /rad-review)
 - [ ] Acceptance Criteria all covered by tasks (checked by /rad-review)
+- [ ] No unresolved clarification markers (enforced by `rad approve`)
+- [ ] Every high-risk path finding resolved or waived in `## Waivers` (waivers are frozen into the `approved` event)
 
 ### Agent Scope Map
 

@@ -175,6 +175,14 @@ Validate: AC#[N] — [how to verify]
 The `## Issue Gaps` section is mandatory — it surfaces where the plan made
 judgment calls that the original issue left open.
 
+**Open questions become clarification markers.** Any open question or unmade
+decision MUST be written inline, where it applies, as a marker on a single line:
+`[NEEDS CLARIFICATION: <question>]`. Never resolve one silently by assumption.
+This is distinct from `## Issue Gaps`: Issue Gaps records assumptions the plan
+DID make, for the architect to verify; a marker records a question the plan did
+NOT answer. `/rad-approve` refuses while any marker remains unresolved, and
+markers cannot be waived.
+
 ### Step 6: Save the plan
 
 Save to: `.agents/plans/[feature-slug].md`

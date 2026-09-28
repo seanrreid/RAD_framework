@@ -255,3 +255,164 @@ path_exists_on_ref() {
   git cat-file -e "${ref}:${path}" >/dev/null 2>&1 && return 0
   return 1
 }
+
+# ── Approval blockers ────────────────────────────────────────────────────────
+# Parsing for the approval-blocker check (scripts/check-approval-blockers.sh).
+# ONE source of truth: markers, high-risk findings, and waivers are parsed ONLY
+# here. Each helper fails closed (non-zero + stderr) on a missing/unreadable plan
+# so a caller can never mistake "could not read" for "nothing found".
+
+# Built-in high-risk pattern, used when RAD_HIGH_RISK_PATTERNS is unset OR empty.
+# The ONLY copy: scripts/lint-plan.sh reads it through plan_high_risk_pattern.
+readonly RAD_HIGH_RISK_DEFAULT_PATTERN='auth|payment|billing|migration|secret|credential|token'
+
+# Prefix of every high-risk finding id; the rest of the id is the scope path.
+readonly RAD_HIGH_RISK_FINDING_PREFIX='high-risk:'
+
+# A line beginning with three backticks toggles a ``` fenced code block. Shared
+# (passed to awk as -v fence_re) by plan_clarification_markers and
+# plan_waivers_section so both skip fenced examples by the SAME rule — a fenced
+# example must never count as a marker, a section heading, or a waiver.
+readonly RAD_FENCE_LINE_RE='^```'
+
+# require_readable_plan <caller> <plan-file>
+# Return 0 iff <plan-file> is a readable regular file; else name the caller and
+# the plan on stderr and return 2.
+require_readable_plan() {
+  local caller="$1" plan_file="$2"
+  if [[ -z "$plan_file" || ! -f "$plan_file" || ! -r "$plan_file" ]]; then
+    echo "$caller: plan file missing or unreadable: '$plan_file'" >&2
+    return 2
+  fi
+}
+
+# plan_clarification_markers <plan-file>
+# Print `<line>\t<question>` for every `[NEEDS CLARIFICATION: <question>]` marker
+# that is NOT code. Two kinds of code are skipped:
+#   - ``` fenced blocks: a line beginning with three backticks toggles the fence.
+#   - inline spans on a non-fenced line (CommonMark rule): a run of N backticks
+#     opens a span closed by the next run of EXACTLY N backticks; the text
+#     between is code. So `x`, ``x`` and ```` ``` ```` are all spans. A run with
+#     no equal-length closer is literal: the rest of the line is NOT code, so a
+#     marker after an unpaired backtick still counts (fail toward reporting). A
+#     marker whose opening `[NEEDS CLARIFICATION:` lies inside a span is skipped.
+# Several markers on one line are each reported; the question is trimmed and may
+# be empty (an empty question still counts). An unterminated marker (no closing
+# `]`) counts too, with the rest of the line as its question — a marker is never
+# silently dropped. No markers → no output, exit 0.
+plan_clarification_markers() {
+  local plan_file="$1"
+  require_readable_plan plan_clarification_markers "$plan_file" || return
+  awk -v fence_re="$RAD_FENCE_LINE_RE" '
+    function trim(s) { gsub(/^[ \t]+|[ \t\r]+$/, "", s); return s }
+    function run_at(s, p,   n) {
+      for (n = 0; substr(s, p + n, 1) == "`"; n++) ;
+      return n
+    }
+    # Offset of the next run of exactly n backticks at or after q, else 0.
+    function closer(s, q, n,   m) {
+      while (q <= length(s)) {
+        if (substr(s, q, 1) != "`") { q++; continue }
+        m = run_at(s, q)
+        if (m == n) return q
+        q += m
+      }
+      return 0
+    }
+    # Replace each inline code span with one space; unmatched runs stay literal.
+    function strip_spans(s,   out, p, n, q) {
+      out = ""; p = 1
+      while (p <= length(s)) {
+        if (substr(s, p, 1) != "`") { out = out substr(s, p, 1); p++; continue }
+        n = run_at(s, p); q = closer(s, p + n, n)
+        if (q > 0) { out = out " "; p = q + n }
+        else { out = out substr(s, p, n); p += n }
+      }
+      return out
+    }
+    $0 ~ fence_re { fenced = !fenced; next }
+    fenced { next }
+    {
+      rest = strip_spans($0); open = "[NEEDS CLARIFICATION:"
+      while ((i = index(rest, open)) > 0) {
+        rest = substr(rest, i + length(open))
+        j = index(rest, "]")
+        q = (j > 0) ? substr(rest, 1, j - 1) : rest
+        print NR "\t" trim(q)
+        if (j == 0) break
+        rest = substr(rest, j + 1)
+      }
+    }
+  ' "$plan_file"
+}
+
+# plan_high_risk_pattern
+# Print the effective high-risk pattern: RAD_HIGH_RISK_PATTERNS when set and
+# non-empty, else the built-in default. The check can be NARROWED but never
+# disabled — `${var:-default}` treats empty as unset, matching lint-plan.sh.
+plan_high_risk_pattern() {
+  printf '%s' "${RAD_HIGH_RISK_PATTERNS:-$RAD_HIGH_RISK_DEFAULT_PATTERN}"
+}
+
+# plan_high_risk_findings <plan-file>
+# Print `high-risk:<path>` for every plan_scope_paths entry matching the
+# effective high-risk pattern (path_matches — the same matcher and path union as
+# the lint advisory), de-duplicated. No matching path → no output, exit 0.
+plan_high_risk_findings() {
+  local plan_file="$1" pattern paths path
+  require_readable_plan plan_high_risk_findings "$plan_file" || return
+  pattern=$(plan_high_risk_pattern)
+  # Readability was checked above, so plan_scope_paths' only non-zero is the
+  # benign pipefail from its `grep -v` filters when the plan declares no paths —
+  # an empty path set, not an error.
+  paths=$(plan_scope_paths "$plan_file") || true
+  [[ -z "$paths" ]] && return 0
+  while IFS= read -r path; do
+    [[ -z "$path" ]] && continue
+    if path_matches "$path" "$pattern"; then
+      printf '%s%s\n' "$RAD_HIGH_RISK_FINDING_PREFIX" "$path"
+    fi
+  done <<< "$paths" | sort -u
+}
+
+# plan_waivers_section <plan-file>
+# Print the raw, fence-free body of the `## Waivers` section: every line after the
+# heading up to the next `## ` heading, with ``` fenced blocks (fence lines and
+# their content) removed. Fence-aware in both directions: a `## Waivers` heading
+# inside a fence is NOT a section start, and a `## ` heading inside a fence does
+# NOT end the real section. The ONE reader of the section — plan_waivers and
+# lint-plan.sh's empty-justification warning both consume it. No section → no
+# output, exit 0; unreadable plan → exit 2.
+plan_waivers_section() {
+  local plan_file="$1"
+  require_readable_plan plan_waivers_section "$plan_file" || return
+  awk -v fence_re="$RAD_FENCE_LINE_RE" '
+    $0 ~ fence_re { fenced = !fenced; next }
+    fenced { next }
+    /^## / { in_waivers = ($0 ~ /^## Waivers[ \t\r]*$/); next }
+    in_waivers { print }
+  ' "$plan_file"
+}
+
+# plan_waivers <plan-file>
+# Print `<id>\t<justification>` for every `- <id>: <justification>` bullet in the
+# fence-free `## Waivers` body (plan_waivers_section). Split on the FIRST ": " so
+# a justification may itself contain ": ". id and justification are trimmed; a
+# bullet with an empty id or empty justification is dropped (an unjustified
+# waiver is no waiver). No section → no output, exit 0.
+plan_waivers() {
+  local plan_file="$1" body
+  body=$(plan_waivers_section "$plan_file") || return
+  [[ -z "$body" ]] && return 0
+  printf '%s\n' "$body" | awk '
+    function trim(s) { gsub(/^[ \t]+|[ \t\r]+$/, "", s); return s }
+    !/^[ \t]*- / { next }
+    {
+      body = $0; sub(/^[ \t]*- /, "", body)
+      k = index(body, ": ")
+      if (k == 0) next
+      id = trim(substr(body, 1, k - 1)); why = trim(substr(body, k + 2))
+      if (id != "" && why != "") print id "\t" why
+    }
+  '
+}

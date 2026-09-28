@@ -124,6 +124,18 @@ If the linter reports errors, display them and stop:
 
 Warnings are shown to the architect as context but do not block approval.
 
+Run the approval-blocker check alongside the linter:
+
+```bash
+scripts/check-approval-blockers.sh "$PLAN_FILE"
+```
+
+Exit 0 means no blockers remain; stdout lists one `<id>\t<justification>` line per
+applied waiver. Exit 1 means blockers remain — each is named on stderr: an
+unresolved clarification marker, or an un-waived `high-risk:<path>` finding. Exit 2
+is a usage or unreadable-plan error — stop and surface it. Do not stop on exit 1;
+carry the blockers and waivers into the Step 3 summary.
+
 ### Step 3: Display review summary
 
 Output the plan for architect review:
@@ -151,8 +163,25 @@ Waves: [N] | Tasks: [total] | ACs: [count] | Out-of-scope deps: [yes/no]
 [Risks section]
 
 [Non-Goals section]
+
+Blockers & Waivers
+  Blockers: [none | one line per blocker from check-approval-blockers.sh stderr]
+  Waivers:  [none | one line per applied waiver: high-risk:<path> — <justification>]
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
+
+**Blockers & Waivers** — render this block from the Step 2 blocker check before the
+confirmation prompt:
+
+- **Unresolved blockers** — state plainly that approval **will be refused** in
+  Step 4 until each one is cleared. A clarification marker must be answered in the
+  plan (markers are resolve-only — they cannot be waived). A high-risk finding must
+  be resolved (remove the path) or waived with a justified bullet in the plan's
+  `## Waivers` section.
+- **Applied waivers** — list each with its justification. Judge every justification
+  yourself: approving the plan accepts the waiver. Waivers are frozen into the
+  `approved` event, so editing `## Waivers` after approval changes the plan
+  fingerprint and requires re-approval.
 
 After rendering the review summary, scan the plan's wave structure for slop-risk
 signals before presenting the confirmation prompt. This is a **read-only analysis**
@@ -268,6 +297,13 @@ and exits 0 on success, or exits non-zero with a clear message (and writes
 nothing) on a refusal — e.g. a non-architect with no valid proxy pair, or
 `--on-behalf-of` without `--evidence`. If it exits non-zero, stop and surface its
 message; do not hand-edit the plan file to work around it.
+
+The CLI also runs the approval-blocker check after its role checks and **refuses**
+(exit 1, writes nothing) while any blocker remains or if the check itself fails.
+On success it freezes the applied waivers into the event's `waivers` field. This
+refusal is **final**: never hand-edit the plan's Status header or the event log to
+get around it. Fix the plan instead — answer the marker, add a justified waiver,
+or remove the path — commit it to the work branch, and re-run `/rad-approve`.
 
 ### Step 5: Commit the approval to the work branch
 

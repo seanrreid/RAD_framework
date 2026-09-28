@@ -467,3 +467,123 @@ test('regression: RAD_LOW_RISK_PATTERNS=.* does not let a non-architect direct a
     else process.env[LOW_RISK_ENV] = saved;
   }
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AC#6 — rad approve runs check-approval-blockers.sh after the role/proxy checks
+// and before recordApproval, in both modes. Only exit 0 permits a write; exit-0
+// stdout (`<id>\t<justification>` lines) is frozen as approved.data.waivers.
+// ─────────────────────────────────────────────────────────────────────────────
+import { readFileSync } from 'node:fs';
+
+const BLOCKER_SCRIPT_RE = /check-approval-blockers\.sh$/;
+const PROXY_ARGS = ['--on-behalf-of', 'arch@example.com', '--evidence', 'slack thread'];
+
+// Run approveCommand with a fake sh whose check-approval-blockers.sh response is
+// `blocker` (an sh result object, or a function called in its place). Returns
+// the exit code, captured stderr, the parsed events (null when no log), the plan
+// text, and every blocker-script call seen.
+async function approveWithBlocker(blocker, extraArgs = []) {
+  const savedSync = process.env.RAD_SYNC;
+  delete process.env.RAD_SYNC;
+  const origWrite = process.stderr.write;
+  const origOut = process.stdout.write;
+  let stderr = '';
+  try {
+    return await withTempRepo(async (repoRoot) => {
+      writeFileSync(join(repoRoot, 'CLAUDE.md'), '# CLAUDE\n', 'utf8');
+      const feature = 'blocker-feature';
+      writeMinimalPlan(repoRoot, feature);
+      const blockerCalls = [];
+      const sh = (file, args, opts) => {
+        if (BLOCKER_SCRIPT_RE.test(file)) {
+          blockerCalls.push({ file, args, opts });
+          return typeof blocker === 'function' ? blocker() : blocker;
+        }
+        if (file === 'git' && args[0] === 'config') return { status: 0, stdout: 'arch@example.com\n', stderr: '' };
+        return { status: 0, stdout: '', stderr: '' };
+      };
+      process.stderr.write = (chunk) => { stderr += String(chunk); return true; };
+      process.stdout.write = () => true;
+      const code = await approveCommand([feature, ...extraArgs], { repoRoot, sh });
+      process.stderr.write = origWrite;
+      process.stdout.write = origOut;
+      const eventsFile = join(repoRoot, '.agents', 'state', feature, 'events.jsonl');
+      const events = existsSync(eventsFile)
+        ? readFileSync(eventsFile, 'utf8').trim().split('\n').map((l) => JSON.parse(l))
+        : null;
+      const planText = readFileSync(join(repoRoot, '.agents', 'plans', `${feature}.md`), 'utf8');
+      return { code, stderr, events, planText, blockerCalls, repoRoot };
+    });
+  } finally {
+    process.stderr.write = origWrite;
+    process.stdout.write = origOut;
+    if (savedSync !== undefined) process.env.RAD_SYNC = savedSync;
+  }
+}
+
+function assertRefusedNoWrite(r, stderrRe) {
+  assert.equal(r.code, 1, `expected exit 1; got ${r.code}`);
+  assert.match(r.stderr, stderrRe);
+  assert.equal(r.events, null, 'no events.jsonl may be written on refusal');
+  assert.match(r.planText, /^Status: pending-review$/m, 'plan Status must be unchanged');
+}
+
+const BLOCKERS = { status: 1, stdout: '', stderr: 'blocker: [NEEDS CLARIFICATION: which db?]\nblocker: high-risk:scripts/x.sh\n' };
+
+test('AC#6: blockers (exit 1) → exit 1, script stderr relayed, nothing written', async () => {
+  const r = await approveWithBlocker(BLOCKERS);
+  assertRefusedNoWrite(r, /rad approve: refused — unresolved approval blockers\n/);
+  assert.match(r.stderr, /NEEDS CLARIFICATION: which db\?/);
+  assert.match(r.stderr, /high-risk:scripts\/x\.sh/);
+  // Invoked once, on the plan doc, from the repo root.
+  assert.equal(r.blockerCalls.length, 1);
+  assert.match(r.blockerCalls[0].file, /scripts\/check-approval-blockers\.sh$/);
+  assert.match(r.blockerCalls[0].args[0], /\.agents\/plans\/blocker-feature\.md$/);
+});
+
+test('AC#6: proxy mode also refuses on blockers and writes nothing', async () => {
+  const r = await approveWithBlocker(BLOCKERS, PROXY_ARGS);
+  assertRefusedNoWrite(r, /rad approve: refused — unresolved approval blockers/);
+});
+
+test('AC#6: blocker script exit 2 → fail-closed refusal, nothing written', async () => {
+  const r = await approveWithBlocker({ status: 2, stdout: '', stderr: 'usage: empty plan' });
+  assertRefusedNoWrite(r, /rad approve: refused — approval blocker check failed \(exit 2: usage: empty plan\)/);
+});
+
+test('AC#6: thrown spawn error → fail-closed refusal, nothing written', async () => {
+  const r = await approveWithBlocker(() => { throw new Error('spawn EACCES'); });
+  assertRefusedNoWrite(r, /rad approve: refused — approval blocker check failed \(spawn error: spawn EACCES\)/);
+});
+
+test('AC#6: malformed exit-0 stdout (no TAB) → fail-closed refusal, nothing written', async () => {
+  const r = await approveWithBlocker({ status: 0, stdout: 'high-risk:x no tab here\n', stderr: '' });
+  assertRefusedNoWrite(r, /rad approve: refused — approval blocker check failed \(malformed waiver line/);
+});
+
+test('AC#6: exit-0 waiver lines are frozen as approved.data.waivers (blank lines ignored)', async () => {
+  const stdout = 'high-risk:scripts/a.sh\treviewed with the architect\n\nhigh-risk:harness/cli.js\tgate wiring\ttab kept\n';
+  const r = await approveWithBlocker({ status: 0, stdout, stderr: '' });
+  assert.equal(r.code, 0, `expected exit 0; stderr: ${r.stderr}`);
+  assert.equal(r.events.length, 1);
+  assert.deepEqual(r.events[0].data.waivers, [
+    { id: 'high-risk:scripts/a.sh', justification: 'reviewed with the architect' },
+    { id: 'high-risk:harness/cli.js', justification: 'gate wiring\ttab kept' },
+  ]);
+  assert.match(r.planText, /^Status: approved$/m);
+});
+
+test('AC#6: proxy mode with waivers records them alongside evidence', async () => {
+  const r = await approveWithBlocker({ status: 0, stdout: 'high-risk:a\tok\n', stderr: '' }, PROXY_ARGS);
+  assert.equal(r.code, 0, `expected exit 0; stderr: ${r.stderr}`);
+  assert.deepEqual(r.events[0].data.waivers, [{ id: 'high-risk:a', justification: 'ok' }]);
+  assert.equal(r.events[0].data.evidence, 'slack thread');
+});
+
+test('AC#6: empty exit-0 stdout → approved event has no waivers key (today\'s shape)', async () => {
+  const r = await approveWithBlocker({ status: 0, stdout: '', stderr: '' });
+  assert.equal(r.code, 0, `expected exit 0; stderr: ${r.stderr}`);
+  const [event] = r.events;
+  assert.deepEqual(Object.keys(event.data), ['fingerprint']);
+  assert.deepEqual(Object.keys(event).sort(), ['actor', 'data', 'feature', 'recordedBy', 'role', 'ts', 'type']);
+});

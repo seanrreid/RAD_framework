@@ -12,6 +12,9 @@
 #   - multi-file task File: lines (#134): one warning per missing comma-separated
 #     path, range-only continuations ignored
 #   - context budget (#134): a bare Lines number counts as 1 line; ranges unchanged
+#   - approval blockers: markers (fenced / inline-span skipped) and un-waived
+#     high-risk ids listed, never changing the exit code; stale, empty and
+#     clarify-naming waivers warned; fenced example waivers ignored
 # Self-contained (no external harness): writes temp fixture plans, runs the real
 # lint-plan.sh, and asserts on output/exit code. Runs under bash 3.2+ (set -u safe).
 #
@@ -50,9 +53,11 @@ run_lint() {
 #            exercise the "large plan (>=3 waves)" advisory branch.
 #       $5 = program_design (optional, default false). When "true", a
 #            `## Program Design` section is emitted so has_section finds it.
+#       $6 = tail (optional, default empty). Raw text appended after ## Risks —
+#            e.g. a marker line (lands in Risks) or a `## Waivers` section.
 write_plan() {
   local out="$1" scope_rows="$2" task_file="$3"
-  local wave_count="${4:-1}" program_design="${5:-false}"
+  local wave_count="${4:-1}" program_design="${5:-false}" tail="${6:-}"
   local w
   {
     cat <<'EOF'
@@ -114,6 +119,8 @@ EOF
 ## Risks
 none
 EOF
+    # An `if`, not `&&`: a false test as the group's last command would fail it.
+    if [[ -n "$tail" ]]; then printf '%s\n' "$tail"; fi
   } > "$out"
 }
 
@@ -564,6 +571,155 @@ t_budget_bare_number() {
   echo "✓ BUD(b): range '1-900' still counted ⇒ ~900-line budget warning"
 }
 
+# ── AC#4: approval blockers section + waiver warnings ────────────────────────
+BLOCKER_HEADING="Approval blockers (resolve or waive before /rad-approve):"
+RISKY_PATH="src/auth/login.js"
+RISKY_ID="high-risk:$RISKY_PATH"
+# Clean, existing, non-self-protected, non-high-risk path for the no-output case.
+CLEAN_PATH="docs/rad-cli.md"
+
+# assert_no_blockers <label> — the blocker heading and ⛔ prefix are both absent.
+assert_no_blockers() {
+  printf '%s\n' "$LINT_OUT" | grep -qF "$BLOCKER_HEADING" \
+    && fail "$1: unexpected blocker section: $LINT_OUT" || true
+  printf '%s\n' "$LINT_OUT" | grep -q "⛔" \
+    && fail "$1: unexpected ⛔ line: $LINT_OUT" || true
+}
+
+t_blocker_markers() {
+  # (a) A live marker → blocker names its line and question; exit stays 0.
+  local plan="$TMP/blk-marker.md" line
+  write_plan "$plan" "| $REAL_PATH | 1-2 | x |" "$REAL_PATH:1-2" 1 false \
+    "Open: [NEEDS CLARIFICATION: which cache?]"
+  line=$(grep -n "NEEDS CLARIFICATION" "$plan" | cut -d: -f1)
+  ( unset RAD_HIGH_RISK_PATTERNS; run_lint "$plan"
+    printf '%s\n' "$LINT_OUT" | grep -qF "$BLOCKER_HEADING" \
+      || fail "BLK(a): marker did not produce the blocker section: $LINT_OUT"
+    printf '%s\n' "$LINT_OUT" | grep -qF "  ⛔ clarification marker at line $line: which cache?" \
+      || fail "BLK(a): blocker did not name line $line and the question: $LINT_OUT"
+    [[ "$LINT_CODE" -eq 0 ]] || fail "BLK(a): blockers changed the exit code to $LINT_CODE"
+  ) || exit 1
+  echo "✓ BLK(a): unresolved marker ⇒ blocker section names line + question, exit 0"
+
+  # (b) A marker inside a ``` fence is code → no blocker.
+  local fenced="$TMP/blk-fenced.md"
+  write_plan "$fenced" "| $REAL_PATH | 1-2 | x |" "$REAL_PATH:1-2" 1 false \
+    "$(printf '```\n[NEEDS CLARIFICATION: example only]\n```')"
+  ( unset RAD_HIGH_RISK_PATTERNS; run_lint "$fenced"; assert_no_blockers "BLK(b)" ) || exit 1
+  echo "✓ BLK(b): fenced marker ⇒ no blocker section"
+
+  # (c) A marker inside an inline code span is code → no blocker.
+  local span="$TMP/blk-span.md"
+  write_plan "$span" "| $REAL_PATH | 1-2 | x |" "$REAL_PATH:1-2" 1 false \
+    'Syntax: `[NEEDS CLARIFICATION: q]` marks a question.'
+  ( unset RAD_HIGH_RISK_PATTERNS; run_lint "$span"; assert_no_blockers "BLK(c)" ) || exit 1
+  echo "✓ BLK(c): inline-span marker ⇒ no blocker section"
+}
+
+t_blocker_high_risk() {
+  # (a) Un-waived high-risk path → blocker names the id; warning carries the id.
+  local plan="$TMP/blk-hr.md"
+  write_plan "$plan" "| $REAL_PATH | 1-2 | x |" "$RISKY_PATH:1-20"
+  ( unset RAD_HIGH_RISK_PATTERNS; run_lint "$plan"
+    printf '%s\n' "$LINT_OUT" | grep -qF "  ⛔ $RISKY_ID — waive under ## Waivers or remove the path" \
+      || fail "BLK-HR(a): un-waived high-risk path not listed as a blocker: $LINT_OUT"
+    printf '%s\n' "$LINT_OUT" | grep -qF "flag for close architect review: $RISKY_PATH (id: $RISKY_ID)" \
+      || fail "BLK-HR(a): high-risk warning does not carry the id: $LINT_OUT"
+    [[ "$LINT_CODE" -eq 0 ]] || fail "BLK-HR(a): exited $LINT_CODE (expected 0)"
+  ) || exit 1
+  echo "✓ BLK-HR(a): un-waived high-risk path ⇒ blocker names $RISKY_ID; warning carries the id"
+
+  # (b) Waived → no blocker section, warning (with id) still shown, no waiver warning.
+  local waived="$TMP/blk-hr-waived.md"
+  write_plan "$waived" "| $REAL_PATH | 1-2 | x |" "$RISKY_PATH:1-20" 1 false \
+    "$(printf '\n## Waivers\n- %s: reviewed by the architect' "$RISKY_ID")"
+  ( unset RAD_HIGH_RISK_PATTERNS; run_lint "$waived"; assert_no_blockers "BLK-HR(b)"
+    printf '%s\n' "$LINT_OUT" | grep -qF "$RISKY_PATH (id: $RISKY_ID)" \
+      || fail "BLK-HR(b): waived path lost its high-risk warning: $LINT_OUT"
+    printf '%s\n' "$LINT_OUT" | grep -q "waiver" \
+      && fail "BLK-HR(b): a valid waiver drew a waiver warning: $LINT_OUT" || true
+  ) || exit 1
+  echo "✓ BLK-HR(b): waived high-risk path ⇒ no blocker section; warning still shows the id"
+}
+
+t_waiver_warnings() {
+  # One plan, three bad waivers: stale id, empty justification, clarify id.
+  local plan="$TMP/blk-waivers.md"
+  write_plan "$plan" "| $REAL_PATH | 1-2 | x |" "$REAL_PATH:1-2" 1 false \
+    "$(printf '\n## Waivers\n- high-risk:src/gone/token.js: path was removed\n- high-risk:src/auth/x.js:\n- clarify-3: we decided already')"
+  ( unset RAD_HIGH_RISK_PATTERNS; run_lint "$plan"
+    printf '%s\n' "$LINT_OUT" | grep -qF "⚠ stale waiver: 'high-risk:src/gone/token.js' matches no current finding" \
+      || fail "WV(a): stale waiver not warned: $LINT_OUT"
+    printf '%s\n' "$LINT_OUT" | grep -qF "⚠ waiver 'high-risk:src/auth/x.js' has an empty justification" \
+      || fail "WV(b): empty-justification waiver not warned: $LINT_OUT"
+    printf '%s\n' "$LINT_OUT" | grep -qF "⚠ waiver 'clarify-3' names a clarification marker — markers can't be waived — answer the question and delete the marker" \
+      || fail "WV(c): clarify-naming waiver not warned: $LINT_OUT"
+    printf '%s\n' "$LINT_OUT" | grep -q "stale waiver: 'clarify-3'" \
+      && fail "WV(c): clarify waiver was ALSO reported stale: $LINT_OUT" || true
+    [[ "$LINT_CODE" -eq 0 ]] || fail "WV: waiver warnings changed the exit code to $LINT_CODE"
+  ) || exit 1
+  echo "✓ WV: stale, empty-justification and clarify-naming waivers each get a ⚠ warning, exit 0"
+}
+
+t_fenced_waiver_ignored() {
+  # (a) A fenced example ## Waivers block → no stale-waiver warning (it is not a
+  # waiver at all), and it does not waive the real high-risk finding.
+  local plan="$TMP/blk-fenced-waiver.md"
+  write_plan "$plan" "| $REAL_PATH | 1-2 | x |" "$RISKY_PATH:1-20" 1 false \
+    "$(printf '\n```markdown\n## Waivers\n- high-risk:scripts/token-budget.sh: example\n- %s: example\n```' "$RISKY_ID")"
+  ( unset RAD_HIGH_RISK_PATTERNS; run_lint "$plan"
+    printf '%s\n' "$LINT_OUT" | grep -q "stale waiver" \
+      && fail "FW(a): fenced example drew a stale-waiver warning: $LINT_OUT" || true
+    printf '%s\n' "$LINT_OUT" | grep -qF "  ⛔ $RISKY_ID — waive under ## Waivers or remove the path" \
+      || fail "FW(a): fenced example waived the real finding: $LINT_OUT"
+  ) || exit 1
+  echo "✓ FW(a): fenced example ## Waivers ⇒ no stale-waiver warning, blocker stands"
+
+  # (b) A fenced empty-justification bullet inside the real section is not reported.
+  local empty="$TMP/blk-fenced-empty.md"
+  write_plan "$empty" "| $REAL_PATH | 1-2 | x |" "$RISKY_PATH:1-20" 1 false \
+    "$(printf '\n## Waivers\n- %s: reviewed\n```\n- high-risk:src/auth/y.js:\n```' "$RISKY_ID")"
+  ( unset RAD_HIGH_RISK_PATTERNS; run_lint "$empty"
+    printf '%s\n' "$LINT_OUT" | grep -q "empty justification" \
+      && fail "FW(b): fenced bullet drew an empty-justification warning: $LINT_OUT" || true
+    assert_no_blockers "FW(b)"
+  ) || exit 1
+  echo "✓ FW(b): fenced empty-justification bullet ⇒ no warning; real waiver still applies"
+}
+
+t_blocker_no_new_output() {
+  # No markers, no high-risk paths, no ## Waivers → no blocker section, no
+  # waiver lines; a fully clean plan still prints the one-line success message.
+  # Runs in the hermetic GREPO fixture (local bare origin) so origin/main always
+  # resolves: in the real checkout an unresolvable base ref (e.g. a CI runner)
+  # adds a freshness warning, which correctly suppresses the success line.
+  local plan="$GREPO/.agents/plans/blk-none.md"
+  write_plan "$plan" "| src/app.js | 1-2 | x |" "src/app.js:1-2"
+  ( unset RAD_HIGH_RISK_PATTERNS; run_lint_in_repo "$GREPO" ".agents/plans/blk-none.md"
+    printf '%s\n' "$FRESH_OUT" | grep -qF "$BLOCKER_HEADING" \
+      && fail "NONE: clean plan printed the blocker section: $FRESH_OUT" || true
+    printf '%s\n' "$FRESH_OUT" | grep -qE "waiver|\(id: " \
+      && fail "NONE: unexpected waiver/id output: $FRESH_OUT" || true
+    printf '%s\n' "$FRESH_OUT" | grep -qF "✓ blk-none.md — plan is valid" \
+      || fail "NONE: clean plan lost its success line: $FRESH_OUT"
+    [[ "$FRESH_CODE" -eq 0 ]] || fail "NONE: exited $FRESH_CODE (expected 0)"
+  ) || exit 1
+  echo "✓ NONE: plan with no markers/high-risk/waivers ⇒ no new output, success line intact"
+
+  # A marker alone must NOT yield the "plan is valid" line.
+  local marked="$TMP/blk-only-marker.md"
+  write_plan "$marked" "| $CLEAN_PATH | 1-2 | x |" "$CLEAN_PATH:1-2" 1 false \
+    "[NEEDS CLARIFICATION: ok?]"
+  ( unset RAD_HIGH_RISK_PATTERNS; run_lint "$marked"
+    printf '%s\n' "$LINT_OUT" | grep -q "plan is valid" \
+      && fail "NONE(b): blocked plan claimed to be valid: $LINT_OUT" || true
+    printf '%s\n' "$LINT_OUT" | grep -qF "$BLOCKER_HEADING" \
+      || fail "NONE(b): blocker-only plan did not print the blocker section: $LINT_OUT"
+    [[ "$LINT_CODE" -eq 0 ]] || fail "NONE(b): exited $LINT_CODE (expected 0)"
+  ) || exit 1
+  echo "✓ NONE(b): blocker-only plan prints the blocker section, not the success line, exit 0"
+}
+
 t_missing_task_file
 t_multi_file_task_line
 t_budget_bare_number
@@ -578,4 +734,9 @@ t_freshness_present_and_absent
 t_freshness_created_exempt
 t_missing_scope_suppression
 t_freshness_unresolvable_ref
+t_blocker_markers
+t_blocker_high_risk
+t_waiver_warnings
+t_fenced_waiver_ignored
+t_blocker_no_new_output
 echo "ALL PASS"

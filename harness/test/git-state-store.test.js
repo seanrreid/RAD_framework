@@ -234,3 +234,60 @@ test('history/phase/plan reject an unsafe feature slug', async () => {
 test('createGitStateStore requires repoRoot', () => {
   assert.throws(() => createGitStateStore({}), /repoRoot is required/);
 });
+
+// --- recordApproval waivers (AC#5) -------------------------------------------
+
+const passSh = () => ({ status: 0, stdout: '', stderr: '' });
+
+test('recordApproval freezes non-empty waivers verbatim into data.waivers', async () => {
+  await withTempRepo((repoRoot) => {
+    const store = createGitStateStore({ repoRoot, sh: passSh });
+    const waivers = [
+      { id: 'high-risk:scripts/foo.sh', justification: 'reviewed by architect' },
+      { id: 'high-risk:harness/cli.js', justification: 'needed for the gate' },
+    ];
+    store.recordApproval({ feature: 'demo', actor: 'architect', ts: 't0', fingerprint: 'fp', waivers });
+    const [ev] = store.history('demo');
+    assert.deepEqual(ev.data, { fingerprint: 'fp', waivers });
+  });
+});
+
+test('recordApproval with waivers omitted or [] is deep-equal to one without the key', async () => {
+  const record = async (extra) => withTempRepo((repoRoot) => {
+    const store = createGitStateStore({ repoRoot, sh: passSh });
+    store.recordApproval({ feature: 'demo', actor: 'architect', ts: 't0', fingerprint: 'fp', ...extra });
+    return store.history('demo');
+  });
+  const baseline = await record({});
+  assert.equal('waivers' in baseline[0].data, false);
+  assert.deepEqual(await record({ waivers: [] }), baseline);
+  assert.deepEqual(await record({ waivers: undefined }), baseline);
+  // Bare approval (no data fields at all) + [] still carries no data key.
+  await withTempRepo((repoRoot) => {
+    const store = createGitStateStore({ repoRoot, sh: passSh });
+    store.recordApproval({ feature: 'demo', actor: 'architect', ts: 't0', waivers: [] });
+    assert.equal('data' in store.history('demo')[0], false);
+  });
+});
+
+test('recordApproval throws on malformed waivers and appends nothing', async () => {
+  const malformed = [
+    ['non-array', { id: 'x', justification: 'y' }],
+    ['string', 'high-risk:x'],
+    ['missing id', [{ justification: 'y' }]],
+    ['empty id', [{ id: '', justification: 'y' }]],
+    ['non-string justification', [{ id: 'x', justification: 42 }]],
+    ['null entry', [null]],
+  ];
+  for (const [label, waivers] of malformed) {
+    await withTempRepo((repoRoot) => {
+      const store = createGitStateStore({ repoRoot, sh: passSh });
+      assert.throws(
+        () => store.recordApproval({ feature: 'demo', actor: 'architect', ts: 't0', waivers }),
+        /recordApproval: waivers/,
+        label,
+      );
+      assert.equal(existsSync(eventsFile(repoRoot, 'demo')), false, `${label}: nothing written`);
+    });
+  }
+});

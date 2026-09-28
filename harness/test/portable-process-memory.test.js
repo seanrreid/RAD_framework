@@ -411,6 +411,9 @@ test('AC#5 — bestEffortSyncPush short-circuits with RAD_SYNC unset (no sh call
       if (typeof file === 'string' && file.endsWith('check-role.sh')) {
         return { status: 0, stdout: '', stderr: '' };
       }
+      if (typeof file === 'string' && file.endsWith('check-approval-blockers.sh')) {
+        return { status: 0, stdout: '', stderr: '' };
+      }
       return defaultSh(file, args, opts);
     };
 
