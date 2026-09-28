@@ -416,3 +416,94 @@ plan_waivers() {
     }
   '
 }
+
+# ── Wave shape, layers, mockups ──────────────────────────────────────────────
+# Parsing for the advisory stack-ordered-wave and missing-mockup lints
+# (scripts/lint-plan.sh). Advisory only: a wrong answer here can at worst emit a
+# spurious warning, so the layer patterns classify only on confident path
+# signals and otherwise say `unknown`.
+
+# A `### Wave N` heading; group 1 is the wave number N.
+readonly RAD_WAVE_HEADING_RE='^### Wave ([0-9]+)'
+
+# Layer patterns (extended regex, matched via path_matches). Checked in the
+# fixed precedence of path_layer; built in, not operator-tunable.
+readonly RAD_LAYER_TEST_RE='(^|/)(tests?|__tests__|spec)/|\.(test|spec)\.'
+readonly RAD_LAYER_SCHEMA_RE='(^|/)(migrations?|schema|db)/|\.sql$|\.prisma$'
+readonly RAD_LAYER_API_RE='(^|/)(api|routes?|controllers?|handlers?|graphql)/|\.graphql$|openapi\.(ya?ml|json)$'
+readonly RAD_LAYER_UI_RE='\.(tsx|jsx|vue|svelte|css|scss|sass|html?)$|(^|/)(components?|pages|views|ui|frontend|styles)/'
+readonly RAD_LAYER_SERVICE_RE='(^|/)(services?|domain|models?|server|backend)/'
+
+# A mockup reference: .agents/mockups/<name>.html or .htm.
+readonly RAD_MOCKUP_REF_RE='\.agents/mockups/[A-Za-z0-9._-]+\.html?'
+
+# plan_wave_task_files <plan-file>
+# Print `<wave>\t<path>` for every task `File:` path under its enclosing
+# `### Wave N` heading, split exactly as plan_task_files does (via
+# split_task_file_value). A File: line is attributed only while inside a numbered
+# wave: lines before the first wave, after a `### Wave` heading with no number,
+# or after any `## ` heading (the Wave Plan section ended) are ignored — an
+# unattributable path must never be guessed into a wave. No waves → no output,
+# exit 0; unreadable plan → exit 2.
+plan_wave_task_files() {
+  local plan_file="$1" line wave="" path
+  require_readable_plan plan_wave_task_files "$plan_file" || return
+  while IFS= read -r line; do
+    if [[ "$line" =~ $RAD_WAVE_HEADING_RE ]]; then
+      wave="${BASH_REMATCH[1]}"
+      continue
+    fi
+    if [[ "$line" == "### Wave"* || "$line" == "## "* ]]; then
+      wave=""
+      continue
+    fi
+    [[ -n "$wave" && "$line" == File:* ]] || continue
+    split_task_file_value "${line#File:}" | while IFS= read -r path; do
+      printf '%s\t%s\n' "$wave" "$path"
+    done
+  done < "$plan_file"
+}
+
+# path_layer <path>
+# Print exactly one word — test | schema | api | ui | service | unknown — the
+# first layer pattern <path> matches, in that fixed precedence (a test file is a
+# test wherever it lives; an api dir beats a .tsx extension). No match, including
+# RAD's own harness/scripts/docs paths, is `unknown`.
+path_layer() {
+  local path="$1"
+  if path_matches "$path" "$RAD_LAYER_TEST_RE"; then echo test
+  elif path_matches "$path" "$RAD_LAYER_SCHEMA_RE"; then echo schema
+  elif path_matches "$path" "$RAD_LAYER_API_RE"; then echo api
+  elif path_matches "$path" "$RAD_LAYER_UI_RE"; then echo ui
+  elif path_matches "$path" "$RAD_LAYER_SERVICE_RE"; then echo service
+  else echo unknown
+  fi
+}
+
+# plan_mockup_refs <plan-file>
+# Print each distinct `.agents/mockups/<name>.html|.htm` reference in the plan,
+# one per line, de-duplicated in FIRST-SEEN order. Lines inside ``` fences
+# (RAD_FENCE_LINE_RE) are skipped; inline backtick spans are NOT — a reference is
+# normally written backticked, so it must still count. No refs → no output,
+# exit 0; unreadable plan → exit 2; a grep read failure → its exit code.
+plan_mockup_refs() {
+  local plan_file="$1" body refs status
+  require_readable_plan plan_mockup_refs "$plan_file" || return
+  body=$(awk -v fence_re="$RAD_FENCE_LINE_RE" '
+    $0 ~ fence_re { fenced = !fenced; next }
+    !fenced { print }
+  ' "$plan_file") || return
+  [[ -z "$body" ]] && return 0
+  # grep exit: 0 = refs found, 1 = none (a valid empty result), >1 = real error.
+  if refs=$(printf '%s\n' "$body" | grep -oE "$RAD_MOCKUP_REF_RE"); then
+    status=0
+  else
+    status=$?
+  fi
+  if [[ "$status" -gt 1 ]]; then
+    echo "plan_mockup_refs: cannot scan '$plan_file' (grep exit $status)" >&2
+    return "$status"
+  fi
+  [[ -z "$refs" ]] && return 0
+  printf '%s\n' "$refs" | awk '!seen[$0]++'
+}

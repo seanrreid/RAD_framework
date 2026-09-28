@@ -267,6 +267,75 @@ if has_section "Files in Scope"; then
   )
 fi
 
+# advisory_scan_failed <helper> <rc> — a wave/mockup helper failure is an ERROR:
+# fail closed, a scan that could not run must never read as "nothing to advise".
+# Called in the parent shell (never inside $(...)) so the ERRORS append survives.
+advisory_scan_failed() {
+  ERRORS+=("advisory scan failed: $1 exited $2 for $PLAN_FILE — wave/mockup advisories could not be verified")
+}
+
+# ── Stack-order wave advisory ─────────────────────────────────────────────────
+# Waves that each land one horizontal layer (schema → service → ui) defer every
+# end-to-end check to the last wave. Fire ONE warning only when ALL hold: >=2
+# waves carry File: paths; each such wave has >=1 non-test path and NO `unknown`
+# path; each wave's non-test paths share a single layer; >=2 distinct layers
+# across waves. Test paths never count toward a wave's layer. Any doubt (an
+# unknown path, a mixed wave) is silence — a false positive is the main risk.
+# WARNING only; never an ERROR or approval blocker; the exit code is unaffected.
+STACK_ORDER_ADVICE="prefer vertical slices that each land a testable end-to-end increment; dismiss if this is a refactor"
+
+# stdin: `<wave>\t<layer>` lines. stdout: "Wave 1: schema, Wave 2: ui" when the
+# waves are stack-ordered per the rule above, else nothing.
+stack_order_summary() {
+  awk -F'\t' '
+    !($1 in seen) { seen[$1] = 1; order[++n] = $1 }
+    $2 == "unknown" { unknown[$1] = 1 }
+    $2 != "test" && $2 != "unknown" && !(($1, $2) in has) {
+      has[$1, $2] = 1; count[$1]++; layer[$1] = $2
+      if (!($2 in distinct)) { distinct[$2] = 1; ndistinct++ }
+    }
+    END {
+      if (n < 2 || ndistinct < 2) exit
+      for (i = 1; i <= n; i++) {
+        w = order[i]
+        if ((w in unknown) || count[w] != 1) exit
+        out = out (i > 1 ? ", " : "") "Wave " w ": " layer[w]
+      }
+      print out
+    }
+  '
+}
+
+collect_stack_order_warning() {
+  local pairs wave path summary rc=0 layered=""
+  pairs=$(plan_wave_task_files "$PLAN_FILE") || rc=$?
+  [[ "$rc" -eq 0 ]] || { advisory_scan_failed plan_wave_task_files "$rc"; return 0; }
+  while IFS=$'\t' read -r wave path; do
+    [[ -z "$wave" ]] && continue
+    layered="${layered}${wave}"$'\t'"$(path_layer "$path")"$'\n'
+  done <<< "$pairs"
+  summary=$(printf '%s' "$layered" | stack_order_summary)
+  [[ -n "$summary" ]] || return 0
+  WARNINGS+=("waves look stack-ordered ($summary) — $STACK_ORDER_ADVICE")
+}
+
+# ── Missing-mockup advisory ───────────────────────────────────────────────────
+# Each distinct `.agents/mockups/<name>.html` the plan references (outside ```
+# fences) must exist as a file, resolved from the same working directory the
+# Files-in-Scope existence check uses. WARNING only; exit code unaffected.
+collect_missing_mockup_warnings() {
+  local refs ref rc=0
+  refs=$(plan_mockup_refs "$PLAN_FILE") || rc=$?
+  [[ "$rc" -eq 0 ]] || { advisory_scan_failed plan_mockup_refs "$rc"; return 0; }
+  while IFS= read -r ref; do
+    [[ -z "$ref" || -f "$ref" ]] && continue
+    WARNINGS+=("mockup referenced but missing: $ref")
+  done <<< "$refs"
+}
+
+collect_stack_order_warning
+collect_missing_mockup_warnings
+
 # ── Premise-freshness advisory ────────────────────────────────────────────────
 # Over the union of cited `path:line` anchors, per-task File: paths, and
 # Files-in-Scope entries — MINUS the paths this plan creates (create-exempt: they
