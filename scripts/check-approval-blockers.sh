@@ -21,7 +21,13 @@
 # Usage: scripts/check-approval-blockers.sh <plan-file>
 #
 # Exit codes:
-#   0 = no blockers; applied waivers printed on stdout as `<id>\t<justification>`
+#   0 = no blockers. stdout, in order:
+#       - `high-risk-pattern\t<effective pattern>` as the FIRST line, ONLY when
+#         the effective RAD_HIGH_RISK_PATTERNS differs from the built-in default
+#         (plan_high_risk_pattern_is_default). Under the default this line is
+#         absent, so stdout is byte-identical to the pre-tag contract.
+#       - each applied waiver as `<id>\t<justification>` (ids start `high-risk:`
+#         with a colon, so they can never collide with the dashed tag).
 #   1 = blockers found; each named on stderr, stdout EMPTY
 #   2 = usage error, or plan missing / unreadable / empty, or a helper failed —
 #       fail closed: an error is never reported as 0
@@ -32,6 +38,9 @@ readonly EXIT_OK=0
 readonly EXIT_BLOCKED=1
 readonly EXIT_ERROR=2
 readonly SELF="check-approval-blockers"
+# Exit-0 stdout tag naming a non-default effective high-risk pattern. Dash, not
+# colon: waiver ids are `high-risk:<path>`, so the tag never parses as one.
+readonly HIGH_RISK_PATTERN_TAG="high-risk-pattern"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/plan-paths.sh
@@ -110,6 +119,9 @@ main() {
   if [[ "$blockers" -gt 0 ]]; then
     echo "$SELF: $blockers approval blocker(s) in $plan_file" >&2
     exit "$EXIT_BLOCKED"
+  fi
+  if ! plan_high_risk_pattern_is_default; then
+    printf '%s\t%s\n' "$HIGH_RISK_PATTERN_TAG" "$(plan_high_risk_pattern)"
   fi
   [[ -n "$applied" ]] && printf '%s\n' "$applied"
   exit "$EXIT_OK"

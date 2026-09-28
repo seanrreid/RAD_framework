@@ -146,9 +146,12 @@ grep -Fq "un-waived high-risk finding: $RISK_ID" "$ERR" \
 echo "✓ RAD_HIGH_RISK_PATTERNS='' with a high-risk path ⇒ exit 1 (default applies)"
 
 # ── narrowed custom pattern matching nothing ──────────────────────────────────
+# A non-default pattern is recorded: stdout is exactly the tag line.
 run_check RAD_HIGH_RISK_PATTERNS=no-such-path-zzz -- "$TMP/risk.md"
-expect "narrowed pattern" 0; expect_empty_stdout "narrowed pattern"
-echo "✓ narrowed RAD_HIGH_RISK_PATTERNS matching nothing ⇒ exit 0"
+expect "narrowed pattern" 0
+[[ "$(cat "$OUT")" == "high-risk-pattern${TAB}no-such-path-zzz" ]] \
+  || fail "narrowed pattern: stdout must be exactly the tag line, got: [$(cat "$OUT")]"
+echo "✓ narrowed RAD_HIGH_RISK_PATTERNS matching nothing ⇒ exit 0, stdout exactly the tag line"
 
 # ── inline-span marker only ───────────────────────────────────────────────────
 write_plan "$TMP/span.md" "docs/readme.md" 'Syntax: `[NEEDS CLARIFICATION: example]` is the marker.'
@@ -221,5 +224,48 @@ run_check -- "$TMP/standard-5.md"
 expect "standard 5 waves" 0; expect_empty_stdout "standard 5 waves"
 [[ ! -s "$ERR" ]] || fail "standard 5 waves: stderr must be empty, got: [$(cat "$ERR")]"
 echo "✓ standard (no Tier:) 5-wave plan ⇒ exit 0 as today"
+
+# ── high-risk-pattern tag line (non-default effective pattern only) ───────────
+# Default pattern ⇒ stdout byte-identical to the pre-tag contract.
+run_check -- "$TMP/clean.md"
+expect "tag default clean" 0; expect_empty_stdout "tag default clean"
+run_check RAD_HIGH_RISK_PATTERNS= -- "$TMP/clean.md"
+expect "tag empty-env clean" 0; expect_empty_stdout "tag empty-env clean"
+DEFAULT_PATTERN=$(env -u RAD_HIGH_RISK_PATTERNS bash -c '. "$1"; plan_high_risk_pattern' _ "$HERE/lib/plan-paths.sh")
+run_check "RAD_HIGH_RISK_PATTERNS=$DEFAULT_PATTERN" -- "$TMP/clean.md"
+expect "tag exact-default clean" 0; expect_empty_stdout "tag exact-default clean"
+run_check -- "$TMP/waived.md"
+expect "tag default waived" 0
+printf '%s\t%s\n' "$RISK_ID" "reviewed: login flow only" > "$TMP/expected.txt"
+cmp -s "$OUT" "$TMP/expected.txt" \
+  || fail "tag default waived: stdout must be byte-identical to the waiver line only, got: [$(cat "$OUT")]"
+echo "✓ default pattern (unset / empty / exact) ⇒ no tag line; stdout byte-identical"
+
+# Custom pattern + an applied waiver ⇒ tag line FIRST, then the waiver.
+run_check "RAD_HIGH_RISK_PATTERNS=auth" -- "$TMP/waived.md"
+expect "tag custom waived" 0
+printf '%s\t%s\n%s\t%s\n' "high-risk-pattern" "auth" "$RISK_ID" "reviewed: login flow only" > "$TMP/expected.txt"
+cmp -s "$OUT" "$TMP/expected.txt" \
+  || fail "tag custom waived: stdout must be tag line then waiver, got: [$(cat "$OUT")]"
+echo "✓ custom pattern + applied waiver ⇒ tag line, then waiver line"
+
+# Custom pattern on a blocked plan ⇒ exit 1, stdout EMPTY (no tag).
+run_check "RAD_HIGH_RISK_PATTERNS=no-such-path-zzz" -- "$TMP/marker.md"
+expect "tag custom blocked" 1; expect_empty_stdout "tag custom blocked"
+echo "✓ custom pattern on a blocked plan ⇒ exit 1, empty stdout"
+
+# Custom pattern on a usage error ⇒ exit 2, stdout EMPTY.
+run_check "RAD_HIGH_RISK_PATTERNS=no-such-path-zzz" -- "$TMP/does-not-exist.md"
+expect "tag custom missing plan" 2; expect_empty_stdout "tag custom missing plan"
+echo "✓ custom pattern + missing plan ⇒ exit 2, empty stdout"
+
+# Regex metacharacters | ( ) ^ $ survive verbatim into the tag line.
+META_PATTERN='(^|/)(zzz-none|yyy-none)($|/)'
+run_check "RAD_HIGH_RISK_PATTERNS=$META_PATTERN" -- "$TMP/clean.md"
+expect "tag metachar pattern" 0
+printf '%s\t%s\n' "high-risk-pattern" "$META_PATTERN" > "$TMP/expected.txt"
+cmp -s "$OUT" "$TMP/expected.txt" \
+  || fail "tag metachar pattern: pattern must survive verbatim, got: [$(cat "$OUT")]"
+echo "✓ pattern with | ( ) ^ \$ ⇒ tag line carries it verbatim"
 
 echo "ALL PASS"

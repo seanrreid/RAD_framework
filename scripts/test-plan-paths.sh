@@ -706,4 +706,21 @@ out=$(plan_files_in_scope "$FIS_ROWS_PLAN")
 src/b.js" ]] || fail "plan_files_in_scope (rows): expected [src/a.js src/b.js], got [$out]"
 echo "✓ plan_files_in_scope: data rows ⇒ paths only (header, separator, placeholder, other sections skipped)"
 
+# ── plan_high_risk_pattern_is_default ────────────────────────────────────────
+(unset RAD_HIGH_RISK_PATTERNS; plan_high_risk_pattern_is_default) \
+  || fail "plan_high_risk_pattern_is_default: unset env must be the default (exit 0)"
+(RAD_HIGH_RISK_PATTERNS='' plan_high_risk_pattern_is_default) \
+  || fail "plan_high_risk_pattern_is_default: empty env must be the default (exit 0)"
+(RAD_HIGH_RISK_PATTERNS="$RAD_HIGH_RISK_DEFAULT_PATTERN" plan_high_risk_pattern_is_default) \
+  || fail "plan_high_risk_pattern_is_default: the exact default string must be the default (exit 0)"
+is_default_rc=0
+(RAD_HIGH_RISK_PATTERNS='widget|readme' plan_high_risk_pattern_is_default) || is_default_rc=$?
+[[ "$is_default_rc" -eq 1 ]] \
+  || fail "plan_high_risk_pattern_is_default: custom pattern must exit 1, got $is_default_rc"
+is_default_rc=0
+(RAD_HIGH_RISK_PATTERNS="$RAD_HIGH_RISK_DEFAULT_PATTERN " plan_high_risk_pattern_is_default) || is_default_rc=$?
+[[ "$is_default_rc" -eq 1 ]] \
+  || fail "plan_high_risk_pattern_is_default: default + trailing space is NOT the default, got $is_default_rc"
+echo "✓ plan_high_risk_pattern_is_default: unset / empty / exact default ⇒ 0; custom / near-miss ⇒ 1"
+
 echo "ALL PASS"
