@@ -20,6 +20,9 @@ import {
   cacheUsage,
   findOrphanAttempts,
   priorAttemptState,
+  modelTierSpend,
+  modelTierAdvisories,
+  UPGRADE_RETRY_RATE,
 } from '../events.js';
 
 test('reduce on empty history → null phase, no markers, no approvals', () => {
@@ -1053,4 +1056,147 @@ test('priorAttemptState is zeroed on invalid history or wave input', () => {
     assert.deepStrictEqual(priorAttemptState(history, wave), PRIOR_ZERO);
   }
   assert.deepStrictEqual(priorAttemptState([null, { type: 'wave-attempt' }], 1), PRIOR_ZERO);
+});
+
+// ── modelTierSpend / modelTierAdvisories ─────────────────────────────────────
+// Expected values are hand-computed from harness/test/fixtures/insights/tiered;
+// the arithmetic is in comments.
+
+const TIER_ZERO = { groups: {}, features: 0 };
+
+/** One tier group, zeroed, overridden per case. */
+const tierGroup = (overrides) => ({ waves: 0, features: 0, firstAttemptSuccess: 0, retried: 0, tokens: 0, unknownUsage: 0, ...overrides });
+
+test('modelTierSpend is zeroed on empty, null, and non-array input', () => {
+  for (const input of [[], null, undefined, 'x', 7, {}, { length: 2 }]) {
+    assert.deepStrictEqual(modelTierSpend(input), TIER_ZERO);
+  }
+});
+
+test('modelTierSpend skips malformed events and never throws', () => {
+  const history = deepFreeze([
+    null,
+    7,
+    { type: 'wave-attempt' },
+    { feature: '', type: 'wave-attempt', data: { wave: 1, outcome: 'success', usage: { input: 1 } } },
+    { feature: 'f', type: 'wave-attempt', data: { wave: '1', outcome: 'success' } },
+    { feature: 'f', type: 'wave-attempt', data: null },
+    { feature: 'f', type: 'wave-started', data: { wave: 9, model: 'm' } }, // orphan: no attempt → not a wave
+  ]);
+  assert.deepStrictEqual(modelTierSpend(history), TIER_ZERO);
+});
+
+test('modelTierSpend groups the tiered fixture by declared / default / unrecorded model', () => {
+  assert.deepStrictEqual(modelTierSpend(loadInsightsFixture('tiered')), {
+    groups: {
+      // alpha w1 (retried: fail-tests → success) + delta w2 (success).
+      // Tokens: alpha w1 = (100+20+300+50) + (80+20+400+0 missing cacheWrite) = 970; delta w2 = 10+5+5 = 20 → 990.
+      'claude-haiku-4-5': tierGroup({ waves: 2, features: 2, firstAttemptSuccess: 1, retried: 1, tokens: 990 }),
+      // alpha w2: 500 + 100 + 200 cacheWrite = 800. delta w3 has wave-started only → not a wave.
+      'claude-opus-4-8': tierGroup({ waves: 1, features: 1, firstAttemptSuccess: 1, tokens: 800 }),
+      // beta w1 = 200+50+100 = 350; beta w2 = 60+40 = 100; delta w1 = 30+20 = 50 → 500.
+      default: tierGroup({ waves: 3, features: 2, firstAttemptSuccess: 3, tokens: 500 }),
+      // gamma w1: 2nd attempt has no usage → unknown, contributes 0 (not 120). gamma w2 = 40+10 = 50.
+      unrecorded: tierGroup({ waves: 2, features: 1, firstAttemptSuccess: 1, retried: 1, tokens: 50, unknownUsage: 1 }),
+    },
+    features: 4, // alpha, beta, delta, gamma
+  });
+});
+
+test('modelTierSpend picks the lowest explicit attempt as first, else log order', () => {
+  const history = deepFreeze([
+    { feature: 'f', type: 'wave-started', data: { wave: 1, attempt: 2 } },
+    { feature: 'f', type: 'wave-attempt', data: { wave: 1, attempt: 2, outcome: 'fail-tests', usage: { input: 1 } } },
+    { feature: 'f', type: 'wave-attempt', data: { wave: 1, attempt: 1, outcome: 'success', usage: { input: 1 } } },
+    { feature: 'f', type: 'wave-attempt', data: { wave: 2, outcome: 'fail-tests', usage: { input: 1 } } },
+    { feature: 'f', type: 'wave-attempt', data: { wave: 2, outcome: 'success', usage: { input: 1 } } },
+  ]);
+  assert.deepStrictEqual(modelTierSpend(history).groups, {
+    // Wave 1: attempt 1 (logged second) is first → success.
+    default: tierGroup({ waves: 1, features: 1, firstAttemptSuccess: 1, retried: 1, tokens: 2 }),
+    // Wave 2: no ordinals → log order → fail-tests first.
+    unrecorded: tierGroup({ waves: 1, features: 1, firstAttemptSuccess: 0, retried: 1, tokens: 2 }),
+  });
+});
+
+test('modelTierAdvisories on the tiered fixture: downgrade default, upgrade haiku, never unrecorded', () => {
+  const stats = modelTierSpend(loadInsightsFixture('tiered'));
+  assert.deepStrictEqual(modelTierAdvisories(stats, { minFeatures: 2 }), [
+    // default: 3/3 first-attempt success; 500 / 3 known waves.
+    { kind: 'downgrade', model: 'default', features: 2, waves: 3, meanTokens: 500 / 3, unknownUsage: 0 },
+    // haiku: retried 1/2 = 0.5 ≥ UPGRADE_RETRY_RATE; 990 / 2 = 495.
+    { kind: 'upgrade', model: 'claude-haiku-4-5', features: 2, waves: 2, meanTokens: 495, unknownUsage: 0 },
+  ]);
+  // Floor 1: unrecorded (retried 1/2) would qualify for upgrade but is never
+  // advised; opus is 100% first-attempt but not 'default' → no downgrade.
+  const loose = modelTierAdvisories(stats, { minFeatures: 1 });
+  assert.equal(loose.some((a) => a.model === 'unrecorded'), false);
+  assert.equal(loose.some((a) => a.model === 'claude-opus-4-8'), false);
+  assert.equal(loose.length, 2);
+});
+
+test('modelTierAdvisories returns [] when every group is below the feature floor', () => {
+  const stats = modelTierSpend(loadInsightsFixture('tiered'));
+  assert.deepStrictEqual(modelTierAdvisories(stats, { minFeatures: 3 }), []);
+});
+
+test('modelTierAdvisories upgrades at exactly UPGRADE_RETRY_RATE and not below it', () => {
+  assert.equal(UPGRADE_RETRY_RATE, 0.5);
+  const attempt = (feature, wave, outcome) =>
+    ({ feature, type: 'wave-attempt', data: { wave, outcome, usage: { input: 10, output: 0 } } });
+  const started = (feature, wave) => ({ feature, type: 'wave-started', data: { wave, model: 'm' } });
+  const atRate = deepFreeze([
+    started('a', 1), attempt('a', 1, 'fail-tests'), attempt('a', 1, 'success'),
+    started('b', 1), attempt('b', 1, 'success'),
+  ]);
+  // retried 1 / waves 2 = 0.5 → upgrade; tokens (10+10) + 10 = 30 over 2 known waves = 15.
+  assert.deepStrictEqual(modelTierAdvisories(modelTierSpend(atRate), { minFeatures: 2 }), [
+    { kind: 'upgrade', model: 'm', features: 2, waves: 2, meanTokens: 15, unknownUsage: 0 },
+  ]);
+  const belowRate = deepFreeze([...atRate, started('c', 1), attempt('c', 1, 'success')]);
+  // retried 1 / waves 3 ≈ 0.33 < 0.5 → nothing.
+  assert.deepStrictEqual(modelTierAdvisories(modelTierSpend(belowRate), { minFeatures: 2 }), []);
+});
+
+test('modelTierAdvisories downgrades only default, and only at 100% first-attempt success', () => {
+  const groups = {
+    default: tierGroup({ waves: 4, features: 2, firstAttemptSuccess: 3, tokens: 40 }), // 75% → no
+    m: tierGroup({ waves: 2, features: 2, firstAttemptSuccess: 2, tokens: 20 }), // 100% but declared → no
+  };
+  assert.deepStrictEqual(modelTierAdvisories({ groups }, { minFeatures: 1 }), []);
+});
+
+test('modelTierAdvisories meanTokens is null when every wave in the group has unknown usage', () => {
+  const history = deepFreeze([
+    { feature: 'a', type: 'wave-started', data: { wave: 1, model: 'm' } },
+    { feature: 'a', type: 'wave-attempt', data: { wave: 1, outcome: 'fail-tests' } },
+    { feature: 'a', type: 'wave-attempt', data: { wave: 1, outcome: 'success', usage: { input: 5 } } },
+  ]);
+  const stats = modelTierSpend(history);
+  assert.deepStrictEqual(stats.groups.m, tierGroup({ waves: 1, features: 1, retried: 1, unknownUsage: 1 }));
+  assert.deepStrictEqual(modelTierAdvisories(stats, { minFeatures: 1 }), [
+    { kind: 'upgrade', model: 'm', features: 1, waves: 1, meanTokens: null, unknownUsage: 1 },
+  ]);
+});
+
+test('modelTierAdvisories returns [] on malformed stats or opts', () => {
+  const stats = modelTierSpend(loadInsightsFixture('tiered'));
+  for (const bad of [null, undefined, 7, 'x', {}, { groups: null }, { groups: 'x' }]) {
+    assert.deepStrictEqual(modelTierAdvisories(bad, { minFeatures: 1 }), []);
+  }
+  for (const opts of [undefined, null, 7, {}, { minFeatures: '2' }, { minFeatures: NaN }, { minFeatures: -1 }]) {
+    assert.deepStrictEqual(modelTierAdvisories(stats, opts), []);
+  }
+  // A malformed group is skipped, not thrown on.
+  const groups = { default: { waves: 'x' }, m: null, n: tierGroup({ waves: 0 }) };
+  assert.deepStrictEqual(modelTierAdvisories({ groups }, { minFeatures: 0 }), []);
+});
+
+test('modelTierSpend and modelTierAdvisories never throw on the existing insights fixtures', () => {
+  for (const feature of INSIGHTS_FIXTURE_FEATURES) {
+    const stats = modelTierSpend(loadInsightsFixture(feature));
+    // Pre-#119 fixtures have no wave-started → every wave is 'unrecorded'.
+    assert.deepStrictEqual(Object.keys(stats.groups).filter((m) => m !== 'unrecorded'), []);
+    assert.ok(Array.isArray(modelTierAdvisories(stats, { minFeatures: 1 })));
+  }
 });
