@@ -8,3 +8,4 @@ Executor role: architect
 
 | Step | Wave | Task | Status | Commit | Time |
 |------|------|------|--------|--------|------|
+| 1 | 1 | 1.1 New default pattern + regression table | complete | a08dd14 | 2026-09-28T16:02:50Z |
