@@ -1,7 +1,10 @@
 # Plan: Tighten the Default High-Risk Pattern
 Created: 2026-09-28
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-09-28T15:55:27.906Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/tighten-high-risk-default
 Adopted-From: https://github.com/seanrreid/RAD_framework/issues/143
 Issue-Title: Default RAD_HIGH_RISK_PATTERNS is too broad now that it blocks approval ('auth' matches 'authority')
