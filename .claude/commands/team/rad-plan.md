@@ -24,6 +24,12 @@ deliver PR.
 
 If `$ARGUMENTS` is empty, ask for a description before proceeding.
 
+`--light` may prefix the description to request a **light-tier** plan — a
+condensed, single-wave plan for a small, low-risk change:
+- "--light Fix the typo in the onboarding guide"
+
+Without `--light`, every step below runs in standard mode, unchanged.
+
 ---
 
 ## Process
@@ -89,6 +95,43 @@ END_RESEARCH_SUMMARY
 your complete research input. Do not spawn additional research agents or read
 files directly. If the summary reveals the feature is larger than one plan can
 hold (more than ~12 files in scope), split into two plans before continuing.
+
+#### Step 2 under `--light`: quick scope check
+
+Under `--light`, replace the full research above with a quick scope check. Spawn
+one Explore sub-agent with this prompt (it is capped at 3 tool calls):
+
+```
+You are running a quick scope check for a small change. Use at most 3 tool
+calls total, then stop. Return no file contents.
+
+Change: [description from $ARGUMENTS, without the --light prefix]
+
+Return format — output this block and nothing after it:
+
+SCOPE_CHECK
+tool_calls_used: [N] of 3
+candidate_files:
+  - [path] — [what changes]
+likely_waves: [N]
+likely_tasks: [N]
+END_SCOPE_CHECK
+```
+
+**Refuse `--light` before writing anything** — no plan file, no branch — when
+the scope check shows any of:
+- more than 1 wave, or more than 3 tasks
+- a candidate file matching a high-risk pattern (`RAD_HIGH_RISK_PATTERNS`,
+  default `auth|payment|billing|migration|secret|credential|token`)
+- a candidate file on a self-protected path (`harness/`, `scripts/`,
+  `.claude/`, `.agents/state/`, `gates.yaml`/`matrix.yaml`)
+
+Name the reason and point to standard mode:
+
+```
+--light refused: [reason, e.g. "touches self-protected path scripts/lint-plan.sh"]
+Run /rad-plan [description] (without --light) for a standard plan.
+```
 
 ### Step 3: Generate the wave-structured plan
 
@@ -235,6 +278,56 @@ The optional `## Program Design` section (signatures, a call-stack sketch, and a
 file-tree diff) is recommended for large/medium plans and skippable for small ones
 (1–2 waves, no high-risk path).
 
+#### Step 3 under `--light`: the light template
+
+Under `--light`, write this template instead. `Tier: light` goes in the header
+block, before the first `## ` section. Scope, Agent Scope, Execution Notes, and
+Risks are optional; the sections below are required.
+
+```markdown
+# Plan: [Feature Name]
+Created: [date]
+Author: [role — developer | designer]
+Status: pending-review
+Branch: rad/[feature-slug]
+Tier: light
+
+## Context
+[1–2 sentences: what exists today and what needs to change]
+
+## Acceptance Criteria
+1. [observable, verifiable outcome]
+
+## Files in Scope
+| File | Lines | Change |
+|------|-------|--------|
+| [path] | [start-end] | [what changes] |
+
+## Wave Plan
+
+### Wave 1 — [parallel | sequential]
+<!-- The only wave. At most 3 tasks. -->
+
+#### Task 1.1: [title]
+File: [path:lines]
+What: [precise description]
+Validate: AC#[N] — [how to verify]
+
+## Tests to Write
+- [ ] [test] — [file]
+
+## Non-Goals
+- [at least 2]
+
+## Risks
+<!-- OPTIONAL. -->
+[Anything that could break existing behavior]
+```
+
+A light plan is limited to 1 wave, at most 3 tasks, and no high-risk or
+self-protected path. `scripts/lint-plan.sh` reports a plan beyond any limit as a
+non-waivable `light-tier:` approval blocker.
+
 ### Step 4: Save the plan
 
 Save to: `.agents/plans/[feature-slug].md`
@@ -309,5 +402,8 @@ Run /rad-deliver .agents/plans/[feature-slug].md once approved.
 - Cut the `rad/[feature]` branch from the default branch and commit the plan there —
   never commit the plan to the default branch, and never open a plan PR
 - Do not run `/rad-deliver` yourself — wait for the architect to run `/rad-approve`
+- A light plan (`--light`) still requires `/rad-approve` — the tier never skips
+  the approval gate. To promote a light plan to standard, remove `Tier: light`
+  and add the standard sections
 - If out-of-scope dependencies exist, flag them clearly — do not attempt to
   work around them by reading files directly
