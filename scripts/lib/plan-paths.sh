@@ -507,3 +507,78 @@ plan_mockup_refs() {
   [[ -z "$refs" ]] && return 0
   printf '%s\n' "$refs" | awk '!seen[$0]++'
 }
+
+# ── Planning tier ────────────────────────────────────────────────────────────
+# Parsing for the light planning tier (`Tier: light` in the plan header). A light
+# plan is bounded; any bound it exceeds is a NON-WAIVABLE approval blocker
+# (scripts/check-approval-blockers.sh). No `Tier:` header ⇒ `standard` ⇒ no
+# light-tier output, so standard plans behave exactly as before.
+
+# Light-tier bounds. Built in, not operator-tunable: a plan must not loosen the
+# limits that classify it.
+readonly RAD_LIGHT_MAX_WAVES=1
+readonly RAD_LIGHT_MAX_TASKS=3
+
+# Prefix of every light-tier violation line. Never a waiver id: the blocker
+# script counts these without consulting ## Waivers.
+readonly RAD_LIGHT_BLOCKER_PREFIX='light-tier'
+
+# plan_tier <plan-file>
+# Print the plan's tier from the first `Tier:` line in the HEADER BLOCK only —
+# the lines before the first `## ` heading — so a `Tier:` line in the body (e.g.
+# a fenced example) can never change the tier. `light` / `standard` are matched
+# trimmed and case-insensitively and printed lower-case; absent ⇒ `standard`;
+# any other value is printed trimmed but otherwise verbatim for the caller to
+# reject. Unreadable plan ⇒ exit 2.
+plan_tier() {
+  local plan_file="$1" raw normalized
+  require_readable_plan plan_tier "$plan_file" || return
+  raw=$(awk '
+    /^## / { exit }
+    /^Tier:/ { v = substr($0, 6); gsub(/^[ \t]+|[ \t\r]+$/, "", v); print v; found = 1; exit }
+    END { if (!found) print "standard" }
+  ' "$plan_file") || return
+  normalized=$(printf '%s' "$raw" | tr '[:upper:]' '[:lower:]')
+  case "$normalized" in
+    light|standard) printf '%s\n' "$normalized" ;;
+    *)              printf '%s\n' "$raw" ;;
+  esac
+}
+
+# plan_light_violations <plan-file>
+# Print one `light-tier: <reason>` line per bound a light plan exceeds: more than
+# RAD_LIGHT_MAX_WAVES `### Wave` headings, more than RAD_LIGHT_MAX_TASKS
+# `#### Task` headings, and — for each plan_scope_paths entry — a high-risk
+# match (plan_high_risk_pattern) and/or a self-protected match (both lines when
+# both apply). Non-light tier or within bounds ⇒ no output, exit 0. Unreadable
+# plan or a failing helper ⇒ non-zero + stderr, never "no violations".
+plan_light_violations() {
+  local plan_file="$1" tier counts waves tasks pattern paths path
+  require_readable_plan plan_light_violations "$plan_file" || return
+  tier=$(plan_tier "$plan_file") || return
+  [[ "$tier" == "light" ]] || return 0
+  counts=$(awk '/^### Wave/ { w++ } /^#### Task/ { t++ } END { print w + 0, t + 0 }' \
+    "$plan_file") || return
+  read -r waves tasks <<< "$counts"
+  if [[ "$waves" -gt "$RAD_LIGHT_MAX_WAVES" ]]; then
+    printf '%s: %s waves (max %s)\n' "$RAD_LIGHT_BLOCKER_PREFIX" "$waves" "$RAD_LIGHT_MAX_WAVES"
+  fi
+  if [[ "$tasks" -gt "$RAD_LIGHT_MAX_TASKS" ]]; then
+    printf '%s: %s tasks (max %s)\n' "$RAD_LIGHT_BLOCKER_PREFIX" "$tasks" "$RAD_LIGHT_MAX_TASKS"
+  fi
+  pattern=$(plan_high_risk_pattern)
+  # Readability was checked above, so plan_scope_paths' only non-zero is the
+  # benign pipefail from its `grep -v` filters when the plan declares no paths —
+  # an empty path set, not an error (same contract as plan_high_risk_findings).
+  paths=$(plan_scope_paths "$plan_file") || true
+  [[ -z "$paths" ]] && return 0
+  while IFS= read -r path; do
+    [[ -z "$path" ]] && continue
+    if path_matches "$path" "$pattern"; then
+      printf '%s: high-risk path %s\n' "$RAD_LIGHT_BLOCKER_PREFIX" "$path"
+    fi
+    if path_is_self_protected "$path"; then
+      printf '%s: self-protected path %s\n' "$RAD_LIGHT_BLOCKER_PREFIX" "$path"
+    fi
+  done <<< "$paths"
+}
