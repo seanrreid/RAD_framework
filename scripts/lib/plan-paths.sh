@@ -262,9 +262,9 @@ path_exists_on_ref() {
 # here. Each helper fails closed (non-zero + stderr) on a missing/unreadable plan
 # so a caller can never mistake "could not read" for "nothing found".
 
-# Built-in high-risk pattern, used when RAD_HIGH_RISK_PATTERNS is UNSET. Must stay
-# byte-identical to the default in scripts/lint-plan.sh (which still carries its
-# own copy this wave; Wave 2 routes lint through plan_high_risk_pattern).
+# Built-in high-risk pattern, used when RAD_HIGH_RISK_PATTERNS is unset OR empty.
+# Must stay byte-identical to the default in scripts/lint-plan.sh (which still
+# carries its own copy this wave; Wave 2 routes lint through plan_high_risk_pattern).
 readonly RAD_HIGH_RISK_DEFAULT_PATTERN='auth|payment|billing|migration|secret|credential|token'
 
 # Prefix of every high-risk finding id; the rest of the id is the scope path.
@@ -283,20 +283,52 @@ require_readable_plan() {
 
 # plan_clarification_markers <plan-file>
 # Print `<line>\t<question>` for every `[NEEDS CLARIFICATION: <question>]` marker
-# OUTSIDE a ``` fenced block (a line beginning with three backticks toggles the
-# fence). Several markers on one line are each reported; the question is trimmed
-# and may be empty (an empty question still counts). An unterminated marker (no
-# closing `]`) counts too, with the rest of the line as its question — a marker
-# is never silently dropped. No markers → no output, exit 0.
+# that is NOT code. Two kinds of code are skipped:
+#   - ``` fenced blocks: a line beginning with three backticks toggles the fence.
+#   - inline spans on a non-fenced line (CommonMark rule): a run of N backticks
+#     opens a span closed by the next run of EXACTLY N backticks; the text
+#     between is code. So `x`, ``x`` and ```` ``` ```` are all spans. A run with
+#     no equal-length closer is literal: the rest of the line is NOT code, so a
+#     marker after an unpaired backtick still counts (fail toward reporting). A
+#     marker whose opening `[NEEDS CLARIFICATION:` lies inside a span is skipped.
+# Several markers on one line are each reported; the question is trimmed and may
+# be empty (an empty question still counts). An unterminated marker (no closing
+# `]`) counts too, with the rest of the line as its question — a marker is never
+# silently dropped. No markers → no output, exit 0.
 plan_clarification_markers() {
   local plan_file="$1"
   require_readable_plan plan_clarification_markers "$plan_file" || return
   awk '
     function trim(s) { gsub(/^[ \t]+|[ \t\r]+$/, "", s); return s }
+    function run_at(s, p,   n) {
+      for (n = 0; substr(s, p + n, 1) == "`"; n++) ;
+      return n
+    }
+    # Offset of the next run of exactly n backticks at or after q, else 0.
+    function closer(s, q, n,   m) {
+      while (q <= length(s)) {
+        if (substr(s, q, 1) != "`") { q++; continue }
+        m = run_at(s, q)
+        if (m == n) return q
+        q += m
+      }
+      return 0
+    }
+    # Replace each inline code span with one space; unmatched runs stay literal.
+    function strip_spans(s,   out, p, n, q) {
+      out = ""; p = 1
+      while (p <= length(s)) {
+        if (substr(s, p, 1) != "`") { out = out substr(s, p, 1); p++; continue }
+        n = run_at(s, p); q = closer(s, p + n, n)
+        if (q > 0) { out = out " "; p = q + n }
+        else { out = out substr(s, p, n); p += n }
+      }
+      return out
+    }
     /^```/ { fenced = !fenced; next }
     fenced { next }
     {
-      rest = $0; open = "[NEEDS CLARIFICATION:"
+      rest = strip_spans($0); open = "[NEEDS CLARIFICATION:"
       while ((i = index(rest, open)) > 0) {
         rest = substr(rest, i + length(open))
         j = index(rest, "]")
@@ -310,22 +342,21 @@ plan_clarification_markers() {
 }
 
 # plan_high_risk_pattern
-# Print the effective high-risk pattern: RAD_HIGH_RISK_PATTERNS when SET (an
-# empty value disables the check — prints nothing), the built-in default when
-# UNSET. `${var-default}` (no colon) is what distinguishes empty from unset.
+# Print the effective high-risk pattern: RAD_HIGH_RISK_PATTERNS when set and
+# non-empty, else the built-in default. The check can be NARROWED but never
+# disabled — `${var:-default}` treats empty as unset, matching lint-plan.sh.
 plan_high_risk_pattern() {
-  printf '%s' "${RAD_HIGH_RISK_PATTERNS-$RAD_HIGH_RISK_DEFAULT_PATTERN}"
+  printf '%s' "${RAD_HIGH_RISK_PATTERNS:-$RAD_HIGH_RISK_DEFAULT_PATTERN}"
 }
 
 # plan_high_risk_findings <plan-file>
 # Print `high-risk:<path>` for every plan_scope_paths entry matching the
 # effective high-risk pattern (path_matches — the same matcher and path union as
-# the lint advisory), de-duplicated. Disabled pattern → no output, exit 0.
+# the lint advisory), de-duplicated. No matching path → no output, exit 0.
 plan_high_risk_findings() {
   local plan_file="$1" pattern paths path
   require_readable_plan plan_high_risk_findings "$plan_file" || return
   pattern=$(plan_high_risk_pattern)
-  [[ -z "$pattern" ]] && return 0
   # Readability was checked above, so plan_scope_paths' only non-zero is the
   # benign pipefail from its `grep -v` filters when the plan declares no paths —
   # an empty path set, not an error.

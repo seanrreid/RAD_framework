@@ -118,10 +118,23 @@ grep -q "clarification marker" "$ERR" || fail "marker + waived finding: marker n
 if grep -q "un-waived" "$ERR"; then fail "marker + waived finding: waived finding must not block"; fi
 echo "✓ marker + waived finding ⇒ exit 1 (marker only), empty stdout"
 
-# ── RAD_HIGH_RISK_PATTERNS='' disables findings ───────────────────────────────
+# ── RAD_HIGH_RISK_PATTERNS='' falls back to the default (never disables) ───────
 run_check RAD_HIGH_RISK_PATTERNS= -- "$TMP/risk.md"
-expect "empty pattern" 0; expect_empty_stdout "empty pattern"
-echo "✓ RAD_HIGH_RISK_PATTERNS='' with a high-risk path ⇒ exit 0"
+expect "empty pattern" 1; expect_empty_stdout "empty pattern"
+grep -Fq "un-waived high-risk finding: $RISK_ID" "$ERR" \
+  || fail "empty pattern: default must still flag $RISK_ID, got: [$(cat "$ERR")]"
+echo "✓ RAD_HIGH_RISK_PATTERNS='' with a high-risk path ⇒ exit 1 (default applies)"
+
+# ── narrowed custom pattern matching nothing ──────────────────────────────────
+run_check RAD_HIGH_RISK_PATTERNS=no-such-path-zzz -- "$TMP/risk.md"
+expect "narrowed pattern" 0; expect_empty_stdout "narrowed pattern"
+echo "✓ narrowed RAD_HIGH_RISK_PATTERNS matching nothing ⇒ exit 0"
+
+# ── inline-span marker only ───────────────────────────────────────────────────
+write_plan "$TMP/span.md" "docs/readme.md" 'Syntax: `[NEEDS CLARIFICATION: example]` is the marker.'
+run_check -- "$TMP/span.md"
+expect "inline-span marker" 0; expect_empty_stdout "inline-span marker"
+echo "✓ inline-span marker only ⇒ exit 0"
 
 # ── error cases: missing file, empty file, no args ────────────────────────────
 run_check -- "$TMP/does-not-exist.md"

@@ -336,16 +336,25 @@ Fenced [NEEDS CLARIFICATION: not me] line.
 After [NEEDS CLARIFICATION: after fence] line.
 Two [NEEDS CLARIFICATION: first] and [NEEDS CLARIFICATION: second] markers.
 Empty [NEEDS CLARIFICATION:] question.
+Span `[NEEDS CLARIFICATION: in span]` only.
+Mixed `[NEEDS CLARIFICATION: spanned]` and [NEEDS CLARIFICATION: plain] here.
+Unpaired ` then [NEEDS CLARIFICATION: after unpaired] counts.
+Double ``[NEEDS CLARIFICATION: in double span]`` and ```` ``` ```` then [NEEDS CLARIFICATION: after quad] counts.
 PLAN
 out=$(plan_clarification_markers "$MARKER_PLAN")
 expected="2${TAB}which store?
 6${TAB}after fence
 7${TAB}first
 7${TAB}second
-8${TAB}"
+8${TAB}
+10${TAB}plain
+11${TAB}after unpaired
+12${TAB}after quad"
 [[ "$out" == "$expected" ]] \
   || fail "plan_clarification_markers: unexpected output: [$out]"
 echo "✓ plan_clarification_markers: outside / after-fence / two-per-line / empty reported; fenced skipped"
+echo "✓ plan_clarification_markers: inline-span marker skipped; plain marker beside a span reported"
+echo "✓ plan_clarification_markers: marker after an unpaired backtick reported; N-backtick runs close only on N"
 
 NO_MARKER_PLAN="$TMP/no-markers.md"
 printf '# Plan\nNothing to clarify.\n```\n[NEEDS CLARIFICATION: fenced only]\n```\n' > "$NO_MARKER_PLAN"
@@ -376,8 +385,15 @@ out=$(RAD_HIGH_RISK_PATTERNS='widget|readme' plan_high_risk_findings "$RISK_PLAN
 echo "✓ plan_high_risk_findings: custom RAD_HIGH_RISK_PATTERNS honored"
 
 out=$(RAD_HIGH_RISK_PATTERNS='' plan_high_risk_findings "$RISK_PLAN")
-[[ -z "$out" ]] || fail "plan_high_risk_findings: empty pattern must disable, got: [$out]"
-echo "✓ plan_high_risk_findings: empty RAD_HIGH_RISK_PATTERNS ⇒ disabled"
+[[ "$out" == "high-risk:src/auth/login.js" ]] \
+  || fail "plan_high_risk_findings: empty pattern must fall back to the default, got: [$out]"
+[[ "$(RAD_HIGH_RISK_PATTERNS='' plan_high_risk_pattern)" == "$RAD_HIGH_RISK_DEFAULT_PATTERN" ]] \
+  || fail "plan_high_risk_pattern: empty RAD_HIGH_RISK_PATTERNS must print the default"
+echo "✓ plan_high_risk_findings: empty RAD_HIGH_RISK_PATTERNS ⇒ built-in default (never disabled)"
+
+out=$(RAD_HIGH_RISK_PATTERNS='no-such-path-zzz' plan_high_risk_findings "$RISK_PLAN")
+[[ -z "$out" ]] || fail "plan_high_risk_findings: narrowed non-matching pattern should flag nothing, got: [$out]"
+echo "✓ plan_high_risk_findings: narrowed pattern matching nothing ⇒ empty"
 
 WAIVER_PLAN="$TMP/waivers.md"
 cat > "$WAIVER_PLAN" <<'PLAN'
