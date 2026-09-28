@@ -1,7 +1,10 @@
 # Plan: Vertical-Slice Waves + Mockup-First Artifacts
 Created: 2026-09-28
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-09-28T15:04:38.316Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/vertical-slices-and-mockups
 Adopted-From: https://github.com/seanrreid/RAD_framework/issues/80, https://github.com/seanrreid/RAD_framework/issues/82
 Issue-Title: Steer waves toward vertical slices, not stack-ordered layers (#80) + Optional mockup-first artifact for UI-bearing features (#82)
