@@ -618,4 +618,49 @@ fi
 grep -q "missing or unreadable" "$TMP/err.txt" || fail "plan_light_violations: missing plan must explain on stderr"
 echo "✓ plan_light_violations: missing plan file ⇒ non-zero + stderr message"
 
+# ── default high-risk pattern: whole-segment matching (#143) ─────────────────
+# One plan lists every table path in Files in Scope; the emitted ids are compared
+# to the expected should-match set, so a missing flag AND a spurious flag both fail.
+HR_SHOULD_MATCH="src/auth/login.js
+lib/authentication.ts
+api/oauth-callback.js
+db/migrations/001.sql
+config/secrets.yaml
+services/authService.js
+src/tokens.js
+billing/invoice.rb
+src/authorize.js
+auth.js
+src/payment_gateway.py
+scripts/secret-rotate.sh"
+HR_SHOULD_NOT_MATCH="harness/test/approval-authority-recording.test.js
+docs/authors.md
+src/tokenizer.js
+src/authorship.md
+docs/tokenomics.md
+harness/adapters/git-state-store.js"
+HR_TABLE_PLAN="$TMP/hr-table.md"
+{ printf '# Plan: high-risk table\n## Files in Scope\n| File | Lines | Change |\n|------|-------|--------|\n'
+  printf '%s\n%s\n' "$HR_SHOULD_MATCH" "$HR_SHOULD_NOT_MATCH" | while IFS= read -r p; do
+    printf '| `%s` | 1 | Modify |\n' "$p"
+  done
+} > "$HR_TABLE_PLAN"
+hr_expected=$(printf '%s\n' "$HR_SHOULD_MATCH" | sed "s/^/$RAD_HIGH_RISK_FINDING_PREFIX/" | sort -u)
+out=$(unset RAD_HIGH_RISK_PATTERNS; plan_high_risk_findings "$HR_TABLE_PLAN")
+[[ "$out" == "$hr_expected" ]] \
+  || fail "plan_high_risk_findings (default, unset): expected [$hr_expected], got [$out]"
+out=$(RAD_HIGH_RISK_PATTERNS='' plan_high_risk_findings "$HR_TABLE_PLAN")
+[[ "$out" == "$hr_expected" ]] \
+  || fail "plan_high_risk_findings (default, empty env): expected [$hr_expected], got [$out]"
+while IFS= read -r p; do
+  (unset RAD_HIGH_RISK_PATTERNS; path_matches "$p" "$(plan_high_risk_pattern)") \
+    || fail "default high-risk pattern must match $p"
+done <<< "$HR_SHOULD_MATCH"
+while IFS= read -r p; do
+  if (unset RAD_HIGH_RISK_PATTERNS; path_matches "$p" "$(plan_high_risk_pattern)"); then
+    fail "default high-risk pattern must NOT match $p"
+  fi
+done <<< "$HR_SHOULD_NOT_MATCH"
+echo "✓ default high-risk pattern: 12 whole-segment paths flagged, 6 substring look-alikes (authority/authors/tokenizer/…) not — unset and empty env"
+
 echo "ALL PASS"

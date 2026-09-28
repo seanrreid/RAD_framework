@@ -264,7 +264,13 @@ path_exists_on_ref() {
 
 # Built-in high-risk pattern, used when RAD_HIGH_RISK_PATTERNS is unset OR empty.
 # The ONLY copy: scripts/lint-plan.sh reads it through plan_high_risk_pattern.
-readonly RAD_HIGH_RISK_DEFAULT_PATTERN='auth|payment|billing|migration|secret|credential|token'
+# Matches whole path segments, not substrings: a stem must start at the path start
+# or after a / _ . - separator, may carry an optional plural or auth suffix
+# (authn/authz/authentication/authorize…), and must be followed by a separator,
+# a capital or digit (camelCase/numbered: authService, auth2), or the path end.
+# Substring matching (#143) flagged authority/authors/tokenizer as high-risk.
+# Must stay BSD grep -E (ERE) compatible — path_matches evaluates it.
+readonly RAD_HIGH_RISK_DEFAULT_PATTERN='(^|[/_.-])(o?auth(n|z|entication|enticate|orization|orize)?|payments?|billing|migrations?|secrets?|credentials?|tokens?)([/_.-]|[A-Z0-9]|$)'
 
 # Prefix of every high-risk finding id; the rest of the id is the scope path.
 readonly RAD_HIGH_RISK_FINDING_PREFIX='high-risk:'
