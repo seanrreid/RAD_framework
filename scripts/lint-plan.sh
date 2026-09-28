@@ -72,12 +72,41 @@ if [[ -n "$STATUS" ]] && ! echo "$VALID_STATUSES" | grep -qw "$STATUS"; then
   ERRORS+=("Invalid Status value: '$STATUS'. Must be one of: $VALID_STATUSES")
 fi
 
+# ── Planning tier ─────────────────────────────────────────────────────────────
+# Parsed by plan_tier (header block only). No `Tier:` line ⇒ standard, so an
+# untiered plan lints exactly as before. Any other value — an empty `Tier:` line
+# included — is an ERROR: a typo must never silently lint as standard. A failed
+# tier read is an ERROR too, and the stricter standard section set then applies.
+TIER_LIGHT="light"
+TIER_STANDARD="standard"
+TIER=""
+TIER_RC=0
+TIER=$(plan_tier "$PLAN_FILE") || TIER_RC=$?
+if [[ "$TIER_RC" -ne 0 ]]; then
+  ERRORS+=("tier scan failed: plan_tier exited $TIER_RC for $PLAN_FILE — tier could not be determined")
+elif [[ "$TIER" != "$TIER_LIGHT" && "$TIER" != "$TIER_STANDARD" ]]; then
+  ERRORS+=("Invalid Tier: '$TIER' (expected light or standard)")
+fi
+
 # ── Required sections ─────────────────────────────────────────────────────────
 
 REQUIRED_SECTIONS=("Context" "Scope" "Acceptance Criteria" "Agent Scope" "Files in Scope" "Execution Notes" "Wave Plan" "Tests to Write" "Non-Goals" "Risks")
-for section in "${REQUIRED_SECTIONS[@]}"; do
-  has_section "$section" || ERRORS+=("Missing required section: ## $section")
-done
+# Light plans may omit Scope, Agent Scope, Execution Notes and Risks. A separate
+# literal (never a mutation of REQUIRED_SECTIONS) keeps bash 3.2 happy.
+LIGHT_REQUIRED_SECTIONS=("Context" "Acceptance Criteria" "Files in Scope" "Wave Plan" "Tests to Write" "Non-Goals")
+
+require_sections() {
+  local section
+  for section in "$@"; do
+    has_section "$section" || ERRORS+=("Missing required section: ## $section")
+  done
+}
+
+if [[ "$TIER" == "$TIER_LIGHT" ]]; then
+  require_sections "${LIGHT_REQUIRED_SECTIONS[@]}"
+else
+  require_sections "${REQUIRED_SECTIONS[@]}"
+fi
 
 # ── Acceptance Criteria — non-empty, and every task validates against one ──────
 
@@ -461,6 +490,18 @@ collect_marker_blockers() {
   done <<< "$markers"
 }
 
+# Light-tier bound violations (plan_light_violations prints nothing for a
+# standard or within-bounds plan). Non-waivable, so never matched to ## Waivers.
+collect_light_blockers() {
+  local violations line rc=0
+  violations=$(plan_light_violations "$PLAN_FILE") || rc=$?
+  [[ "$rc" -eq 0 ]] || { blocker_scan_failed plan_light_violations "$rc"; return 0; }
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    BLOCKERS+=("$line")
+  done <<< "$violations"
+}
+
 collect_high_risk_blockers() {
   local waivers id rc=0
   HIGH_RISK_FINDINGS=$(plan_high_risk_findings "$PLAN_FILE") || rc=$?
@@ -507,6 +548,7 @@ collect_empty_justification_warnings() {
 }
 
 collect_marker_blockers
+collect_light_blockers
 collect_high_risk_blockers
 collect_waiver_warnings
 collect_empty_justification_warnings
