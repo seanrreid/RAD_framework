@@ -9,3 +9,4 @@ Executor role: architect
 | Step | Wave | Task | Status | Commit | Time |
 |------|------|------|--------|--------|------|
 | 1 | Wave 1 | Blocker helpers in plan-paths.sh | ✓ complete | 072fdf2 | 13:46 UTC |
+| 2 | Wave 1 | check-approval-blockers.sh | ✓ complete | ad4c485 | 13:48 UTC |
