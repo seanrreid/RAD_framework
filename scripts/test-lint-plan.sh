@@ -17,6 +17,7 @@
 #     clarify-naming waivers warned; fenced example waivers ignored
 #   - stack-order wave advisory (layered waves only; mixed/single/unknown silent)
 #   - missing-mockup advisory (present, absent, fenced refs)
+#   - empty Files in Scope table (#145): named error + exit 1, never silent
 # Self-contained (no external harness): writes temp fixture plans, runs the real
 # lint-plan.sh, and asserts on output/exit code. Runs under bash 3.2+ (set -u safe).
 #
@@ -921,6 +922,29 @@ t_tier_absent_identical() {
   echo "✓ TIER(g): untiered plans ⇒ output byte-identical to the pre-tier baseline"
 }
 
+# ── Empty Files in Scope table (#145) ─────────────────────────────────────────
+# A header + separator with no data rows used to abort lint under pipefail with
+# NO output and exit 1. It must now name the error under Errors and exit 1; the
+# same plan with a row still lints valid (hermetic GREPO fixture).
+EMPTY_SCOPE_ERROR="✗ Files in Scope table has no rows — declare every file the plan changes"
+t_empty_files_in_scope() {
+  local base="$GREPO/.agents/plans"
+  write_plan "$base/empty-scope.md" "" "src/app.js:1-2"
+  ( tier_lint empty-scope.md
+    [[ -n "$FRESH_OUT" ]] || fail "EMPTY-SCOPE: lint exited $FRESH_CODE with no output"
+    assert_out_has "EMPTY-SCOPE" "Errors (must fix before approval):"
+    assert_out_has "EMPTY-SCOPE" "$EMPTY_SCOPE_ERROR"
+    assert_code "EMPTY-SCOPE" 1 ) || exit 1
+  echo "✓ EMPTY-SCOPE(a): header-only Files in Scope table ⇒ named error, exit 1, output non-empty"
+
+  write_plan "$base/one-row-scope.md" "| src/app.js | 1-2 | x |" "src/app.js:1-2"
+  ( tier_lint one-row-scope.md
+    assert_out_lacks "EMPTY-SCOPE" "Files in Scope table has no rows"
+    assert_out_has "EMPTY-SCOPE" "✓ one-row-scope.md — plan is valid"
+    assert_code "EMPTY-SCOPE" 0 ) || exit 1
+  echo "✓ EMPTY-SCOPE(b): same plan with one row ⇒ plan is valid, exit 0"
+}
+
 t_missing_task_file
 t_multi_file_task_line
 t_budget_bare_number
@@ -946,4 +970,5 @@ t_tier_light_sections
 t_tier_invalid_values
 t_tier_light_blockers
 t_tier_absent_identical
+t_empty_files_in_scope
 echo "ALL PASS"

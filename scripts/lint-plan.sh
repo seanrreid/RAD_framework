@@ -122,6 +122,20 @@ if has_section "Acceptance Criteria"; then
   fi
 fi
 
+# ── Files in Scope — table has at least one data row ──────────────────────────
+# Read once here; the rename advisory below reuses DECLARED_IN_SCOPE only when
+# the read succeeded. A failed read is an ERROR (fail closed), never "no rows".
+FILES_IN_SCOPE_RC=0
+DECLARED_IN_SCOPE=""
+if has_section "Files in Scope"; then
+  DECLARED_IN_SCOPE=$(plan_files_in_scope "$PLAN_FILE") || FILES_IN_SCOPE_RC=$?
+  if [[ "$FILES_IN_SCOPE_RC" -ne 0 ]]; then
+    ERRORS+=("Files in Scope scan failed: plan_files_in_scope exited $FILES_IN_SCOPE_RC for $PLAN_FILE — declared scope could not be read")
+  elif [[ -z "$DECLARED_IN_SCOPE" ]]; then
+    ERRORS+=("Files in Scope table has no rows — declare every file the plan changes")
+  fi
+fi
+
 # Adopted plans require Issue Gaps
 if [[ -n "$ADOPTED_FROM" ]]; then
   has_section "Issue Gaps" || ERRORS+=("Adopted plans require ## Issue Gaps section (captures assumptions from under-specified issue)")
@@ -275,8 +289,7 @@ token_is_path_shaped() {
   echo "$token" | grep -qE "^[A-Za-z0-9_.-]+\.${RAD_ANCHOR_EXT}\$"
 }
 
-if has_section "Files in Scope"; then
-  DECLARED_IN_SCOPE=$(plan_files_in_scope "$PLAN_FILE")
+if has_section "Files in Scope" && [[ "$FILES_IN_SCOPE_RC" -eq 0 ]]; then
   RENAME_WARNED=""
   while IFS= read -r change_cell; do
     change_cell_describes_rename "$change_cell" || continue

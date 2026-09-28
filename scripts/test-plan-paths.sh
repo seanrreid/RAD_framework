@@ -663,4 +663,47 @@ while IFS= read -r p; do
 done <<< "$HR_SHOULD_NOT_MATCH"
 echo "✓ default high-risk pattern: 12 whole-segment paths flagged, 6 substring look-alikes (authority/authors/tokenizer/…) not — unset and empty env"
 
+# ── plan_files_in_scope: empty table, missing plan, normal output (#145) ─────
+# A header + separator with no data rows must print nothing and SUCCEED — under
+# set -euo pipefail the old grep -v exit 1 silently aborted lint-plan.sh.
+FIS_EMPTY_PLAN="$TMP/fis-empty.md"
+printf '# Plan: fis\n## Files in Scope\n| File | Lines | Change |\n|------|-------|--------|\n\n## Wave Plan\n' > "$FIS_EMPTY_PLAN"
+fis_rc=0
+out=$(plan_files_in_scope "$FIS_EMPTY_PLAN") || fis_rc=$?
+[[ "$fis_rc" -eq 0 ]] || fail "plan_files_in_scope (empty table): expected exit 0, got $fis_rc"
+[[ -z "$out" ]] || fail "plan_files_in_scope (empty table): expected no output, got [$out]"
+FIS_NOSECTION_PLAN="$TMP/fis-nosection.md"
+printf '# Plan: fis\n## Wave Plan\n' > "$FIS_NOSECTION_PLAN"
+fis_rc=0
+out=$(plan_files_in_scope "$FIS_NOSECTION_PLAN") || fis_rc=$?
+[[ "$fis_rc" -eq 0 && -z "$out" ]] || fail "plan_files_in_scope (no section): expected exit 0 + no output, got $fis_rc [$out]"
+echo "✓ plan_files_in_scope: header-only table / no section ⇒ exit 0, no output"
+
+if plan_files_in_scope "$TMP/does-not-exist.md" >/dev/null 2>"$TMP/err.txt"; then
+  fail "plan_files_in_scope: missing plan file must return non-zero"
+fi
+grep -q "missing or unreadable" "$TMP/err.txt" || fail "plan_files_in_scope: missing plan must explain on stderr"
+if plan_files_in_scope "" >/dev/null 2>"$TMP/err.txt"; then
+  fail "plan_files_in_scope: empty plan argument must return non-zero"
+fi
+echo "✓ plan_files_in_scope: missing plan / empty argument ⇒ non-zero + stderr message"
+
+FIS_ROWS_PLAN="$TMP/fis-rows.md"
+cat > "$FIS_ROWS_PLAN" <<'FIS'
+# Plan: fis
+## Files in Scope
+| File | Lines | Change |
+|------|-------|--------|
+| `src/a.js` | 1-2 | Modify |
+| [path] | 1 | placeholder |
+|  src/b.js  | 3 | Modify |
+
+## Wave Plan
+| not/scope.js | 1 | outside the section |
+FIS
+out=$(plan_files_in_scope "$FIS_ROWS_PLAN")
+[[ "$out" == "src/a.js
+src/b.js" ]] || fail "plan_files_in_scope (rows): expected [src/a.js src/b.js], got [$out]"
+echo "✓ plan_files_in_scope: data rows ⇒ paths only (header, separator, placeholder, other sections skipped)"
+
 echo "ALL PASS"
