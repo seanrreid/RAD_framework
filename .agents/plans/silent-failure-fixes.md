@@ -1,7 +1,7 @@
 # Plan: Silent-Failure Fixes (empty scope table, missing blocker script)
 Created: 2026-09-28
 Author: architect
-Status: approved
+Status: in-progress
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-09-28T16:21:28.554Z
 Recorded-By: sean@torchcodelab.com
