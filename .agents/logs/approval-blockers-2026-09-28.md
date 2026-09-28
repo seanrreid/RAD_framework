@@ -8,3 +8,4 @@ Executor role: architect
 
 | Step | Wave | Task | Status | Commit | Time |
 |------|------|------|--------|--------|------|
+| 1 | Wave 1 | Blocker helpers in plan-paths.sh | ✓ complete | 072fdf2 | 13:46 UTC |
