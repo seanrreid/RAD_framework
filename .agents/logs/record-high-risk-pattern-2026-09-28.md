@@ -8,3 +8,4 @@ Executor role: architect
 
 | Step | Wave | Task | Status | Commit | Time |
 |------|------|------|--------|--------|------|
+| 1 | Wave 1 | Default-pattern predicate and the blocker script's tag line | ✓ complete | 9da88e2 | 19:41 UTC |
