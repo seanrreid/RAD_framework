@@ -547,6 +547,81 @@ Reading the output:
 - **`overallRatioPct`** — summed `cacheRead` over summed `input + cacheRead`
   across the listed attempts only.
 
+### Step 4f3: Fold spend by model
+
+Since #119 every wave records a `wave-started` event, which carries `data.model`
+when the plan declared a `Model:` line. Joining those with `wave-attempt` usage
+gives per-MODEL spend and reliability. The counting lives in `harness/events.js`
+(`modelTierSpend`, `modelTierAdvisories`) — import them, never re-implement them.
+Same invocation convention as Steps 4c–4f2: run from the repo root;
+`RAD_STATE_DIR` (default `.agents/state`) exists only for fixture testing. The
+advisory floor is the same `TIERING_MIN_FEATURES` as Step 4f, applied per model
+group. This step only reads; it writes nothing.
+
+```bash
+node --input-type=module -e '
+import { readFileSync, readdirSync, existsSync } from "node:fs";
+import { join } from "node:path";
+const { modelTierSpend, modelTierAdvisories } = await import("./harness/events.js");
+
+// Minimum DISTINCT features with wave history before any tiering advisory
+// renders. Below it, a rate describes one or two plans, not a model tier.
+const TIERING_MIN_FEATURES = 3;
+
+const stateDir = process.env.RAD_STATE_DIR || ".agents/state";
+const features = existsSync(stateDir)
+  ? readdirSync(stateDir, { withFileTypes: true })
+      .filter((d) => d.isDirectory())
+      .map((d) => d.name)
+      .filter((f) => existsSync(join(stateDir, f, "events.jsonl")))
+      .sort()
+  : [];
+
+// Waves are joined on (feature, wave), so one concatenated history is safe.
+const history = features.flatMap((feature) =>
+  readFileSync(join(stateDir, feature, "events.jsonl"), "utf8")
+    .split("\n").filter(Boolean).map((l) => JSON.parse(l)));
+const stats = modelTierSpend(history);
+const advisories = modelTierAdvisories(stats, { minFeatures: TIERING_MIN_FEATURES });
+
+const pct = (n, d) => (d === 0 ? 0 : Math.round((100 * n) / d));
+// meanTokens is over known-usage waves only; null (render `unknown`) when none.
+const groups = Object.fromEntries(Object.entries(stats.groups).map(([model, g]) => {
+  const known = g.waves - g.unknownUsage;
+  return [model, { ...g, firstAttemptSuccessPct: pct(g.firstAttemptSuccess, g.waves),
+    retriedPct: pct(g.retried, g.waves),
+    meanTokens: known > 0 ? Math.round(g.tokens / known) : null }];
+}));
+console.log(JSON.stringify({ groups, features: stats.features, advisories,
+  minFeatures: TIERING_MIN_FEATURES }, null, 2));
+'
+```
+
+Reading the output:
+
+- **`groups`** — keyed by model: a declared `Model:` string, `default` (the wave
+  recorded `wave-started` but declared no model — the deliver default, whatever
+  it was at the time), or `unrecorded` (a pre-#119 wave with no `wave-started`;
+  its model is unknowable). Per group: `waves` ((feature, wave) pairs — every
+  rate is out of this n), `features` (distinct features), `firstAttemptSuccess`
+  / `firstAttemptSuccessPct`, `retried` / `retriedPct` (more than one attempt),
+  `tokens` (summed over known-usage waves only), `unknownUsage` (waves with any
+  usage-less attempt), and `meanTokens` = `tokens / (waves - unknownUsage)`,
+  `null` when no wave in the group reported usage — render `unknown`, never 0.
+- **`features`** — distinct features contributing waves across all groups.
+- **`advisories[]`** — `{ kind, model, features, waves, meanTokens, unknownUsage }`,
+  only for groups with at least `minFeatures` features and never for
+  `unrecorded`. `downgrade` — the `default` group succeeded first-attempt in
+  every wave. `upgrade` — a group retried in at least 50% of its waves
+  (`UPGRADE_RETRY_RATE`); the retried count R is `groups[model].retried`.
+- **`advisories: []`** — no advisory fired. Never render an empty list; render
+  exactly one of two lines from the Spend by model template below. If no
+  non-`unrecorded` group has at least `minFeatures` features, render the
+  insufficient-history line (F = the largest such group's `features`, 0 if none).
+  Otherwise the floor was met and nothing crossed a threshold: render the
+  "No spend advisories: N group(s) met the floor" line, N = the count of
+  non-`unrecorded` groups at or above `minFeatures`.
+
 ### Step 4g: Route recurring signals to prompt surfaces
 
 Some failure signals point at the INSTRUCTIONS the wave agent was given, not at
@@ -829,11 +904,44 @@ Based on [features] features (floor: [minFeatures]):
  position with small n is weak evidence even above the feature floor.]
 
 [Render this note verbatim in every state, including the degradation states:]
-Spend-based tiering advice is deliberately absent. Recorded `input_tokens` is the
-uncached remainder, so relative spend varies with cache-hit rate and scheduling
-rather than with what a wave costs. Usage now carries the optional cache fields
-(`cacheRead` / `cacheWrite` / `cost`, #121) — see the Cache-Hit Readout below —
-but spend-derived tiering advice is still deferred (tracked in #65).
+The per-position rates above are outcome-only — they carry no spend. Spend-derived
+tiering advice lives in the Spend by model subsection below (Step 4f3), grouped by
+the recorded wave model. Recorded `input_tokens` is the uncached remainder, so
+token totals vary with cache-hit rate and scheduling — see the Cache-Hit Readout
+below (`cacheRead` / `cacheWrite` / `cost`, #121).
+
+#### Spend by model
+[From Step 4f3. Render in every state of the section above, including its
+ degradation states — this subsection has its own floor. If `groups` is empty,
+ render the table header with no rows, then the insufficient-history line.]
+| Model | Features | Waves | First-attempt % | Retried % | Mean tokens / known-usage wave | Unknown-usage waves |
+|-------|----------|-------|-----------------|-----------|--------------------------------|---------------------|
+| `[model]` | [features] | [waves] | [firstAttemptSuccessPct]% (n=[waves]) | [retriedPct]% (n=[waves]) | [meanTokens] (n=[waves − unknownUsage])   [meanTokens null: "unknown"] | [unknownUsage] |
+...
+[One line per advisories entry, in output order:]
+[kind downgrade:]
+- `default` waves succeeded first-attempt in all [waves] waves across [features]
+  features — candidates for a cheaper `Model:` line
+[kind upgrade:]
+- `[model]` waves retried in [groups[model].retried] of [waves] (≥ 50%) across
+  [features] features — consider a stronger model or splitting the wave
+[If advisories is empty, render EXACTLY ONE of these two lines instead. F is the
+ largest `features` among groups other than `unrecorded` (0 if none); N is the
+ count of non-`unrecorded` groups whose `features` ≥ minFeatures.]
+[If N is 0 (no non-`unrecorded` group reaches the floor):]
+Insufficient history for spend advisories ([F] of [minFeatures] features with
+recorded models)
+[Else (N ≥ 1 — the floor was met but nothing crossed a threshold):]
+No spend advisories: [N] group(s) met the [minFeatures] floor and none crossed a
+downgrade or upgrade threshold.
+
+[Render this caveat verbatim in every state:]
+`default` means the deliver default model, whatever it was when the wave ran — not
+one fixed model. `unrecorded` waves (pre-#119 logs, no `wave-started`) are shown
+for completeness but never advised on. Unknown-usage waves are excluded from mean
+tokens, never counted as 0.
+[Suggestion only — never edit plans, never block. Always quote the n; a group
+ with small n is weak evidence even above the feature floor.]
 
 ### Cache-Hit Readout
 [From Step 4f2. Omit this section entirely if no per-feature events.jsonl exists.]

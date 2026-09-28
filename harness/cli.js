@@ -733,6 +733,9 @@ export async function deliverCommand(argv, ctx) {
       // Empty for a plan that declares none, which leaves the spine's behavior
       // and its event sequence unchanged.
       waveVerify: planCtx.waveVerify,
+      // Per-wave `Model:` ids (parseWaveModels — the sole Model: parser), recorded
+      // on each wave-started. Empty for a plan that declares none.
+      waveModels: planCtx.waveModels,
     });
   } catch (err) {
     // Unexpected spine throw: still preserve the worktree (so the operator can

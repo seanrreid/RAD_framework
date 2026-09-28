@@ -695,6 +695,192 @@ export function cacheUsage(history) {
   return out;
 }
 
+// ── Model-tier spend + advisories (appended; pure folds, no I/O) ─────────────
+
+/** A group whose retried/waves ratio reaches this rate is advised to upgrade. */
+export const UPGRADE_RETRY_RATE = 0.5;
+/** Model label for a wave that recorded `wave-started` but declared no model. */
+const MODEL_DEFAULT = 'default';
+/** Model label for a legacy wave with no `wave-started` (model is unknowable). */
+const MODEL_UNRECORDED = 'unrecorded';
+/** Usage fields summed into a wave's token spend (cache fields are optional). */
+const TIER_TOKEN_FIELDS = ['input', 'output', 'cacheRead', 'cacheWrite'];
+
+/** (feature, wave) join key for a tier event, or null when it cannot be placed. */
+function tierKeyOf(event) {
+  if (!event || typeof event !== 'object' || !event.data || typeof event.data !== 'object') return null;
+  if (event.type !== 'wave-started' && event.type !== 'wave-attempt') return null;
+  if (typeof event.feature !== 'string' || event.feature === '') return null;
+  const wave = event.data.wave;
+  if (typeof wave !== 'number' || !Number.isFinite(wave)) return null;
+  return JSON.stringify([event.feature, wave]);
+}
+
+/** A reported usage object, or null (absent / null / non-object / array). */
+const usageOf = (data) =>
+  data.usage && typeof data.usage === 'object' && !Array.isArray(data.usage) ? data.usage : null;
+
+/** Record one placeable tier event onto its (feature, wave) accumulator. */
+function addTierEvent(wave, data, type) {
+  if (type === 'wave-started') {
+    wave.started = true;
+    if (wave.model === null && typeof data.model === 'string' && data.model !== '') wave.model = data.model;
+    return;
+  }
+  const ordinal = Number.isInteger(data.attempt) && data.attempt > 0 ? data.attempt : null;
+  const outcome = typeof data.outcome === 'string' ? data.outcome : null;
+  wave.attempts.push({ ordinal, outcome, usage: usageOf(data) });
+}
+
+/** Join wave-started + wave-attempt events per (feature, wave), history order. */
+function collectTierWaves(history) {
+  const waves = new Map();
+  for (const event of history) {
+    const key = tierKeyOf(event);
+    if (key === null) continue;
+    let wave = waves.get(key);
+    if (!wave) {
+      wave = { feature: event.feature, started: false, model: null, attempts: [] };
+      waves.set(key, wave);
+    }
+    addTierEvent(wave, event.data, event.type);
+  }
+  return waves;
+}
+
+/** Declared model, else 'default' when started without one, else 'unrecorded'. */
+const tierModelOf = (wave) => wave.model ?? (wave.started ? MODEL_DEFAULT : MODEL_UNRECORDED);
+
+/** Outcome of the lowest explicit attempt; first in log order when none carry one. */
+function firstAttemptOutcome(attempts) {
+  let first = attempts[0];
+  for (const a of attempts) {
+    if (a.ordinal !== null && (first.ordinal === null || a.ordinal < first.ordinal)) first = a;
+  }
+  return first.outcome;
+}
+
+/** Summed token spend over every attempt, or null when any attempt lacks usage. */
+function waveTokens(attempts) {
+  let sum = 0;
+  for (const { usage } of attempts) {
+    if (usage === null) return null;
+    for (const field of TIER_TOKEN_FIELDS) if (isTokenCount(usage[field])) sum += usage[field];
+  }
+  return sum;
+}
+
+/** Fold one joined wave into its model group (feature sets are sized later). */
+function addWaveToGroup(groups, wave) {
+  const model = tierModelOf(wave);
+  const group = groups[model] ||
+    (groups[model] = { waves: 0, features: new Set(), firstAttemptSuccess: 0, retried: 0, tokens: 0, unknownUsage: 0 });
+  group.waves += 1;
+  group.features.add(wave.feature);
+  if (firstAttemptOutcome(wave.attempts) === 'success') group.firstAttemptSuccess += 1;
+  if (wave.attempts.length > 1) group.retried += 1;
+  const tokens = waveTokens(wave.attempts);
+  if (tokens === null) group.unknownUsage += 1;
+  else group.tokens += tokens;
+}
+
+/**
+ * Pure fold over an event history → per-MODEL wave spend and reliability, the
+ * raw material for model-tier advisories. Waves are joined on (feature, wave)
+ * across `wave-started` and `wave-attempt`; only a pair with at least one
+ * `wave-attempt` is a wave (a crash-orphaned `wave-started` contributes nothing).
+ *
+ * A wave's model is the first non-empty string `data.model` on any of its
+ * `wave-started` events; `'default'` when it has `wave-started` events but none
+ * declares a model; `'unrecorded'` when it has no `wave-started` (legacy logs).
+ * Per group:
+ *   - `waves`               — (feature, wave) pairs in the group
+ *   - `features`            — distinct features in the group (a number)
+ *   - `firstAttemptSuccess` — waves whose first attempt (lowest positive-integer
+ *                             `data.attempt`; log order when none) was 'success'
+ *   - `retried`             — waves with more than one `wave-attempt` (the same
+ *                             definition as `waveReliability`)
+ *   - `tokens`              — input + output + cacheRead + cacheWrite summed over
+ *                             waves where EVERY attempt reported a usage object;
+ *                             an invalid/absent field on such an attempt counts 0
+ *   - `unknownUsage`        — waves with any usage-less attempt; they add nothing
+ *                             to `tokens` (unknown spend is never counted as 0)
+ * Top-level `features` counts distinct features overall. Malformed events are
+ * skipped; `{ groups: {}, features: 0 }` on [] / null / non-array; never throws.
+ *
+ * @param {Event[]} history - in-memory event array (no I/O performed)
+ * @returns {{ groups: Object<string,{ waves: number, features: number,
+ *   firstAttemptSuccess: number, retried: number, tokens: number,
+ *   unknownUsage: number }>, features: number }}
+ */
+export function modelTierSpend(history) {
+  const out = { groups: {}, features: 0 };
+  if (!Array.isArray(history)) return out;
+  const features = new Set();
+  for (const wave of collectTierWaves(history).values()) {
+    if (wave.attempts.length === 0) continue;
+    features.add(wave.feature);
+    addWaveToGroup(out.groups, wave);
+  }
+  for (const group of Object.values(out.groups)) group.features = group.features.size;
+  out.features = features.size;
+  return out;
+}
+
+/** A group count is usable iff it is a non-negative integer. */
+const isCount = (v) => Number.isInteger(v) && v >= 0;
+
+/** A stats group is usable iff every count is valid and waves is positive. */
+const isTierGroup = (g) =>
+  g !== null && typeof g === 'object' && g.waves > 0 &&
+  ['waves', 'features', 'firstAttemptSuccess', 'retried', 'unknownUsage'].every((k) => isCount(g[k])) &&
+  isTokenCount(g.tokens);
+
+/** Advisory kinds a qualifying group earns ('unrecorded' is never advised). */
+function tierAdviceKinds(model, group) {
+  const kinds = [];
+  if (model === MODEL_DEFAULT && group.firstAttemptSuccess === group.waves) kinds.push('downgrade');
+  if (group.retried / group.waves >= UPGRADE_RETRY_RATE) kinds.push('upgrade');
+  return kinds;
+}
+
+/** Locale-independent string order, so advisory sorting is deterministic. */
+const compareCodeUnits = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+
+/** One advisory row; meanTokens is null when no wave in the group has known usage. */
+function tierAdvisory(kind, model, group) {
+  const known = group.waves - group.unknownUsage;
+  const meanTokens = known > 0 ? group.tokens / known : null;
+  return { kind, model, features: group.features, waves: group.waves, meanTokens, unknownUsage: group.unknownUsage };
+}
+
+/**
+ * Pure, deterministic advisories over `modelTierSpend` output. A group is
+ * considered only when its `features` >= `minFeatures`; `'unrecorded'` is never
+ * advised. `'downgrade'` is emitted only for `'default'` at 100% first-attempt
+ * success; `'upgrade'` for any group whose retried/waves >= UPGRADE_RETRY_RATE.
+ * `meanTokens` = tokens / (waves - unknownUsage), or null when that is 0.
+ * Sorted by kind, then model. [] when none qualify or on malformed stats/opts
+ * (minFeatures must be a finite non-negative number); malformed groups are
+ * skipped; never throws.
+ *
+ * @param {{ groups: Object<string, object> }} stats - `modelTierSpend` output
+ * @param {{ minFeatures: number }} opts - distinct-feature floor per group
+ * @returns {Array<{ kind: 'downgrade'|'upgrade', model: string, features: number,
+ *   waves: number, meanTokens: number|null, unknownUsage: number }>}
+ */
+export function modelTierAdvisories(stats, opts) {
+  if (!stats || typeof stats !== 'object' || !stats.groups || typeof stats.groups !== 'object') return [];
+  const minFeatures = opts && typeof opts === 'object' ? opts.minFeatures : undefined;
+  if (typeof minFeatures !== 'number' || !Number.isFinite(minFeatures) || minFeatures < 0) return [];
+  const out = [];
+  for (const [model, group] of Object.entries(stats.groups)) {
+    if (model === MODEL_UNRECORDED || !isTierGroup(group) || group.features < minFeatures) continue;
+    for (const kind of tierAdviceKinds(model, group)) out.push(tierAdvisory(kind, model, group));
+  }
+  return out.sort((a, b) => compareCodeUnits(a.kind, b.kind) || compareCodeUnits(a.model, b.model));
+}
+
 // ── Wave-attempt durability read helpers (#119; appended; pure, no I/O) ──────
 
 /** A wave id is usable iff it is a finite number (the spine stores wave.n). */

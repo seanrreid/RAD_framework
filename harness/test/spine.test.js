@@ -1532,3 +1532,45 @@ test('(dur-f) AC#2 a post-wave veto attempt keeps its provenance keys alongside 
     hook: 'hooks/post-wave/01.sh',
   });
 });
+
+// ── wave-model-attribution: waveModels → wave-started.model (Task 1.1) ──────
+
+test('(wm-a) AC#1 waveModels {1: model} → every wave-1 wave-started carries it, including the retry', async () => {
+  let i = 0;
+  const { state, result } = await runOneWave({
+    runWave: async () => (i++ === 0 ? { outcome: 'fail-tests', summary: 'first' } : { outcome: 'success' }),
+    waveModels: { 1: 'claude-haiku-4-5' },
+  });
+  assert.deepEqual(result, { ok: true, waves: 1 });
+  const started = state.appended.filter((e) => e.type === 'wave-started');
+  assert.deepEqual(started.map((e) => e.data), [
+    { wave: 1, attempt: 1, model: 'claude-haiku-4-5' },
+    { wave: 1, attempt: 2, model: 'claude-haiku-4-5' },
+  ]);
+});
+
+test('(wm-b) AC#2 a wave absent from a NON-empty waveModels map records no model key', async () => {
+  const { state } = await runOneWave({
+    plan: twoWaves,
+    runWave: async () => ({ outcome: 'success' }),
+    waveModels: { 2: 'claude-opus-4-8' },
+  });
+  const [w1, w2] = state.appended.filter((e) => e.type === 'wave-started');
+  assert.ok(!('model' in w1.data), 'wave 1 declared none → model key absent, not undefined');
+  assert.equal(w2.data.model, 'claude-opus-4-8');
+});
+
+test('(wm-c) AC#2 waveModels omitted vs {} vs {1: ""} vs non-string → deep-equal sequences, no model key', async () => {
+  const runWith = async (extra) =>
+    (await runOneWave({ plan: twoWaves, runWave: async () => ({ outcome: 'success' }), ...extra })).state.appended;
+  const omitted = await runWith({});
+  const empty = await runWith({ waveModels: {} });
+  const emptyString = await runWith({ waveModels: { 1: '' } });
+  const nonString = await runWith({ waveModels: { 1: 42 } });
+  assert.deepEqual(empty, omitted);
+  assert.deepEqual(emptyString, omitted);
+  assert.deepEqual(nonString, omitted);
+  const started = omitted.filter((e) => e.type === 'wave-started');
+  assert.equal(started.length, 2);
+  assert.ok(started.every((e) => !('model' in e.data)));
+});
