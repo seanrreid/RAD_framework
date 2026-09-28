@@ -444,6 +444,7 @@ Architect:  /rad-epic-decompose → Gate 0: shapes a GitHub epic into per-child 
 Anyone:     /rad-research → consumes PRD/issue, writes .agents/research/
 Architect:  /rad-design   → drafts + generates .claude/agents/ boundaries
 Team:       /rad-plan     → cuts rad/[feature] branch, commits plan (no PR)
+Team:       /rad-plan --light → same, condensed single-wave plan for small low-risk changes (Tier: light)
 Team:       /rad-adopt    → same as /rad-plan but sourced from a pre-existing issue
 Architect:  /rad-approve  → records approval on the branch tip (Gate 1, no PR)
 Team:       /rad-deliver  → wave execution on the same branch, opens the deliver PR (Gate 2)

@@ -24,6 +24,9 @@
 #   - plan_wave_task_files — `<wave>\t<path>` per task File: path under ### Wave N
 #   - path_layer           — one-word layer classification in fixed precedence
 #   - plan_mockup_refs     — unfenced .agents/mockups/*.html|.htm refs, first-seen
+# …and for light-planning-tier:
+#   - plan_tier             — header-block Tier: value (absent ⇒ standard)
+#   - plan_light_violations — light-tier: <reason> per exceeded light bound
 #
 # Self-contained: builds a temp git-repo fixture (git init + a local bare origin
 # so `origin/main` resolves), copies
@@ -552,5 +555,67 @@ for fn in plan_wave_task_files plan_mockup_refs; do
   grep -q "missing or unreadable" "$TMP/err.txt" || fail "$fn: missing plan must explain on stderr"
 done
 echo "✓ wave/mockup helpers: missing plan file ⇒ non-zero + stderr message"
+
+# ── plan_tier: header-block Tier: line only ─────────────────────────────────
+check_tier() {
+  local file="$TMP/tier-$1.md" got
+  printf '%b' "$2" > "$file"
+  got=$(plan_tier "$file")
+  [[ "$got" == "$3" ]] || fail "plan_tier ($1): expected [$3], got [$got]"
+}
+check_tier absent   '# Plan\nStatus: draft\n\n## Goal\nx\n'             standard
+check_tier light    '# Plan\nTier: light\n\n## Goal\nx\n'               light
+check_tier padded   '# Plan\nTier:  Light  \n\n## Goal\nx\n'            light
+check_tier standard '# Plan\nTier: standard\n## Goal\n'                 standard
+check_tier bogus    '# Plan\nTier: bogus\n## Goal\n'                    bogus
+check_tier body     '# Plan\nStatus: draft\n\n## Goal\n```\nTier: light\n```\n' standard
+echo "✓ plan_tier: absent ⇒ standard, light / ' Light ' ⇒ light, standard, bogus verbatim, body Tier: ignored"
+
+if plan_tier "$TMP/does-not-exist.md" 2>"$TMP/err.txt"; then
+  fail "plan_tier: missing plan file must return non-zero"
+fi
+grep -q "missing or unreadable" "$TMP/err.txt" || fail "plan_tier: missing plan must explain on stderr"
+echo "✓ plan_tier: missing plan file ⇒ non-zero + stderr message"
+
+# ── plan_light_violations: bounds + risky paths on light plans only ─────────
+# write_tier_plan <file> <tier-header-line> <waves> <tasks-per-wave> <scope-path>
+write_tier_plan() {
+  local file="$1" w t
+  { printf '# Plan: tier fixture\n%s\n\n## Files in Scope\n' "$2"
+    printf '| File | Lines | Change |\n|------|-------|--------|\n| `%s` | 1-10 | Modify |\n\n' "$5"
+    printf '## Wave Plan\n'
+    for ((w = 1; w <= $3; w++)); do
+      printf '### Wave %s\n' "$w"
+      for ((t = 1; t <= $4; t++)); do printf '#### Task %s.%s: t\nFile: %s\n' "$w" "$t" "$5"; done
+    done
+  } > "$file"
+}
+check_violations() {
+  local got
+  got=$(unset RAD_HIGH_RISK_PATTERNS; plan_light_violations "$1")
+  [[ "$got" == "$2" ]] || fail "plan_light_violations ($1): expected [$2], got [$got]"
+}
+write_tier_plan "$TMP/lv-standard.md" "Status: draft" 5 2 docs/readme.md
+check_violations "$TMP/lv-standard.md" ""
+write_tier_plan "$TMP/lv-ok.md" "Tier: light" 1 3 docs/readme.md
+check_violations "$TMP/lv-ok.md" ""
+write_tier_plan "$TMP/lv-waves.md" "Tier: light" 2 1 docs/readme.md
+check_violations "$TMP/lv-waves.md" "light-tier: 2 waves (max 1)"
+write_tier_plan "$TMP/lv-tasks.md" "Tier: light" 1 4 docs/readme.md
+check_violations "$TMP/lv-tasks.md" "light-tier: 4 tasks (max 3)"
+write_tier_plan "$TMP/lv-risk.md" "Tier: light" 1 1 src/auth/login.js
+check_violations "$TMP/lv-risk.md" "light-tier: high-risk path src/auth/login.js"
+write_tier_plan "$TMP/lv-self.md" "Tier: light" 1 1 harness/cli.js
+check_violations "$TMP/lv-self.md" "light-tier: self-protected path harness/cli.js"
+write_tier_plan "$TMP/lv-both.md" "Tier: light" 1 1 scripts/token-x.sh
+check_violations "$TMP/lv-both.md" "light-tier: high-risk path scripts/token-x.sh
+light-tier: self-protected path scripts/token-x.sh"
+echo "✓ plan_light_violations: standard 5 waves ⇒ none, light within bounds ⇒ none, waves / tasks / high-risk / self-protected / both each named"
+
+if plan_light_violations "$TMP/does-not-exist.md" 2>"$TMP/err.txt"; then
+  fail "plan_light_violations: missing plan file must return non-zero"
+fi
+grep -q "missing or unreadable" "$TMP/err.txt" || fail "plan_light_violations: missing plan must explain on stderr"
+echo "✓ plan_light_violations: missing plan file ⇒ non-zero + stderr message"
 
 echo "ALL PASS"

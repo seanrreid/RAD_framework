@@ -102,6 +102,14 @@ This will:
 No PR is opened. Then wait. Do not run `/rad-deliver` until the architect runs
 `/rad-approve`, which records approval on the branch tip.
 
+**Choosing a planning tier.** For small, single-wave, low-risk work outside RAD's
+own paths (`harness/`, `scripts/`, `.claude/`, `.agents/state/`), use
+`/rad-plan --light`: a quick scope check replaces the full research and the plan is
+condensed (`Tier: light` — at most 1 wave and 3 tasks, no high-risk path). Use
+standard `/rad-plan` for everything else. Both tiers go through `/rad-approve`.
+`/rad-research` and `/rad-design` run once per project, not per change — the
+per-change cost is `/rad-plan` only.
+
 ---
 
 ## Adopting a pre-existing issue (developer, designer, or architect)

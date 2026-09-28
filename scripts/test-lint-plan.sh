@@ -823,6 +823,104 @@ t_missing_mockup_advisory() {
   echo "✓ MK(c): fenced mockup ref ⇒ no advisory, exit 0"
 }
 
+# ── Planning tier (AC#4) ───────────────────────────────────────────────────────
+# All tier cases run in GREPO against src/app.js (on origin, not self-protected)
+# so the only tier-dependent output is what the case asserts on.
+
+# write_tier_plan <out> <tier-line|""> <wave-count> [section-to-drop...]
+# write_plan's fixture with an optional header line inserted after Branch: and
+# each named `## <section>` (heading through the next `## `) removed.
+write_tier_plan() {
+  local out="$1" tier_line="$2" waves="$3"; shift 3
+  local drops
+  drops=$(IFS='|'; printf '%s' "$*")
+  write_plan "$out.base" "| src/app.js | 1-2 | x |" "src/app.js:1-2" "$waves"
+  awk -v tier="$tier_line" -v drops="$drops" '
+    BEGIN { n = split(drops, d, "|"); for (i = 1; i <= n; i++) drop["## " d[i]] = 1 }
+    /^## / { skip = ($0 in drop) }
+    skip { next }
+    { print }
+    /^Branch:/ && tier != "" { print tier }
+  ' "$out.base" > "$out"
+  rm -f "$out.base"
+}
+
+# tier_lint <name> — lint $GREPO/.agents/plans/<name> into FRESH_OUT/FRESH_CODE.
+tier_lint() {
+  unset RAD_HIGH_RISK_PATTERNS
+  run_lint_in_repo "$GREPO" ".agents/plans/$1"
+}
+
+assert_out_has()   { printf '%s\n' "$FRESH_OUT" | grep -qF -e "$2" || fail "$1: missing '$2': $FRESH_OUT"; }
+assert_out_lacks() { if printf '%s\n' "$FRESH_OUT" | grep -qF -e "$2"; then fail "$1: unexpected '$2': $FRESH_OUT"; fi; }
+assert_code()      { [[ "$FRESH_CODE" -eq "$2" ]] || fail "$1: exited $FRESH_CODE (expected $2): $FRESH_OUT"; }
+
+t_tier_light_sections() {
+  local base="$GREPO/.agents/plans"
+  write_tier_plan "$base/tier-light-opt.md" "Tier: light" 1 "Scope" "Agent Scope" "Execution Notes" "Risks"
+  ( tier_lint tier-light-opt.md
+    assert_out_lacks "TIER(a)" "Missing required section"
+    assert_code "TIER(a)" 0 ) || exit 1
+  echo "✓ TIER(a): light plan without Scope/Agent Scope/Execution Notes/Risks ⇒ no missing-section errors"
+
+  write_tier_plan "$base/tier-light-noctx.md" "Tier: light" 1 "Context"
+  ( tier_lint tier-light-noctx.md
+    assert_out_has "TIER(b)" "✗ Missing required section: ## Context"
+    assert_code "TIER(b)" 1 ) || exit 1
+  echo "✓ TIER(b): light plan missing Context ⇒ error, exit 1"
+
+  write_tier_plan "$base/tier-std-noagent.md" "Tier: standard" 1 "Agent Scope"
+  ( tier_lint tier-std-noagent.md
+    assert_out_has "TIER(c)" "✗ Missing required section: ## Agent Scope"
+    assert_code "TIER(c)" 1 ) || exit 1
+  echo "✓ TIER(c): standard plan missing Agent Scope ⇒ still an error"
+}
+
+t_tier_invalid_values() {
+  local base="$GREPO/.agents/plans"
+  write_tier_plan "$base/tier-bogus.md" "Tier: bogus" 1
+  ( tier_lint tier-bogus.md
+    assert_out_has "TIER(d)" "✗ Invalid Tier: 'bogus' (expected light or standard)"
+    assert_code "TIER(d)" 1 ) || exit 1
+  echo "✓ TIER(d): Tier: bogus ⇒ error, exit 1"
+
+  write_tier_plan "$base/tier-empty.md" "Tier:" 1
+  ( tier_lint tier-empty.md
+    assert_out_has "TIER(e)" "✗ Invalid Tier: '' (expected light or standard)"
+    assert_code "TIER(e)" 1 ) || exit 1
+  echo "✓ TIER(e): empty Tier: ⇒ error, exit 1 (never silently standard)"
+}
+
+t_tier_light_blockers() {
+  local base="$GREPO/.agents/plans"
+  write_tier_plan "$base/tier-light-2w.md" "Tier: light" 2
+  ( tier_lint tier-light-2w.md
+    assert_out_has "TIER(f)" "$BLOCKER_HEADING"
+    assert_out_has "TIER(f)" "⛔ light-tier: 2 waves (max 1)"
+    assert_code "TIER(f)" 0 ) || exit 1
+  echo "✓ TIER(f): light plan with 2 waves ⇒ light-tier blocker listed, exit 0"
+}
+
+# A plan with no Tier: header must lint byte-identically to the pre-tier lint.
+# Expected strings were captured from origin/main's lint-plan.sh (f6f6cba).
+TIER_BASELINE_CLEAN="✓ tier-none.md — plan is valid (waves: 1, budget: ~2L)"
+TIER_BASELINE_NOAGENT="Plan lint: tier-none-noagent.md
+
+Errors (must fix before approval):
+  ✗ Missing required section: ## Agent Scope"
+t_tier_absent_identical() {
+  local base="$GREPO/.agents/plans"
+  write_tier_plan "$base/tier-none.md" "" 1
+  ( tier_lint tier-none.md
+    [[ "$FRESH_OUT" == "$TIER_BASELINE_CLEAN" ]] || fail "TIER(g): clean untiered output drifted: $FRESH_OUT"
+    assert_code "TIER(g)" 0 ) || exit 1
+  write_tier_plan "$base/tier-none-noagent.md" "" 1 "Agent Scope"
+  ( tier_lint tier-none-noagent.md
+    [[ "$FRESH_OUT" == "$TIER_BASELINE_NOAGENT" ]] || fail "TIER(g): untiered error output drifted: $FRESH_OUT"
+    assert_code "TIER(g)" 1 ) || exit 1
+  echo "✓ TIER(g): untiered plans ⇒ output byte-identical to the pre-tier baseline"
+}
+
 t_missing_task_file
 t_multi_file_task_line
 t_budget_bare_number
@@ -844,4 +942,8 @@ t_fenced_waiver_ignored
 t_blocker_no_new_output
 t_stack_order_advisory
 t_missing_mockup_advisory
+t_tier_light_sections
+t_tier_invalid_values
+t_tier_light_blockers
+t_tier_absent_identical
 echo "ALL PASS"

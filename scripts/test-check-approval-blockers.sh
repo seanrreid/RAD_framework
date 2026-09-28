@@ -166,4 +166,60 @@ run_check --
 expect "no args" 2; grep -q "usage" "$ERR" || fail "no args: no usage message"
 echo "✓ missing file / empty file / no args ⇒ exit 2 with a reason"
 
+# ── light tier: non-waivable blockers ─────────────────────────────────────────
+# write_tier_plan <file> <tier-line> <scope-path> <waves> <extra-body>
+# One single-task wave per <waves>; <tier-line> is placed in the header block.
+write_tier_plan() {
+  local w
+  { printf '# Plan: fixture\nStatus: pending-review\n%s\n\n## Files in Scope\n' "$2"
+    printf '| File | Lines | Change |\n|------|-------|--------|\n| `%s` | 1-10 | Modify |\n\n' "$3"
+    printf '## Wave Plan\n'
+    for ((w = 1; w <= $4; w++)); do printf '### Wave %s\n#### Task %s.1: t\nFile: %s\n' "$w" "$w" "$3"; done
+    printf '\n%s\n' "$5"
+  } > "$1"
+}
+LIGHT_HINT='(shrink the plan or remove "Tier: light" to make it a standard plan)'
+
+write_tier_plan "$TMP/light-ok.md" "Tier: light" "docs/readme.md" 1 ""
+run_check -- "$TMP/light-ok.md"
+expect "light within limits" 0; expect_empty_stdout "light within limits"
+echo "✓ light plan within limits ⇒ exit 0, empty stdout"
+
+write_tier_plan "$TMP/light-waves.md" "Tier: light" "docs/readme.md" 2 ""
+run_check -- "$TMP/light-waves.md"
+expect "light 2 waves" 1; expect_empty_stdout "light 2 waves"
+grep -Fq "✗ light-tier: 2 waves (max 1) $LIGHT_HINT" "$ERR" \
+  || fail "light 2 waves: stderr must name the violation + hint, got: [$(cat "$ERR")]"
+echo "✓ light plan with 2 waves ⇒ exit 1, violation named with the promotion hint"
+
+write_tier_plan "$TMP/light-self.md" "Tier: light" "harness/cli.js" 1 ""
+run_check -- "$TMP/light-self.md"
+expect "light self-protected" 1; expect_empty_stdout "light self-protected"
+grep -Fq "light-tier: self-protected path harness/cli.js" "$ERR" \
+  || fail "light self-protected: stderr must name the path, got: [$(cat "$ERR")]"
+echo "✓ light plan with a self-protected path ⇒ exit 1"
+
+write_tier_plan "$TMP/light-risk-waived.md" "Tier: light" "$RISK_PATH" 1 \
+  $'## Waivers\n- '"$RISK_ID"': reviewed: login flow only'
+run_check -- "$TMP/light-risk-waived.md"
+expect "light high-risk waived" 1; expect_empty_stdout "light high-risk waived"
+grep -Fq "light-tier: high-risk path $RISK_PATH" "$ERR" \
+  || fail "light high-risk waived: light-tier blocker must stand, got: [$(cat "$ERR")]"
+if grep -q "un-waived" "$ERR"; then fail "light high-risk waived: the high-risk: waiver itself must still apply"; fi
+echo "✓ light plan + high-risk path + matching high-risk waiver ⇒ exit 1 (light-tier blocker stands), empty stdout"
+
+write_tier_plan "$TMP/light-waiver-bullet.md" "Tier: light" "docs/readme.md" 2 \
+  $'## Waivers\n- light-tier: 2 waves (max 1): needs two waves'
+run_check -- "$TMP/light-waiver-bullet.md"
+expect "light-tier waiver bullet" 1; expect_empty_stdout "light-tier waiver bullet"
+grep -Fq "light-tier: 2 waves (max 1)" "$ERR" \
+  || fail "light-tier waiver bullet: violation must still be named, got: [$(cat "$ERR")]"
+echo "✓ a '- light-tier…:' waiver bullet has no effect ⇒ exit 1"
+
+write_tier_plan "$TMP/standard-5.md" "" "docs/readme.md" 5 ""
+run_check -- "$TMP/standard-5.md"
+expect "standard 5 waves" 0; expect_empty_stdout "standard 5 waves"
+[[ ! -s "$ERR" ]] || fail "standard 5 waves: stderr must be empty, got: [$(cat "$ERR")]"
+echo "✓ standard (no Tier:) 5-wave plan ⇒ exit 0 as today"
+
 echo "ALL PASS"
