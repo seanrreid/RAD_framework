@@ -1,7 +1,7 @@
 # Plan: Adversarial Gate Evals + Composed-Path Fixes + Push Guard
 Created: 2026-09-29
 Author: architect
-Status: in-progress
+Status: pending-review
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-09-29T19:42:50.998Z
 Recorded-By: sean@torchcodelab.com
@@ -143,6 +143,7 @@ This is Plan 2 of the verification batch. #109 asks for evals that drive an agen
 | harness/evals/repo.eval.js | 1-90 | New: append-only, self-protected and worktree cases |
 | harness/invariants.js | 45-110 | `evals` / `not_evalable` rule; eval-path existence check |
 | harness/test/invariants.test.js | 140-175 | Tests for AC#9 |
+| scripts/test-lint-invariants.sh | 1-167 | Amendment 1: inline fixture registries declare `evals`/`not_evalable` so the A1–A9 fixtures stay valid under the AC#9 rule |
 | docs/invariants.yaml | 1-170 | Eval links for every entry; new `no-direct-push-to-default`; new anchors |
 | .github/workflows/ci.yml | 100-118 | New `evals-scripted` job |
 | docs/evals.md | 1-50 | New: lanes, adding a case, mutation, live mode |
@@ -293,13 +294,15 @@ Validate: AC#5, AC#6 — `node --test harness/evals/delivery.eval.js` passes, in
 Registry links, CI and docs, once every eval file exists.
 
 #### Task 4.1: Registry links + CI + docs
-File: docs/invariants.yaml:1-170, .github/workflows/ci.yml:100-118, docs/evals.md:1-50
+File: docs/invariants.yaml:1-170, .github/workflows/ci.yml:100-118, docs/evals.md:1-50, scripts/test-lint-invariants.sh:1-167
 What:
 - Add `evals` / `not_evalable` to every registry entry per AC#9, add the `no-direct-push-to-default` invariant and the new CLI-wiring anchors, and mark `push-to-default` as detective in its claim or note.
 - Add the `evals-scripted` CI job per AC#10.
 - Write `docs/evals.md`.
+- **Amendment 1:** add `not_evalable: "fixture"` (or `evals`) to every inline fixture registry in `scripts/test-lint-invariants.sh` that's meant to be valid, so A1–A9 keep testing what they tested. Add a fixture case asserting that an entry with neither key fails as "eval coverage not recorded".
 Validate: AC#9, AC#10, AC#11:
 - `scripts/lint-invariants.sh` exits 0
+- `bash scripts/test-lint-invariants.sh` and `/bin/bash scripts/test-lint-invariants.sh` print ALL PASS
 - `node --test harness/evals/*.eval.js` passes
 - `npm test --prefix harness` passes
 - every `scripts/test-*.sh` passes under `bash` and `/bin/bash`
@@ -332,6 +335,7 @@ None. All paths are architect-owned, and the author is the architect.
 - **Self-protected paths.** `harness/`, `scripts/` and `.github/` trigger advisory lint warnings by design.
 
 ## Issue Gaps
+- **AMENDMENT 1 (2026-09-29, during Wave 1).** Task 1.3's AC#9 schema rule makes the inline "valid" fixture registries in `scripts/test-lint-invariants.sh` (from #155) invalid, because they declare no eval coverage. That file was missing from Files in Scope. It's added to Task 4.1 so the fixtures gain `not_evalable`, plus one new case for the missing-coverage error. No other change to the plan.
 - **ASSUMPTION — bug fixes in scope.** The two composed-path defects found during research are fixed here, with evals proving them. Architect decision, 2026-09-29.
 - **ASSUMPTION — push guard design.** Spine-side detection, `fail-protocol` → abort; offline skips with a `push-check-unavailable` record; spine default off, CLI on. Architect decision, 2026-09-29.
 - **ASSUMPTION — split.** #49 moves to Plan 3 together with the live-eval CI workflow. #109's live mode is supported by the runner here (AC#7), but it isn't wired into CI.
