@@ -200,6 +200,18 @@ scripts/lint-plan.sh .agents/plans/[feature-name].md
 Fix any errors before committing. For adopted plans, `lint-plan.sh` also
 verifies `## Issue Gaps` is non-empty. Warnings should be reviewed but do not block.
 
+Then run the plan-time forecast over the files the plan declares:
+
+```bash
+node harness/cli.js forecast .agents/plans/[feature-name].md
+```
+
+Show every `forecast:` line (and the summary line) to the author as an
+**advisory** before committing — a code-legibility signal from past deliveries
+about the regions this plan touches, not a verdict. Exit 0 → continue. Non-zero
+(2: unreadable plan or path-parse failure; 1: malformed event log) → report the
+reason and continue. The forecast never blocks planning.
+
 ### Step 7: Cut the work branch and commit the plan
 
 Cut `rad/[feature-slug]` from the project default branch and commit the plan doc
