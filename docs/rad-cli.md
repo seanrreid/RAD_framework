@@ -87,10 +87,36 @@ satisfied" (non-zero), never as a pass.
 
 ---
 
+### rad stop-status
+
+```
+rad stop-status <feature> [--stdin]
+```
+
+A read-only query that answers "is `<feature>` parked on a stop a human can
+lift?" by folding the event log through `dormantStop` (`harness/events.js`). A run
+is **dormant** when its latest `deliver-stopped` is class `needs-decision` **and** no
+`deliver-started` follows it. Prints exactly one line and records nothing:
+
+```
+dormant class=needs-decision reason=<reason> wave=<wave|unknown> decision="<decision>"
+none
+```
+
+`scripts/rad-status.sh` (and `/kickoff`) use it for the **Dormant Runs (needs a
+decision)** section, with a `rad deliver <feature> --resume --context "..."` hint.
+
+- `--stdin` reads a JSONL event log from standard input instead of the on-disk file.
+
+**Exit codes:** `0` with either line, `1` on a malformed log or read error, `2`
+on bad arguments.
+
+---
+
 ### rad deliver
 
 ```
-rad deliver <feature> [--model <model-id>]
+rad deliver <feature> [--model <model-id>] [--resume --context <text>]
 ```
 
 Drives wave execution for an approved plan. Reads the plan file, constructs
@@ -171,8 +197,56 @@ path only (the `command` path's model is the configured command's concern):
 RAD_AGENT=sdk node harness/cli.js deliver my-feature --model claude-sonnet-4-6
 ```
 
-**Exit codes:** 0 on full completion, 1 on credential/selection failure, gate
-failure, or blocked wave.
+**Exit codes:**
+
+| Code | Meaning |
+|------|---------|
+| `0` | complete (evidenced by the `deliverCompleted` fold) |
+| `1` | failed — credential/selection or preflight failure, a `failed` stop, or completion not evidenced (an unknown option or missing feature also exits `1`) |
+| `2` | usage / config error — every `--resume` refusal (including `--context` with no value), malformed `RAD_MAX_FAILED_ATTEMPTS` / `RAD_AGENT_PREFLIGHT_TIMEOUT_SECONDS` |
+| `3` | needs a human decision — a `needs-decision` stop (see [Resuming a stopped run](#resuming-a-stopped-run)) |
+
+See the Stop contract in [`rad-wave-contract.md`](./rad-wave-contract.md#stop-contract)
+for the stop classes behind `1` and `3`.
+
+#### Resuming a stopped run
+
+A run that stopped with class `needs-decision` (exit `3` — `token-budget`,
+`failed-attempt-cap`, `approval-changed`, or a matrix/hook-veto `surface`) can be
+re-run with the operator's decision attached:
+
+```bash
+node harness/cli.js deliver my-feature --resume --context "Raised the budget; wave 2 timed out on a flaky network call — retry as-is."
+```
+
+The context (at most **8000** characters, recorded verbatim) is appended as an
+audit-only `run-resumed` event right after `deliver-started`, with `recordedBy`
+(the running `git user.email`) and the prior stop, and is rendered into the
+**first** wave prompt only. Resume grants no authority: anyone may run it, and the
+approved gate plus the between-wave approval and scope re-checks run unchanged.
+A `failed` stop is not resumable — fix the plan or code and plain re-run. Without
+`--resume`, the event sequence and prompts are byte-for-byte unchanged.
+
+Eligibility is checked in this order, **before** any event is appended or any
+worktree is created. Every refusal prints `rad deliver: <reason>` and exits **2**:
+
+| # | Condition | Refusal |
+|---|-----------|---------|
+| 1 | `--context` given no value | `--context requires a value` |
+| 2 | `--context` without `--resume` | `--context requires --resume` |
+| 3 | `--resume` without `--context` | `--resume requires --context "<text>"` |
+| 4 | empty / whitespace-only context | `--context must not be empty` |
+| 5 | context over 8000 characters (rejected, never truncated) | `--context exceeds 8000 characters (<n>)` |
+| 6 | event log unreadable (worktree mode: the branch-tip log) | `cannot read the event log to resume: <error>` |
+| 7 | no `deliver-stopped` in history | `nothing to resume: <feature> has no deliver-stopped event` |
+| 8 | latest stop is class `failed` | `cannot resume a failed stop (<reason>): <decision>` |
+| 9 | `git user.email` unresolvable | `cannot resolve git user.email for run-resumed.recordedBy` |
+
+History is read from the same source the approved gate reads: the feature's log
+in the main checkout, or `git show <branch>:.agents/state/<feature>/events.jsonl`
+when `RAD_WORKTREE` is set. `rad stop-status <feature>` shows whether a run is
+resumable. See [`rad-wave-contract.md`](./rad-wave-contract.md#resuming-a-stopped-run)
+for the prompt block and cap interaction.
 
 #### Cost & frugality (optional)
 
