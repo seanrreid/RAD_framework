@@ -9,3 +9,4 @@ Executor role: architect
 | Step | Wave | Task | Status | Commit | Time |
 |------|------|------|--------|--------|------|
 | 1 | 1 | 1.1 Stop classification module | complete | db368a6 | 2026-09-29T14:57:46Z |
+| 2 | 1 | 1.2 deliver-stopped at every terminal | complete | c2722d7 | 2026-09-29T14:59:36Z |
