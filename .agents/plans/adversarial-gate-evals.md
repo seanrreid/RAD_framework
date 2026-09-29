@@ -1,7 +1,7 @@
 # Plan: Adversarial Gate Evals + Composed-Path Fixes + Push Guard
 Created: 2026-09-29
 Author: architect
-Status: in-progress
+Status: pending-review
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-09-29T20:27:36.972Z
 Recorded-By: sean@torchcodelab.com
@@ -129,10 +129,10 @@ This is Plan 2 of the verification batch. #109 asks for evals that drive an agen
 | harness/test/cli.test.js | 940-990 | Tests for AC#1, AC#2 |
 | harness/spine.js | 175-215 | `pushGuardDemotion` beside `scopeDemotion` |
 | harness/spine.js | 440-490 | JSDoc + `pushGuard = false` param |
-| harness/spine.js | 598-640 | Read the tip before `runWave`; amendment 2: approval re-check before the first wave too |
+| harness/spine.js | 598-625 | Read the tip before `runWave`; amendment 2: approval re-check before the first wave too |
 | harness/spine.js | 770-800 | Read after; demote to `fail-protocol` or append `push-check-unavailable` |
 | harness/test/spine.test.js | 1990-2040 | Tests for AC#3 |
-| harness/test/spine.test.js | 2159-2190 | Amendment 2: first-wave approval re-check tests |
+| harness/test/spine.test.js | 1737-1800 | Amendment 3: rewrite the #151 tests that encoded the wave-1 exemption (ac-a/b/c flip after first call; ac-f/ac-g inverted) |
 | harness/events.js | 16-40 | Typedef: `push-check-unavailable` (7th audit-only event) |
 | harness/events.js | 165-175 | `PHASE_BY_TYPE` comment: absent |
 | scripts/default-tip.sh | 1-60 | New: remote default-branch tip reader (AC#4) |
@@ -246,7 +246,7 @@ Tests:
 Validate: AC#1, AC#2 — `npm test --prefix harness`.
 
 #### Task 1.2: Spine push guard + default-tip script
-File: harness/spine.js:175-215, 440-490, 598-640, 770-800, harness/test/spine.test.js:1990-2040, harness/events.js:16-40, 165-175, scripts/default-tip.sh:1-60, scripts/test-default-tip.sh:1-80
+File: harness/spine.js:175-215, 440-490, 598-625, 770-800, harness/test/spine.test.js:1990-2040, harness/events.js:16-40, 165-175, scripts/default-tip.sh:1-60, scripts/test-default-tip.sh:1-80
 What: Implement Program Design §3, add the `push-check-unavailable` typedef and audit-only note, and write `scripts/default-tip.sh` per AC#4.
 Spine tests (fake `sh`):
 - tip moved → `fail-protocol` → abort, with gate fields
@@ -296,12 +296,18 @@ Validate: AC#5, AC#6 — `node --test harness/evals/delivery.eval.js` passes, in
 Amendment 2: close the wave-1 fingerprint gap before the registry records the invariant as held.
 
 #### Task 4.1: Approval re-check before the first wave
-File: harness/spine.js:598-640, harness/test/spine.test.js:2159-2190, harness/evals/approval.eval.js:1-160
+File: harness/spine.js:598-625, harness/test/spine.test.js:1737-1800, harness/evals/approval.eval.js:1-160
 What:
 - **Spine:** remove the `if (!firstWaveOfRun)` exemption so the `approvalIntact` port (and the gate re-read) also runs before the run's first wave. An approved plan whose body changed after approval then stops with `approval-changed` (class `needs-decision`, exit 3) before any agent runs. The spine default `approvalIntact = () => ({ ok: true })` keeps every existing spine test unchanged.
 - **Spine tests:**
   - edited plan → `approval-changed` before wave 1, `runWave` never called
   - unedited plan → unchanged sequence
+- **Amendment 3, existing tests:** #151's tests at `spine.test.js:1737-1800` encoded the exemption. They were written on the premise that the pre-start gate covered wave 1, but that gate never checks the fingerprint.
+  - **ac-a, ac-b, ac-c:** use a port or gate that flips only after its first call, so they keep testing the between-wave path.
+  - **ac-f (inverted):** a single-wave plan calls `approvalIntact` once, before wave 1.
+  - **ac-g (inverted):** a resumed run checks before its first executed wave.
+  - Put the new first-wave tests (edited plan → `approval-changed` before wave 1, `runWave` never called) in the same region.
+  - Make no other edits to existing tests.
 - **Eval:** `harness/evals/approval.eval.js` `deliver-after-plan-edit` now also asserts that `rad deliver` (CLI) refuses before the adversary runs. Its mutation restores the first-wave exemption in the fixture's `spine.js` copy.
 Validate: AC#5, AC#6 — `npm test --prefix harness`; `node --test harness/evals/approval.eval.js` including `[mutated]`.
 
@@ -350,6 +356,7 @@ None. All paths are architect-owned, and the author is the architect.
 - **Self-protected paths.** `harness/`, `scripts/` and `.github/` trigger advisory lint warnings by design.
 
 ## Issue Gaps
+- **AMENDMENT 3 (2026-09-29, during Wave 4).** Task 4.1 stopped with `blocked_spec`: five #151 spine tests (ac-a, b, c, f, g) encode the wave-1 exemption. #151's design ran the re-check only for `[wave > first]`, on the premise that the pre-start gate already covered wave 1, and that gate doesn't check the fingerprint. Architect decision: rewrite those tests as described in Task 4.1. `spine.test.js:1737-1800` is added to scope.
 - **AMENDMENT 2 (2026-09-29, after Wave 3).** Task 3.1 found that `rad deliver` runs wave 1 of a plan edited after approval: the gate fold ignores the fingerprint, and the spine re-checks `approvalIntact` only from wave 2 (`if (!firstWaveOfRun)`). Only the skill hook catches it before a run. Architect decision: fix now. The new Task 4.1 runs the re-check before the first wave too, and the old Task 4.1 becomes Task 5.1. To stay within the context budget, `docs/evals.md` (part of AC#10) moves to Plan 3, which documents both the scripted and live lanes together. Here the lanes are described in `lib/runner.js`'s header. `harness/evals/smoke.eval.js` (created in Task 2.1) was missing from Files in Scope and is added. Line ranges for two finished new files (`runner.js`, `delivery.eval.js`) are set to their actual lengths.
 - **AMENDMENT 1 (2026-09-29, during Wave 1).** Task 1.3's AC#9 schema rule makes the inline "valid" fixture registries in `scripts/test-lint-invariants.sh` (from #155) invalid, because they declare no eval coverage. That file was missing from Files in Scope. It's added to Task 4.1 so the fixtures gain `not_evalable`, plus one new case for the missing-coverage error. No other change to the plan.
 - **ASSUMPTION — bug fixes in scope.** The two composed-path defects found during research are fixed here, with evals proving them. Architect decision, 2026-09-29.
