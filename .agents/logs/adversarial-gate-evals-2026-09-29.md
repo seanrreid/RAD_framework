@@ -13,3 +13,4 @@ Executor role: architect
 | 3 | Wave 1 | Registry eval-link schema | ✓ done_with_concerns (test-lint-invariants.sh fixtures now invalid → amendment 1) | cfc797d | 15:49 |
 | — | Amend | Amendment 1: add scripts/test-lint-invariants.sh to Task 4.1 scope; awaiting re-approval | — | — | 15:49 |
 | — | Amend | Re-approved after amendment 1 | — | — | 16:10 |
+| 4 | Wave 2 | Eval fixture builder + runner | ✓ done_with_concerns (pre-fix repro stops fail-tests→doom-loop; detect-platform.sh ignores CLAUDE.md platform:) | c49529d | 16:15 |
