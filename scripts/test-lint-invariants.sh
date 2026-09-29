@@ -45,6 +45,7 @@ invariants:
   - id: approval-gates-deliver
     claim: Deliver runs only after an approved event.
     authority: events.jsonl approved event
+    not_evalable: "fixture"
     enforced_by:
       - { file: src/gate.js, symbol: "export function checkGate" }
     bypasses:
@@ -119,6 +120,7 @@ invariants:
   - id: per-wave-regression-detection
     claim: Each wave detects a regression and demotes it to fail-tests.
     authority: harness/spine.js
+    not_evalable: "fixture"
     enforced_by:
       - { file: harness/spine.js, symbol: "// regression. DEMOTE it to fail-tests" }
     bypasses: []
@@ -128,6 +130,14 @@ code=$(run_lint "$TMP/a8")
 grep -q "✗ per-wave-regression-detection: symbol not found in harness/spine.js" "$TMP/out" \
   || { cat "$TMP/out"; fail "A8: expected the diverged entry to be named"; }
 echo "✓ A8: #91 divergence caught against current spine.js (exit 1)"
+
+# ── A8b: an entry with neither evals nor not_evalable fails (fail-closed) ──────
+build_fixture "$TMP/a8b"
+grep -v 'not_evalable:' "$TMP/a8b/docs/invariants.yaml" > "$TMP/a8b/reg.yaml"
+code=$(run_lint "$TMP/a8b" "$TMP/a8b/reg.yaml")
+[[ "$code" -eq 1 ]] || { cat "$TMP/out"; fail "A8b: missing eval coverage should exit 1 (got $code)"; }
+grep -q "eval coverage not recorded" "$TMP/out" || { cat "$TMP/out"; fail "A8b: expected 'eval coverage not recorded'"; }
+echo "✓ A8b: entry with neither evals nor not_evalable fails (exit 1)"
 
 # ── A9: --inventory marks guarded:no as UNGUARDED ──────────────────────────────
 build_fixture "$TMP/a9"

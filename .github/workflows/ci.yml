@@ -110,6 +110,18 @@ jobs:
           node-version: 20
       - run: scripts/lint-invariants.sh
 
+  # All PRs — scripted adversarial gate evals (blocking): each case attacks a
+  # registry invariant in a throwaway fixture repo with a scripted adversary.
+  # Thin wrapper: the same command runs on any runner. Live-agent lane is manual.
+  evals-scripted:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: node --test harness/evals/*.eval.js
+
   # Deliver PRs only — approval integrity at the PR head (ancestry +
   # fingerprint + gate + authenticity, with an advisory-only ownership check).
   # Ordinary PRs: the job-level `if` skips non-rad/ branches entirely (skipped

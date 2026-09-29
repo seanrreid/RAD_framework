@@ -21,12 +21,14 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import { readFileSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
 import process from 'node:process';
+import { spawnSync } from 'node:child_process';
 
 import { createGitStateStore, defaultSh } from './adapters/git-state-store.js';
 import { evaluateGate } from './gates.js';
 import { planFingerprint } from './plan-fingerprint.js';
 import { makeWorktreeLifecycle } from './adapters/worktree.js';
 import { deliverSpine } from './spine.js';
+import { createHookRunner } from './hook-runner.js';
 import { createCommandAdapter, probeCommand } from './adapters/agent/command.js';
 import { sanitizeErrorMessage } from './adapters/agent/contract.js';
 import { loadMatrix } from './matrix.js';
@@ -132,6 +134,45 @@ const RESUME_CONTEXT_MAX_CHARS = 8000;
  * before any event) — a typo must never silently disable the cap.
  */
 const MAX_FAILED_ATTEMPTS_ENV = 'RAD_MAX_FAILED_ATTEMPTS';
+
+/**
+ * Env var overriding the wave-lifecycle hooks dir. Unset/empty = the convention
+ * dir `<root>/scripts/hooks`. A value that could be read as a flag or that
+ * carries a line break is a hard usage error (exit 2, before any event).
+ */
+const HOOKS_DIR_ENV = 'RAD_HOOKS_DIR';
+const DEFAULT_HOOKS_SUBDIR = join('scripts', 'hooks');
+const MALFORMED_HOOKS_DIR = /^-|[\r\n]/;
+/** Exit status reported for a hook that could not be spawned or died on a signal. */
+const HOOK_SPAWN_FAILURE_EXIT = 127;
+
+/** Prints the project default branch (always exit 0 by contract). */
+const DEFAULT_BRANCH_SCRIPT = 'scripts/get-default-branch.sh';
+/** Remote whose default-branch tip the spine's push guard reads. */
+const PUSH_GUARD_REMOTE = 'origin';
+/** Label every deliver PR carries (CLAUDE.md → PR Labels). */
+const DELIVER_PR_LABEL = 'rad:deliver';
+
+/**
+ * Argument contract for every script the deliver spine runs through its `sh`
+ * port, keyed by the EXACT script string the spine passes. Each builder takes
+ * the per-run script context (and the spine's second `sh` argument) and returns
+ * argv. A script absent from this table is refused (fail-closed), never run
+ * with a guessed argv.
+ */
+const SCRIPT_ARGS = Object.freeze({
+  'scripts/check-scope.sh': (c) => [c.planPath, c.branch, ...c.baseArgs()],
+  'scripts/check-tests-present.sh': (c) => [c.planPath],
+  'scripts/check-verify.sh': (_c, command) => [command],
+  'scripts/open-pr.sh': (c) => [
+    '--title', `Deliver: ${c.feature}`,
+    '--body', `RAD deliver: ${c.waveCount()} wave(s) complete`,
+    '--head', c.branch,
+    '--no-draft',
+    '--label', DELIVER_PR_LABEL,
+  ],
+  'scripts/default-tip.sh': (c) => [PUSH_GUARD_REMOTE, ...c.baseArgs()],
+});
 
 /** The harness package root (where cli.js lives). */
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -868,6 +909,100 @@ function reportStop({ result, feature, worktree, root }) {
 }
 
 /**
+ * Resolve the wave-lifecycle hooks dir from `env`, rooted at `root`.
+ *
+ * @returns {{ ok: true, dir: string } | { ok: false, raw: string }}
+ */
+export function resolveHooksDir(env, root) {
+  const raw = env[HOOKS_DIR_ENV];
+  if (!isNonEmpty(raw)) return { ok: true, dir: join(root, DEFAULT_HOOKS_SUBDIR) };
+  if (MALFORMED_HOOKS_DIR.test(raw)) return { ok: false, raw };
+  return { ok: true, dir: resolve(root, raw) };
+}
+
+/**
+ * The work branch for a run: the isolated branch in worktree mode, else the
+ * plan's `Branch:` header, else the `rad/<feature>` convention.
+ */
+function resolveWorkBranch(setup, planCtx, feature) {
+  return setup.workBranch ?? (isNonEmpty(planCtx.branch) ? planCtx.branch : `rad/${feature}`);
+}
+
+/**
+ * Read the default branch via get-default-branch.sh. A non-zero exit breaks the
+ * script's always-0 contract and is thrown (fail-closed); empty output yields ''
+ * so callers omit the optional base argument.
+ */
+function readDefaultBranch({ sh, repoRoot, root }) {
+  const res = sh(join(repoRoot, DEFAULT_BRANCH_SCRIPT), [join(root, 'CLAUDE.md')], { cwd: root });
+  if (res.status !== 0) {
+    throw new Error(`rad deliver: cannot resolve default branch (${DEFAULT_BRANCH_SCRIPT} exited ${res.status})`);
+  }
+  return String(res.stdout ?? '').trim();
+}
+
+/**
+ * Per-run context the SCRIPT_ARGS builders read. The base branch is resolved
+ * lazily, once per run, only when a script needs it; the wave count is read
+ * from the same plan the spine walks.
+ */
+function makeScriptCtx({ sh, repoRoot, root, feature, branch, state }) {
+  let base;
+  return {
+    feature,
+    branch,
+    planPath: join(root, '.agents', 'plans', `${feature}.md`),
+    baseArgs: () => {
+      if (base === undefined) base = readDefaultBranch({ sh, repoRoot, root });
+      return base === '' ? [] : [base];
+    },
+    waveCount: () => (state.plan(feature)?.waves ?? []).length,
+  };
+}
+
+/**
+ * Build the deliverSpine `sh` port: each script string the spine passes is
+ * mapped through SCRIPT_ARGS to its real argv and run with cwd = root.
+ * An unknown script throws — it is never run with a guessed argv.
+ */
+export function makeSpineScriptPort({ sh, repoRoot, root, scriptCtx }) {
+  return (script, arg) => {
+    const build = Object.hasOwn(SCRIPT_ARGS, script) ? SCRIPT_ARGS[script] : null;
+    if (!build) throw new Error(`rad deliver: no argument contract for ${script}`);
+    return sh(join(repoRoot, script), build(scriptCtx, arg), { cwd: root });
+  };
+}
+
+/** The script strings SCRIPT_ARGS covers (for contract tests). */
+export const SCRIPT_ARG_KEYS = Object.freeze(Object.keys(SCRIPT_ARGS));
+
+/**
+ * Real hook spawner honoring hook-runner's `sh(hook, argv, { cwd, env })`
+ * contract (defaultSh does not forward env). Spawn errors and signal deaths
+ * are reported as a non-zero status so the runner fails closed/open per point.
+ */
+function spawnHook(file, args, opts) {
+  const res = spawnSync(file, args, {
+    cwd: opts.cwd, env: opts.env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  if (res.error) {
+    return { status: HOOK_SPAWN_FAILURE_EXIT, stdout: '', stderr: `${res.error.code ?? 'spawn-error'}: ${res.error.message}` };
+  }
+  const signalNote = res.signal ? `killed by ${res.signal}` : '';
+  return { status: res.status ?? HOOK_SPAWN_FAILURE_EXIT, stdout: res.stdout ?? '', stderr: res.stderr || signalNote };
+}
+
+/**
+ * Wire the hook runner for a run: hooks run with cwd = root and inherit the
+ * process env plus the runner's RAD_HOOK_* values.
+ */
+function makeRunHooks({ hookShell, root, hooksDir, now }) {
+  const hookSh = (file, args, opts = {}) =>
+    hookShell(file, args, { cwd: root, env: { ...process.env, ...opts.env } });
+  return createHookRunner({ sh: hookSh, now, hooksDir }).runHooks;
+}
+
+/**
  * `deliver <feature> [--model <model-id>]`.
  *
  * Reads the approved plan, constructs an SDK-backed runWave, and drives
@@ -926,6 +1061,16 @@ export async function deliverCommand(argv, ctx) {
     return USAGE_EXIT_CODE;
   }
 
+  // Hooks dir: validated BEFORE setup so a malformed value exits 2 with no
+  // worktree created and no event appended.
+  const hooksCheck = resolveHooksDir(process.env, repoRoot);
+  if (!hooksCheck.ok) {
+    process.stderr.write(
+      `rad deliver: ${HOOKS_DIR_ENV} must be a directory path (got ${JSON.stringify(hooksCheck.raw)})\n`,
+    );
+    return USAGE_EXIT_CODE;
+  }
+
   // --resume eligibility: BEFORE setup, so a refusal exits 2 with no worktree
   // created and no event appended. Without --resume this yields resume: null
   // and the spine call below is unchanged (AC#7 byte-for-byte).
@@ -957,6 +1102,13 @@ export async function deliverCommand(argv, ctx) {
   const parsedBudget = Number.parseInt(process.env.RAD_TOKEN_BUDGET, 10);
   const tokenBudget = Number.isFinite(parsedBudget) && parsedBudget > 0 ? parsedBudget : null;
 
+  const now = () => new Date().toISOString();
+  const workBranch = resolveWorkBranch(setup, planCtx, feature);
+  const scriptCtx = makeScriptCtx({ sh, repoRoot, root, feature, branch: workBranch, state });
+  const runHooks = makeRunHooks({
+    hookShell: ctx.sh ?? spawnHook, root, hooksDir: resolveHooksDir(process.env, root).dir, now,
+  });
+
   let result;
   try {
     result = await deliverSpine({
@@ -967,8 +1119,11 @@ export async function deliverCommand(argv, ctx) {
       gates: null,
       runWave,
       // Scripts run with cwd = root: repoRoot today, the worktree when isolated.
-      sh: (script, feat) => sh(join(repoRoot, script), [feat], { cwd: root }),
-      now: () => new Date().toISOString(),
+      // Each gets its real argv from SCRIPT_ARGS; an unknown script throws.
+      sh: makeSpineScriptPort({ sh, repoRoot, root, scriptCtx }),
+      now,
+      runHooks,
+      pushGuard: true,
       tokenBudget,
       // Per-wave `Verify:` commands, passed through exactly as tokenBudget is.
       // Empty for a plan that declares none, which leaves the spine's behavior
@@ -1012,8 +1167,6 @@ export async function deliverCommand(argv, ctx) {
     // work-branch tip; push it so the process memory is portable across machines.
     // Never fails the verb (offline-fail-safe). Worktree mode pushes the branch it
     // isolated; otherwise the plan's `Branch:` header is canonical, else rad/<feature>.
-    const workBranch = setup.workBranch
-      ?? (isNonEmpty(planCtx.branch) ? planCtx.branch : `rad/${feature}`);
     bestEffortSyncPush(repoRoot, workBranch, sh);
     process.stdout.write(
       `rad deliver: ok feature=${feature} waves=${result.waves} status=complete\n`,

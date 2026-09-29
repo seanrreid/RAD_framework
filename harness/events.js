@@ -20,7 +20,15 @@
  *   'pr-opened' | 'revision-requested' | 'research-created' | 'plan-created' |
  *   'hook-observed' | 'hook-veto' | 'hook-failed' | 'done' |
  *   'owner-claimed' | 'owner-released' | 'architecture-approved' |
- *   'capture-failed' | 'wave-started' | 'deliver-stopped' | 'run-resumed'.
+ *   'capture-failed' | 'wave-started' | 'deliver-stopped' | 'run-resumed' |
+ *   'push-check-unavailable'.
+ *   `push-check-unavailable` is the seventh AUDIT-ONLY event: when the deliver
+ *   spine's push guard is on and either default-branch tip read around a wave
+ *   (scripts/default-tip.sh) fails, it appends `{ wave, attempt, status }` —
+ *   `status` is the read's non-zero exit — and does NOT demote the attempt. It
+ *   carries NO authority (never a gate, never an outcome) and establishes NO
+ *   phase (absent from PHASE_BY_TYPE), so a history with it folds identically to
+ *   one without it.
  *   `run-resumed` is the sixth AUDIT-ONLY event: the deliver spine appends it
  *   immediately after `deliver-started` when `rad deliver --resume --context` is
  *   used. Its `data` is `{ context, recordedBy, stop: { class, reason[, wave] } }`
@@ -172,6 +180,8 @@ const PHASE_BY_TYPE = {
   // it would give a stopped run a phase and could block a re-run's appends.
   // `run-resumed` is audit-only for the same reason: it records the operator
   // context a resume answered with, and must never move a feature's phase.
+  // `push-check-unavailable` is audit-only too: it records that the push guard
+  // could not read the default tip, and must never move a feature's phase.
 };
 
 /** Phase ordering — earliest first; later phases dominate in the fold. */
