@@ -98,6 +98,18 @@ jobs:
       - uses: actions/checkout@v4
       - run: scripts/lint-shell-safety.sh
 
+  # All PRs — invariant registry lint (fail-closed): every claim in
+  # docs/invariants.yaml must resolve to a live enforcement anchor.
+  # setup-node: the lint shells out to node to parse the YAML registry.
+  invariant-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: scripts/lint-invariants.sh
+
   # Deliver PRs only — approval integrity at the PR head (ancestry +
   # fingerprint + gate + authenticity, with an advisory-only ownership check).
   # Ordinary PRs: the job-level `if` skips non-rad/ branches entirely (skipped
@@ -176,5 +188,46 @@ jobs:
             printf '%s\n' "$out" | while IFS= read -r line; do
               [ -n "$line" ] && echo "::warning file=$plan::$line"
             done
+          done
+          exit "$rc"
+
+  # PRs touching harness/matrix.yaml or harness/gates.yaml — replay recorded
+  # event logs under the changed tables. Divergences are ADVISORY (re-emitted
+  # as warning annotations); a mechanical failure (script exit non-zero)
+  # fails the job. Not continue-on-error.
+  matrix-replay:
+    runs-on: ubuntu-latest
+    steps:
+      # fetch-depth: 0 — the table-change detection diffs against the PR base
+      # sha, and the replay reads refs/remotes/origin/rad/* tip logs.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # Transport only: guarantee the rad/* remote-tracking refs exist the
+      # script reads (it never fetches itself). A glob matching no branch is
+      # a no-op, not an error.
+      - name: Fetch rad/* work-branch tips
+        run: git fetch --no-tags origin '+refs/heads/rad/*:refs/remotes/origin/rad/*'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Replay event logs under changed tables
+        # The diff detection and re-emit loop are output plumbing, not check
+        # logic: the replay itself is scripts/check-matrix-replay.sh, runnable
+        # locally with the same command line.
+        run: |
+          base="${{ github.event.pull_request.base.sha }}"
+          changed=$(git diff --name-only "$base"...HEAD -- harness/matrix.yaml harness/gates.yaml)
+          if [ -z "$changed" ]; then
+            echo "matrix-replay: no table change — skipped"
+            exit 0
+          fi
+          rc=0
+          out=$(scripts/check-matrix-replay.sh --base "$base" 2>&1) || rc=$?
+          printf '%s\n' "$out" | while IFS= read -r line; do
+            case "$line" in
+              divergence:*) echo "::warning::$line" ;;
+              *) printf '%s\n' "$line" ;;
+            esac
           done
           exit "$rc"
