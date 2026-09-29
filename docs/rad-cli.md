@@ -113,6 +113,44 @@ on bad arguments.
 
 ---
 
+### rad forecast
+
+```
+rad forecast <plan>
+```
+
+A read-only, **advisory** plan-time readout: "have the files this plan touches
+been hard for agents before?" It resolves the plan's declared paths with
+`plan_scope_paths` (`scripts/lib/plan-paths.sh` — the same Files-in-Scope +
+per-task `File:` union the plan lint uses), builds the task→file mapping from
+`.agents/plans/*.md` (parser in `harness/plan-tasks.js`), folds every
+`.agents/state/*/events.jsonl`, and looks each path up in the `fileDeficitSignals`
+fold (`harness/events.js`). The three deficits (`opaqueAbstraction`,
+`missingDocumentation`, `insufficientTesting`) are proxies, each floored at 2
+distinct features — see
+[Prompt surfaces as a feedback-loop target](harness-and-framework.md#prompt-surfaces-as-a-feedback-loop-target)
+for what each one measures. It records nothing and never blocks.
+
+One line per deficit present on a declared path, then a summary:
+
+```
+forecast: <path> — <deficit> in <n> feature(s) (<feature>, ...); consider <remedy>
+forecast: <k> of <n> path(s) have reliability signals (history: <m> feature(s)); advisory only — these are proxies, not verdicts
+forecast: no reliability signals for <n> path(s) (history: <m> feature(s))
+```
+
+The remedy is described, never applied — a boundary/decomposition note, a comment
+explaining the governing constraint, or a characterization test. `/rad-plan`
+(Step 4b) and `/rad-adopt` (Step 6b) run it after the plan lint so the author can
+fold a remedy task into the plan before approval. v1 is path-level only: no
+wave-size or token-spend forecasting.
+
+**Exit codes:** `0` on any readout (with or without signals), `1` on a malformed
+event log (the message names the feature), `2` on bad arguments, an unreadable
+plan, or a `plan_scope_paths` failure.
+
+---
+
 ### rad deliver
 
 ```
