@@ -10,3 +10,5 @@ Executor role: architect
 |------|------|------|--------|--------|------|
 | 1 | Wave 1 | run-resumed event + stop folds | ✓ complete | 7523861 | 13:00 |
 | 2 | Wave 1 | Operator-context prompt block | ✓ done_with_concerns (fail-closed TypeError on malformed operatorContext) | aafba24 | 13:00 |
+| 3 | Wave 2 | Spine resume param | ✓ complete | f1dfa71 | 13:02 |
+| 4 | Wave 2 | CLI flags, eligibility, stop-status | ✓ done_with_concerns (other deliver parse errors still exit 1; stop-status --stdin strict on malformed lines; extra worktree refusal when branch-tip log unreadable) | 416fe1e | 13:07 |
