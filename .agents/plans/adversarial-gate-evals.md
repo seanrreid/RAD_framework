@@ -140,13 +140,14 @@ This is Plan 2 of the verification batch. #109 asks for evals that drive an agen
 | harness/evals/lib/runner.js | 1-70 | New: normal + mutated runs; live mode |
 | harness/evals/approval.eval.js | 1-140 | New: approval, blockers, plan-edit and resume cases |
 | harness/evals/delivery.eval.js | 1-170 | New: scope (±), hook, verify, env and push cases |
-| harness/evals/repo.eval.js | 1-90 | New: append-only, self-protected and worktree cases |
+| harness/evals/repo.eval.js | 1-80 | New: append-only, self-protected and worktree cases |
 | harness/invariants.js | 45-110 | `evals` / `not_evalable` rule; eval-path existence check |
 | harness/test/invariants.test.js | 140-175 | Tests for AC#9 |
-| scripts/test-lint-invariants.sh | 1-167 | Amendment 1: inline fixture registries declare `evals`/`not_evalable` so the A1–A9 fixtures stay valid under the AC#9 rule |
+| scripts/test-lint-invariants.sh | 42-53 | Amendment 1: inline fixture registries declare `evals`/`not_evalable` so the A1–A9 fixtures stay valid under the AC#9 rule |
+| scripts/test-lint-invariants.sh | 97-130 | Amendment 1: A8 fixture gains `not_evalable`; new missing-coverage case after A8 |
 | docs/invariants.yaml | 1-170 | Eval links for every entry; new `no-direct-push-to-default`; new anchors |
 | .github/workflows/ci.yml | 100-118 | New `evals-scripted` job |
-| docs/evals.md | 1-50 | New: lanes, adding a case, mutation, live mode |
+| docs/evals.md | 1-40 | New: lanes, adding a case, mutation, live mode |
 
 ## Program Design
 
@@ -281,7 +282,7 @@ Validate: AC#5, AC#8 — `node --test harness/evals/smoke.eval.js` passes. It re
 Tasks in this wave can run in parallel (disjoint eval files; both use the Wave 2 harness).
 
 #### Task 3.1: Approval and repository eval cases
-File: harness/evals/approval.eval.js:1-140, harness/evals/repo.eval.js:1-90
+File: harness/evals/approval.eval.js:1-140, harness/evals/repo.eval.js:1-80
 What: Implement the AC#6 cases `deliver-without-approval`, `deliver-after-plan-edit`, `approve-with-marker`, `resume-failed-stop`, `events-log-tamper`, `self-protected-plan` and `remove-unmarked-worktree`. Each case has a `mutate` that disables its guard in the fixture copy, and the mutated run must fail.
 Validate: AC#5, AC#6 — `node --test harness/evals/approval.eval.js harness/evals/repo.eval.js` passes, including every `[mutated]` expectation.
 
@@ -294,7 +295,7 @@ Validate: AC#5, AC#6 — `node --test harness/evals/delivery.eval.js` passes, in
 Registry links, CI and docs, once every eval file exists.
 
 #### Task 4.1: Registry links + CI + docs
-File: docs/invariants.yaml:1-170, .github/workflows/ci.yml:100-118, docs/evals.md:1-50, scripts/test-lint-invariants.sh:1-167
+File: docs/invariants.yaml:1-170, .github/workflows/ci.yml:100-118, docs/evals.md:1-40, scripts/test-lint-invariants.sh:42-53, 97-130
 What:
 - Add `evals` / `not_evalable` to every registry entry per AC#9, add the `no-direct-push-to-default` invariant and the new CLI-wiring anchors, and mark `push-to-default` as detective in its claim or note.
 - Add the `evals-scripted` CI job per AC#10.
