@@ -12,13 +12,17 @@
 #   RAD_FINDINGS_FILE       findings log (default .agents/findings.jsonl)
 #   RAD_FINDINGS_THRESHOLD  parsed like Step 3b: unset/0/non-numeric/negative → 5
 #
+#   RAD_BRANCH_PREFIX       work-branch prefix (default rad/)
+#
 # Exit codes:
 #   0 = drafted (prints `drafted: <plan> on <branch>`), --dry-run printed the
 #       plan, or `nothing to draft (threshold <t>)`
 #   1 = refused, nothing written: dirty tracked worktree, target branch exists
 #       locally or on origin, origin cannot be verified, too many categories for
 #       one lint-valid plan, or a git step failed
-#   2 = usage error, missing/unreadable findings log, or malformed findings line
+#   2 = usage error, missing/unreadable findings log, malformed findings line,
+#       RAD_FINDINGS_FILE starting with '-' or containing a newline, or an
+#       invalid branch name from RAD_BRANCH_PREFIX
 
 set -euo pipefail
 
@@ -33,6 +37,15 @@ readonly FALLBACK_CONVENTIONS_LINES="1-1"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 die() { echo "$SELF: $2" >&2; exit "$1"; }
+
+# validate_findings_file — a leading `-` would be read as a jq option, and a
+# newline cannot be a safe path argument; refuse both (usage error, exit 2).
+validate_findings_file() {
+  case "$FINDINGS_FILE" in
+    -*) die 2 "RAD_FINDINGS_FILE must not start with '-' (option injection): $FINDINGS_FILE" ;;
+    *$'\n'*) die 2 "RAD_FINDINGS_FILE must not contain a newline" ;;
+  esac
+}
 
 # parse_threshold — Number.parseInt semantics: leading integer, else default.
 parse_threshold() {
@@ -203,6 +216,16 @@ EOF
 
 render_plan() { render_header; render_criteria; render_files; render_waves; render_tail; }
 
+# validate_branch — BRANCH is built from RAD_BRANCH_PREFIX; it must be a plain
+# ref name (no leading '-', whitespace, or '..' segment) before any git use.
+validate_branch() {
+  [[ "$BRANCH" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ ]] \
+    || die 2 "invalid branch name from RAD_BRANCH_PREFIX: '$BRANCH' (allowed: [A-Za-z0-9._/-], no leading '-')"
+  case "$BRANCH" in
+    *..*) die 2 "invalid branch name from RAD_BRANCH_PREFIX: '$BRANCH' (contains '..')" ;;
+  esac
+}
+
 # refuse_unless_clean — exit 1 (nothing written) on any precondition failure.
 refuse_unless_clean() {
   local dirty rc=0
@@ -237,6 +260,7 @@ main() {
     *) die 2 "usage: $SELF [--dry-run]" ;;
   esac
   [[ $# -le 1 ]] || die 2 "usage: $SELF [--dry-run]"
+  validate_findings_file
   [[ -f "$FINDINGS_FILE" && -r "$FINDINGS_FILE" ]] || die 2 "findings log not found or unreadable: $FINDINGS_FILE"
   THRESHOLD=$(parse_threshold)
   rows=$(crossing_rows "$THRESHOLD")
@@ -251,6 +275,7 @@ main() {
     || die 1 "$N categories cross the threshold (max $((MAX_WAVES * TASKS_PER_WAVE)) per plan); raise RAD_FINDINGS_THRESHOLD"
   DATE=$(date +%Y-%m-%d) SLUG="insights-proposals-$DATE"
   BRANCH="${RAD_BRANCH_PREFIX:-rad/}$SLUG" CONV_RANGE=$(conventions_range)
+  validate_branch
   if [[ "$dry_run" == 1 ]]; then render_plan; exit 0; fi
   refuse_unless_clean
   commit_plan

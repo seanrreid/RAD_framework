@@ -125,6 +125,19 @@ run_draft RAD_FINDINGS_FILE="$TMP/absent.jsonl" -- ; expect "AC#10 missing log" 
 grep -q "absent.jsonl" "$ERR" || fail "AC#10: missing-log stderr does not name the file"
 echo "✓ AC#10: missing findings log exits 2 naming the file"
 
+# ── Unsafe inputs → exit 2, nothing written ──────────────────────────────────
+before_b="$(branches)" before_s="$(status)"
+run_draft RAD_FINDINGS_FILE="-x" -- ; expect "AC#10 findings file '-x'" 2
+grep -q "option injection" "$ERR" || fail "AC#10: '-x' findings file stderr does not name the reason"
+[[ "$(branches)" == "$before_b" && "$(status)" == "$before_s" ]] || fail "AC#10: '-x' findings file changed git state"
+for bad_prefix in "-bad/" "has space/" "a/../b/"; do
+  run_draft RAD_BRANCH_PREFIX="$bad_prefix" -- ; expect "AC#10 branch prefix [$bad_prefix]" 2
+  grep -q "invalid branch name" "$ERR" || fail "AC#10: prefix [$bad_prefix] stderr does not name the reason"
+  [[ "$(branches)" == "$before_b" && "$(status)" == "$before_s" ]] || fail "AC#10: prefix [$bad_prefix] changed git state"
+  [[ ! -e "$GREPO/.agents/plans" ]] || [[ -z "$(ls "$GREPO/.agents/plans")" ]] || fail "AC#10: prefix [$bad_prefix] wrote a plan"
+done
+echo "✓ AC#10: RAD_FINDINGS_FILE='-x' and unsafe RAD_BRANCH_PREFIX (-bad/, space, ..) exit 2, nothing written"
+
 # ── Dirty tracked file → exit 1, nothing written ──────────────────────────────
 echo "dirty" >> "$GREPO/CLAUDE.md"
 run_draft -- ; expect "AC#10 dirty" 1
