@@ -8,3 +8,5 @@ Executor role: architect
 
 | Step | Wave | Task | Status | Commit | Time |
 |------|------|------|--------|--------|------|
+| 1 | Wave 1 | run-resumed event + stop folds | ✓ complete | 7523861 | 13:00 |
+| 2 | Wave 1 | Operator-context prompt block | ✓ done_with_concerns (fail-closed TypeError on malformed operatorContext) | aafba24 | 13:00 |
