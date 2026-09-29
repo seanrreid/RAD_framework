@@ -1,7 +1,8 @@
 # Plan: Deliver Stop Contract (typed terminals, needs-decision exit, between-wave checks)
 Created: 2026-09-28
 Author: architect
-Status: in-progress
+Status: complete
+Completed-At: 2026-09-29T15:15:48Z
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-09-29T15:11:26.114Z
 Recorded-By: sean@torchcodelab.com

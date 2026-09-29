@@ -15,3 +15,5 @@ Executor role: architect
 | 5 | 2 | 2.3 Cumulative failed-attempt cap | complete | 9789dce | 2026-09-29T15:04:20Z |
 | 6 | Wave 3 | rad deliver exit codes, completion fold, cap parsing, approval port | ⚠ done_with_concerns (fold rejects resumed runs → amendment 1) | d357b0c | 15:10 UTC |
 | 7 | Wave 3 | Stop-contract docs | ✓ complete | 8a85dd6 | 15:10 UTC |
+| 8 | — | Amendment 1 + re-approval (completion fold counts resumed waves; resume-verify row recorded) | ✓ | — | 15:15 UTC |
+| 9 | Wave 3 | Completion fold counts resumed waves (amendment 1) | ✓ complete | ee6dc03 | 15:15 UTC |
