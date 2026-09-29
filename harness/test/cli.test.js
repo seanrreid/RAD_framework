@@ -1,13 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, readFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { mkdtempSync, rmSync, readFileSync, existsSync, mkdirSync, writeFileSync, chmodSync } from 'node:fs';
+import { join, dirname, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import {
   approveCommand, gateCommand, parsePlanCtx, deliverCommand, stopStatusCommand, forecastCommand,
+  resolveHooksDir, makeSpineScriptPort, SCRIPT_ARG_KEYS,
 } from '../cli.js';
 import { planFingerprint } from '../plan-fingerprint.js';
 import { createGitStateStore, defaultSh } from '../adapters/git-state-store.js';
@@ -509,7 +510,7 @@ test('AC#1 (gate) — --stdin path: empty stdin fails closed → non-zero exit',
 
 const DELIVER_FEATURE = 'stop-feature';
 /** Env knobs these tests control; saved and restored around each run. */
-const DELIVER_ENV_KEYS = ['RAD_MAX_FAILED_ATTEMPTS', 'RAD_WORKTREE', 'RAD_TOKEN_BUDGET', 'RAD_SYNC'];
+const DELIVER_ENV_KEYS = ['RAD_MAX_FAILED_ATTEMPTS', 'RAD_WORKTREE', 'RAD_TOKEN_BUDGET', 'RAD_SYNC', 'RAD_HOOKS_DIR'];
 
 /** A two-wave plan doc body; `extra` appends body text (changes the fingerprint). */
 function twoWavePlanText(extra = '') {
@@ -1119,4 +1120,155 @@ test('forecast AC#8 — missing plan arg / unknown flag / extra positional → u
     }
     assert.equal(calls.length, 0);
   });
+});
+
+// ── CLI script arguments + hook wiring (adversarial-gate-evals Task 1.1) ──
+
+const DEFAULT_BRANCH_STUB = 'main';
+
+/** A recording sh: answers get-default-branch.sh with `defaultBranch`, else ok. */
+function recordingSh({ defaultBranchStatus = 0 } = {}) {
+  const calls = [];
+  const sh = (file, args = [], opts = {}) => {
+    calls.push({ file, args, opts });
+    if (file.endsWith('scripts/get-default-branch.sh')) {
+      return { status: defaultBranchStatus, stdout: `${DEFAULT_BRANCH_STUB}\n`, stderr: '' };
+    }
+    return okSh();
+  };
+  const argsFor = (script) => calls.filter((c) => c.file.endsWith(script)).map((c) => c.args);
+  return { sh, calls, argsFor };
+}
+
+/** Every `scripts/*.sh` string the spine source can hand its `sh` port. */
+function spineScriptStrings() {
+  const src = readFileSync(join(HERE, '..', 'spine.js'), 'utf8');
+  const literals = [...src.matchAll(/'(scripts\/[\w-]+\.sh)'/g)].map((m) => m[1]);
+  const postChecks = /const POST_CHECKS = \[([^\]]*)\]/.exec(src);
+  assert.ok(postChecks, 'spine.js must declare POST_CHECKS');
+  const post = [...postChecks[1].matchAll(/'([\w-]+\.sh)'/g)].map((m) => `scripts/${m[1]}`);
+  return [...new Set([...literals, ...post])];
+}
+
+test('script args — every script string the spine passes has an argument contract', () => {
+  const scripts = spineScriptStrings();
+  assert.ok(scripts.includes('scripts/check-scope.sh'));
+  assert.ok(scripts.includes('scripts/open-pr.sh'));
+  for (const script of scripts) {
+    assert.ok(SCRIPT_ARG_KEYS.includes(script), `no SCRIPT_ARGS entry for ${script}`);
+  }
+});
+
+test('script args — an unknown script throws naming it, never runs', () => {
+  const { sh, calls } = recordingSh();
+  const port = makeSpineScriptPort({ sh, repoRoot: '/r', root: '/r', scriptCtx: {} });
+  assert.throws(() => port('scripts/unknown.sh', 'f'), /^Error: rad deliver: no argument contract for scripts\/unknown\.sh$/);
+  assert.throws(() => port('toString', 'f'), /no argument contract for toString/);
+  assert.equal(calls.length, 0);
+});
+
+test('script args — a real deliver passes each script its argv contract', async () => {
+  await withTempRepo(async (repoRoot) => {
+    seedApprovedTwoWavePlan(repoRoot);
+    const rec = recordingSh();
+    const { code, stderr } = await runDeliverCaptured({
+      repoRoot, sh: rec.sh, runWave: async () => ({ outcome: 'success' }),
+    });
+    assert.equal(code, 0, `expected exit 0; stderr:\n${stderr}`);
+    const planPath = join(repoRoot, '.agents', 'plans', `${DELIVER_FEATURE}.md`);
+    const branch = `rad/${DELIVER_FEATURE}`;
+    const scope = rec.argsFor('scripts/check-scope.sh');
+    assert.ok(scope.length > 0, 'check-scope.sh must run');
+    for (const args of scope) assert.deepEqual(args, [planPath, branch, DEFAULT_BRANCH_STUB]);
+    const presence = rec.argsFor('scripts/check-tests-present.sh');
+    assert.ok(presence.length > 0, 'check-tests-present.sh must run');
+    for (const args of presence) assert.deepEqual(args, [planPath]);
+    assert.deepEqual(rec.argsFor('scripts/open-pr.sh'), [[
+      '--title', `Deliver: ${DELIVER_FEATURE}`, '--body', 'RAD deliver: 2 wave(s) complete',
+      '--head', branch, '--no-draft', '--label', 'rad:deliver',
+    ]]);
+    // The base branch is resolved once per run, from the run root's CLAUDE.md.
+    assert.deepEqual(rec.argsFor('scripts/get-default-branch.sh'), [[join(repoRoot, 'CLAUDE.md')]]);
+  });
+});
+
+test('script args — get-default-branch.sh failing → deliver fails closed (exit 1)', async () => {
+  await withTempRepo(async (repoRoot) => {
+    seedApprovedTwoWavePlan(repoRoot);
+    const rec = recordingSh({ defaultBranchStatus: 1 });
+    const { code, stderr } = await runDeliverCaptured({
+      repoRoot, sh: rec.sh, runWave: async () => ({ outcome: 'success' }),
+    });
+    assert.equal(code, 1);
+    assert.match(stderr, /cannot resolve default branch \(scripts\/get-default-branch\.sh exited 1\)/);
+    assert.equal(rec.argsFor('scripts/check-scope.sh').length, 0);
+  });
+});
+
+test('hooks dir — resolveHooksDir: default, relative, absolute, malformed', () => {
+  const root = '/work/root';
+  assert.deepEqual(resolveHooksDir({}, root), { ok: true, dir: join(root, 'scripts', 'hooks') });
+  assert.deepEqual(resolveHooksDir({ RAD_HOOKS_DIR: '  ' }, root), { ok: true, dir: join(root, 'scripts', 'hooks') });
+  assert.deepEqual(resolveHooksDir({ RAD_HOOKS_DIR: 'ops/hooks' }, root), { ok: true, dir: resolve(root, 'ops/hooks') });
+  assert.deepEqual(resolveHooksDir({ RAD_HOOKS_DIR: '/etc/rad-hooks' }, root), { ok: true, dir: '/etc/rad-hooks' });
+  for (const raw of ['-rf', '--hooks', 'a\nb', 'a\rb']) {
+    assert.deepEqual(resolveHooksDir({ RAD_HOOKS_DIR: raw }, root), { ok: false, raw });
+  }
+});
+
+test('hooks dir — malformed RAD_HOOKS_DIR → exit 2 before any event', async () => {
+  for (const raw of ['-x', 'hooks\ndir']) {
+    await withTempRepo(async (repoRoot) => {
+      const { logFile } = seedApprovedTwoWavePlan(repoRoot);
+      const before = readFileSync(logFile, 'utf8');
+      const rec = recordingSh();
+      const { code, stderr } = await runDeliverCaptured({
+        repoRoot, sh: rec.sh, env: { RAD_HOOKS_DIR: raw }, runWave: async () => ({ outcome: 'success' }),
+      });
+      assert.equal(code, 2, `RAD_HOOKS_DIR=${JSON.stringify(raw)} should exit 2`);
+      assert.match(stderr, /RAD_HOOKS_DIR must be a directory path/);
+      assert.equal(readFileSync(logFile, 'utf8'), before);
+    });
+  }
+});
+
+test('hooks dir — RAD_HOOKS_DIR set → the runner discovers and fires hooks from it', async () => {
+  await withTempRepo(async (repoRoot) => {
+    seedApprovedTwoWavePlan(repoRoot);
+    const hooksDir = join(repoRoot, 'ops-hooks');
+    const hook = join(hooksDir, 'wave-complete', '10-observe.sh');
+    mkdirSync(dirname(hook), { recursive: true });
+    writeFileSync(hook, '#!/usr/bin/env bash\nexit 0\n', 'utf8');
+    chmodSync(hook, 0o755);
+    const rec = recordingSh();
+    const { code, stderr } = await runDeliverCaptured({
+      repoRoot, sh: rec.sh, env: { RAD_HOOKS_DIR: hooksDir }, runWave: async () => ({ outcome: 'success' }),
+    });
+    assert.equal(code, 0, `expected exit 0; stderr:\n${stderr}`);
+    const fired = rec.calls.filter((c) => c.file === hook);
+    assert.ok(fired.length > 0, 'the wave-complete hook must fire');
+    assert.equal(fired[0].args[0], DELIVER_FEATURE);
+    assert.equal(fired[0].args[2], 'wave-complete');
+    assert.equal(fired[0].opts.cwd, repoRoot);
+    assert.equal(fired[0].opts.env.RAD_HOOK_POINT, 'wave-complete');
+    assert.equal(fired[0].opts.env.PATH, process.env.PATH);
+  });
+});
+
+test('hooks dir — no hooks dir → event sequence identical to an empty hooks dir run', async () => {
+  const typesOf = async (env) => withTempRepo(async (repoRoot) => {
+    const { logFile } = seedApprovedTwoWavePlan(repoRoot);
+    if (env.RAD_HOOKS_DIR === '') {
+      env = { RAD_HOOKS_DIR: join(repoRoot, 'empty-hooks') };
+      mkdirSync(env.RAD_HOOKS_DIR);
+    }
+    const { code } = await runDeliverCaptured({
+      repoRoot, sh: recordingSh().sh, env, runWave: async () => ({ outcome: 'success' }),
+    });
+    assert.equal(code, 0);
+    return readLog(logFile).map(({ type, data }) => JSON.stringify({ type, data }));
+  });
+  const noDir = await typesOf({});
+  assert.ok(!noDir.some((e) => /"type":"hook-/.test(e)), 'no hook events without hooks');
+  assert.deepEqual(await typesOf({ RAD_HOOKS_DIR: '' }), noDir);
 });
