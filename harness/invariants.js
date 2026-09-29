@@ -46,6 +46,26 @@ function validateBypasses(label, entry) {
   return errors;
 }
 
+/** Eval coverage: EXACTLY ONE of `evals` (non-empty list of repo-relative
+ * paths) or `not_evalable` (non-empty reason). Key presence decides "set". */
+function validateEvalLink(label, entry) {
+  const hasEvals = Object.prototype.hasOwnProperty.call(entry, 'evals');
+  const hasReason = Object.prototype.hasOwnProperty.call(entry, 'not_evalable');
+  if (hasEvals && hasReason) {
+    return [`${label}: set exactly one of evals / not_evalable (both present)`];
+  }
+  if (!hasEvals && !hasReason) {
+    return [`${label}: eval coverage not recorded (set evals or not_evalable)`];
+  }
+  if (hasEvals) {
+    const ok = Array.isArray(entry.evals) && entry.evals.length > 0
+      && entry.evals.every(isNonEmptyString);
+    return ok ? [] : [`${label}: evals must be a non-empty list of paths`];
+  }
+  return isNonEmptyString(entry.not_evalable)
+    ? [] : [`${label}: not_evalable must be a non-empty reason`];
+}
+
 function validateEntry(entry, index, seenIds) {
   if (!isObject(entry)) return [`invariants[${index}]: entry must be an object`];
   if (!isNonEmptyString(entry.id)) return [`invariants[${index}]: missing id`];
@@ -57,6 +77,7 @@ function validateEntry(entry, index, seenIds) {
   if (!isNonEmptyString(entry.authority)) errors.push(`${label}: missing authority`);
   errors.push(...validateAnchors(label, entry.enforced_by));
   errors.push(...validateBypasses(label, entry));
+  errors.push(...validateEvalLink(label, entry));
   return errors;
 }
 
@@ -85,8 +106,15 @@ function anchorsOf(entry) {
   return [...enforced.filter(hasBoth), ...display.filter(hasBoth)];
 }
 
-/** Check each anchor's symbol is a literal substring of its file. Position is
- * irrelevant — a moved symbol still passes. Invalid shape → [] (never throws). */
+/** Eval paths to verify for one invariant (existence only). Non-string or
+ * non-array shapes are validateRegistry's concern → skipped here. */
+function evalPathsOf(entry) {
+  return Array.isArray(entry.evals) ? entry.evals.filter(isNonEmptyString) : [];
+}
+
+/** Check each anchor's symbol is a literal substring of its file, and each
+ * `evals` path exists. Position is irrelevant — a moved symbol still passes.
+ * Invalid shape → [] (never throws). */
 export function checkAnchors(doc, readFile) {
   if (!isObject(doc) || !Array.isArray(doc.invariants)) return [];
   const errors = [];
@@ -98,6 +126,9 @@ export function checkAnchors(doc, readFile) {
       else if (!content.includes(symbol)) {
         errors.push(`${entry.id}: symbol not found in ${file}: ${symbol}`);
       }
+    }
+    for (const path of evalPathsOf(entry)) {
+      if (readFile(path) === null) errors.push(`${entry.id}: eval file not found: ${path}`);
     }
   }
   return errors;

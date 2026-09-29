@@ -17,6 +17,7 @@ const entry = (over = {}) => ({
   authority: 'events.jsonl',
   enforced_by: [{ file: 'harness/gates.js', symbol: 'foldGate' }],
   bypasses: [],
+  not_evalable: 'fixture',
   ...over,
 });
 const doc = (...invariants) => ({ version: REGISTRY_VERSION, invariants });
@@ -144,4 +145,43 @@ test('bypassInventory flattens in registry order with fields', () => {
     { invariant: 'c', id: 'c1', surface: 's3', guarded: 'no', note: undefined },
   ]);
   assert.deepEqual(bypassInventory(null), []);
+});
+
+// Eval-link schema (adversarial-gate-evals AC#9): exactly one of evals / not_evalable.
+const withEvals = (evals) => {
+  const { not_evalable, ...rest } = entry();
+  return { ...rest, evals };
+};
+
+test('evals and not_evalable both present is an error', () => {
+  hasError(validateRegistry(doc(entry({ evals: ['harness/test/x.test.js'] }))),
+    /^inv-a: set exactly one of evals \/ not_evalable \(both present\)$/);
+});
+
+test('neither evals nor not_evalable names the id', () => {
+  const { not_evalable, ...bare } = entry();
+  hasError(validateRegistry(doc(bare)), /^inv-a: eval coverage not recorded \(set evals or not_evalable\)$/);
+});
+
+test('evals empty, non-array, or holding a non-string/empty path fails', () => {
+  for (const bad of [[], 'harness/test/x.test.js', null, ['ok.js', 7], ['']]) {
+    hasError(validateRegistry(doc(withEvals(bad))), /^inv-a: evals must be a non-empty list of paths$/);
+  }
+});
+
+test('not_evalable empty or non-string fails', () => {
+  for (const bad of ['', null, 3, ['reason']]) {
+    hasError(validateRegistry(doc(entry({ not_evalable: bad }))), /^inv-a: not_evalable must be a non-empty reason$/);
+  }
+});
+
+test('valid evals with an existing file passes schema and anchors', () => {
+  const d = doc(withEvals(['docs/x.md']));
+  assert.deepEqual(validateRegistry(d), []);
+  assert.deepEqual(checkAnchors(d, readFile), []);
+});
+
+test('checkAnchors missing eval file names id and path', () => {
+  const d = doc(withEvals(['docs/x.md', 'harness/test/gone.test.js']));
+  assert.deepEqual(checkAnchors(d, readFile), ['inv-a: eval file not found: harness/test/gone.test.js']);
 });
