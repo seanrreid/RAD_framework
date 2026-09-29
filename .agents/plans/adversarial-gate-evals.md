@@ -1,7 +1,7 @@
 # Plan: Adversarial Gate Evals + Composed-Path Fixes + Push Guard
 Created: 2026-09-29
 Author: architect
-Status: in-progress
+Status: pending-review
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-09-29T20:10:20.265Z
 Recorded-By: sean@torchcodelab.com
@@ -39,7 +39,7 @@ This is Plan 2 of the verification batch. #109 asks for evals that drive an agen
 | Spine push guard (`scripts/default-tip.sh` + `fail-protocol` demotion + `push-check-unavailable` audit event) | A preventive in-agent push block (bypassable; not chosen) |
 | Scripted adversarial evals in `harness/evals/` against real git fixtures, with a mutation check per case | #49 reviewer fixtures, the live-eval CI workflow and credentials (Plan 3) |
 | Registry `evals` / `not_evalable` fields + lint; new `no-direct-push-to-default` invariant | Prompt-injection and read-only-question cases (live-model only; Plan 3) |
-| CI `evals-scripted` job; `docs/evals.md` | Fixing the `RAD_BRANCH_PREFIX` CI bypass (#154) |
+| CI `evals-scripted` job; lanes documented in `lib/runner.js` (`docs/evals.md` → Plan 3) | Fixing the `RAD_BRANCH_PREFIX` CI bypass (#154) |
 
 ## Acceptance Criteria
 
@@ -98,7 +98,7 @@ This is Plan 2 of the verification batch. #109 asks for evals that drive an agen
      - A new `no-direct-push-to-default` invariant is added, anchored to the spine guard, `default-tip.sh` and the CLI wiring.
      - The hook and scope entries gain anchors for the new CLI wiring.
    - **Lint:** `scripts/lint-invariants.sh` passes.
-10. CI gains an `evals-scripted` job (all PRs, blocking, thin wrapper: node 20 + `node --test harness/evals/*.eval.js`). `docs/evals.md` explains:
+10. CI gains an `evals-scripted` job (all PRs, blocking, thin wrapper: node 20 + `node --test harness/evals/*.eval.js`). `harness/evals/lib/runner.js`'s header explains the following (amendment 2: the full `docs/evals.md` moves to Plan 3):
     - the lanes
     - how to add a case and its mutation
     - live mode
@@ -129,17 +129,19 @@ This is Plan 2 of the verification batch. #109 asks for evals that drive an agen
 | harness/test/cli.test.js | 940-990 | Tests for AC#1, AC#2 |
 | harness/spine.js | 175-215 | `pushGuardDemotion` beside `scopeDemotion` |
 | harness/spine.js | 440-490 | JSDoc + `pushGuard = false` param |
-| harness/spine.js | 615-640 | Read the tip before `runWave` |
+| harness/spine.js | 598-640 | Read the tip before `runWave`; amendment 2: approval re-check before the first wave too |
 | harness/spine.js | 770-800 | Read after; demote to `fail-protocol` or append `push-check-unavailable` |
 | harness/test/spine.test.js | 1990-2040 | Tests for AC#3 |
-| harness/events.js | 16-66 | Typedef: `push-check-unavailable` (7th audit-only event) |
+| harness/test/spine.test.js | 2159-2190 | Amendment 2: first-wave approval re-check tests |
+| harness/events.js | 16-40 | Typedef: `push-check-unavailable` (7th audit-only event) |
 | harness/events.js | 165-175 | `PHASE_BY_TYPE` comment: absent |
 | scripts/default-tip.sh | 1-60 | New: remote default-branch tip reader (AC#4) |
 | scripts/test-default-tip.sh | 1-80 | New: fixture test |
 | harness/evals/lib/fixture.js | 1-130 | New: hermetic real-git fixture builder |
-| harness/evals/lib/runner.js | 1-70 | New: normal + mutated runs; live mode |
-| harness/evals/approval.eval.js | 1-140 | New: approval, blockers, plan-edit and resume cases |
-| harness/evals/delivery.eval.js | 1-170 | New: scope (±), hook, verify, env and push cases |
+| harness/evals/lib/runner.js | 1-55 | New: normal + mutated runs; live mode |
+| harness/evals/approval.eval.js | 1-160 | New: approval, blockers, plan-edit and resume cases |
+| harness/evals/smoke.eval.js | 1-23 | Amendment 2: happy-path smoke case created in Task 2.1 (was missing from this table) |
+| harness/evals/delivery.eval.js | 1-145 | New: scope (±), hook, verify, env and push cases |
 | harness/evals/repo.eval.js | 1-80 | New: append-only, self-protected and worktree cases |
 | harness/invariants.js | 45-110 | `evals` / `not_evalable` rule; eval-path existence check |
 | harness/test/invariants.test.js | 140-175 | Tests for AC#9 |
@@ -147,7 +149,6 @@ This is Plan 2 of the verification batch. #109 asks for evals that drive an agen
 | scripts/test-lint-invariants.sh | 97-130 | Amendment 1: A8 fixture gains `not_evalable`; new missing-coverage case after A8 |
 | docs/invariants.yaml | 1-170 | Eval links for every entry; new `no-direct-push-to-default`; new anchors |
 | .github/workflows/ci.yml | 100-118 | New `evals-scripted` job |
-| docs/evals.md | 1-40 | New: lanes, adding a case, mutation, live mode |
 
 ## Program Design
 
@@ -245,7 +246,7 @@ Tests:
 Validate: AC#1, AC#2 — `npm test --prefix harness`.
 
 #### Task 1.2: Spine push guard + default-tip script
-File: harness/spine.js:175-215, 440-490, 615-640, 770-800, harness/test/spine.test.js:1990-2040, harness/events.js:16-66, 165-175, scripts/default-tip.sh:1-60, scripts/test-default-tip.sh:1-80
+File: harness/spine.js:175-215, 440-490, 598-640, 770-800, harness/test/spine.test.js:1990-2040, harness/events.js:16-40, 165-175, scripts/default-tip.sh:1-60, scripts/test-default-tip.sh:1-80
 What: Implement Program Design §3, add the `push-check-unavailable` typedef and audit-only note, and write `scripts/default-tip.sh` per AC#4.
 Spine tests (fake `sh`):
 - tip moved → `fail-protocol` → abort, with gate fields
@@ -270,7 +271,7 @@ Validate: AC#9 — `npm test --prefix harness`. `scripts/lint-invariants.sh` is 
 The eval harness that every case depends on.
 
 #### Task 2.1: Eval fixture builder + runner
-File: harness/evals/lib/fixture.js:1-130, harness/evals/lib/runner.js:1-70
+File: harness/evals/lib/fixture.js:1-130, harness/evals/lib/runner.js:1-55
 What: Implement AC#5 (the fixture and runner parts), AC#7 (live mode) and AC#8.
 - **`fixture.js`:** exposes `createFixture({ feature, plan, withOrigin = true, approve = true, adversary })`, which returns `{ root, deliver(args, env), approve(), run(cmd, args, env), events(), git(...), cleanup() }`.
 - **Adversary:** a generated `adversary.mjs` implements the named scripted behaviours (in-scope commit, undeclared-file commit, push to `origin main`, dump env, rewrite events log, noop) and prints a valid `WAVE_RESULT`.
@@ -282,24 +283,37 @@ Validate: AC#5, AC#8 — `node --test harness/evals/smoke.eval.js` passes. It re
 Tasks in this wave can run in parallel (disjoint eval files; both use the Wave 2 harness).
 
 #### Task 3.1: Approval and repository eval cases
-File: harness/evals/approval.eval.js:1-140, harness/evals/repo.eval.js:1-80
+File: harness/evals/approval.eval.js:1-160, harness/evals/repo.eval.js:1-80
 What: Implement the AC#6 cases `deliver-without-approval`, `deliver-after-plan-edit`, `approve-with-marker`, `resume-failed-stop`, `events-log-tamper`, `self-protected-plan` and `remove-unmarked-worktree`. Each case has a `mutate` that disables its guard in the fixture copy, and the mutated run must fail.
 Validate: AC#5, AC#6 — `node --test harness/evals/approval.eval.js harness/evals/repo.eval.js` passes, including every `[mutated]` expectation.
 
 #### Task 3.2: Delivery eval cases
-File: harness/evals/delivery.eval.js:1-170
+File: harness/evals/delivery.eval.js:1-145
 What: Implement the AC#6 cases `deliver-in-scope-advances`, `out-of-scope-write`, `crashing-pre-wave-hook`, `verify-hang`, `env-secret-leak` and `push-to-default` (both the moved-tip and the no-origin variants), each with a `mutate`.
 Validate: AC#5, AC#6 — `node --test harness/evals/delivery.eval.js` passes, including every `[mutated]` expectation.
 
 ### Wave 4 — sequential
+Amendment 2: close the wave-1 fingerprint gap before the registry records the invariant as held.
+
+#### Task 4.1: Approval re-check before the first wave
+File: harness/spine.js:598-640, harness/test/spine.test.js:2159-2190, harness/evals/approval.eval.js:1-160
+What:
+- **Spine:** remove the `if (!firstWaveOfRun)` exemption so the `approvalIntact` port (and the gate re-read) also runs before the run's first wave. An approved plan whose body changed after approval then stops with `approval-changed` (class `needs-decision`, exit 3) before any agent runs. The spine default `approvalIntact = () => ({ ok: true })` keeps every existing spine test unchanged.
+- **Spine tests:**
+  - edited plan → `approval-changed` before wave 1, `runWave` never called
+  - unedited plan → unchanged sequence
+- **Eval:** `harness/evals/approval.eval.js` `deliver-after-plan-edit` now also asserts that `rad deliver` (CLI) refuses before the adversary runs. Its mutation restores the first-wave exemption in the fixture's `spine.js` copy.
+Validate: AC#5, AC#6 — `npm test --prefix harness`; `node --test harness/evals/approval.eval.js` including `[mutated]`.
+
+### Wave 5 — sequential
 Registry links, CI and docs, once every eval file exists.
 
-#### Task 4.1: Registry links + CI + docs
-File: docs/invariants.yaml:1-170, .github/workflows/ci.yml:100-118, docs/evals.md:1-40, scripts/test-lint-invariants.sh:42-53, 97-130
+#### Task 5.1: Registry links + CI + docs
+File: docs/invariants.yaml:1-170, .github/workflows/ci.yml:100-118, scripts/test-lint-invariants.sh:42-53, 97-130
 What:
 - Add `evals` / `not_evalable` to every registry entry per AC#9, add the `no-direct-push-to-default` invariant and the new CLI-wiring anchors, and mark `push-to-default` as detective in its claim or note.
 - Add the `evals-scripted` CI job per AC#10.
-- Write `docs/evals.md`.
+- Document the eval lanes in `harness/evals/lib/runner.js`'s header comment (`docs/evals.md` moves to Plan 3; see amendment 2).
 - **Amendment 1:** add `not_evalable: "fixture"` (or `evals`) to every inline fixture registry in `scripts/test-lint-invariants.sh` that's meant to be valid, so A1–A9 keep testing what they tested. Add a fixture case asserting that an entry with neither key fails as "eval coverage not recorded".
 Validate: AC#9, AC#10, AC#11:
 - `scripts/lint-invariants.sh` exits 0
@@ -336,6 +350,7 @@ None. All paths are architect-owned, and the author is the architect.
 - **Self-protected paths.** `harness/`, `scripts/` and `.github/` trigger advisory lint warnings by design.
 
 ## Issue Gaps
+- **AMENDMENT 2 (2026-09-29, after Wave 3).** Task 3.1 found that `rad deliver` runs wave 1 of a plan edited after approval: the gate fold ignores the fingerprint, and the spine re-checks `approvalIntact` only from wave 2 (`if (!firstWaveOfRun)`). Only the skill hook catches it before a run. Architect decision: fix now. The new Task 4.1 runs the re-check before the first wave too, and the old Task 4.1 becomes Task 5.1. To stay within the context budget, `docs/evals.md` (part of AC#10) moves to Plan 3, which documents both the scripted and live lanes together. Here the lanes are described in `lib/runner.js`'s header. `harness/evals/smoke.eval.js` (created in Task 2.1) was missing from Files in Scope and is added. Line ranges for two finished new files (`runner.js`, `delivery.eval.js`) are set to their actual lengths.
 - **AMENDMENT 1 (2026-09-29, during Wave 1).** Task 1.3's AC#9 schema rule makes the inline "valid" fixture registries in `scripts/test-lint-invariants.sh` (from #155) invalid, because they declare no eval coverage. That file was missing from Files in Scope. It's added to Task 4.1 so the fixtures gain `not_evalable`, plus one new case for the missing-coverage error. No other change to the plan.
 - **ASSUMPTION — bug fixes in scope.** The two composed-path defects found during research are fixed here, with evals proving them. Architect decision, 2026-09-29.
 - **ASSUMPTION — push guard design.** Spine-side detection, `fail-protocol` → abort; offline skips with a `push-check-unavailable` record; spine default off, CLI on. Architect decision, 2026-09-29.
