@@ -163,11 +163,18 @@ set `RAD_BRANCH_PREFIX` (e.g. `RAD_BRANCH_PREFIX=feature/`) in your environment.
 
 ### Cost & Frugality
 
-Both knobs are OPTIONAL and backward-compatible — absent, deliver behaves as before.
+All knobs are OPTIONAL and backward-compatible — absent, deliver behaves as before.
 
 ```
-RAD_TOKEN_BUDGET: <positive integer>   # per-deliver cumulative token ceiling
+RAD_TOKEN_BUDGET: <positive integer>          # per-deliver cumulative token ceiling
+RAD_MAX_FAILED_ATTEMPTS: <positive integer>   # cumulative failed wave-attempt cap
 ```
+
+`RAD_MAX_FAILED_ATTEMPTS` (opt-in) stops deliver with `failed-attempt-cap` once the
+non-success wave-attempts since the latest `deliver-stopped` reach it; a malformed
+value (non-numeric, zero, negative) is a hard error — **exit 2** before any event.
+`rad deliver` exits **0** complete, **1** failed, **2** usage/config, **3** needs a
+human decision (see the Stop contract in `docs/rad-wave-contract.md`).
 
 When set, `/rad-deliver` (the harness spine) sums each wave's recorded token usage
 and, before starting the next wave, stops gracefully once the running total reaches
