@@ -11,3 +11,4 @@ Executor role: architect
 | 1 | 1 | 1.1 Stop classification module | complete | db368a6 | 2026-09-29T14:57:46Z |
 | 2 | 1 | 1.2 deliver-stopped at every terminal | complete | c2722d7 | 2026-09-29T14:59:36Z |
 | 3 | 2 | 2.1 Between-wave approval re-check | complete | f2a1703 | 2026-09-29T15:02:16Z |
+| 4 | 2 | 2.2 Between-wave scope check | complete | d8cbbb0 | 2026-09-29T15:03:33Z |
