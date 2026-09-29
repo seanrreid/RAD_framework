@@ -94,11 +94,24 @@ done
 
 # ── Collect event logs: branch tips first, then working tree ──────────────────
 REMOTE_ROOT="refs/remotes/origin/"
+SKIPPED=0
+
+warn_skip() {
+  # warn_skip <kind> <source> <feature> — advisory: an unsafe-named log is excluded, never
+  # silently. <kind> is a fixed literal; source and name are %q-quoted so control characters
+  # in a ref or dir name cannot forge output lines.
+  printf 'warning: skipped %s %q log for unsafe feature name: %q\n' "$1" "$2" "$3" >&2
+  SKIPPED=$((SKIPPED + 1))
+}
+
 while IFS= read -r ref; do
   name="${ref#"$REMOTE_ROOT"}"
   [[ "$name" == "$PREFIX"* ]] || continue
   feature="${name#"$PREFIX"}"
-  [[ "$feature" =~ $FEATURE_PATTERN ]] || continue
+  if [[ ! "$feature" =~ $FEATURE_PATTERN ]]; then
+    warn_skip branch-tip "$ref" "$feature"
+    continue
+  fi
   spec="${ref}:${LOG_REL_DIR}/${feature}/${LOG_NAME}"
   # Absence is expected (a branch without a log yet); a probe miss is not an error.
   git cat-file -e "$spec" 2>/dev/null || continue
@@ -112,7 +125,10 @@ for log in "$LOG_REL_DIR"/*/"$LOG_NAME"; do
   [[ -f "$log" ]] || continue
   feature="${log#"$LOG_REL_DIR"/}"
   feature="${feature%/"$LOG_NAME"}"
-  [[ "$feature" =~ $FEATURE_PATTERN ]] || continue
+  if [[ ! "$feature" =~ $FEATURE_PATTERN ]]; then
+    warn_skip working-tree "$log" "$feature"
+    continue
+  fi
   [[ -e "$TMP/logs/${feature}.jsonl" ]] && continue
   cp "$log" "$TMP/logs/${feature}.jsonl"
 done
@@ -123,7 +139,9 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-const [repoRoot, tmp] = process.argv.slice(1);
+const [repoRoot, tmp, skippedArg] = process.argv.slice(1);
+const skipped = Number(skippedArg);
+const skipNote = skipped > 0 ? ` (${skipped} log(s) skipped — see warnings)` : "";
 const harness = (m) => import(pathToFileURL(join(repoRoot, "harness", m)).href);
 const { loadMatrix } = await harness("matrix.js");
 const { loadGates } = await harness("gates.js");
@@ -141,7 +159,7 @@ const pg = load(loadGates, join(repoRoot, "harness", "gates.yaml"), "proposed ga
 const names = gateNameUnion(bg, pg);
 
 const files = readdirSync(join(tmp, "logs")).filter((f) => f.endsWith(".jsonl")).sort();
-if (files.length === 0) { console.log("no history to replay"); process.exit(0); }
+if (files.length === 0) { console.log(`no history to replay${skipNote}`); process.exit(0); }
 
 let total = 0;
 for (const file of files) {
@@ -164,6 +182,6 @@ for (const file of files) {
 }
 const k = files.length;
 console.log(total === 0
-  ? `no divergences across ${k} feature(s)`
-  : `${total} divergence(s) across ${k} feature(s) — advisory; review before merging`);
-' -- "$REPO_ROOT" "$TMP"
+  ? `no divergences across ${k} feature(s)${skipNote}`
+  : `${total} divergence(s) across ${k} feature(s) — advisory; review before merging${skipNote}`);
+' -- "$REPO_ROOT" "$TMP" "$SKIPPED"

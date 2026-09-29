@@ -2,7 +2,8 @@
 # test-check-matrix-replay.sh
 # Regression tests for check-matrix-replay.sh: known divergence, identical
 # tables, removed outcome (throws:), unparseable table, empty history,
-# branch-tip-preferred log collection, malformed log, and usage errors.
+# branch-tip-preferred log collection, malformed log, unsafe-name skip warning,
+# and usage errors.
 # Hermetic: builds a temp git repo with a local bare origin and copies the
 # script plus the harness modules it loads (replay.js → matrix.js, gates.js →
 # vendor/js-yaml.mjs) into it. Runs under bash 3.2+ (set -u safe).
@@ -117,6 +118,17 @@ run_check
 expect_code 1 R9; expect_out "error: malformed event log for bad" R9
 pass "R9 malformed event log → exit 1"
 rm -rf "$GREPO/.agents/state/bad"
+
+# ── R10: unsafe feature dir name → warned skip, not silent drop ───────────────
+mkdir -p "$GREPO/.agents/state/bad name"
+attempt_event "" 1 > "$GREPO/.agents/state/bad name/events.jsonl"
+run_check
+expect_code 0 R10
+expect_out "warning: skipped working-tree .agents/state/bad\\ name/events.jsonl log" R10
+expect_out "unsafe feature name: bad\\ name" R10
+expect_out "no divergences across 1 feature(s) (1 log(s) skipped — see warnings)" R10
+pass "R10 unsafe feature name → stderr warning + skipped count in summary, exit 0"
+rm -rf "$GREPO/.agents/state/bad name"
 
 # ── R6: branch-tip log replayed and preferred over the working-tree copy ──────
 g checkout -q -b rad/f2
