@@ -49,7 +49,17 @@ Stop the briefing on this warning until it's resolved.
 scripts/rad-status.sh
 ```
 
-Group what it returns by status and surface the actionable ones first:
+**Dormant runs first.** If the output has a `── Dormant Runs (needs a decision) ──`
+section, report it ABOVE every plan-status group — a dormant run is a deliver that
+is parked awaiting a human decision, and nothing moves until someone makes it. For
+each entry, give the feature, what it stopped on (reason and wave), the decision it
+is asking for, and the resume hint exactly as printed:
+`rad deliver <feature> --resume --context "<what you decided>"`. The section is
+absent when nothing is parked — then say nothing about dormant runs. A
+`warning: stop-status <feature>: …` line means that feature's event log could not
+be read; mention it so it gets looked at.
+
+Then group the plans by status and surface the actionable ones first:
 - **pending-review** → *Awaiting architect approval* — the architect runs `/rad-approve <feature>`.
 - **approved** → *Ready to execute* — `/rad-deliver .agents/plans/<feature>.md`.
 - **in-progress** → *Delivery underway* — note the `rad/` branch.

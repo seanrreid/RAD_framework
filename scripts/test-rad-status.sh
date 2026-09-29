@@ -205,4 +205,112 @@ printf '%s\n' "$OUT" | awk '/── Research \(pre-plan\)/{p=1;next} /^── /{
   | grep -q "(no research artifacts)" || fail "R7: empty-state line missing"
 echo "✓ R7: no research yields the explicit empty-state line"
 
-echo "PASS: rad-status research visibility"
+# ── Dormant runs (needs a decision) ──────────────────────────────────────────
+
+DORMANT_HEADER="── Dormant Runs (needs a decision)"
+STOP_DATA='{"class":"needs-decision","reason":"token-budget","decision":"token budget 100 reached (spent 120); raise RAD_TOKEN_BUDGET or stop","wave":2}'
+FAILED_DATA='{"class":"failed","reason":"attempts-exhausted","decision":"fix the failing wave","wave":1}'
+
+# Prints one event line in the real event shape (feature, type, actor, ts, data).
+event_line() {
+  # $1 = feature, $2 = type, $3 = data JSON
+  printf '{"feature":"%s","type":"%s","actor":"t","ts":"2026-09-29T00:00:00.000Z","data":%s}\n' "$1" "$2" "$3"
+}
+
+# Pushes rad/<feature> with a plan and (optionally) an events.jsonl whose
+# content is read from stdin. Run inside the dormant fixture's work tree.
+push_feature() {
+  # $1 = feature, $2 = "log" to commit stdin as its events.jsonl
+  g checkout -q main
+  g checkout -qb "rad/$1"
+  write_doc ".agents/plans/$1.md" in-progress
+  if [[ "${2:-}" == "log" ]]; then
+    mkdir -p ".agents/state/$1"
+    cat > ".agents/state/$1/events.jsonl"
+  fi
+  g add -A && g commit -qm "$1"
+  g push -q origin "rad/$1"
+}
+
+# rad-status.sh finds harness/cli.js beside its own scripts dir. Copied, not
+# symlinked: cli.js only runs as main when argv[1] is its real path. node_modules
+# (large, resolved via realpath) and the test suite are linked/skipped.
+install_harness() {
+  local src="$HERE/../harness" entry
+  mkdir -p "$1/harness"
+  for entry in "$src"/*; do
+    case "$(basename "$entry")" in
+      node_modules|test) ;;
+      *) cp -R "$entry" "$1/harness/" ;;
+    esac
+  done
+  [[ -d "$src/node_modules" ]] && ln -s "$src/node_modules" "$1/harness/node_modules"
+  return 0
+}
+
+# Prints the Dormant Runs section body (header excluded).
+dormant_section() {
+  printf '%s\n' "$1" | awk -v h="$DORMANT_HEADER" 'index($0,h)==1{p=1;next} /^── /{p=0} p'
+}
+
+# No log anywhere in the main fixture: the header must not render at all.
+OUT=$(run_status "$TMP/work")
+case "$OUT" in *"$DORMANT_HEADER"*) fail "D1: Dormant Runs header rendered with no dormant run: $OUT" ;; esac
+echo "✓ D1: no dormant run → no Dormant Runs section header"
+
+DORM="$TMP/dormant"
+DORM_ORIGIN="$TMP/dormant-origin.git"
+git init -q --bare "$DORM_ORIGIN"
+git init -q "$DORM"
+install_scripts "$DORM"
+install_harness "$DORM"
+(
+  cd "$DORM"
+  g symbolic-ref HEAD refs/heads/main
+  g add -A && g commit -qm base
+  g remote add origin "$DORM_ORIGIN"
+  g push -q origin main
+  { event_line parked deliver-started '{}'; event_line parked deliver-stopped "$STOP_DATA"; } \
+    | push_feature parked log
+  { event_line failed-run deliver-started '{}'; event_line failed-run deliver-stopped "$FAILED_DATA"; } \
+    | push_feature failed-run log
+  { event_line resumed deliver-stopped "$STOP_DATA"; event_line resumed deliver-started '{}'; } \
+    | push_feature resumed log
+  { event_line corrupt deliver-stopped "$STOP_DATA"; echo 'not json at all'; } \
+    | push_feature corrupt log
+  push_feature no-log
+  g checkout -q main
+  g fetch -q origin
+)
+(cd "$DORM" && bash scripts/rad-status.sh >"$TMP/dormant.out" 2>"$TMP/dormant.err") \
+  || fail "D5: rad-status.sh exited non-zero on a corrupt event log: $(cat "$TMP/dormant.err")"
+OUT=$(cat "$TMP/dormant.out")
+ERR=$(cat "$TMP/dormant.err")
+SECTION=$(dormant_section "$OUT")
+
+case "$OUT" in *"$DORMANT_HEADER"*) ;; *) fail "D2: Dormant Runs section missing: $OUT" ;; esac
+case "$SECTION" in *"⏸ parked"*) ;; *) fail "D2: needs-decision run not listed: $SECTION" ;; esac
+case "$SECTION" in *"Stopped:  token-budget (wave 2)"*) ;; *) fail "D2: reason/wave missing: $SECTION" ;; esac
+case "$SECTION" in *"Decision: token budget 100 reached (spent 120); raise RAD_TOKEN_BUDGET or stop"*) ;;
+  *) fail "D2: decision missing: $SECTION" ;; esac
+case "$SECTION" in *'rad deliver parked --resume --context "<what you decided>"'*) ;;
+  *) fail "D2: resume hint missing: $SECTION" ;; esac
+header_line=$(printf '%s\n' "$OUT" | grep -n "^$DORMANT_HEADER" | cut -d: -f1)
+plans_line=$(printf '%s\n' "$OUT" | grep -n "^── Active Plans" | cut -d: -f1)
+[[ "$header_line" -lt "$plans_line" ]] || fail "D2: Dormant Runs must render before Active Plans"
+echo "✓ D2: needs-decision stop listed before Active Plans with reason, decision, and resume hint"
+
+case "$SECTION" in *"failed-run"*) fail "D3: failed-class stop must not be dormant: $SECTION" ;; esac
+echo "✓ D3: failed-class stop is not listed as dormant"
+
+case "$SECTION" in *"resumed"*) fail "D4: stop followed by deliver-started must not be dormant: $SECTION" ;; esac
+echo "✓ D4: needs-decision stop picked up by a later deliver-started is not dormant"
+
+case "$ERR" in *"warning: stop-status corrupt: "*"malformed event log"*) ;;
+  *) fail "D5: corrupt log did not warn naming the feature: $ERR" ;; esac
+case "$SECTION" in *"corrupt"*) fail "D5: corrupt log must not render as dormant: $SECTION" ;; esac
+case "$ERR" in *"no-log"*) fail "D6: a tip without an event log must be skipped silently: $ERR" ;; esac
+echo "✓ D5: corrupt event log warns naming the feature and the run exits 0"
+echo "✓ D6: plan tip with no event log is skipped silently"
+
+echo "PASS: rad-status research visibility + dormant runs"

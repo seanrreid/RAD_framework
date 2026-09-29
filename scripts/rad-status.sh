@@ -105,6 +105,92 @@ collect_plans() {
   } | sort
 }
 
+# ── Dormant runs ──────────────────────────────────────────────────────────────
+
+# A dormant run is a deliver that stopped with class needs-decision and has not
+# been picked up by a later deliver-started. The fold lives in the harness
+# (`rad stop-status`); this script only feeds it each branch tip's event log.
+# Located relative to this script (the repo root), never the CWD.
+RAD_CLI="$SCRIPT_DIR/../harness/cli.js"
+DORMANT_PREFIX="dormant "
+# Anchored field extraction from `dormant class=.. reason=.. wave=.. decision=".."`;
+# each field before decision is a single token, so decision may hold any text.
+DORMANT_FIELDS='^dormant class=[^ ]* reason=\([^ ]*\) wave=\([^ ]*\) decision="\(.*\)"$'
+
+# Row delimiter for dormant rows: a decision is free text and may hold `|`.
+TAB=$'\t'
+
+# Prints the tab-separated `feature reason wave decision` row for one
+# stop-status line, or warns (stderr) when the line is not a dormant record.
+dormant_row() {
+  # $1 = feature, $2 = stop-status stdout line
+  local row
+  row=$(printf '%s\n' "$2" | sed -n "s/${DORMANT_FIELDS}/\\1${TAB}\\2${TAB}\\3/p")
+  if [[ -z "$row" ]]; then
+    echo "warning: stop-status $1: unrecognised output: $2" >&2
+    return 0
+  fi
+  printf '%s%s%s\n' "$1" "$TAB" "$row"
+}
+
+# Folds one branch tip's event log through `rad stop-status` and emits its
+# dormant row, if any. Every failure warns on stderr and returns 0 — a broken
+# log must never abort the status run. $3 = temp file for captured stderr.
+dormant_for_branch() {
+  # $1 = branch, $2 = feature, $3 = stderr capture file
+  local log_path=".agents/state/${2}/events.jsonl" log out
+  # The caller confirmed the path exists on the tip, so this is a real git error.
+  if ! log=$(git show "origin/${1}:${log_path}" 2>"$3"); then
+    echo "warning: stop-status $2: git show failed: $(cat "$3")" >&2
+    return 0
+  fi
+  if ! out=$(printf '%s\n' "$log" | node "$RAD_CLI" stop-status "$2" --stdin 2>"$3"); then
+    echo "warning: stop-status $2: $(cat "$3")" >&2
+    return 0
+  fi
+  case "$out" in
+    none) ;;
+    "$DORMANT_PREFIX"*) dormant_row "$2" "$out" ;;
+    *) echo "warning: stop-status $2: unrecognised output: $out" >&2 ;;
+  esac
+}
+
+# Warns once (stderr) and fails when the stop-status fold cannot run here.
+stop_status_available() {
+  if ! command -v node >/dev/null 2>&1; then
+    echo "warning: node not found; skipping Dormant Runs" >&2
+    return 1
+  fi
+  if [[ ! -f "$RAD_CLI" ]]; then
+    echo "warning: $RAD_CLI not found; skipping Dormant Runs" >&2
+    return 1
+  fi
+}
+
+# Emits one row per dormant rad/ branch-tip feature that has a plan. node is
+# only required once a tip actually carries an event log.
+collect_dormant() {
+  local ref branch feature errf checked=false
+  errf=$(mktemp "${TMPDIR:-/tmp}/rad-status-dormant.XXXXXX") || {
+    echo "warning: stop-status: cannot create a temp file; skipping Dormant Runs" >&2
+    return 0
+  }
+  while read -r ref; do
+    [[ -z "$ref" ]] && continue
+    branch="${ref#origin/}"
+    feature="${branch#"$PREFIX"}"
+    git cat-file -e "origin/${branch}:.agents/plans/${feature}.md" 2>/dev/null || continue
+    # No log on the tip is the normal pre-deliver state — skip silently.
+    git cat-file -e "origin/${branch}:.agents/state/${feature}/events.jsonl" 2>/dev/null || continue
+    if ! $checked; then
+      checked=true
+      stop_status_available || break
+    fi
+    dormant_for_branch "$branch" "$feature" "$errf"
+  done < <(git branch -r --list "origin/${PREFIX}*" 2>/dev/null | sed 's/^[[:space:]]*//')
+  rm -f "$errf"
+}
+
 # ── Research inventory ────────────────────────────────────────────────────────
 
 # Research artifacts (.agents/research/<slug>.md) are the pre-plan stage. Same
@@ -261,6 +347,7 @@ cli_available && CLI_STATUS="✓ CLI available"
 PLANS=$(collect_plans)
 RESEARCH=$(collect_research)
 PLAN_SLUGS=$(plan_slug_set "$PLANS")
+DORMANT=$(collect_dormant)
 LOGS=$(collect_logs)
 AGENTS=$(agent_count)
 
@@ -273,6 +360,22 @@ echo "Platform:  $PLATFORM  $CLI_STATUS"
 echo "Agents:    $AGENTS defined in .claude/agents/"
 echo "Branch:    $CURRENT_BRANCH"
 echo ""
+
+# ── Dormant runs (needs a decision) ──────────────────────────────────────────
+
+# Rendered only when at least one run is parked: with none, the output is
+# byte-identical to a status run without this section (no header, no blank).
+if [[ -n "$DORMANT" ]]; then
+  echo "── Dormant Runs (needs a decision) ────"
+  echo ""
+  while IFS="$TAB" read -r feature reason wave decision; do
+    echo "  ⏸ $feature"
+    echo "    Stopped:  $reason (wave $wave)"
+    echo "    Decision: $decision"
+    echo "    Resume:   rad deliver $feature --resume --context \"<what you decided>\""
+    echo ""
+  done <<< "$DORMANT"
+fi
 
 # ── Plans ─────────────────────────────────────────────────────────────────────
 
