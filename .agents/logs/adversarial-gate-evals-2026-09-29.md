@@ -19,3 +19,5 @@ Executor role: architect
 | — | Amend | Re-approved after amendment 2 | — | — | 16:27 |
 | — | Wave 4 | Approval re-check before the first wave | ✗ blocked_spec (5 #151 tests encode the exemption) → amendment 3 | — | 16:37 |
 | — | Amend | Re-approved after amendment 3 | — | — | 16:37 |
+| 7 | Wave 4 | Approval re-check before the first wave (retry 1, amendment 3) | ✓ complete | 2a67f40 | 16:43 |
+| 8 | Wave 4 | Hook-only edited-plan eval (restores fingerprint mutation coverage) | ✓ complete | a9eee92 | 16:43 |
