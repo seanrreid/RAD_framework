@@ -12,3 +12,4 @@ Executor role: architect
 | 2 | 1 | 1.2 deliver-stopped at every terminal | complete | c2722d7 | 2026-09-29T14:59:36Z |
 | 3 | 2 | 2.1 Between-wave approval re-check | complete | f2a1703 | 2026-09-29T15:02:16Z |
 | 4 | 2 | 2.2 Between-wave scope check | complete | d8cbbb0 | 2026-09-29T15:03:33Z |
+| 5 | 2 | 2.3 Cumulative failed-attempt cap | complete | 9789dce | 2026-09-29T15:04:20Z |
