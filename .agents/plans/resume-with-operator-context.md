@@ -1,7 +1,10 @@
 # Plan: Resume a Stopped Run with Operator Context
 Created: 2026-09-29
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-09-29T16:58:29.441Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/resume-with-operator-context
 Adopted-From: https://github.com/seanrreid/RAD_framework/issues/95
 Issue-Title: Surfaced runs have no re-entry: classify terminal vs dormant stops, make the operator's reply the resume context
