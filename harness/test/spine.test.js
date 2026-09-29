@@ -1730,12 +1730,23 @@ function makeRevokingState({ passes, plan = twoWaves }) {
   return state;
 }
 
+/** An approvalIntact port that is intact on its first call (the pre-wave-1
+ * check), then delegates to `later` — i.e. the approval changes before wave 2. */
+function intactOnlyOnFirstCall(later) {
+  let calls = 0;
+  return () => {
+    calls += 1;
+    return calls === 1 ? { ok: true } : later();
+  };
+}
+
 function wave2Started(state) {
   return state.appended.some((e) => e.type === 'wave-started' && e.data.wave === 2);
 }
 
 test('(ac-a) AC#3 gate flips to failed before wave 2 → approval-changed, no wave-2 wave-started', async () => {
-  const { state, result } = await runStopped({ state: makeRevokingState({ passes: 1 }) });
+  // passes: entry gate + the pre-wave-1 re-check; the pre-wave-2 re-check fails.
+  const { state, result } = await runStopped({ state: makeRevokingState({ passes: 2 }) });
   assert.equal(result.stopped, 'approval-changed');
   assert.equal(result.ok, false);
   assert.equal(result.wave, 2);
@@ -1747,7 +1758,7 @@ test('(ac-a) AC#3 gate flips to failed before wave 2 → approval-changed, no wa
 test('(ac-b) AC#3 approvalIntact {ok:false} → approval-changed with its reason, no wave-2 wave-started', async () => {
   const { state, result } = await runStopped({
     state: makeValidatingState({ plan: twoWaves }),
-    approvalIntact: () => ({ ok: false, reason: 'plan edited after approval' }),
+    approvalIntact: intactOnlyOnFirstCall(() => ({ ok: false, reason: 'plan edited after approval' })),
   });
   assert.equal(result.stopped, 'approval-changed');
   assert.match(result.reason, /plan edited after approval/);
@@ -1758,9 +1769,9 @@ test('(ac-b) AC#3 approvalIntact {ok:false} → approval-changed with its reason
 test('(ac-c) AC#3 a throwing approvalIntact is NOT intact (fail-closed), message kept in reason', async () => {
   const { state, result } = await runStopped({
     state: makeValidatingState({ plan: twoWaves }),
-    approvalIntact: () => {
+    approvalIntact: intactOnlyOnFirstCall(() => {
       throw new Error('cannot read plan doc');
-    },
+    }),
   });
   assert.equal(result.stopped, 'approval-changed');
   assert.match(result.reason, /cannot read plan doc/);
@@ -1782,21 +1793,39 @@ test('(ac-e) AC#3 default port → event sequence deep-equal to an explicit alwa
   assert.deepEqual(explicit.state.appended, baseline.state.appended);
 });
 
-test('(ac-f) AC#3 a single-wave plan never calls approvalIntact (nor re-runs the gate)', async () => {
+test('(ac-f) AC#3 a single-wave plan calls approvalIntact exactly once (before wave 1) and completes when ok', async () => {
   let portCalls = 0;
-  const state = makeRevokingState({ passes: 1, plan: { waves: [{ n: 1 }] } });
+  const state = makeValidatingState({ plan: { waves: [{ n: 1 }] } });
   const { result } = await runStopped({ state, approvalIntact: () => { portCalls += 1; return { ok: true }; } });
   assert.deepEqual(result, { ok: true, waves: 1 });
-  assert.equal(portCalls, 0);
+  assert.equal(portCalls, 1);
 });
 
-test('(ac-g) AC#3 a resumed run skips the check for its first executed wave', async () => {
+test('(ac-g) AC#3 a resumed run checks approval before its first executed wave', async () => {
   const state = makeValidatingState({ plan: twoWaves });
   state.appended.push({ feature: 'demo', type: 'deliver-started' }, { feature: 'demo', type: 'wave-complete', data: { wave: 1 } });
   let portCalls = 0;
-  const { result } = await runStopped({ state, approvalIntact: () => { portCalls += 1; return { ok: false }; } });
-  assert.deepEqual(result, { ok: true, waves: 2 });
-  assert.equal(portCalls, 0);
+  const { result } = await runStopped({ state, approvalIntact: () => { portCalls += 1; return { ok: false, reason: 'plan edited after approval' }; } });
+  assert.equal(result.stopped, 'approval-changed');
+  assert.equal(result.wave, 2);
+  assert.equal(portCalls, 1);
+  assert.ok(!wave2Started(state), 'the remaining wave never started');
+  assertOneTrailingStop(state, { class: 'needs-decision', reason: 'approval-changed', wave: 2 });
+});
+
+test('(ac-h) AC#3 approvalIntact {ok:false} on a fresh run → approval-changed before wave 1, no agent runs', async () => {
+  let runWaveCalls = 0;
+  const { state, result } = await runStopped({
+    state: makeValidatingState({ plan: twoWaves }),
+    approvalIntact: () => ({ ok: false, reason: 'plan edited after approval' }),
+    runWave: async () => { runWaveCalls += 1; return { outcome: 'success' }; },
+  });
+  assert.equal(result.stopped, 'approval-changed');
+  assert.equal(result.wave, 1);
+  assert.match(result.reason, /plan edited after approval/);
+  assert.equal(runWaveCalls, 0, 'runWave never called');
+  assert.ok(!state.appended.some((e) => e.type === 'wave-started'), 'no wave-started');
+  assertOneTrailingStop(state, { class: 'needs-decision', reason: 'approval-changed', wave: 1 });
 });
 
 // ── deliver-stop-contract: between-wave scope check (#77, Task 2.2) ──

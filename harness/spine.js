@@ -593,10 +593,6 @@ export async function deliverSpine({
   // resuming). On a fresh run the log carries no wave-attempt usage, so this is 0. ──
   let spent = totalUsage(history).total;
 
-  // The first wave this run executes was covered by the entry gate above; every
-  // later one re-checks approval first (#77).
-  let firstWaveOfRun = true;
-
   // Cumulative failed-attempt count for the cap, seeded from the log so it
   // spans resumed runs until a deliver-stopped resets it.
   let failedAttempts = failedAttemptsSinceStop(history);
@@ -609,16 +605,16 @@ export async function deliverSpine({
   for (const wave of waves) {
     if (completed.has(wave.n)) continue;
 
-    // Approval re-check fires before the budget check and before any
-    // wave-started: a plan re-edited (or un-approved) mid-run must not keep
-    // running under the approval it no longer has.
-    if (!firstWaveOfRun) {
-      const reason = await approvalChangeReason({ state, feature, approvalIntact });
-      if (reason) {
-        return stopRun({ stopped: 'approval-changed', ok: false, wave: wave.n, reason }, stopCtx);
-      }
+    // Approval re-check fires before EVERY wave — the run's first included —
+    // ahead of the budget check and any wave-started: an edited (or
+    // un-approved) plan must stop before any agent runs. #151 exempted the
+    // first wave on the premise that the entry gate covered it, but the gate
+    // fold ignores the plan fingerprint, so only this check catches an edit
+    // made after approval (#77).
+    const reason = await approvalChangeReason({ state, feature, approvalIntact });
+    if (reason) {
+      return stopRun({ stopped: 'approval-changed', ok: false, wave: wave.n, reason }, stopCtx);
     }
-    firstWaveOfRun = false;
 
     // Budget check fires before running THIS wave (and before resume-verify) so
     // an over-budget run stops without doing any further model work.

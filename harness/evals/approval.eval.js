@@ -11,6 +11,7 @@ import { defaultPlan } from './lib/fixture.js';
 const ALWAYS_PASS_SCRIPT = '#!/usr/bin/env bash\nexit 0\n';
 const HOOK_BLOCK_EXIT = 2;
 const RESUME_REFUSED_EXIT = 2;
+const NEEDS_DECISION_EXIT = 3;
 
 /** Replace `from` in a fixture-copy file; throws when absent so a mutation is never a silent no-op. */
 function patch(root, rel, from, to) {
@@ -27,6 +28,12 @@ function runDeliverHook(fx) {
     { cwd: fx.root, input: JSON.stringify(payload), encoding: 'utf8' });
   if (res.error) throw res.error;
   return res;
+}
+
+/** Hide a mutated fixture copy from the wave scope check so only the targeted guard differs. */
+function assumeUnchanged(root, rel) {
+  const hide = spawnSync('git', ['update-index', '--assume-unchanged', rel], { cwd: root, encoding: 'utf8' });
+  if (hide.status !== 0) throw new Error(`mutate: git update-index failed: ${hide.stderr}`);
 }
 
 const types = (events) => events.map((e) => e.type);
@@ -68,18 +75,27 @@ defineCases([
     mutate: (root) => writeFileSync(join(root, 'scripts', 'check-plan-approved.sh'), ALWAYS_PASS_SCRIPT),
   },
   {
-    // The deliver gate that re-checks the plan fingerprint before a run starts is
-    // the /rad-deliver hook (check-plan-approved.sh); `rad deliver` itself only
-    // re-checks between waves — see plan-edit-mid-run below.
+    // Both deliver entry points refuse a plan edited after approval: the
+    // /rad-deliver hook (check-plan-approved.sh) and `rad deliver` itself, whose
+    // spine re-checks approval before EVERY wave — the first included.
     id: 'deliver-after-plan-edit',
     invariant: 'approval-invalidated-by-plan-change',
-    act: (fx) => { editPlanBody(fx); return runDeliverHook(fx); },
-    assert: (fx, result) => {
-      assert.equal(result.status, HOOK_BLOCK_EXIT, `hook allowed an edited plan (exit ${result.status})`);
+    act: (fx) => { editPlanBody(fx); return { hook: runDeliverHook(fx), cli: fx.deliver() }; },
+    assert: (fx, { hook, cli }) => {
+      assert.equal(hook.status, HOOK_BLOCK_EXIT, `hook allowed an edited plan (exit ${hook.status})`);
+      assert.equal(cli.status, NEEDS_DECISION_EXIT, `rad deliver exit ${cli.status}: ${cli.stderr}`);
+      const stop = cli.events.find((e) => e.type === 'deliver-stopped');
+      assert.equal(stop?.data?.reason, 'approval-changed', `deliver-stopped: ${JSON.stringify(stop)}`);
       assert.equal(fx.adversaryRan(), false, 'the agent ran');
     },
-    mutate: (root) => patch(root, join('scripts', 'check-plan-approved.sh'),
-      'if [[ -n "$STORED_FP" ]]; then', 'if false; then'),
+    // Restore #151's first-wave exemption in the spine copy; only the CLI assertion can catch it.
+    mutate: (root) => {
+      const spine = join('harness', 'spine.js');
+      patch(root, spine, 'for (const wave of waves) {', 'let firstWaveOfRun = true;\n  for (const wave of waves) {');
+      patch(root, spine, 'const reason = await approvalChangeReason({ state, feature, approvalIntact });',
+        'const reason = firstWaveOfRun ? null : await approvalChangeReason({ state, feature, approvalIntact });\n    firstWaveOfRun = false;');
+      assumeUnchanged(root, spine);
+    },
   },
   {
     id: 'plan-edit-mid-run',
@@ -98,9 +114,7 @@ defineCases([
     mutate: (root) => {
       const cli = join('harness', 'cli.js');
       patch(root, cli, 'if (current === stored) return { ok: true };', 'return { ok: true };');
-      // Hide the mutated copy from the wave scope check so only the fingerprint guard differs.
-      const hide = spawnSync('git', ['update-index', '--assume-unchanged', cli], { cwd: root, encoding: 'utf8' });
-      if (hide.status !== 0) throw new Error(`mutate: git update-index failed: ${hide.stderr}`);
+      assumeUnchanged(root, cli);
     },
   },
   {
