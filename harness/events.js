@@ -998,9 +998,12 @@ function lastDeliverStartedIndex(history) {
 }
 
 /**
- * Pure fold → did the LATEST deliver run evidence completion? True iff, AFTER
- * the last `deliver-started`, there is a `wave-complete` (numeric `data.wave`)
- * for EVERY wave 1..waveCount AND a `pr-opened`. The exit-0 authority for
+ * Pure fold → did the LATEST deliver run evidence completion? True iff there is
+ * a `wave-complete` for EVERY wave 1..waveCount ANYWHERE in the history —
+ * counted exactly as `resumeFrom` counts them, because a resumed run skips
+ * waves a prior run completed, so their evidence precedes the latest
+ * `deliver-started` — AND a `pr-opened` AFTER the last `deliver-started` (the
+ * current run itself finished and opened the PR). The exit-0 authority for
  * `rad deliver` (#77): a spine `ok` alone is not completion. FAIL-CLOSED: false
  * on a non-array history, a non-positive-integer waveCount, or no
  * `deliver-started`; never throws.
@@ -1013,17 +1016,9 @@ export function deliverCompleted(history, waveCount) {
   if (!Array.isArray(history) || !Number.isInteger(waveCount) || waveCount < 1) return false;
   const start = lastDeliverStartedIndex(history);
   if (start === -1) return false;
-  const completedWaves = new Set();
-  let prOpened = false;
-  for (const event of history.slice(start + 1)) {
-    if (!event) continue;
-    if (event.type === 'pr-opened') prOpened = true;
-    if (event.type === 'wave-complete' && event.data && typeof event.data.wave === 'number') {
-      completedWaves.add(event.data.wave);
-    }
-  }
+  const completedWaves = resumeFrom(history);
   for (let n = 1; n <= waveCount; n += 1) {
     if (!completedWaves.has(n)) return false;
   }
-  return prOpened;
+  return history.slice(start + 1).some((event) => event && event.type === 'pr-opened');
 }

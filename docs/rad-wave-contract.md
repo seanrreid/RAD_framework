@@ -226,8 +226,10 @@ table, never silently bucketed.
 ### Completion criteria
 
 A run is **complete** only when the event log shows it: a `wave-complete` for
-every plan wave **and** a `pr-opened`, all after the latest `deliver-started`
-(the pure `deliverCompleted` fold). **The agent's claim is not evidence** — a
+every plan wave **anywhere** in the history (counted as `resumeFrom` counts
+them, so waves a prior run completed still count after a resume) **and** a
+`pr-opened` after the latest `deliver-started`, so the current run itself
+finished and opened the PR (the pure `deliverCompleted` fold). **The agent's claim is not evidence** — a
 `WAVE_RESULT` saying `complete` only feeds the matrix; completion is read from
 recorded events, never from the agent's text. A run whose spine returns without
 that evidence exits `1` ("completion not evidenced").

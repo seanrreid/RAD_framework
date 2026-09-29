@@ -631,6 +631,32 @@ test('deliver AC#6 — spine ok but the log lacks a wave-complete → exit 1 com
   });
 });
 
+test('deliver AC#6 — resumed run completes waves a prior run finished → exit 0', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const { logFile } = seedApprovedTwoWavePlan(repoRoot);
+    // Prior run: wave 1 succeeds, wave 2 aborts (fail-scope) → the log holds
+    // wave 1's wave-complete BEFORE the resumed run's deliver-started.
+    const first = await runDeliverCaptured({
+      repoRoot,
+      runWave: async (wave) => ({ outcome: wave.n === 1 ? 'success' : 'fail-scope' }),
+    });
+    assert.equal(first.code, 1, `prior run must stop; stderr:\n${first.stderr}`);
+    // Resumed run: only wave 2 runs; wave 1's completion is from the prior run.
+    const ran = [];
+    const { code, stderr } = await runDeliverCaptured({
+      repoRoot,
+      runWave: async (wave) => { ran.push(wave.n); return { outcome: 'success' }; },
+    });
+    assert.equal(code, 0, `expected exit 0; stderr:\n${stderr}`);
+    assert.deepEqual(ran, [2], 'the resumed run must skip wave 1');
+    const log = readLog(logFile);
+    const lastStart = log.map((e) => e.type).lastIndexOf('deliver-started');
+    const wave1Done = log.findIndex((e) => e.type === 'wave-complete' && e.data && e.data.wave === 1);
+    assert.ok(wave1Done !== -1 && wave1Done < lastStart, 'wave 1 completed before the latest deliver-started');
+    assert.ok(log.slice(lastStart + 1).some((e) => e.type === 'pr-opened'));
+  });
+});
+
 for (const bad of ['abc', '0', '-1', '1.5', ' 2']) {
   test(`deliver AC#5 — malformed RAD_MAX_FAILED_ATTEMPTS '${bad}' → exit 2, no events appended`, async () => {
     await withTempRepo(async (repoRoot) => {
