@@ -282,6 +282,15 @@ one `deliver-stopped` event `{ class, reason, decision, wave?, action?, outcome?
 It is deliberately absent from `PHASE_BY_TYPE`, so it never moves the phase and a
 re-run after it is legal. Success appends none (success is `pr-opened`).
 
+**`run-resumed` is audit-only.** `rad deliver --resume --context` appends one
+`run-resumed` event `{ context, recordedBy, stop: { class, reason, wave? } }` right
+after `deliver-started`. Like `deliver-stopped` it is absent from `PHASE_BY_TYPE`
+and is not a wave attempt. Two pure read folds in `harness/events.js` sit beside
+it: `latestStop(history)` (the latest `deliver-stopped`, which gates resume
+eligibility) and `dormantStop(history)` — that stop when it is `needs-decision`
+**and** no `deliver-started` follows it, else `null`. `rad stop-status` prints the
+`dormantStop` result (see [`rad-cli.md`](./rad-cli.md#rad-stop-status)).
+
 ## `rad-deliver` as a harness spine, calling the ports
 
 This is the audit's step-1 prototype, written against the ports and driven by the

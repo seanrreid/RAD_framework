@@ -21,6 +21,8 @@ import {
   findOrphanAttempts,
   priorAttemptState,
   deliverCompleted,
+  latestStop,
+  dormantStop,
   modelTierSpend,
   modelTierAdvisories,
   UPGRADE_RETRY_RATE,
@@ -1275,4 +1277,59 @@ test('modelTierSpend and modelTierAdvisories never throw on the existing insight
     assert.deepStrictEqual(Object.keys(stats.groups).filter((m) => m !== 'unrecorded'), []);
     assert.ok(Array.isArray(modelTierAdvisories(stats, { minFeatures: 1 })));
   }
+});
+
+// ---- latestStop / dormantStop (run-resumed audit support) --------------------
+
+const stopped = (cls, reason, wave) =>
+  ({ feature: 'f', type: 'deliver-stopped', data: wave === undefined ? { class: cls, reason } : { class: cls, reason, wave } });
+const started = () => ({ feature: 'f', type: 'deliver-started', data: {} });
+
+test('latestStop and dormantStop return null on an empty history', () => {
+  assert.equal(latestStop([]), null);
+  assert.equal(dormantStop([]), null);
+});
+
+test('a failed stop is the latest stop but never dormant', () => {
+  const history = deepFreeze([started(), stopped('failed', 'agent-error', 1)]);
+  assert.deepStrictEqual(latestStop(history), { class: 'failed', reason: 'agent-error', wave: 1 });
+  assert.equal(dormantStop(history), null);
+});
+
+test('a needs-decision stop is both the latest and the dormant stop', () => {
+  const history = deepFreeze([started(), stopped('needs-decision', 'doom-loop', 2)]);
+  const expected = { class: 'needs-decision', reason: 'doom-loop', wave: 2 };
+  assert.deepStrictEqual(latestStop(history), expected);
+  assert.deepStrictEqual(dormantStop(history), expected);
+});
+
+test('a deliver-started after a needs-decision stop clears dormancy but not latestStop', () => {
+  const history = deepFreeze([started(), stopped('needs-decision', 'doom-loop', 2), started()]);
+  assert.deepStrictEqual(latestStop(history), { class: 'needs-decision', reason: 'doom-loop', wave: 2 });
+  assert.equal(dormantStop(history), null);
+});
+
+test('with two stops the latest one wins', () => {
+  const history = deepFreeze([
+    started(), stopped('needs-decision', 'doom-loop', 1),
+    started(), stopped('failed', 'agent-error', 2),
+  ]);
+  assert.deepStrictEqual(latestStop(history), { class: 'failed', reason: 'agent-error', wave: 2 });
+  assert.equal(dormantStop(history), null);
+});
+
+test('latestStop and dormantStop throw on a non-array history', () => {
+  for (const bad of [null, undefined, 7, 'x', {}]) {
+    assert.throws(() => latestStop(bad), { message: 'latestStop: history must be an array' });
+    assert.throws(() => dormantStop(bad), { message: 'dormantStop: history must be an array' });
+  }
+});
+
+test('run-resumed is audit-only: it establishes no phase and leaves the folded phase unchanged', () => {
+  const base = [{ feature: 'f', type: 'approved', data: {} }];
+  const resumed = { feature: 'f', type: 'run-resumed',
+    data: { context: 'use option B', recordedBy: 'a@b', stop: { class: 'needs-decision', reason: 'doom-loop' } } };
+  assert.equal(phaseOf(deepFreeze([resumed])), null);
+  assert.equal(phaseOf(deepFreeze([...base, resumed])), phaseOf(deepFreeze(base)));
+  assert.equal(reduce(deepFreeze([...base, resumed])).phase, reduce(deepFreeze(base)).phase);
 });

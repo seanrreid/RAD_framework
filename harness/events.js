@@ -20,7 +20,13 @@
  *   'pr-opened' | 'revision-requested' | 'research-created' | 'plan-created' |
  *   'hook-observed' | 'hook-veto' | 'hook-failed' | 'done' |
  *   'owner-claimed' | 'owner-released' | 'architecture-approved' |
- *   'capture-failed' | 'wave-started' | 'deliver-stopped'.
+ *   'capture-failed' | 'wave-started' | 'deliver-stopped' | 'run-resumed'.
+ *   `run-resumed` is the sixth AUDIT-ONLY event: the deliver spine appends it
+ *   immediately after `deliver-started` when `rad deliver --resume --context` is
+ *   used. Its `data` is `{ context, recordedBy, stop: { class, reason[, wave] } }`
+ *   — the operator's context and the stop it answers. It carries NO authority
+ *   (never a gate, never an outcome) and establishes NO phase (absent from
+ *   PHASE_BY_TYPE), so a history with it folds identically to one without it.
  *   `deliver-stopped` is the fifth AUDIT-ONLY event (#77): the deliver spine
  *   appends exactly one as the LAST event of every run that stopped after
  *   `deliver-started` (never on success, never on a pre-start gate stop). Its
@@ -164,6 +170,8 @@ const PHASE_BY_TYPE = {
   // non-decision move a feature's phase. `deliver-stopped` is likewise
   // audit-only and deliberately absent: it records HOW a run ended, and keying
   // it would give a stopped run a phase and could block a re-run's appends.
+  // `run-resumed` is audit-only for the same reason: it records the operator
+  // context a resume answered with, and must never move a feature's phase.
 };
 
 /** Phase ordering — earliest first; later phases dominate in the fold. */
@@ -1021,4 +1029,49 @@ export function deliverCompleted(history, waveCount) {
     if (!completedWaves.has(n)) return false;
   }
   return history.slice(start + 1).some((event) => event && event.type === 'pr-opened');
+}
+
+/** The only stop class that leaves a run dormant, awaiting an operator decision. */
+const NEEDS_DECISION_CLASS = 'needs-decision';
+
+/** Index of the LAST `deliver-stopped` in `history`, or -1 when there is none. */
+function lastDeliverStoppedIndex(history) {
+  for (let i = history.length - 1; i >= 0; i -= 1) {
+    const event = history[i];
+    if (event && event.type === 'deliver-stopped') return i;
+  }
+  return -1;
+}
+
+/**
+ * Pure fold → the `data` of the LATEST `deliver-stopped` event, or null when
+ * the history holds none. Audit read only — a stop carries no authority.
+ * Throws on a non-array history: a caller passing a malformed log is a bug,
+ * not an "unstopped" run.
+ *
+ * @param {Event[]} history - in-memory event array (no I/O performed)
+ * @returns {(Object|null)} the latest stop's data, or null
+ */
+export function latestStop(history) {
+  if (!Array.isArray(history)) throw new Error('latestStop: history must be an array');
+  const index = lastDeliverStoppedIndex(history);
+  return index === -1 ? null : history[index].data;
+}
+
+/**
+ * Pure fold → the latest stop's `data` only while it is still DORMANT: its
+ * class is `needs-decision` AND no `deliver-started` follows it (a later run
+ * has not already picked it up). Else null. A `failed` stop is never dormant —
+ * it needs a fix, not a decision. Throws on a non-array history.
+ *
+ * @param {Event[]} history - in-memory event array (no I/O performed)
+ * @returns {(Object|null)} the dormant stop's data, or null
+ */
+export function dormantStop(history) {
+  if (!Array.isArray(history)) throw new Error('dormantStop: history must be an array');
+  const index = lastDeliverStoppedIndex(history);
+  if (index === -1) return null;
+  const stop = history[index].data;
+  if (!stop || stop.class !== NEEDS_DECISION_CLASS) return null;
+  return lastDeliverStartedIndex(history) > index ? null : stop;
 }

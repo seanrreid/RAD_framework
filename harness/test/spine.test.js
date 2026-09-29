@@ -1962,3 +1962,106 @@ test('(cap-f) AC#5 success attempts are not counted', async () => {
   });
   assert.deepEqual(result, { ok: true, waves: 3 });
 });
+
+// ── resume-with-operator-context: spine resume param (Task 2.1) ──
+
+const RESUME_CONTEXT = '  \n`npm test` was flaky; I fixed `harness/foo.js` by hand.\n\t ';
+const RESUME_STOP = { class: 'needs-decision', reason: 'failed-attempt-cap', decision: 'raise the cap or fix', wave: 1 };
+const RESUME = { context: RESUME_CONTEXT, recordedBy: 'sean@torchcodelab.com', stop: RESUME_STOP };
+
+/** A runWave that records every attemptCtx it is handed, answering from `outcomes` (default success). */
+function capturingRunWave(outcomes = []) {
+  const calls = [];
+  const runWave = async (wave, ctx) => {
+    calls.push({ wave: wave.n, ctx });
+    return { outcome: outcomes[calls.length - 1] || 'success', summary: `s${calls.length}` };
+  };
+  return { calls, runWave };
+}
+
+test('(resume-a) AC#1 resume set → run-resumed directly after deliver-started, context byte-for-byte', async () => {
+  const { state, result } = await runStopped({ resume: RESUME });
+  assert.deepEqual(result, { ok: true, waves: 1 });
+  const types = state.appended.map((e) => e.type);
+  const i = types.indexOf('deliver-started');
+  assert.equal(types[i + 1], 'run-resumed');
+  const ev = state.appended[i + 1];
+  assert.equal(ev.actor, 'harness');
+  assert.equal(ev.recordedBy, RESUME.recordedBy);
+  assert.equal(typeof ev.ts, 'string');
+  assert.deepEqual(ev.data, {
+    context: RESUME_CONTEXT,
+    recordedBy: RESUME.recordedBy,
+    stop: { class: 'needs-decision', reason: 'failed-attempt-cap', wave: 1 },
+  });
+  assert.equal(ev.data.context, RESUME_CONTEXT);
+});
+
+test('(resume-b) AC#1 a stop with no wave records no wave key on run-resumed', async () => {
+  const stop = { class: 'failed', reason: 'resume-verify', decision: 'x' };
+  const { state } = await runStopped({ resume: { ...RESUME, stop } });
+  const ev = state.appended.find((e) => e.type === 'run-resumed');
+  assert.deepEqual(ev.data.stop, { class: 'failed', reason: 'resume-verify' });
+  assert.equal('wave' in ev.data.stop, false);
+});
+
+test('(resume-c) AC#3 only the first runWave call carries operatorContext (not the retry, not the next wave)', async () => {
+  const { calls, runWave } = capturingRunWave(['fail-tests', 'success', 'success']);
+  const { result } = await runStopped({ state: makeValidatingState({ plan: twoWaves }), runWave, resume: RESUME });
+  assert.deepEqual(result, { ok: true, waves: 2 });
+  assert.deepEqual(calls.map((c) => [c.wave, c.ctx.attempt]), [[1, 1], [1, 2], [2, 1]]);
+  assert.deepEqual(calls[0].ctx.operatorContext, { context: RESUME_CONTEXT, stop: RESUME_STOP });
+  assert.equal('operatorContext' in calls[1].ctx, false, 'retry omits the key');
+  assert.equal('operatorContext' in calls[2].ctx, false, 'next wave omits the key');
+});
+
+test('(resume-d) AC#3 completed waves skipped → operatorContext on the first non-completed wave', async () => {
+  const state = makeValidatingState({ plan: twoWaves });
+  state.appended.push(
+    { feature: 'demo', type: 'deliver-started' },
+    { feature: 'demo', type: 'wave-complete', data: { wave: 1 } },
+    { feature: 'demo', type: 'deliver-stopped', data: { class: 'failed', reason: 'budget', decision: 'x' } },
+  );
+  const { calls, runWave } = capturingRunWave();
+  const { result } = await runStopped({ state, runWave, resume: RESUME });
+  assert.deepEqual(result, { ok: true, waves: 2 });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].wave, 2);
+  assert.deepEqual(calls[0].ctx.operatorContext, { context: RESUME_CONTEXT, stop: RESUME_STOP });
+});
+
+test('(resume-e) AC#5 unapproved gate with resume set → gate stop, no run-resumed', async () => {
+  const { calls, runWave } = capturingRunWave();
+  const { state, result } = await runStopped({ state: makeValidatingState({ gateResult: blockedGate }), runWave, resume: RESUME });
+  assert.equal(result.stopped, 'gate');
+  assert.equal(calls.length, 0);
+  assert.equal(state.appended.some((e) => e.type === 'run-resumed'), false);
+  assert.deepEqual(state.appended, []);
+});
+
+test('(resume-f) AC#6 resuming a failed-attempt-cap stop does not re-trip the cap immediately', async () => {
+  const state = makeValidatingState();
+  state.appended.push(
+    { feature: 'demo', type: 'deliver-started' },
+    { feature: 'demo', type: 'wave-attempt', data: { wave: 1, attempt: 1, outcome: 'fail-tests' } },
+    { feature: 'demo', type: 'wave-attempt', data: { wave: 1, attempt: 2, outcome: 'fail-tests' } },
+    { feature: 'demo', type: 'deliver-stopped', data: { class: 'needs-decision', reason: 'failed-attempt-cap', decision: 'x', wave: 1 } },
+  );
+  const { calls, runWave } = capturingRunWave();
+  const { result } = await runStopped({ state, runWave, maxFailedAttempts: 2, maxAttempts: 5, resume: RESUME });
+  assert.deepEqual(result, { ok: true, waves: 1 });
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0].ctx.operatorContext, { context: RESUME_CONTEXT, stop: RESUME_STOP });
+});
+
+test('(resume-g) AC#7 resume null/absent → event sequence and attemptCtx deep-equal the run without the param', async () => {
+  const run = async (extra) => {
+    const { calls, runWave } = capturingRunWave(['fail-tests', 'success', 'success']);
+    const { state } = await runStopped({ state: makeValidatingState({ plan: twoWaves }), runWave, ...extra });
+    return { events: state.appended, ctxs: calls.map((c) => c.ctx) };
+  };
+  const baseline = await run({});
+  assert.deepEqual(await run({ resume: null }), baseline);
+  assert.deepEqual(await run({ resume: undefined }), baseline);
+  for (const ctx of baseline.ctxs) assert.equal('operatorContext' in ctx, false);
+});

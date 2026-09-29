@@ -287,6 +287,31 @@ latest `deliver-stopped`; reaching the cap stops with `failed-attempt-cap`. A
 malformed value (non-numeric, zero, negative) exits `2` before any event is
 appended. Unset = no cap.
 
+### Resuming a stopped run
+
+`rad deliver <feature> --resume --context "<text>"` re-runs a stopped feature with
+the operator's decision attached (flags and the ordered eligibility table:
+[`rad-cli.md`](./rad-cli.md#resuming-a-stopped-run)).
+
+- **`needs-decision` only.** Only a run whose latest `deliver-stopped` is class
+  `needs-decision` is resumable. A `failed` stop is refused (exit `2`) — re-running
+  unchanged cannot succeed, so fix the plan or code and plain re-run.
+- **Audit event.** The spine appends one audit-only `run-resumed` event right after
+  `deliver-started`: `{ context, recordedBy, stop: { class, reason, wave? } }`, the
+  context verbatim and `recordedBy` the running `git user.email`.
+- **First `runWave` call only.** That call's prompt carries a
+  `## Operator Context (resumed run)` block — the prior stop's class, reason, wave,
+  and decision, plus the operator text verbatim in a collision-proof backtick
+  fence — placed where a Prior Attempt Failure block goes (after `### Reminders`,
+  before `## Guardrail Extensions`). Retries and later waves do not get it.
+- **No gate bypass.** The pre-start approved gate and the between-wave approval and
+  scope re-checks run unchanged; a refused pre-start gate appends no `run-resumed`.
+  Resume grants no authority — anyone may resume.
+- **Not a wave attempt.** `run-resumed` does not count toward
+  `RAD_MAX_FAILED_ATTEMPTS` (the counter already resets at `deliver-stopped`).
+
+Without `--resume` the event sequence and prompts are byte-for-byte unchanged.
+
 ### Exit codes
 
 | Code | Meaning |

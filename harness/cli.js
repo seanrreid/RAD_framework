@@ -31,7 +31,12 @@ import { createCommandAdapter, probeCommand } from './adapters/agent/command.js'
 import { sanitizeErrorMessage } from './adapters/agent/contract.js';
 import { loadMatrix } from './matrix.js';
 import { classifyStop, STOP_CLASSES } from './stops.js';
-import { deliverCompleted } from './events.js';
+import { deliverCompleted, latestStop, dormantStop } from './events.js';
+
+/** Usage line for `rad deliver` (help, parse errors, and the command table). */
+const DELIVER_USAGE = 'rad deliver <feature> [--model <model-id>] [--resume --context <text>]';
+/** Usage line for `rad stop-status`. */
+const STOP_STATUS_USAGE = 'rad stop-status <feature> [--stdin]';
 
 const SUBCOMMANDS = {
   approve: {
@@ -43,7 +48,7 @@ const SUBCOMMANDS = {
   },
   deliver: {
     summary: 'Run approved plan wave execution via Claude Agent SDK.',
-    usage: 'rad deliver <feature> [--model <model-id>]',
+    usage: DELIVER_USAGE,
     run: (argv, ctx) => deliverCommand(argv, ctx),
   },
   status: {
@@ -55,6 +60,11 @@ const SUBCOMMANDS = {
     summary: 'Evaluate a named gate over a feature event log (read-only).',
     usage: 'rad gate <feature> <name> [--stdin]',
     run: (argv, ctx) => gateCommand(argv, ctx),
+  },
+  'stop-status': {
+    summary: 'Report whether a feature has a dormant needs-decision stop (read-only).',
+    usage: STOP_STATUS_USAGE,
+    run: (argv, ctx) => stopStatusCommand(argv, ctx),
   },
   'owner-claim': {
     summary: 'Claim the single-writer lock on a feature (records who holds it).',
@@ -98,6 +108,13 @@ const USAGE_EXIT_CODE = 2;
 const NEEDS_DECISION_EXIT_CODE = 3;
 /** Exit code for a deliver stop showing the work is wrong (#77 `failed`). */
 const FAILED_EXIT_CODE = 1;
+
+/**
+ * Hard ceiling on `rad deliver --resume --context <text>`. An over-long context
+ * is refused (exit 2), never truncated — the operator's words reach the agent
+ * and the run-resumed audit event verbatim or not at all.
+ */
+const RESUME_CONTEXT_MAX_CHARS = 8000;
 
 /**
  * Env var arming the spine's cumulative failed-attempt cap (#77). Unset or
@@ -227,16 +244,21 @@ function bestEffortSyncPush(repoRoot, workBranch, sh) {
 }
 
 /**
- * Hand-rolled argv parser for `deliver`. Returns the positional feature and the
- * optional `--model <id>` value. Throws on a flag that is missing its value or
- * on extra positionals so malformed invocations fail loudly.
+ * Hand-rolled argv parser for `deliver`. Returns the positional feature, the
+ * optional `--model <id>` value, the `--resume` flag, and the `--context <text>`
+ * value (undefined when absent). Throws on a flag that is missing its value or
+ * on extra positionals so malformed invocations fail loudly. A `--context` with
+ * no value carries `exitCode: USAGE_EXIT_CODE` (the resume surface exits 2);
+ * the pre-existing parse errors keep their exit 1.
  *
  * @param {string[]} argv
- * @returns {{ feature?: string, model: string }}
+ * @returns {{ feature?: string, model: string, resume: boolean, context?: string }}
  */
 function parseDeliverArgs(argv) {
   let feature;
   let model = 'claude-opus-4-8';
+  let resume = false;
+  let context;
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -244,6 +266,15 @@ function parseDeliverArgs(argv) {
       const val = argv[i + 1];
       if (val === undefined) throw new Error('--model requires a value');
       model = val;
+      i += 1;
+    } else if (arg === '--resume') {
+      resume = true;
+    } else if (arg === '--context') {
+      const val = argv[i + 1];
+      if (val === undefined) {
+        throw Object.assign(new Error('--context requires a value'), { exitCode: USAGE_EXIT_CODE });
+      }
+      context = val;
       i += 1;
     } else if (arg.startsWith('--')) {
       throw new Error(`unknown option '${arg}'`);
@@ -254,7 +285,7 @@ function parseDeliverArgs(argv) {
     }
   }
 
-  return { feature, model };
+  return { feature, model, resume, context };
 }
 
 /**
@@ -483,16 +514,26 @@ function conventionWorkBranch(feature) {
  * @returns {{ passed: boolean, reason: string }}
  */
 function branchTipApprovedGate({ feature, branch, repoRoot, sh }) {
+  const read = readBranchTipHistory({ feature, branch, repoRoot, sh });
+  if (!read.ok) return { passed: false, reason: read.reason };
+  return evaluateGate(APPROVED_GATE, read.history);
+}
+
+/**
+ * Read the work-branch TIP's event log through the sh port
+ * (`git show <branch>:<log>`). The single branch-tip read shared by the approved
+ * gate and the --resume eligibility check, so both fold the identical history.
+ *
+ * @returns {{ ok: true, history: Object[] } | { ok: false, reason: string }}
+ */
+function readBranchTipHistory({ feature, branch, repoRoot, sh }) {
   const logPath = `.agents/state/${feature}/events.jsonl`;
   const res = sh('git', ['show', `${branch}:${logPath}`], { cwd: repoRoot });
   if (res.status !== 0) {
     const detail = sanitizeErrorMessage(String(res.stderr ?? '').trim());
-    return {
-      passed: false,
-      reason: `no event log at ${branch}:${logPath}` + (detail ? ` (${detail})` : ''),
-    };
+    return { ok: false, reason: `no event log at ${branch}:${logPath}` + (detail ? ` (${detail})` : '') };
   }
-  return evaluateGate(APPROVED_GATE, parseEventsJsonl(String(res.stdout ?? '')));
+  return { ok: true, history: parseEventsJsonl(String(res.stdout ?? '')) };
 }
 
 /**
@@ -660,6 +701,70 @@ async function setupWorktreeRun({ ctx, feature, model, agentKind, repoRoot, sh }
 }
 
 /**
+ * The flag half of the --resume eligibility table (needs no history). Returns
+ * the refusal reason, or null when the flags are consistent.
+ */
+function resumeFlagRefusal({ resume, context }) {
+  if (context !== undefined && !resume) return '--context requires --resume';
+  if (resume && context === undefined) return '--resume requires --context "<text>"';
+  if (!resume) return null;
+  if (context.trim() === '') return '--context must not be empty';
+  if (context.length > RESUME_CONTEXT_MAX_CHARS) {
+    return `--context exceeds ${RESUME_CONTEXT_MAX_CHARS} characters (${context.length})`;
+  }
+  return null;
+}
+
+/**
+ * Read the history --resume eligibility folds over — the SAME source the
+ * approved gate reads: the branch-tip log in worktree mode (RAD_WORKTREE set,
+ * read before any worktree exists), else the feature's log via the state store.
+ *
+ * @returns {{ ok: true, history: Object[] } | { ok: false, reason: string }}
+ */
+function readResumeHistory({ feature, repoRoot, sh }) {
+  if (isNonEmpty(process.env.RAD_WORKTREE)) {
+    return readBranchTipHistory({ feature, branch: conventionWorkBranch(feature), repoRoot, sh });
+  }
+  try {
+    const state = createGitStateStore({ repoRoot, sh, claudeMd: join(repoRoot, 'CLAUDE.md') });
+    return { ok: true, history: state.history(feature) };
+  } catch (err) {
+    return { ok: false, reason: sanitizeErrorMessage(err?.message ?? String(err)) };
+  }
+}
+
+/** The running git user.email via the sh port (as approveCommand reads it); '' when unset or on error. */
+function gitUserEmail(repoRoot, sh) {
+  const res = sh('git', ['config', 'user.email'], { cwd: repoRoot });
+  if (res.status !== 0) return '';
+  return String(res.stdout ?? '').trim();
+}
+
+/**
+ * The --resume eligibility table, in order. Runs before any event append and
+ * before worktree creation. Returns `{ resume }` (null without --resume) or
+ * `{ refusal }` — the reason deliverCommand reports with exit 2.
+ *
+ * @returns {{ resume: ({ context: string, recordedBy: string, stop: Object }|null) } | { refusal: string }}
+ */
+function resolveResume({ resume, context, feature, repoRoot, sh }) {
+  const flagRefusal = resumeFlagRefusal({ resume, context });
+  if (flagRefusal) return { refusal: flagRefusal };
+  if (!resume) return { resume: null };
+  const read = readResumeHistory({ feature, repoRoot, sh });
+  if (!read.ok) return { refusal: `cannot read the event log to resume: ${read.reason}` };
+  const stop = latestStop(read.history);
+  if (stop == null) return { refusal: `nothing to resume: ${feature} has no deliver-stopped event` };
+  if (stop.class === STOP_CLASSES.FAILED) {
+    return { refusal: `cannot resume a failed stop (${stop.reason}): ${stop.decision}` };
+  }
+  const recordedBy = gitUserEmail(repoRoot, sh);
+  if (!isNonEmpty(recordedBy)) return { refusal: 'cannot resolve git user.email for run-resumed.recordedBy' };
+  return { resume: { context, recordedBy, stop } };
+}
+
+/**
  * Parse RAD_MAX_FAILED_ATTEMPTS. Unset/empty → `cap: null` (the cap is off);
  * a positive integer → that cap; anything else → `{ ok: false }` (exit 2).
  *
@@ -769,7 +874,7 @@ export async function deliverCommand(argv, ctx) {
 
   // Subcommand-level help: print usage and exit 0.
   if (argv.includes('--help') || argv.includes('-h')) {
-    process.stdout.write('Usage: rad deliver <feature> [--model <model-id>]\n');
+    process.stdout.write(`Usage: ${DELIVER_USAGE}\n`);
     process.stdout.write('\nRun approved plan wave execution via Claude Agent SDK.\n');
     return 0;
   }
@@ -779,15 +884,15 @@ export async function deliverCommand(argv, ctx) {
     parsed = parseDeliverArgs(argv);
   } catch (err) {
     process.stderr.write(`rad deliver: ${err.message}\n`);
-    process.stderr.write('Usage: rad deliver <feature> [--model <model-id>]\n');
-    return 1;
+    process.stderr.write(`Usage: ${DELIVER_USAGE}\n`);
+    return err.exitCode ?? 1;
   }
 
   const { feature, model } = parsed;
 
   if (!isNonEmpty(feature)) {
     process.stderr.write('rad deliver: a feature name is required\n');
-    process.stderr.write('Usage: rad deliver <feature> [--model <model-id>]\n');
+    process.stderr.write(`Usage: ${DELIVER_USAGE}\n`);
     return 1;
   }
 
@@ -810,6 +915,16 @@ export async function deliverCommand(argv, ctx) {
     );
     return USAGE_EXIT_CODE;
   }
+
+  // --resume eligibility: BEFORE setup, so a refusal exits 2 with no worktree
+  // created and no event appended. Without --resume this yields resume: null
+  // and the spine call below is unchanged (AC#7 byte-for-byte).
+  const eligibility = resolveResume({ ...parsed, feature, repoRoot, sh });
+  if (eligibility.refusal !== undefined) {
+    process.stderr.write(`rad deliver: ${eligibility.refusal}\n`);
+    return USAGE_EXIT_CODE;
+  }
+  const { resume } = eligibility;
 
   // Optional worktree isolation. RAD_WORKTREE follows the env-knob convention:
   // unset/empty = OFF (exact today's behavior — main checkout, no worktree port,
@@ -854,6 +969,8 @@ export async function deliverCommand(argv, ctx) {
       waveModels: planCtx.waveModels,
       approvalIntact: makeApprovalIntact({ root, state, feature }),
       maxFailedAttempts: failedCap.cap,
+      // Only a --resume run passes the key; otherwise the call is today's.
+      ...(resume ? { resume } : {}),
     });
   } catch (err) {
     // Unexpected spine throw: still preserve the worktree (so the operator can
@@ -1575,6 +1692,106 @@ export async function gateCommand(argv, ctx) {
   );
 
   return result.passed ? 0 : 1;
+}
+
+/**
+ * Hand-rolled argv parser for `stop-status`: one positional feature and the
+ * optional `--stdin` flag. Throws on unknown flags or extra positionals.
+ *
+ * @param {string[]} argv
+ * @returns {{ feature?: string, stdin: boolean }}
+ */
+function parseStopStatusArgs(argv) {
+  let feature;
+  let stdin = false;
+  for (const arg of argv) {
+    if (arg === '--stdin') {
+      stdin = true;
+    } else if (arg.startsWith('--')) {
+      throw new Error(`unknown option '${arg}'`);
+    } else if (feature === undefined) {
+      feature = arg;
+    } else {
+      throw new Error(`unexpected argument '${arg}'`);
+    }
+  }
+  return { feature, stdin };
+}
+
+/**
+ * STRICT JSONL parse for `stop-status --stdin`: unlike the crash-tolerant
+ * parseEventsJsonl, a line that is not a JSON object throws. A dropped line
+ * could hide the deliver-started that makes a stop no longer dormant, so a
+ * malformed log is an error (exit 1), never a silent `dormant`.
+ *
+ * @param {string} raw
+ * @returns {Object[]}
+ */
+function parseEventsJsonlStrict(raw) {
+  const events = [];
+  raw.split('\n').forEach((line, index) => {
+    const trimmed = line.trim();
+    if (trimmed === '') return;
+    let parsed;
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch (err) {
+      throw new Error(`malformed event log: line ${index + 1} is not valid JSON (${err.message})`);
+    }
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error(`malformed event log: line ${index + 1} is not a JSON object`);
+    }
+    events.push(parsed);
+  });
+  return events;
+}
+
+/** The single stdout line for a stop-status result. */
+function formatStopStatus(stop) {
+  if (!stop) return 'none';
+  const wave = stop.wave ?? 'unknown';
+  return `dormant class=${stop.class} reason=${stop.reason} wave=${wave} decision="${stop.decision}"`;
+}
+
+/**
+ * `stop-status <feature> [--stdin]`.
+ *
+ * Read-only: folds the feature's event log (or a piped JSONL log with --stdin)
+ * through dormantStop and prints exactly one line — `dormant class=... reason=...
+ * wave=... decision="..."` or `none` — exit 0. A malformed log or read error →
+ * stderr, exit 1. Bad argv → usage on stderr, exit 2. Writes nothing.
+ *
+ * @param {string[]} argv - args after `stop-status`
+ * @param {{ repoRoot: string, sh?: typeof defaultSh }} ctx
+ * @returns {Promise<number>}
+ */
+export async function stopStatusCommand(argv, ctx) {
+  const { repoRoot } = ctx;
+  const sh = ctx.sh ?? defaultSh;
+  let parsed;
+  try {
+    parsed = parseStopStatusArgs(argv);
+  } catch (err) {
+    process.stderr.write(`rad stop-status: ${err.message}\nUsage: ${STOP_STATUS_USAGE}\n`);
+    return USAGE_EXIT_CODE;
+  }
+  const { feature, stdin } = parsed;
+  if (!isNonEmpty(feature)) {
+    process.stderr.write(`rad stop-status: a feature name is required\nUsage: ${STOP_STATUS_USAGE}\n`);
+    return USAGE_EXIT_CODE;
+  }
+  let stop;
+  try {
+    const history = stdin
+      ? parseEventsJsonlStrict(readFileSync(0, 'utf8')) // fd 0 = stdin
+      : createGitStateStore({ repoRoot, sh, claudeMd: join(repoRoot, 'CLAUDE.md') }).history(feature);
+    stop = dormantStop(history);
+  } catch (err) {
+    process.stderr.write(`rad stop-status: ${sanitizeErrorMessage(err?.message ?? String(err))}\n`);
+    return 1;
+  }
+  process.stdout.write(`${formatStopStatus(stop)}\n`);
+  return 0;
 }
 
 /**
