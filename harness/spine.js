@@ -71,6 +71,38 @@ function stopRun(result, { state, feature, now }) {
   return result;
 }
 
+/** Neutral approval-integrity port. The default injected `approvalIntact`:
+ * always intact, so omitting it changes nothing (the between-wave re-check then
+ * reduces to re-running the approved gate). */
+const ALWAYS_INTACT = () => ({ ok: true });
+
+/** Render a thrown value's message for a stop reason. */
+function errorMessage(err) {
+  return err && err.message ? err.message : String(err);
+}
+
+/**
+ * Between-wave approval re-check (#77): does the approval this run started
+ * under still hold? Re-runs the `approved` gate, then the injected
+ * `approvalIntact` port. FAIL-CLOSED: a port that throws, or returns anything
+ * but `{ ok: true }`, is NOT intact. Returns null when approval holds, else a
+ * reason string for the `approval-changed` stop.
+ */
+async function approvalChangeReason({ state, feature, approvalIntact }) {
+  const g = await state.gate(feature, 'approved');
+  if (!g.passed) return `approved gate no longer passes: ${g.reason}`;
+  let intact;
+  try {
+    intact = await approvalIntact();
+  } catch (err) {
+    return `approvalIntact threw: ${errorMessage(err)}`;
+  }
+  if (!intact || intact.ok !== true) {
+    return `approval not intact: ${(intact && intact.reason) || 'no reason given'}`;
+  }
+  return null;
+}
+
 /** Bounded attempt budget per wave — the hard ceiling. The doom-loop breaker is
  * the early exit; this cap only bites when every attempt fails *differently*. */
 const MAX_ATTEMPTS = 3;
@@ -370,6 +402,7 @@ export async function deliverSpine({
   waveModels = {},
   runHooks = NOOP_HOOKS,
   hookPreflight = NOOP_PREFLIGHT,
+  approvalIntact = ALWAYS_INTACT,
 }) {
   // ── DET gate: approval. The human (or proxy) decided earlier; here we ENFORCE
   // it. A blocked gate is a normal outcome — return structured, append nothing
@@ -423,9 +456,24 @@ export async function deliverSpine({
   // resuming). On a fresh run the log carries no wave-attempt usage, so this is 0. ──
   let spent = totalUsage(history).total;
 
+  // The first wave this run executes was covered by the entry gate above; every
+  // later one re-checks approval first (#77).
+  let firstWaveOfRun = true;
+
   // ── DET wave loop — the MATRIX decides what happens next, not a counter. ──
   for (const wave of waves) {
     if (completed.has(wave.n)) continue;
+
+    // Approval re-check fires before the budget check and before any
+    // wave-started: a plan re-edited (or un-approved) mid-run must not keep
+    // running under the approval it no longer has.
+    if (!firstWaveOfRun) {
+      const reason = await approvalChangeReason({ state, feature, approvalIntact });
+      if (reason) {
+        return stopRun({ stopped: 'approval-changed', ok: false, wave: wave.n, reason }, stopCtx);
+      }
+    }
+    firstWaveOfRun = false;
 
     // Budget check fires before running THIS wave (and before resume-verify) so
     // an over-budget run stops without doing any further model work.

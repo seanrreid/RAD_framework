@@ -1697,3 +1697,86 @@ test('(stop-f) an unclassifiable terminal throws out of the spine (never swallow
     /classifyStop: unknown action/,
   );
 });
+
+// ── deliver-stop-contract: between-wave approval re-check (#77, Task 2.1) ──
+
+/** A validating state whose `approved` gate passes for the first `passes`
+ * calls, then fails — i.e. approval is revoked mid-run. */
+function makeRevokingState({ passes, plan = twoWaves }) {
+  const state = makeValidatingState({ plan });
+  let calls = 0;
+  state.gate = async () => {
+    calls += 1;
+    return calls <= passes ? passingGate : { passed: false, reason: 'plan fingerprint changed', satisfiedBy: null };
+  };
+  return state;
+}
+
+function wave2Started(state) {
+  return state.appended.some((e) => e.type === 'wave-started' && e.data.wave === 2);
+}
+
+test('(ac-a) AC#3 gate flips to failed before wave 2 → approval-changed, no wave-2 wave-started', async () => {
+  const { state, result } = await runStopped({ state: makeRevokingState({ passes: 1 }) });
+  assert.equal(result.stopped, 'approval-changed');
+  assert.equal(result.ok, false);
+  assert.equal(result.wave, 2);
+  assert.match(result.reason, /plan fingerprint changed/);
+  assert.ok(!wave2Started(state), 'wave 2 never started');
+  assertOneTrailingStop(state, { class: 'needs-decision', reason: 'approval-changed', wave: 2 });
+});
+
+test('(ac-b) AC#3 approvalIntact {ok:false} → approval-changed with its reason, no wave-2 wave-started', async () => {
+  const { state, result } = await runStopped({
+    state: makeValidatingState({ plan: twoWaves }),
+    approvalIntact: () => ({ ok: false, reason: 'plan edited after approval' }),
+  });
+  assert.equal(result.stopped, 'approval-changed');
+  assert.match(result.reason, /plan edited after approval/);
+  assert.ok(!wave2Started(state));
+  assertOneTrailingStop(state, { class: 'needs-decision', reason: 'approval-changed', wave: 2 });
+});
+
+test('(ac-c) AC#3 a throwing approvalIntact is NOT intact (fail-closed), message kept in reason', async () => {
+  const { state, result } = await runStopped({
+    state: makeValidatingState({ plan: twoWaves }),
+    approvalIntact: () => {
+      throw new Error('cannot read plan doc');
+    },
+  });
+  assert.equal(result.stopped, 'approval-changed');
+  assert.match(result.reason, /cannot read plan doc/);
+  assert.ok(!wave2Started(state));
+  assertOneTrailingStop(state, { class: 'needs-decision', reason: 'approval-changed', wave: 2 });
+});
+
+test('(ac-d) AC#3 non-object / missing-ok approvalIntact results are not intact', async () => {
+  for (const bad of [undefined, null, {}, { ok: 'yes' }]) {
+    const { result } = await runStopped({ state: makeValidatingState({ plan: twoWaves }), approvalIntact: () => bad });
+    assert.equal(result.stopped, 'approval-changed', JSON.stringify(bad));
+  }
+});
+
+test('(ac-e) AC#3 default port → event sequence deep-equal to an explicit always-intact port', async () => {
+  const baseline = await runStopped({ state: makeValidatingState({ plan: twoWaves }) });
+  const explicit = await runStopped({ state: makeValidatingState({ plan: twoWaves }), approvalIntact: () => ({ ok: true }) });
+  assert.deepEqual(baseline.result, { ok: true, waves: 2 });
+  assert.deepEqual(explicit.state.appended, baseline.state.appended);
+});
+
+test('(ac-f) AC#3 a single-wave plan never calls approvalIntact (nor re-runs the gate)', async () => {
+  let portCalls = 0;
+  const state = makeRevokingState({ passes: 1, plan: { waves: [{ n: 1 }] } });
+  const { result } = await runStopped({ state, approvalIntact: () => { portCalls += 1; return { ok: true }; } });
+  assert.deepEqual(result, { ok: true, waves: 1 });
+  assert.equal(portCalls, 0);
+});
+
+test('(ac-g) AC#3 a resumed run skips the check for its first executed wave', async () => {
+  const state = makeValidatingState({ plan: twoWaves });
+  state.appended.push({ feature: 'demo', type: 'deliver-started' }, { feature: 'demo', type: 'wave-complete', data: { wave: 1 } });
+  let portCalls = 0;
+  const { result } = await runStopped({ state, approvalIntact: () => { portCalls += 1; return { ok: false }; } });
+  assert.deepEqual(result, { ok: true, waves: 2 });
+  assert.equal(portCalls, 0);
+});
