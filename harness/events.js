@@ -653,6 +653,175 @@ export function attemptOutcomeCounts(history) {
   return { counts, features };
 }
 
+// Code-legibility deficit PROXIES (#93) read from wave-attempt task evidence.
+// Each names a hypothesis about the code region a task touched, not a verdict
+// on the agent that ran it.
+export const DEFICITS = Object.freeze(['opaqueAbstraction', 'missingDocumentation', 'insufficientTesting']);
+
+// Task statuses that count as "reached a passing state" for missingDocumentation.
+const PASSING_TASK_STATUSES = ['complete', 'done_with_concerns'];
+const FAIL_TESTS_OUTCOME = 'fail-tests';
+const DOC_FAILED = 'failed';
+const DOC_ATTRIBUTED = 'attributed';
+
+/**
+ * missingDocumentation state machine for one (feature, wave, title) key: a
+ * non-passing status arms it, a later passing status fires it exactly once.
+ */
+function docRecovered(docState, key, status) {
+  const prior = docState.get(key);
+  if (!PASSING_TASK_STATUSES.includes(status)) {
+    if (prior === undefined) docState.set(key, DOC_FAILED);
+    return false;
+  }
+  if (prior !== DOC_FAILED) return false;
+  docState.set(key, DOC_ATTRIBUTED);
+  return true;
+}
+
+/** Deficit records ({ title, deficits }) for one enriched, placeable attempt. */
+function attemptDeficitRecords(event, docState) {
+  const failTests = event.data.outcome === FAIL_TESTS_OUTCOME;
+  const records = [];
+  for (const task of event.data.tasks) {
+    if (!task || typeof task.title !== 'string') continue;
+    const status = typeof task.status === 'string' ? task.status : null;
+    const deficits = [];
+    if (status === 'blocked_code') deficits.push('opaqueAbstraction');
+    const docKey = JSON.stringify([event.feature, event.data.wave, task.title]);
+    if (docRecovered(docState, docKey, status)) deficits.push('missingDocumentation');
+    if (failTests) deficits.push('insufficientTesting');
+    if (deficits.length > 0) records.push({ title: task.title, deficits });
+  }
+  return records;
+}
+
+/** Add one record's deficits to every path its title declares. */
+function attributeRecord(byFile, paths, record, feature, waveLabel) {
+  for (const path of paths) {
+    const perDeficit = byFile.get(path) || new Map();
+    for (const deficit of record.deficits) {
+      const entry = perDeficit.get(deficit) || { features: new Set(), waves: new Set(), attempts: 0 };
+      entry.features.add(feature);
+      entry.waves.add(waveLabel);
+      entry.attempts += 1;
+      perDeficit.set(deficit, entry);
+    }
+    byFile.set(path, perDeficit);
+  }
+}
+
+/**
+ * Walk history once → path -> deficit -> evidence, plus the unattributable and
+ * unenriched counters. Placement matches collectWavePairs: an attempt needs a
+ * string `feature` and a finite numeric `data.wave` to contribute anything.
+ */
+function collectDeficitEvidence(history, taskFiles) {
+  const acc = { byFile: new Map(), unattributable: 0, unenriched: 0 };
+  const docState = new Map();
+  for (const event of history) {
+    if (!event || event.type !== 'wave-attempt' || !event.data) continue;
+    if (typeof event.feature !== 'string' || event.feature === '') continue;
+    if (typeof event.data.wave !== 'number' || !Number.isFinite(event.data.wave)) continue;
+    if (!Array.isArray(event.data.tasks)) {
+      acc.unenriched += 1;
+      continue;
+    }
+    const waveLabel = `${event.feature}#${event.data.wave}`;
+    for (const record of attemptDeficitRecords(event, docState)) {
+      if (!hasOwn(taskFiles, record.title)) {
+        acc.unattributable += 1;
+        continue;
+      }
+      attributeRecord(acc.byFile, declaredPaths(taskFiles, record.title), record, event.feature, waveLabel);
+    }
+  }
+  return acc;
+}
+
+/** Qualifying deficits for one file (each floored independently), or null. */
+function flooredDeficits(perDeficit, floor) {
+  const out = {};
+  for (const deficit of DEFICITS) {
+    const entry = perDeficit.get(deficit);
+    if (!entry || entry.features.size < floor) continue;
+    out[deficit] = { features: [...entry.features].sort(), waves: [...entry.waves].sort(), attempts: entry.attempts };
+  }
+  return Object.keys(out).length > 0 ? out : null;
+}
+
+/**
+ * Pure fold over an event history → per-FILE code-legibility deficit PROXIES
+ * (#93), aggregated across features. These are PROXIES — hypotheses about the
+ * region of code a task touched — and a code-legibility signal, NOT a verdict
+ * on agent performance. Records come from `wave-attempt` `data.tasks` joined to
+ * the CALLER's `taskFiles` (task title -> declared File: paths; the fold never
+ * reads plan docs):
+ *   - opaqueAbstraction    — a task self-classified `blocked_code`.
+ *   - missingDocumentation — a (feature, wave, title) that was non-passing on an
+ *     earlier attempt and later reached complete/done_with_concerns (one record,
+ *     at the passing attempt).
+ *   - insufficientTesting  — every task listed in an attempt whose
+ *     `data.outcome` is `fail-tests`.
+ * Per (file, deficit): sorted distinct `features`, sorted distinct `waves`
+ * ("<feature>#<wave>"), and `attempts` (contributing records). Each deficit is
+ * floored INDEPENDENTLY at `minFeatures` distinct features; a file with no
+ * qualifying deficit is omitted and counted in `belowFloor`. `unattributable`
+ * counts contributing task records whose title has no `taskFiles` entry;
+ * `unenriched` counts placeable attempts with no `tasks` array. Attempts lacking
+ * a string `feature` or finite numeric `data.wave` contribute nothing. Zeroed
+ * shape on non-array history or non-object taskFiles; never throws.
+ *
+ * @param {Event[]} history - in-memory event array (no I/O performed)
+ * @param {Object<string,string[]>} taskFiles - task title -> declared File: paths
+ * @param {number} [minFeatures] - positive-integer floor; anything else → FILE_FAILURE_MIN_FEATURES
+ * @returns {{ files: Object<string, Object<string, { features: string[], waves: string[],
+ *   attempts: number }>>, unattributable: number, unenriched: number,
+ *   belowFloor: number, minFeatures: number }}
+ */
+export function fileDeficitSignals(history, taskFiles, minFeatures = FILE_FAILURE_MIN_FEATURES) {
+  const floor = Number.isInteger(minFeatures) && minFeatures > 0 ? minFeatures : FILE_FAILURE_MIN_FEATURES;
+  const out = { files: {}, unattributable: 0, unenriched: 0, belowFloor: 0, minFeatures: floor };
+  if (!Array.isArray(history) || !taskFiles || typeof taskFiles !== 'object' || Array.isArray(taskFiles)) {
+    return out;
+  }
+  const { byFile, unattributable, unenriched } = collectDeficitEvidence(history, taskFiles);
+  out.unattributable = unattributable;
+  out.unenriched = unenriched;
+  for (const path of [...byFile.keys()].sort()) {
+    const deficits = flooredDeficits(byFile.get(path), floor);
+    if (deficits === null) out.belowFloor += 1;
+    else out.files[path] = deficits;
+  }
+  return out;
+}
+
+/**
+ * Plan-time forecast: the deficit PROXIES `fileDeficitSignals` reported for the
+ * given paths — a code-legibility signal (#93) about the regions a plan will
+ * touch, NOT a verdict on agent performance or a prediction of failure. Returns
+ * one entry per path present in `signals.files`, in input order (duplicates and
+ * no-signal paths dropped). Non-object signals or non-array paths → []; never
+ * throws.
+ *
+ * @param {{ files: Object<string, Object> }} signals - a fileDeficitSignals result
+ * @param {string[]} paths - paths the plan declares
+ * @returns {Array<{ path: string, deficits: Object }>}
+ */
+export function forecastForPaths(signals, paths) {
+  if (!signals || typeof signals !== 'object' || !Array.isArray(paths)) return [];
+  const files = signals.files;
+  if (!files || typeof files !== 'object' || Array.isArray(files)) return [];
+  const out = [];
+  const seen = new Set();
+  for (const path of paths) {
+    if (typeof path !== 'string' || seen.has(path) || !hasOwn(files, path)) continue;
+    seen.add(path);
+    out.push({ path, deficits: files[path] });
+  }
+  return out;
+}
+
 /** A usage field is reportable iff it is a finite, non-negative number. */
 const isTokenCount = (v) => typeof v === 'number' && Number.isFinite(v) && v >= 0;
 

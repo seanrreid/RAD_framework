@@ -256,6 +256,31 @@ that property without failing any functional test. Any proposal acting on a
 intact; the Step 4g table carries this as a note on the `fail-protocol` row so the
 constraint travels with every proposal.
 
+**The code-legibility signal, corrected (#93).** The earlier framing (#63) read a
+recurring **`blocked_code`** as "the code is simply hard — fix nothing". That
+premise was wrong. A task that keeps blocking on the same file across features is
+a *legibility* signal about that code: the next agent could not see the constraint
+it needed. The highest-leverage fix is a comment, a test, or a clearer boundary —
+cheap, durable, and it helps every later plan that touches the file.
+`fileDeficitSignals` (`harness/events.js`) derives three per-file deficits from the
+event log. Each is a **proxy**, not a diagnosis, and each is floored independently
+at `FILE_FAILURE_MIN_FEATURES` (2 distinct features) so one bad feature cannot
+flag a file:
+
+| Deficit | Proxy | Remedy shape (described, never applied) |
+|---|---|---|
+| `opaqueAbstraction` | task status `blocked_code` | a boundary / decomposition note |
+| `missingDocumentation` | same feature + wave + task non-passing on an earlier attempt, then `complete` / `done_with_concerns` | a comment explaining the governing constraint |
+| `insufficientTesting` | attempt outcome `fail-tests` → every task in that attempt | a characterization test for the uncovered behavior |
+
+Evidence per file lists the features, waves (`<feature>#<wave>`), and attempts.
+Two gaps are always reported, never dropped: **`unattributable`** (failing task
+records whose title has no plan-doc `File:` mapping) and **`unenriched`** (attempts
+that predate per-task data). The `File:` parser lives in `harness/plan-tasks.js`,
+shared by `/rad-insights` Step 4e (retrospective) and `rad forecast`
+([rad-cli.md](rad-cli.md#rad-forecast)), which surfaces the same signals at plan
+time for the paths a new plan declares.
+
 ---
 
 ## Anchor index

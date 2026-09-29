@@ -26,6 +26,9 @@ import {
   modelTierSpend,
   modelTierAdvisories,
   UPGRADE_RETRY_RATE,
+  DEFICITS,
+  fileDeficitSignals,
+  forecastForPaths,
 } from '../events.js';
 
 test('reduce on empty history → null phase, no markers, no approvals', () => {
@@ -1332,4 +1335,161 @@ test('run-resumed is audit-only: it establishes no phase and leaves the folded p
   assert.equal(phaseOf(deepFreeze([resumed])), null);
   assert.equal(phaseOf(deepFreeze([...base, resumed])), phaseOf(deepFreeze(base)));
   assert.equal(reduce(deepFreeze([...base, resumed])).phase, reduce(deepFreeze(base)).phase);
+});
+
+// ---- fileDeficitSignals / forecastForPaths (code-legibility proxies, #93) ----
+
+const dAttempt = (feature, wave, outcome, tasks) =>
+  ({ feature, type: 'wave-attempt', data: tasks === undefined ? { wave, outcome } : { wave, outcome, tasks } });
+const dTask = (title, status) => ({ title, status });
+const D_FILES = { A: ['src/a.js'], B: ['src/b.js'], AB: ['src/a.js', 'src/b.js'] };
+
+test('DEFICITS is the frozen three-proxy vocabulary', () => {
+  assert.deepStrictEqual([...DEFICITS], ['opaqueAbstraction', 'missingDocumentation', 'insufficientTesting']);
+  assert.ok(Object.isFrozen(DEFICITS));
+});
+
+test('blocked_code alone yields only opaqueAbstraction', () => {
+  const history = deepFreeze([
+    dAttempt('f1', 1, 'fail-scope', [dTask('A', 'blocked_code')]),
+    dAttempt('f2', 1, 'fail-scope', [dTask('A', 'blocked_code')]),
+  ]);
+  const out = fileDeficitSignals(history, D_FILES);
+  assert.deepStrictEqual(out.files, {
+    'src/a.js': { opaqueAbstraction: { features: ['f1', 'f2'], waves: ['f1#1', 'f2#1'], attempts: 2 } },
+  });
+});
+
+test('fail-then-pass on a later attempt yields only missingDocumentation, once', () => {
+  const history = deepFreeze([
+    dAttempt('f1', 2, 'fail-scope', [dTask('A', 'blocked_spec')]),
+    dAttempt('f1', 2, 'success', [dTask('A', 'complete')]),
+    dAttempt('f1', 2, 'success', [dTask('A', 'complete')]),
+    dAttempt('f2', 1, 'fail-scope', [dTask('A', 'blocked_intent')]),
+    dAttempt('f2', 1, 'success', [dTask('A', 'done_with_concerns')]),
+  ]);
+  const out = fileDeficitSignals(history, D_FILES);
+  assert.deepStrictEqual(out.files, {
+    'src/a.js': { missingDocumentation: { features: ['f1', 'f2'], waves: ['f1#2', 'f2#1'], attempts: 2 } },
+  });
+});
+
+test('a pass with no earlier failure is not missingDocumentation', () => {
+  const history = deepFreeze([
+    dAttempt('f1', 1, 'success', [dTask('A', 'complete')]),
+    dAttempt('f2', 1, 'success', [dTask('A', 'complete')]),
+  ]);
+  const out = fileDeficitSignals(history, D_FILES);
+  assert.deepStrictEqual(out.files, {});
+  assert.equal(out.belowFloor, 0);
+});
+
+test('fail-tests alone yields only insufficientTesting for every listed task', () => {
+  const history = deepFreeze([
+    dAttempt('f1', 1, 'fail-tests', [dTask('A', 'complete'), dTask('B', 'complete')]),
+    dAttempt('f2', 1, 'fail-tests', [dTask('A', 'complete'), dTask('B', 'complete')]),
+  ]);
+  const out = fileDeficitSignals(history, D_FILES);
+  const expected = { insufficientTesting: { features: ['f1', 'f2'], waves: ['f1#1', 'f2#1'], attempts: 2 } };
+  assert.deepStrictEqual(out.files, { 'src/a.js': expected, 'src/b.js': expected });
+});
+
+test('a file qualifying on two deficits reports both; each is floored independently', () => {
+  const history = deepFreeze([
+    dAttempt('f1', 1, 'fail-tests', [dTask('A', 'blocked_code')]),
+    dAttempt('f2', 1, 'fail-tests', [dTask('A', 'blocked_code')]),
+    dAttempt('f3', 1, 'success', [dTask('A', 'blocked_spec')]),
+    dAttempt('f3', 1, 'success', [dTask('A', 'complete')]),
+  ]);
+  const out = fileDeficitSignals(history, D_FILES);
+  assert.deepStrictEqual(Object.keys(out.files['src/a.js']).sort(), ['insufficientTesting', 'opaqueAbstraction']);
+  assert.equal(out.belowFloor, 0);
+});
+
+test('a file whose deficits are all below the floor is counted once in belowFloor', () => {
+  const history = deepFreeze([
+    dAttempt('f1', 1, 'fail-tests', [dTask('A', 'blocked_code')]),
+  ]);
+  const out = fileDeficitSignals(history, D_FILES);
+  assert.deepStrictEqual(out.files, {});
+  assert.equal(out.belowFloor, 1);
+  assert.equal(out.minFeatures, FILE_FAILURE_MIN_FEATURES);
+  assert.deepStrictEqual(fileDeficitSignals(history, D_FILES, 1).files['src/a.js'].opaqueAbstraction.attempts, 1);
+  assert.equal(fileDeficitSignals(history, D_FILES, 0).minFeatures, FILE_FAILURE_MIN_FEATURES);
+  assert.equal(fileDeficitSignals(history, D_FILES, -3).minFeatures, FILE_FAILURE_MIN_FEATURES);
+});
+
+test('a two-file task attributes to each file once per record', () => {
+  const history = deepFreeze([
+    dAttempt('f1', 1, 'fail-scope', [dTask('AB', 'blocked_code')]),
+    dAttempt('f2', 1, 'fail-scope', [dTask('AB', 'blocked_code')]),
+  ]);
+  const out = fileDeficitSignals(history, D_FILES);
+  assert.equal(out.files['src/a.js'].opaqueAbstraction.attempts, 2);
+  assert.equal(out.files['src/b.js'].opaqueAbstraction.attempts, 2);
+});
+
+test('a contributing task whose title has no taskFiles entry is unattributable', () => {
+  const history = deepFreeze([
+    dAttempt('f1', 1, 'fail-scope', [dTask('Z', 'blocked_code'), dTask('Y', 'complete')]),
+  ]);
+  const out = fileDeficitSignals(history, D_FILES);
+  assert.equal(out.unattributable, 1);
+  assert.deepStrictEqual(out.files, {});
+});
+
+test('an attempt without a tasks array is unenriched; feature-less events contribute nothing', () => {
+  const history = deepFreeze([
+    dAttempt('f1', 1, 'fail-tests'),
+    dAttempt('f2', 1, 'success'),
+    { type: 'wave-attempt', data: { wave: 1, outcome: 'fail-tests' } },
+    { type: 'wave-attempt', data: { wave: 1, outcome: 'fail-tests', tasks: [dTask('Z', 'blocked_code')] } },
+  ]);
+  const out = fileDeficitSignals(history, D_FILES);
+  assert.equal(out.unenriched, 2);
+  assert.equal(out.unattributable, 0);
+});
+
+test('waves evidence is sorted and deduplicated', () => {
+  const history = deepFreeze([
+    dAttempt('f2', 3, 'fail-scope', [dTask('A', 'blocked_code')]),
+    dAttempt('f2', 3, 'fail-scope', [dTask('A', 'blocked_code')]),
+    dAttempt('f1', 2, 'fail-scope', [dTask('A', 'blocked_code')]),
+    dAttempt('f1', 1, 'fail-scope', [dTask('A', 'blocked_code')]),
+  ]);
+  const entry = fileDeficitSignals(history, D_FILES).files['src/a.js'].opaqueAbstraction;
+  assert.deepStrictEqual(entry.waves, ['f1#1', 'f1#2', 'f2#3']);
+  assert.deepStrictEqual(entry.features, ['f1', 'f2']);
+  assert.equal(entry.attempts, 4);
+});
+
+test('fileDeficitSignals returns the zeroed shape on bad input and never throws', () => {
+  const zeroed = { files: {}, unattributable: 0, unenriched: 0, belowFloor: 0, minFeatures: FILE_FAILURE_MIN_FEATURES };
+  for (const bad of [null, undefined, 7, 'x', {}]) {
+    assert.deepStrictEqual(fileDeficitSignals(bad, D_FILES), zeroed);
+  }
+  for (const bad of [null, undefined, 7, 'x', []]) {
+    assert.deepStrictEqual(fileDeficitSignals([dAttempt('f1', 1, 'fail-tests')], bad), zeroed);
+  }
+  assert.deepStrictEqual(fileDeficitSignals([null, 1, { type: 'wave-attempt' }], D_FILES), zeroed);
+});
+
+test('forecastForPaths intersects signals, drops no-signal paths, and preserves input order', () => {
+  const signals = {
+    files: {
+      'src/a.js': { opaqueAbstraction: { features: ['f1', 'f2'], waves: ['f1#1', 'f2#1'], attempts: 2 } },
+      'src/b.js': { insufficientTesting: { features: ['f1', 'f2'], waves: ['f1#1', 'f2#1'], attempts: 2 } },
+    },
+  };
+  assert.deepStrictEqual(forecastForPaths(signals, ['src/b.js', 'src/none.js', 'src/a.js', 'src/b.js']), [
+    { path: 'src/b.js', deficits: signals.files['src/b.js'] },
+    { path: 'src/a.js', deficits: signals.files['src/a.js'] },
+  ]);
+  assert.deepStrictEqual(forecastForPaths(signals, []), []);
+});
+
+test('forecastForPaths returns [] on non-object signals or non-array paths', () => {
+  for (const bad of [null, undefined, 7, 'x']) assert.deepStrictEqual(forecastForPaths(bad, ['src/a.js']), []);
+  for (const bad of [null, undefined, 'src/a.js', {}]) assert.deepStrictEqual(forecastForPaths({ files: {} }, bad), []);
+  assert.deepStrictEqual(forecastForPaths({ files: null }, ['src/a.js']), []);
 });

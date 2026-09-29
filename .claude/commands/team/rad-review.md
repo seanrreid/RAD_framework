@@ -243,8 +243,16 @@ For each finding in each reviewer's `rad-findings` block, append one line to
 findings from accessibility-reviewer include it.
 
 ```json
-{"type":"finding","cycle_id":"[CYCLE_ID]","feature":"[FEATURE]","date":"[DATE]","reviewer":"[reviewer]","priority":"[priority]","category":"[category]","file":"[file]","line":[line or null],"issue":"[issue]","wcag":"[wcag or null]"}
+{"type":"finding","cycle_id":"[CYCLE_ID]","feature":"[FEATURE]","date":"[DATE]","reviewer":"[reviewer]","priority":"[priority]","category":"[category]","file":"[file]","line":[line or null],"issue":"[issue]","wcag":"[wcag or null]","verdict":[ "confirmed" | "false-alarm" | null ]}
 ```
+
+`verdict` feeds `/rad-insights` reviewer calibration. Set it ONLY when this cycle
+settled the finding: `"confirmed"` when it was verified real (fixed, or confirmed
+to be a genuine defect); `"false-alarm"` when it was refuted (adversarially
+verified to be false). Otherwise write `null` — never guess. Never rewrite existing
+lines in `.agents/findings.jsonl` to add or change a verdict; older findings
+without the field are classified by the documented keyword fallback in
+`harness/findings.js`.
 
 Then append one cycle summary record:
 

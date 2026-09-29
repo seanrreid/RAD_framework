@@ -11,8 +11,12 @@ Analyze finding patterns across all recorded RAD review cycles.
 
 ## Input
 
-`$ARGUMENTS` (optional): `--since YYYY-MM-DD` to limit analysis to cycles on or after
-that date.
+`$ARGUMENTS` (optional):
+
+- `--since YYYY-MM-DD` to limit analysis to cycles on or after that date.
+- `--draft-plans` to bundle every threshold-crossing Step 3b category into ONE
+  Gate-1-blocked plan via `scripts/draft-insights-plan.sh` (see Step 3b). Without
+  this flag the skill drafts nothing and Step 3b output is unchanged.
 
 ---
 
@@ -112,6 +116,75 @@ Suggested `## Coding Conventions` bullet for CLAUDE.md:
 
 If no category reaches the threshold, state "No category meets the recurrence
 threshold ([t])" and emit no blocks.
+
+**Only when `--draft-plans` was passed** (skip this block entirely otherwise —
+the output above stays exactly as it is): hand the same threshold-crossing
+categories to the drafter, which bundles them into ONE plan on a new
+`rad/insights-proposals-<YYYY-MM-DD>` branch cut from the default branch. It
+reads the same findings log (`RAD_FINDINGS_FILE` override) and the same
+`RAD_FINDINGS_THRESHOLD`, commits only the plan, and never pushes. The drafted
+plan carries `[NEEDS CLARIFICATION: …]` markers, so `rad approve` refuses it
+until a human finishes it — Gate 1 is never bypassed.
+
+```bash
+scripts/draft-insights-plan.sh
+```
+
+- **Exit 0** — report its stdout verbatim: either the branch + plan path, or
+  `nothing to draft` (no category crossed the threshold). On a drafted plan, print
+  the next steps for the human:
+  1. `git push -u origin <branch>` (insights never pushes)
+  2. Review the plan and resolve every `[NEEDS CLARIFICATION: …]` marker
+  3. `/rad-approve <feature>` once the plan is finished
+- **Non-zero exit** — report the stderr reason verbatim (exit 1: dirty tracked
+  worktree or the branch already exists locally/on origin; exit 2: findings log
+  missing) and stop drafting. Never retry, never pass a force flag, never delete
+  or rename a branch to make room.
+
+### Step 3c: Reviewer calibration
+
+How often each reviewer's findings turn out real. The verdict per finding and the
+per-reviewer rates come from `reviewerCalibration` in `harness/findings.js` — never
+re-implement the classification or the rate math in jq. A finding is labeled by its
+optional `verdict` field (`confirmed` | `false-alarm`, written by `/rad-review` Step
+7); older findings without it fall back to the module's documented keyword rules
+(`category: "false-alarm"` or "verified false"/"false alarm" in `issue` →
+false-alarm; "verified real" or an uppercase `FIXED` in `issue` → confirmed;
+anything else → unlabeled). Same invocation convention as Step 4c: run from the
+repo root; `RAD_FINDINGS_FILE` (default `.agents/findings.jsonl`) exists only for
+fixture testing. This step only reads; it writes nothing.
+
+```bash
+node --input-type=module -e '
+import { readFileSync, existsSync } from "node:fs";
+const { reviewerCalibration } = await import("./harness/findings.js");
+
+const findingsFile = process.env.RAD_FINDINGS_FILE || ".agents/findings.jsonl";
+if (!existsSync(findingsFile)) {
+  console.log(JSON.stringify({ findingsLog: false }, null, 2));
+  process.exit(0);
+}
+// A malformed line is reported with its line number, then skipped — never silently.
+const records = [];
+readFileSync(findingsFile, "utf8").split("\n").forEach((line, i) => {
+  if (!line.trim()) return;
+  try { records.push(JSON.parse(line)); }
+  catch (err) { console.error(`skipping malformed JSON at ${findingsFile}:${i + 1}: ${err.message}`); }
+});
+console.log(JSON.stringify({ findingsLog: true, ...reviewerCalibration(records) }, null, 2));
+'
+```
+
+Reading the output:
+
+- **`findingsLog: false`** — no findings log; omit the Reviewer Calibration section.
+- **`reviewers`** — per reviewer: `confirmed`, `falseAlarm`, `unlabeled` counts and
+  `labeled` (= confirmed + falseAlarm). `precision` (confirmed / labeled) and
+  `falseAlarmRate` (falseAlarm / labeled) are `null` until `labeled >= minLabeled`
+  — below that a rate is noise, so render "insufficient labels", never a 0.
+- **`minLabeled`** — the floor applied (`CALIBRATION_MIN_LABELED`, default 5).
+- Any `skipping malformed JSON at <file>:<line>` stderr line MUST be surfaced in
+  the report under the section — the skip is never silent.
 
 ### Step 4: Compute cycle outcomes and trajectory
 
@@ -329,45 +402,31 @@ files each task DECLARED in its plan. The plan docs are the only source of the
 task-title → paths association: every task in `.agents/plans/*.md` is a
 `#### Task N.M: <title>` header followed by a `File:` line (paths separated by
 `,` or `;`, sometimes with `:lines` / `:+N` suffixes or a parenthetical note).
-This step builds that mapping and passes it to `fileFailureCounts` in
-`harness/events.js` — the fold itself never touches the filesystem, and the
-counting must never be re-implemented in jq. Same invocation convention as
-Steps 4c/4d: run from the repo root; `RAD_STATE_DIR` (default `.agents/state`)
-and `RAD_PLANS_DIR` (default `.agents/plans`) exist only for fixture testing.
-This step only reads; it writes nothing.
+The plan-doc parsing lives in `harness/plan-tasks.js` (`taskFilesFromPlanText`,
+merged across plan docs with `mergeTaskFiles`) — shared with the plan-time
+`rad forecast` verb, so never re-implement it inline. This step passes the
+mapping to `fileFailureCounts` and `fileDeficitSignals` in `harness/events.js`
+— the folds themselves never touch the filesystem, and the counting must never
+be re-implemented in jq. Same invocation convention as Steps 4c/4d: run from
+the repo root; `RAD_STATE_DIR` (default `.agents/state`) and `RAD_PLANS_DIR`
+(default `.agents/plans`) exist only for fixture testing. This step only reads;
+it writes nothing.
 
 ```bash
 node --input-type=module -e '
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
-const { fileFailureCounts } = await import("./harness/events.js");
+const { fileFailureCounts, fileDeficitSignals } = await import("./harness/events.js");
+const { taskFilesFromPlanText, mergeTaskFiles } = await import("./harness/plan-tasks.js");
 
 const stateDir = process.env.RAD_STATE_DIR || ".agents/state";
 const plansDir = process.env.RAD_PLANS_DIR || ".agents/plans";
-const TASK_HEADER = /^#### Task [0-9]+\.[0-9]+:\s*(.+?)\s*$/;
-const LINE_SUFFIX = /:[+0-9,-]+$/;
-
-// "a.js:10-20; b.md (throughout)" -> ["a.js", "b.md"]; drops prose fragments.
-const parseFileLine = (line) => line.replace(/^File:\s*/, "")
-  .split(/[,;]|\s\+\s/)
-  .map((part) => part.trim().replace(/`/g, "").split(/\s+/)[0] || "")
-  .map((p) => p.replace(LINE_SUFFIX, ""))
-  .filter((p) => /[./]/.test(p));
 
 const taskFiles = {};
 const planFiles = existsSync(plansDir)
   ? readdirSync(plansDir).filter((f) => f.endsWith(".md")).sort() : [];
 for (const plan of planFiles) {
-  let title = null;
-  for (const line of readFileSync(join(plansDir, plan), "utf8").split("\n")) {
-    const header = line.match(TASK_HEADER);
-    if (header) { title = header[1]; continue; }
-    if (line.startsWith("#")) { title = null; continue; }
-    if (title && line.startsWith("File:")) {
-      taskFiles[title] = [...new Set([...(taskFiles[title] || []), ...parseFileLine(line)])];
-      title = null;
-    }
-  }
+  mergeTaskFiles(taskFiles, taskFilesFromPlanText(readFileSync(join(plansDir, plan), "utf8")));
 }
 
 const features = existsSync(stateDir)
@@ -386,9 +445,10 @@ const history = features.flatMap((feature) =>
     .map((e) => ({ ...e, feature: e.feature || feature })));
 
 const result = fileFailureCounts(history, taskFiles);
+const deficits = fileDeficitSignals(history, taskFiles);
 const mappedTitles = Object.keys(taskFiles).length;
 const reportedFiles = Object.keys(result.files).length;
-console.log(JSON.stringify({ mappedTitles, reportedFiles, ...result }, null, 2));
+console.log(JSON.stringify({ mappedTitles, reportedFiles, ...result, deficits }, null, 2));
 '
 ```
 
@@ -406,6 +466,19 @@ Reading the output:
   plan doc under the plans dir carried a `#### Task` header + `File:` line.
 - Only enriched attempts (Step 4d's `enrichedAttempts`) can be attributed; a
   legacy attempt without per-task data names no task, so it names no file.
+- **`deficits`** — the `fileDeficitSignals` output, splitting per-file trouble by
+  deficit PROXY (not a diagnosis): `deficits.files[path]` holds any of
+  `opaqueAbstraction` (tasks self-classified `blocked_code`),
+  `missingDocumentation` (a task non-passing on an earlier attempt of the same
+  feature+wave that later reached `complete`/`done_with_concerns`), and
+  `insufficientTesting` (every task in an attempt whose outcome was
+  `fail-tests`), each as `{ features, waves ("<feature>#<wave>"), attempts }`.
+  Each deficit is floored independently at `deficits.minFeatures` distinct
+  features; files with no qualifying deficit count toward `deficits.belowFloor`.
+- **`deficits.unattributable`** — contributing task records whose title has no
+  plan-doc `File:` mapping, so no file could be named. Never drop silently.
+- **`deficits.unenriched`** — attempts with no per-task data (pre-enrichment), so
+  they contribute nothing. Never drop silently.
 
 ### Step 4f: Fold per-wave-position reliability (model-tiering advisory)
 
@@ -785,6 +858,22 @@ Cycles analyzed: [N]  |  Date range: [earliest date] → [latest date]
  block format — each carries the "Suggestion — apply via PR; never auto-applied"
  framing verbatim.]
 [If none reach the threshold: "No category meets the recurrence threshold ([t])."]
+[Only with --draft-plans: the drafter's reported stdout (branch + plan path, or
+ "nothing to draft") and, on a drafted plan, the three next steps from Step 3b; on
+ a non-zero exit, the stderr reason.]
+
+### Reviewer Calibration
+[From Step 3c. Omit this section entirely if findingsLog is false.]
+[One line per reviewer in `reviewers`:]
+- [reviewer] — [confirmed] confirmed, [falseAlarm] false alarm, [unlabeled] unlabeled;
+  [if labeled >= minLabeled:] precision [precision as %], false-alarm rate [falseAlarmRate as %]
+  [else:] insufficient labels ([labeled] of [minLabeled] needed)
+[If Step 3c reported any malformed lines: "Skipped malformed line(s): [file:line, ...]"]
+[Framing — render verbatim under the list:]
+A rising false-alarm rate is a signal to revise that reviewer's prompt. Labels come
+from the optional `verdict` field on each finding, with a documented keyword fallback
+for older findings (`harness/findings.js`). Suggestion only — this skill never edits
+a reviewer prompt.
 
 ### Hotspot Files
 [Top files by total finding count. Omit if fewer than 2 cycles.]
@@ -855,8 +944,11 @@ Blocked tasks across [enrichedAttempts] enriched wave attempt(s):
 
 ### Code Legibility Signals
 [From Step 4e. Omit this section entirely if no per-feature events.jsonl exists.]
-[Pick EXACTLY ONE degradation line when it applies, and render nothing else in
- the section — silence would read as a clean record:]
+[Pick EXACTLY ONE degradation line when it applies — silence would read as a clean
+ record. After the noEnrichedData or mappedTitles-0 line render only the
+ unattributable/unenriched line below (when non-zero); after the reportedFiles-0
+ line still render the deficit breakdown and that line, skipping the blocked-task
+ list:]
 [If Step 4d reported noEnrichedData: true:]
 No enriched (per-task) wave events exist yet — code-legibility signals need
 per-task data to attribute blocked tasks to files.
@@ -878,6 +970,26 @@ Files accumulating blocked tasks across features (floor: [minFeatures] features)
 These counts are a code-legibility signal about the named region of the codebase —
 repeated trouble there across unrelated features suggests the code is hard to
 understand or change safely — not a verdict on agent or developer performance.
+
+[Deficit breakdown — from `deficits.files`, one line per (file × deficit) present,
+ files in path order, deficits in the order below:]
+Deficit proxies per file (floor: [deficits.minFeatures] features per deficit):
+- [path] — [deficit label]: [attempts] record(s) across [N] features ([features joined]); waves [waves joined] → consider [remedy shape]
+...
+[Deficit labels and remedy shapes — describe the remedy; never write it:]
+- `opaqueAbstraction` → "opaque abstraction" → consider a described boundary/decomposition
+  note (what the module owns, where it should split)
+- `missingDocumentation` → "missing documentation" → consider a described comment
+  explaining the governing constraint the tasks kept tripping on
+- `insufficientTesting` → "insufficient testing" → consider a described characterization
+  test naming the uncovered behavior
+[If deficits.files is empty: "No file meets the per-deficit floor
+ ([deficits.minFeatures] features)."]
+[State under the breakdown: "These deficit labels are proxies inferred from wave
+ outcomes and task statuses, not a diagnosis of the code."]
+[Whenever deficits.unattributable or deficits.unenriched is non-zero, render —
+ never omit silently:]
+[unattributable] failing task record(s) could not be attributed to a file (no plan-doc File: mapping); [unenriched] attempt(s) predate per-task data.
 [Suggestion only — name the files; never edit them and never propose an automatic
  change. A reader may choose to add a comment, a README, or a refactor task.]
 
@@ -1025,6 +1137,18 @@ carries per-task data yet.
   or scripts/lint-plan.sh from this skill; every block must carry the
   "Suggestion — apply via PR; never auto-applied" framing
 - RAD_FINDINGS_THRESHOLD parses via Number.parseInt; unset/0/NaN/negative → default 5
+- The plan drafter (`--draft-plans`, `scripts/draft-insights-plan.sh`) runs ONLY when
+  that flag is passed; it writes only the one plan doc and its new
+  `rad/insights-proposals-<date>` branch — never pushes, never approves, never
+  retries or forces on a non-zero exit. Approval stays a human `/rad-approve` after
+  the plan's `[NEEDS CLARIFICATION: …]` markers are resolved
+- Reviewer calibration (Step 3c) MUST come from `reviewerCalibration` in
+  `harness/findings.js`; rates below `minLabeled` render as "insufficient labels",
+  never 0; malformed findings lines are reported by line number, never silently
+  skipped. Calibration is suggestion-only — never edit a reviewer prompt
+- Deficit breakdown (Step 4e) MUST come from `fileDeficitSignals`; plan-doc parsing
+  MUST come from `harness/plan-tasks.js`. Deficits are proxies and remedies are
+  described, never written; non-zero `unattributable`/`unenriched` are always rendered
 - If the file is missing or empty, say so and exit cleanly
 - If fewer than 3 cycles exist, skip pattern analysis and output raw findings
 - Do not invent patterns — only report what the data shows

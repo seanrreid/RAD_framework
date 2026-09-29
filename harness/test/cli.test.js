@@ -6,7 +6,9 @@ import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-import { approveCommand, gateCommand, parsePlanCtx, deliverCommand, stopStatusCommand } from '../cli.js';
+import {
+  approveCommand, gateCommand, parsePlanCtx, deliverCommand, stopStatusCommand, forecastCommand,
+} from '../cli.js';
 import { planFingerprint } from '../plan-fingerprint.js';
 import { createGitStateStore, defaultSh } from '../adapters/git-state-store.js';
 
@@ -981,4 +983,140 @@ test('stop-status AC#9 — missing feature / unknown flag / extra positional →
     assert.equal(status, 2, `argv ${JSON.stringify(argv)} should exit 2`);
     assert.match(stderr, /Usage: rad stop-status <feature> \[--stdin\]/);
   }
+});
+
+// ---------------------------------------------------------------------------
+// rad forecast — advisory plan-time reliability readout (AC#8)
+// ---------------------------------------------------------------------------
+
+/** Capture stdout AND stderr around an async command call. */
+async function captureStdio(fn) {
+  const origErr = process.stderr.write.bind(process.stderr);
+  let stderr = '';
+  process.stderr.write = (chunk) => {
+    stderr += chunk;
+    return true;
+  };
+  try {
+    const { value, stdout } = await captureStdout(fn);
+    return { code: value, stdout, stderr };
+  } finally {
+    process.stderr.write = origErr;
+  }
+}
+
+/** sh stub standing in for plan_scope_paths: fixed stdout, records calls. */
+function scopePathsSh(paths, { status = 0, stderr = '' } = {}) {
+  const calls = [];
+  const sh = (file, args, opts) => {
+    calls.push({ file, args, opts });
+    return { status, stdout: paths.map((p) => `${p}\n`).join(''), stderr };
+  };
+  return { sh, calls };
+}
+
+const FORECAST_PLAN = '.agents/plans/target.md';
+const HISTORY_PLAN = [
+  '# history', '', '#### Task 1.1: Touch A', 'File: src/a.js', '',
+  '#### Task 1.2: Touch B', 'File: src/b.js:10-20', '',
+].join('\n');
+
+/** Two features whose wave-1 attempt failed tests on Touch A and Touch B (feature stamped from dir). */
+function seedForecastRepo(repoRoot) {
+  mkdirSync(join(repoRoot, '.agents', 'plans'), { recursive: true });
+  writeFileSync(join(repoRoot, FORECAST_PLAN), '# target\n', 'utf8');
+  writeFileSync(join(repoRoot, '.agents', 'plans', 'history.md'), HISTORY_PLAN, 'utf8');
+  for (const feature of ['feat-one', 'feat-two']) {
+    const attempt = { type: 'wave-attempt', data: { wave: 1, outcome: 'fail-tests',
+      tasks: [{ title: 'Touch A', status: 'failed' }, { title: 'Touch B', status: 'failed' }] } };
+    mkdirSync(join(repoRoot, '.agents', 'state', feature), { recursive: true });
+    writeFileSync(join(repoRoot, '.agents', 'state', feature, 'events.jsonl'), jsonl([attempt]), 'utf8');
+  }
+}
+
+test('forecast AC#8 — signals printed only for in-scope paths, then the advisory summary', async () => {
+  await withTempRepo(async (repoRoot) => {
+    seedForecastRepo(repoRoot);
+    const { sh, calls } = scopePathsSh(['src/a.js', 'src/c.js']);
+    const { code, stdout } = await captureStdio(() => forecastCommand([FORECAST_PLAN], { repoRoot, sh }));
+    assert.equal(code, 0);
+    assert.equal(stdout, [
+      'forecast: src/a.js — insufficientTesting in 2 feature(s) (feat-one, feat-two); '
+        + 'consider a characterization test for the uncovered behavior',
+      'forecast: 1 of 2 path(s) have reliability signals (history: 2 feature(s)); '
+        + 'advisory only — these are proxies, not verdicts',
+      '',
+    ].join('\n'));
+    assert.doesNotMatch(stdout, /src\/b\.js/, 'out-of-scope path never printed');
+    assert.equal(calls[0].file, 'bash');
+    assert.match(calls[0].args[1], /plan_scope_paths "\$1"/);
+    assert.equal(calls[0].args[3], join(repoRoot, FORECAST_PLAN));
+    assert.equal(calls[0].opts.cwd, repoRoot);
+  });
+});
+
+test('forecast AC#8 — no in-scope signals → the no-signals summary line', async () => {
+  await withTempRepo(async (repoRoot) => {
+    seedForecastRepo(repoRoot);
+    const { sh } = scopePathsSh(['src/c.js', '', 'src/d.js']);
+    const { code, stdout } = await captureStdio(() => forecastCommand([FORECAST_PLAN], { repoRoot, sh }));
+    assert.equal(code, 0);
+    assert.equal(stdout, 'forecast: no reliability signals for 2 path(s) (history: 2 feature(s))\n');
+  });
+});
+
+test('forecast AC#8 — no state dir → history 0 summary, exit 0', async () => {
+  await withTempRepo(async (repoRoot) => {
+    writeFileSync(join(repoRoot, 'plan.md'), '# p\n', 'utf8');
+    const { sh } = scopePathsSh(['src/a.js']);
+    const { code, stdout } = await captureStdio(() => forecastCommand(['plan.md'], { repoRoot, sh }));
+    assert.equal(code, 0);
+    assert.equal(stdout, 'forecast: no reliability signals for 1 path(s) (history: 0 feature(s))\n');
+  });
+});
+
+test('forecast AC#8 — missing plan → exit 2 naming the plan; sh never called', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const { sh, calls } = scopePathsSh([]);
+    const { code, stdout, stderr } = await captureStdio(() => forecastCommand(['missing.md'], { repoRoot, sh }));
+    assert.equal(code, 2);
+    assert.equal(stdout, '');
+    assert.match(stderr, /^rad forecast: cannot read plan missing\.md: /);
+    assert.equal(calls.length, 0);
+  });
+});
+
+test('forecast AC#8 — plan_scope_paths failure → exit 2 with its stderr as the reason', async () => {
+  await withTempRepo(async (repoRoot) => {
+    writeFileSync(join(repoRoot, 'plan.md'), '# p\n', 'utf8');
+    const { sh } = scopePathsSh([], { status: 1, stderr: 'no such plan section\n' });
+    const { code, stdout, stderr } = await captureStdio(() => forecastCommand(['plan.md'], { repoRoot, sh }));
+    assert.equal(code, 2);
+    assert.equal(stdout, '');
+    assert.equal(stderr, 'rad forecast: plan_scope_paths failed: no such plan section\n');
+  });
+});
+
+test('forecast AC#8 — malformed event log → exit 1 naming the feature', async () => {
+  await withTempRepo(async (repoRoot) => {
+    seedForecastRepo(repoRoot);
+    writeFileSync(join(repoRoot, '.agents', 'state', 'feat-two', 'events.jsonl'), '{"type":\n', 'utf8');
+    const { sh } = scopePathsSh(['src/a.js']);
+    const { code, stdout, stderr } = await captureStdio(() => forecastCommand([FORECAST_PLAN], { repoRoot, sh }));
+    assert.equal(code, 1);
+    assert.equal(stdout, '');
+    assert.match(stderr, /^rad forecast: malformed event log for feat-two: /);
+  });
+});
+
+test('forecast AC#8 — missing plan arg / unknown flag / extra positional → usage, exit 2', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const { sh, calls } = scopePathsSh([]);
+    for (const argv of [[], ['--bogus', 'p.md'], ['p.md', 'extra']]) {
+      const { code, stderr } = await captureStdio(() => forecastCommand(argv, { repoRoot, sh }));
+      assert.equal(code, 2, `argv ${JSON.stringify(argv)} should exit 2`);
+      assert.match(stderr, /Usage: rad forecast <plan>\n$/);
+    }
+    assert.equal(calls.length, 0);
+  });
 });

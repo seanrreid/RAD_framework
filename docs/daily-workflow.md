@@ -312,3 +312,67 @@ and developers (seeing where to invest in skill improvement).
 
 Findings accumulate automatically as long as `/rad-review` is run on each
 `rad/[feature]` branch before the deliver PR. No separate setup required.
+
+### Reviewer Calibration
+
+The report includes a **Reviewer Calibration** section: per reviewer, how many of
+its findings were later confirmed, how many were false alarms, and how many are
+unlabeled. A finding's verdict comes from an explicit `verdict` field that
+`/rad-review` writes when a cycle verified or refuted it; older findings fall back
+to keywords (a `false-alarm` category or "verified false" / "false alarm" → false
+alarm; "verified real" or an uppercase `FIXED` → confirmed; anything else stays
+unlabeled). Precision and false-alarm rate are shown only once a reviewer has at
+least 5 labeled findings. A rising false-alarm rate is a signal to revise that
+reviewer's prompt. Existing findings are not backfilled.
+
+### File deficit signals
+
+The report also names files that have repeatedly been hard for agents, from the
+event log rather than the findings log: `opaqueAbstraction` (tasks blocked on the
+code), `missingDocumentation` (tasks that failed before passing), and
+`insufficientTesting` (waves that failed tests). Each needs 2 or more distinct
+features before it shows up, and each comes with a suggested remedy: a boundary
+note, a comment, or a characterization test. These are proxies. Treat a flagged
+file as a legibility problem to fix with a comment, test, or clearer boundary, not
+as code to avoid. The proxy definitions are in
+[harness-and-framework.md](harness-and-framework.md#prompt-surfaces-as-a-feedback-loop-target).
+
+### `rad forecast` in the planning flow
+
+The same signals appear at plan time. `/rad-plan` (Step 4b) and `/rad-adopt`
+(Step 6b) run `rad forecast <plan>` after the plan lint and print a line for each
+declared path with history:
+
+```
+forecast: harness/spine.js — insufficientTesting in 2 feature(s) (hooks, insights-arc); consider ...
+```
+
+The forecast never blocks. If a path is flagged, consider adding the suggested
+remedy as a task in the plan before you request approval. See
+[rad-cli.md](rad-cli.md#rad-forecast) for output and exit codes.
+
+### `--draft-plans`: turning recurring findings into a plan
+
+```
+/rad-insights --draft-plans
+```
+
+Runs `scripts/draft-insights-plan.sh`, which collects every finding category at
+or above `RAD_FINDINGS_THRESHOLD` (default 5) into **one** plan,
+`.agents/plans/insights-proposals-<date>.md`, on a new
+`rad/insights-proposals-<date>` branch (honors `RAD_BRANCH_PREFIX`). It commits only
+the plan and does not push or approve it. A category that maps to a known
+convention becomes a CLAUDE.md Coding Conventions bullet task. An unmapped category
+becomes a lint task with a co-located test fixture. Pass `--dry-run` to preview
+without creating a branch or commit.
+
+This is a **Gate-1 handoff, not an automation**. Every drafted task carries a
+`[NEEDS CLARIFICATION]` marker, and `rad approve` refuses a plan with unresolved
+markers. The plan can't be approved until you finish it: resolve each marker,
+drop tasks you don't want, push the branch, and request approval as usual.
+
+The script refuses (exit 1) on a dirty tracked tree, when the branch already exists
+locally or on `origin`, when `origin` can't be checked, or when more than 15
+categories qualify (the plan-lint task cap). It exits 2 on a missing findings log
+or an unknown flag. It prints `nothing to draft` and exits 0 when no category
+reaches the threshold.
