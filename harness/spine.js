@@ -103,6 +103,31 @@ async function approvalChangeReason({ state, feature, approvalIntact }) {
   return null;
 }
 
+/** The one wave-attempt outcome the failed-attempt cap does NOT count. */
+const SUCCESS_OUTCOME = 'success';
+
+/**
+ * Count non-success `wave-attempt` events since the latest `deliver-stopped`
+ * (or from log start when there is none), across ALL waves. Pure. A stop resets
+ * the count, so a re-run after a stop gets a fresh failed-attempt budget.
+ *
+ * @param {Array<{ type: string, data?: { outcome?: string } }>} history
+ * @returns {number}
+ */
+export function failedAttemptsSinceStop(history) {
+  let failed = 0;
+  for (const event of history) {
+    if (event.type === 'deliver-stopped') failed = 0;
+    else if (event.type === 'wave-attempt' && event.data?.outcome !== SUCCESS_OUTCOME) failed += 1;
+  }
+  return failed;
+}
+
+/** The cap is on only for a positive integer; null/0/negative/non-integer = off. */
+function capEnabled(cap) {
+  return Number.isInteger(cap) && cap > 0;
+}
+
 /** Bounded attempt budget per wave — the hard ceiling. The doom-loop breaker is
  * the early exit; this cap only bites when every attempt fails *differently*. */
 const MAX_ATTEMPTS = 3;
@@ -432,6 +457,7 @@ export async function deliverSpine({
   runHooks = NOOP_HOOKS,
   hookPreflight = NOOP_PREFLIGHT,
   approvalIntact = ALWAYS_INTACT,
+  maxFailedAttempts = null,
 }) {
   // ── DET gate: approval. The human (or proxy) decided earlier; here we ENFORCE
   // it. A blocked gate is a normal outcome — return structured, append nothing
@@ -488,6 +514,10 @@ export async function deliverSpine({
   // The first wave this run executes was covered by the entry gate above; every
   // later one re-checks approval first (#77).
   let firstWaveOfRun = true;
+
+  // Cumulative failed-attempt count for the cap, seeded from the log so it
+  // spans resumed runs until a deliver-stopped resets it.
+  let failedAttempts = failedAttemptsSinceStop(history);
 
   // ── DET wave loop — the MATRIX decides what happens next, not a counter. ──
   for (const wave of waves) {
@@ -546,6 +576,15 @@ export async function deliverSpine({
     let priorFailure = null;
 
     for (let attempt = prior.attempts + 1; attempt <= maxAttempts; attempt += 1) {
+      // ── Failed-attempt cap (#77): checked before the pre-wave hooks and any
+      // wave-started, so a capped run does no further agent work. ──
+      if (capEnabled(maxFailedAttempts) && failedAttempts >= maxFailedAttempts) {
+        return stopRun(
+          { stopped: 'failed-attempt-cap', ok: false, wave: wave.n, failed: failedAttempts, cap: maxFailedAttempts },
+          stopCtx,
+        );
+      }
+
       // ── Hook: pre-wave (veto-capable point). Fired BEFORE runWave. A veto here
       // aborts the wave without running the agent: route the veto outcome through
       // the existing matrix and terminate the same way an agent-emitted outcome
@@ -755,6 +794,7 @@ export async function deliverSpine({
       // OPTIONAL (a command adapter may emit none) — a missing total contributes
       // 0, never NaN.
       spent += result.usage?.total ?? 0;
+      if (outcome !== SUCCESS_OUTCOME) failedAttempts += 1;
 
       // ── Hook: on-outcome (observe-only). Fired after the matrix resolves the
       // outcome, before the action is dispatched. Observe + emit only. ──

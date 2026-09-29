@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { deliverSpine } from '../spine.js';
+import { deliverSpine, failedAttemptsSinceStop } from '../spine.js';
 import { loadMatrix } from '../matrix.js';
 import { fingerprint } from '../fingerprint.js';
 import { validateTransition } from '../transitions.js';
@@ -1882,4 +1882,83 @@ test('(sc-e) AC#4 scope runs AFTER a declared Verify passes, and its failure sti
   const attempt = state.appended.find((e) => e.type === 'wave-attempt');
   assert.deepEqual(attempt.data.verify, { command: 'npm test', status: 0, passed: true });
   assert.equal(attempt.data.outcome, 'fail-scope');
+});
+
+// ── deliver-stop-contract: cumulative failed-attempt cap (#77, Task 2.3) ──
+
+test('(cap-a) AC#5 failedAttemptsSinceStop counts non-success attempts across waves, reset by deliver-stopped', () => {
+  const attempt = (wave, outcome) => ({ type: 'wave-attempt', data: { wave, outcome } });
+  assert.equal(failedAttemptsSinceStop([]), 0);
+  assert.equal(failedAttemptsSinceStop([attempt(1, 'fail-tests'), attempt(1, 'success'), attempt(2, 'fail-scope')]), 2);
+  assert.equal(failedAttemptsSinceStop([attempt(1, 'fail-tests'), { type: 'deliver-stopped', data: {} }, attempt(2, 'fail-tests')]), 1);
+  assert.equal(failedAttemptsSinceStop([attempt(1, 'fail-tests'), { type: 'deliver-stopped', data: {} }]), 0);
+  assert.equal(failedAttemptsSinceStop([{ type: 'wave-started', data: { wave: 1 } }, attempt(1, 'success')]), 0);
+});
+
+test('(cap-b) AC#5 cap 2 → two failing attempts stop before the third (no third wave-started)', async () => {
+  let n = 0;
+  const { state, result } = await runStopped({
+    maxFailedAttempts: 2,
+    runWave: async () => ({ outcome: 'fail-tests', summary: `s${n++}` }),
+  });
+  assert.deepEqual(result, { stopped: 'failed-attempt-cap', ok: false, wave: 1, failed: 2, cap: 2 });
+  assert.equal(n, 2, 'runWave called exactly twice');
+  assert.equal(state.appended.filter((e) => e.type === 'wave-started').length, 2);
+  const stop = assertOneTrailingStop(state, { class: 'needs-decision', reason: 'failed-attempt-cap', wave: 1 });
+  assert.match(stop.data.decision, /2 failed attempts reached RAD_MAX_FAILED_ATTEMPTS=2/);
+});
+
+test('(cap-c) AC#5 the cap counts across waves, not per wave', async () => {
+  // Each wave fails once then succeeds: 1 failure in wave 1 + 1 in wave 2 = 2 → stop before wave 2's retry.
+  const calls = { 1: 0, 2: 0 };
+  const { result } = await runStopped({
+    state: makeValidatingState({ plan: twoWaves }),
+    maxFailedAttempts: 2,
+    runWave: async (wave) => (calls[wave.n]++ === 0 ? { outcome: 'fail-tests', summary: `w${wave.n}` } : { outcome: 'success' }),
+  });
+  assert.deepEqual(result, { stopped: 'failed-attempt-cap', ok: false, wave: 2, failed: 2, cap: 2 });
+  assert.deepEqual(calls, { 1: 2, 2: 1 });
+});
+
+test('(cap-d) AC#5 a prior deliver-stopped resets the count (a re-run gets a fresh budget)', async () => {
+  const state = makeValidatingState();
+  state.appended.push(
+    { feature: 'demo', type: 'deliver-started' },
+    { feature: 'demo', type: 'wave-attempt', data: { wave: 1, attempt: 1, outcome: 'fail-tests' } },
+    { feature: 'demo', type: 'wave-attempt', data: { wave: 1, attempt: 2, outcome: 'fail-tests' } },
+    { feature: 'demo', type: 'wave-failed', data: { wave: 1, reason: 'budget-exhausted' } },
+    { feature: 'demo', type: 'deliver-stopped', data: { class: 'failed', reason: 'budget', decision: 'x' } },
+  );
+  const { result } = await runStopped({ state, maxFailedAttempts: 2 });
+  assert.deepEqual(result, { ok: true, waves: 1 });
+
+  // Without the reset (no deliver-stopped), the same history is already at the cap.
+  const unreset = makeValidatingState();
+  unreset.appended.push(
+    { feature: 'demo', type: 'deliver-started' },
+    { feature: 'demo', type: 'wave-attempt', data: { wave: 1, attempt: 1, outcome: 'fail-tests' } },
+    { feature: 'demo', type: 'wave-attempt', data: { wave: 1, attempt: 2, outcome: 'fail-tests' } },
+  );
+  const capped = await runStopped({ state: unreset, maxFailedAttempts: 2, maxAttempts: 5 });
+  assert.equal(capped.result.stopped, 'failed-attempt-cap');
+});
+
+test('(cap-e) AC#5 null/off (and non-positive / non-integer) → deep-equal to baseline', async () => {
+  const run = async (extra) => {
+    let n = 0;
+    return (await runStopped({ runWave: async () => (n++ < 2 ? { outcome: 'fail-tests', summary: `s${n}` } : { outcome: 'success' }), ...extra })).state.appended;
+  };
+  const baseline = await run({});
+  assert.equal(baseline[baseline.length - 1].type, 'pr-opened');
+  for (const off of [null, 0, -1, 1.5, '2']) {
+    assert.deepEqual(await run({ maxFailedAttempts: off }), baseline, `maxFailedAttempts=${JSON.stringify(off)}`);
+  }
+});
+
+test('(cap-f) AC#5 success attempts are not counted', async () => {
+  const { result } = await runStopped({
+    state: makeValidatingState({ plan: { waves: [{ n: 1 }, { n: 2 }, { n: 3 }] } }),
+    maxFailedAttempts: 1,
+  });
+  assert.deepEqual(result, { ok: true, waves: 3 });
 });
