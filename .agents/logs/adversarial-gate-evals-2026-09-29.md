@@ -21,3 +21,4 @@ Executor role: architect
 | — | Amend | Re-approved after amendment 3 | — | — | 16:37 |
 | 7 | Wave 4 | Approval re-check before the first wave (retry 1, amendment 3) | ✓ complete | 2a67f40 | 16:43 |
 | 8 | Wave 4 | Hook-only edited-plan eval (restores fingerprint mutation coverage) | ✓ complete | a9eee92 | 16:43 |
+| 9 | Wave 5 | Registry links + CI + docs | ✓ complete | 0542cc7 | 16:47 |
