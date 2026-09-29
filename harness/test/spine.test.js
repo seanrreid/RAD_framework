@@ -96,7 +96,9 @@ test('(b) happy path → all waves advance, post-checks called in order, pr-open
     shCalls.map((c) => c.script),
     [
       'scripts/check-tests-present.sh', // wave 1 gate
+      'scripts/check-scope.sh', // wave 1 scope gate (#77)
       'scripts/check-tests-present.sh', // wave 2 gate
+      'scripts/check-scope.sh', // wave 2 scope gate (#77)
       'scripts/check-scope.sh', // end post-check
       'scripts/open-pr.sh', // end post-check
     ],
@@ -118,11 +120,23 @@ test('(b) happy path → all waves advance, post-checks called in order, pr-open
   ]);
 });
 
+/** An sh fake that fails ONLY the nth check-scope.sh call (1-based). Since #77
+ * check-scope also runs per wave, so an END post-check failure is the last call. */
+function failNthScope(n) {
+  let scopeCalls = 0;
+  return (script) => {
+    if (!script.endsWith('check-scope.sh')) return { status: 0 };
+    scopeCalls += 1;
+    return { status: scopeCalls === n ? 1 : 0 };
+  };
+}
+
 test('(b2) a failing end post-check (check-scope) halts before pr-opened', async () => {
   const state = makeFakeState({ gateResult: passingGate, plan: { waves: [{ n: 1 }] } });
   const runWave = async () => ({ outcome: 'success' });
-  // The per-wave presence gate passes (status 0); the end check-scope post-check fails.
-  const sh = (script) => (script.endsWith('check-scope.sh') ? { status: 1 } : { status: 0 });
+  // The per-wave presence + scope gates pass; only the END check-scope post-check
+  // (the second check-scope call of a one-wave run, #77) fails.
+  const sh = failNthScope(2);
   const result = await deliverSpine({
     feature: 'demo',
     state,
@@ -762,7 +776,9 @@ test('(w2-b) BACKWARD-COMPAT SNAPSHOT: default no-op runHooks → event sequence
     shCalls.map((c) => c.script),
     [
       'scripts/check-tests-present.sh',
+      'scripts/check-scope.sh', // per-wave scope gate (#77)
       'scripts/check-tests-present.sh',
+      'scripts/check-scope.sh', // per-wave scope gate (#77)
       'scripts/check-scope.sh',
       'scripts/open-pr.sh',
     ],
@@ -1090,13 +1106,15 @@ test('(w5-a) AC#1 absent Verify: declaring none is byte-for-byte today — no ch
     );
   }
 
-  // The sh call order is the legacy one: per-wave presence gates, then the end
-  // post-checks. Nothing was inserted.
+  // The sh call order is the legacy one: per-wave presence + scope gates, then
+  // the end post-checks. No check-verify call was inserted.
   assert.deepEqual(
     legacy.spy.calls.map((c) => c.script),
     [
       'scripts/check-tests-present.sh',
+      'scripts/check-scope.sh', // per-wave scope gate (#77)
       'scripts/check-tests-present.sh',
+      'scripts/check-scope.sh', // per-wave scope gate (#77)
       'scripts/check-scope.sh',
       'scripts/open-pr.sh',
     ],
@@ -1640,7 +1658,7 @@ test('(stop-a) AC#2 every post-start terminal ends with exactly one classified d
       expect: { class: 'needs-decision', reason: 'fail-timeout', wave: 1, action: 'surface', outcome: 'fail-timeout' } },
     { name: 'budget', args: { maxAttempts: 2, runWave: async () => ({ outcome: 'fail-tests', summary: `s${flip++}` }) },
       expect: { class: 'failed', reason: 'budget', wave: 1 } },
-    { name: 'post-check', args: { sh: (s) => ({ status: s.endsWith('check-scope.sh') ? 1 : 0 }) },
+    { name: 'post-check', args: { sh: failNthScope(2) },
       expect: { class: 'failed', reason: 'post-check' } },
   ];
   const seen = new Set();
@@ -1779,4 +1797,89 @@ test('(ac-g) AC#3 a resumed run skips the check for its first executed wave', as
   const { result } = await runStopped({ state, approvalIntact: () => { portCalls += 1; return { ok: false }; } });
   assert.deepEqual(result, { ok: true, waves: 2 });
   assert.equal(portCalls, 0);
+});
+
+// ── deliver-stop-contract: between-wave scope check (#77, Task 2.2) ──
+
+/** An sh spy: records every (script, arg); `status(script, arg)` scripts the exit. */
+function makeShSpy(status = () => 0) {
+  const calls = [];
+  const sh = (script, arg) => {
+    calls.push({ script, arg });
+    return { status: status(script, arg), stdout: `${script} out` };
+  };
+  return { sh, calls };
+}
+
+test('(sc-a) AC#4 scope fails after wave 1 → fail-scope recorded, matrix abort, failed, wave 2 never runs', async () => {
+  const spy = makeShSpy((s) => (s === 'scripts/check-scope.sh' ? 1 : 0));
+  let runs = 0;
+  const { state, result } = await runStopped({
+    state: makeValidatingState({ plan: twoWaves }),
+    runWave: async () => { runs += 1; return { outcome: 'success' }; },
+    sh: spy.sh,
+  });
+  assert.deepEqual(result, { stopped: 'matrix', ok: false, wave: 1, action: 'abort', outcome: 'fail-scope' });
+  assert.equal(runs, 1, 'wave 2 never ran');
+  const attempt = state.appended.find((e) => e.type === 'wave-attempt');
+  assert.equal(attempt.data.outcome, 'fail-scope');
+  assert.ok(!state.appended.some((e) => e.type === 'wave-complete'));
+  assert.ok(!wave2Started(state));
+  assertOneTrailingStop(state, { class: 'failed', reason: 'fail-scope', wave: 1, action: 'abort', outcome: 'fail-scope' });
+  // The scope gate ran after the presence gate, with the same call shape as the end post-check.
+  assert.deepEqual(spy.calls, [
+    { script: 'scripts/check-tests-present.sh', arg: 'demo' },
+    { script: 'scripts/check-scope.sh', arg: 'demo' },
+  ]);
+});
+
+test('(sc-b) AC#4 scope passes → events deep-equal to baseline; only the sh spy sees the extra calls', async () => {
+  const spy = makeShSpy();
+  const withScope = await runStopped({ state: makeValidatingState({ plan: twoWaves }), sh: spy.sh });
+  const baseline = await runStopped({ state: makeValidatingState({ plan: twoWaves }) });
+  assert.deepEqual(withScope.result, { ok: true, waves: 2 });
+  assert.deepEqual(withScope.state.appended, baseline.state.appended);
+  assert.deepEqual(withScope.state.appended.map((e) => e.type), [
+    'deliver-started', 'wave-started', 'wave-attempt', 'wave-complete',
+    'wave-started', 'wave-attempt', 'wave-complete', 'pr-opened',
+  ]);
+  // Two per-wave scope calls + the retained end post-check.
+  assert.equal(spy.calls.filter((c) => c.script === 'scripts/check-scope.sh').length, 3);
+});
+
+test('(sc-c) AC#4 scope check is not called after a failed attempt (retry then success calls it once)', async () => {
+  const spy = makeShSpy();
+  let i = 0;
+  const { result } = await runStopped({
+    runWave: async () => (i++ === 0 ? { outcome: 'fail-tests', summary: 'first' } : { outcome: 'success' }),
+    sh: spy.sh,
+  });
+  assert.deepEqual(result, { ok: true, waves: 1 });
+  const order = spy.calls.map((c) => c.script);
+  // attempt 1 failed: no gate calls; attempt 2: presence + scope; then end post-checks.
+  assert.deepEqual(order, [
+    'scripts/check-tests-present.sh', 'scripts/check-scope.sh', 'scripts/check-scope.sh', 'scripts/open-pr.sh',
+  ]);
+});
+
+test('(sc-d) AC#4 scope is not run when the presence gate or a declared Verify demoted the attempt', async () => {
+  const presence = makeShSpy((s) => (s === 'scripts/check-tests-present.sh' ? 1 : 0));
+  await runStopped({ sh: presence.sh, maxAttempts: 1 });
+  assert.ok(!presence.calls.some((c) => c.script === 'scripts/check-scope.sh'));
+
+  const verify = makeShSpy((s) => (s === 'scripts/check-verify.sh' ? 1 : 0));
+  await runStopped({ sh: verify.sh, maxAttempts: 1, waveVerify: { 1: 'npm test' } });
+  assert.ok(!verify.calls.some((c) => c.script === 'scripts/check-scope.sh'));
+});
+
+test('(sc-e) AC#4 scope runs AFTER a declared Verify passes, and its failure still demotes', async () => {
+  const spy = makeShSpy((s) => (s === 'scripts/check-scope.sh' ? 2 : 0));
+  const { state, result } = await runStopped({ sh: spy.sh, waveVerify: { 1: 'npm test' } });
+  assert.equal(result.outcome, 'fail-scope');
+  assert.deepEqual(spy.calls.map((c) => c.script), [
+    'scripts/check-tests-present.sh', 'scripts/check-verify.sh', 'scripts/check-scope.sh',
+  ]);
+  const attempt = state.appended.find((e) => e.type === 'wave-attempt');
+  assert.deepEqual(attempt.data.verify, { command: 'npm test', status: 0, passed: true });
+  assert.equal(attempt.data.outcome, 'fail-scope');
 });

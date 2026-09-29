@@ -132,6 +132,35 @@ const VERIFY_SCRIPT = 'scripts/check-verify.sh';
  * Kept in lockstep with VERIFY_TIMEOUT_STATUS in scripts/check-verify.sh. */
 const VERIFY_TIMEOUT_STATUS = 124;
 
+/** The scope guardrail, also run per wave (#77) after an advancing outcome so
+ * an out-of-scope edit stops the run AT the wave that made it, not after every
+ * later wave has built on it. The end post-check (POST_CHECKS) is kept. */
+const SCOPE_SCRIPT = 'scripts/check-scope.sh';
+
+/** The EXISTING outcome a failed per-wave scope check demotes to (matrix `abort`). */
+const SCOPE_FAIL_OUTCOME = 'fail-scope';
+
+/**
+ * Per-wave scope gate: run check-scope.sh through the `sh` port (the same call
+ * shape as the end post-check). Returns null when it passes — the caller then
+ * appends NOTHING extra — else the demotion `{ outcome, gateOutput, gated }`,
+ * with gate-derived fingerprint fields only (mirroring the Verify demotion).
+ */
+function scopeDemotion(sh, feature) {
+  const scope = sh(SCOPE_SCRIPT, feature);
+  if (scope.status === 0) return null;
+  return {
+    outcome: SCOPE_FAIL_OUTCOME,
+    gateOutput: scope.stdout ?? '',
+    gated: {
+      outcome: SCOPE_FAIL_OUTCOME,
+      gateStatus: scope.status,
+      categories: ['check-scope'],
+      summary: `check-scope gate failed (status ${scope.status})`,
+    },
+  };
+}
+
 /** Post-check guardrails, run in order after all waves. The test-PRESENCE gate
  * now runs per-wave (a promised-but-absent test file blocks AT the wave that
  * promised it, not at the end), so check-tests-present is no longer an end
@@ -662,6 +691,13 @@ export async function deliverSpine({
                 summary: `check-verify gate failed (status ${run.status})`,
               };
             }
+          }
+          // ── Per-wave SCOPE gate (#77). Only an outcome still advancing after
+          // the presence and Verify gates is checked; a failure demotes it to
+          // fail-scope BEFORE the attempt is recorded or the matrix resolves. ──
+          if (resolveOutcome('implement', outcome, matrix).action === 'advance') {
+            const demoted = scopeDemotion(sh, feature);
+            if (demoted) ({ outcome, gateOutput, gated } = demoted);
           }
         }
       }
