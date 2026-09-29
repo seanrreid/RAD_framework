@@ -14,3 +14,5 @@ Executor role: architect
 | 4 | Wave 2 | rad forecast command | ✓ complete | e4ea00c | 13:54 |
 | 5 | Wave 2 | Insights, review and planning skill wiring | ✓ complete | 9630c32 | 13:54 |
 | 6 | Wave 2 | Draft-plan script | ✓ done_with_concerns (>15 categories refused, lint cap; honors RAD_BRANCH_PREFIX) | ee37a0f | 13:54 |
+| 7 | Wave 3 | Docs | ✓ complete | 270c6c5 | 13:56 |
+| 8 | Verify | Reviewer calibration fixture — post-rename script name (B1 rename guard) | ✓ complete (retry 1) | da9a087 | 14:01 |

@@ -1,7 +1,8 @@
 # Plan: Insights Arc — Legibility Deficits, Reviewer Calibration, Plan-Time Forecast, Drafted Plans
 Created: 2026-09-29
 Author: architect
-Status: in-progress
+Status: complete
+Completed-At: 2026-09-29T18:01:50Z
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-09-29T17:46:25.682Z
 Recorded-By: sean@torchcodelab.com
