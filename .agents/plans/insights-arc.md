@@ -1,7 +1,10 @@
 # Plan: Insights Arc — Legibility Deficits, Reviewer Calibration, Plan-Time Forecast, Drafted Plans
 Created: 2026-09-29
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-09-29T17:46:25.682Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/insights-arc
 Adopted-From: https://github.com/seanrreid/RAD_framework/issues/93, https://github.com/seanrreid/RAD_framework/issues/48, https://github.com/seanrreid/RAD_framework/issues/60, https://github.com/seanrreid/RAD_framework/issues/64
 Issue-Title: Agent-failure-as-code-smell (#93) + Findings→reviewer-calibration loop (#48) + Reliability metrics into /rad-plan (#60) + /rad-insights --draft-plans (#64)
