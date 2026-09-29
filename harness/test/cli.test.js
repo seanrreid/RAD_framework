@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-import { approveCommand, gateCommand, parsePlanCtx, deliverCommand } from '../cli.js';
+import { approveCommand, gateCommand, parsePlanCtx, deliverCommand, stopStatusCommand } from '../cli.js';
 import { planFingerprint } from '../plan-fingerprint.js';
 import { createGitStateStore, defaultSh } from '../adapters/git-state-store.js';
 
@@ -547,7 +547,7 @@ function seedApprovedTwoWavePlan(repoRoot) {
 const okSh = () => ({ status: 0, stdout: '', stderr: '' });
 
 /** Run deliverCommand with the given env overrides, capturing stderr. */
-async function runDeliverCaptured({ repoRoot, runWave, sh = okSh, env = {} }) {
+async function runDeliverCaptured({ repoRoot, runWave, sh = okSh, env = {}, args = [] }) {
   const saved = Object.fromEntries(DELIVER_ENV_KEYS.map((k) => [k, process.env[k]]));
   for (const k of DELIVER_ENV_KEYS) delete process.env[k];
   Object.assign(process.env, env);
@@ -556,7 +556,7 @@ async function runDeliverCaptured({ repoRoot, runWave, sh = okSh, env = {} }) {
   process.stderr.write = (chunk) => { stderr += chunk; return true; };
   try {
     const { value: code } = await captureStdout(() =>
-      deliverCommand([DELIVER_FEATURE], { repoRoot, sh, runWave }),
+      deliverCommand([DELIVER_FEATURE, ...args], { repoRoot, sh, runWave }),
     );
     return { code, stderr };
   } finally {
@@ -726,4 +726,259 @@ test('deliver AC#6 — legacy approval without a fingerprint passes the approval
     });
     assert.equal(code, 0, `legacy approval is fail-open for an unprovable edit; stderr:\n${stderr}`);
   });
+});
+
+// ---------------------------------------------------------------------------
+// rad deliver --resume --context — eligibility table (AC#1, AC#4) and the
+// run-resumed happy path. Stops are produced by the REAL spine (a prior run),
+// so the deliver-stopped shape is the one production writes.
+// ---------------------------------------------------------------------------
+
+const RESUMER_EMAIL = 'operator@example.com';
+
+/** sh that answers `git config user.email` with `email`, everything else ok. */
+function emailSh(email = RESUMER_EMAIL) {
+  return (file, argv) => (file === 'git' && argv[0] === 'config'
+    ? { status: 0, stdout: `${email}\n`, stderr: '' }
+    : okSh());
+}
+
+/** Prior run stopped by the failed-attempt cap → a needs-decision deliver-stopped. */
+async function seedNeedsDecisionStop(repoRoot) {
+  const seeded = seedApprovedTwoWavePlan(repoRoot);
+  const first = await runDeliverCaptured({
+    repoRoot,
+    env: { RAD_MAX_FAILED_ATTEMPTS: '1' },
+    runWave: async () => ({ outcome: 'fail-tests', summary: 'first failure' }),
+  });
+  assert.equal(first.code, 3, `prior run must stop needs-decision; stderr:\n${first.stderr}`);
+  return seeded;
+}
+
+/** Prior run aborted (fail-scope) → a failed deliver-stopped. */
+async function seedFailedStop(repoRoot) {
+  const seeded = seedApprovedTwoWavePlan(repoRoot);
+  const first = await runDeliverCaptured({ repoRoot, runWave: async () => ({ outcome: 'fail-scope' }) });
+  assert.equal(first.code, 1, `prior run must stop failed; stderr:\n${first.stderr}`);
+  return seeded;
+}
+
+const RESUME_REFUSALS = [
+  { name: '--context without --resume', seed: seedApprovedTwoWavePlan, args: ['--context', 'go'], match: /--context requires --resume/ },
+  { name: '--resume without --context', seed: seedNeedsDecisionStop, args: ['--resume'], match: /--resume requires --context "<text>"/ },
+  { name: '--context with no value', seed: seedNeedsDecisionStop, args: ['--resume', '--context'], match: /--context requires a value/ },
+  { name: 'whitespace-only context', seed: seedNeedsDecisionStop, args: ['--resume', '--context', '  \n\t '], match: /--context must not be empty/ },
+  { name: 'context over 8000 chars', seed: seedNeedsDecisionStop, args: ['--resume', '--context', 'x'.repeat(8001)], match: /--context exceeds 8000 characters \(8001\)/ },
+  { name: 'no deliver-stopped event', seed: seedApprovedTwoWavePlan, args: ['--resume', '--context', 'go'], match: /nothing to resume: stop-feature has no deliver-stopped event/ },
+  { name: 'failed stop', seed: seedFailedStop, args: ['--resume', '--context', 'go'], match: /cannot resume a failed stop \(fail-scope\): wave 1: fail-scope/ },
+  { name: 'empty git user.email', seed: seedNeedsDecisionStop, args: ['--resume', '--context', 'go'], sh: okSh, match: /cannot resolve git user.email for run-resumed.recordedBy/ },
+];
+
+for (const c of RESUME_REFUSALS) {
+  test(`deliver --resume AC#4 — ${c.name} → exit 2, reason on stderr, log unchanged`, async () => {
+    await withTempRepo(async (repoRoot) => {
+      const { logFile } = await c.seed(repoRoot);
+      const before = readFileSync(logFile, 'utf8');
+      let calls = 0;
+      const { code, stderr } = await runDeliverCaptured({
+        repoRoot,
+        args: c.args,
+        sh: c.sh ?? emailSh(),
+        runWave: async () => { calls += 1; return { outcome: 'success' }; },
+      });
+      assert.equal(code, 2, `expected exit 2; stderr:\n${stderr}`);
+      assert.match(stderr, c.match);
+      assert.equal(readFileSync(logFile, 'utf8'), before, 'no event may be appended');
+      assert.equal(calls, 0, 'runWave must never run');
+    });
+  });
+}
+
+test('deliver --resume AC#4 — an 8000-char context is accepted (boundary is inclusive)', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const { logFile } = await seedNeedsDecisionStop(repoRoot);
+    const context = 'y'.repeat(8000);
+    const { code, stderr } = await runDeliverCaptured({
+      repoRoot,
+      args: ['--resume', '--context', context],
+      sh: emailSh(),
+      runWave: async () => ({ outcome: 'success' }),
+    });
+    assert.equal(code, 0, `expected exit 0; stderr:\n${stderr}`);
+    const resumed = readLog(logFile).find((e) => e.type === 'run-resumed');
+    assert.equal(resumed.data.context.length, 8000, 'context is never truncated');
+  });
+});
+
+test('deliver --resume AC#1 — needs-decision stop + context → run-resumed recorded, operatorContext on first runWave', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const { logFile } = await seedNeedsDecisionStop(repoRoot);
+    const context = 'Raise the budget; the flaky test is quarantined.\n  keep "quotes" verbatim';
+    const calls = [];
+    const { code, stderr } = await runDeliverCaptured({
+      repoRoot,
+      args: ['--resume', '--context', context],
+      sh: emailSh(),
+      runWave: async (wave, attemptCtx) => { calls.push(attemptCtx); return { outcome: 'success' }; },
+    });
+    assert.equal(code, 0, `expected exit 0; stderr:\n${stderr}`);
+    const log = readLog(logFile);
+    const lastStart = log.map((e) => e.type).lastIndexOf('deliver-started');
+    const resumed = log[lastStart + 1];
+    assert.equal(resumed.type, 'run-resumed', 'run-resumed immediately follows deliver-started');
+    assert.equal(resumed.data.context, context, 'context recorded verbatim');
+    assert.equal(resumed.data.recordedBy, RESUMER_EMAIL);
+    assert.equal(resumed.data.stop.class, 'needs-decision');
+    assert.equal(resumed.data.stop.reason, 'failed-attempt-cap');
+    assert.ok(calls.length >= 1, 'runWave ran');
+    assert.equal(calls[0].operatorContext.context, context, 'first runWave call carries operatorContext');
+    assert.equal(calls[0].operatorContext.stop.reason, 'failed-attempt-cap');
+    for (const later of calls.slice(1)) assert.equal(later.operatorContext, undefined);
+  });
+});
+
+test('deliver AC#7 — without --resume no run-resumed is appended and runWave gets no operatorContext', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const { logFile } = await seedNeedsDecisionStop(repoRoot);
+    const calls = [];
+    const { code, stderr } = await runDeliverCaptured({
+      repoRoot,
+      runWave: async (wave, attemptCtx) => { calls.push(attemptCtx); return { outcome: 'success' }; },
+    });
+    assert.equal(code, 0, `expected exit 0; stderr:\n${stderr}`);
+    assert.ok(!readLog(logFile).some((e) => e.type === 'run-resumed'));
+    assert.ok(calls.every((c) => !('operatorContext' in c)));
+  });
+});
+
+/**
+ * sh for worktree mode: `git show <branch>:<log>` returns `tipLog` (JSONL), git
+ * config returns the email; records every call so the test can prove the read
+ * source and that no worktree was created.
+ */
+function branchTipSh(tipLog, seen) {
+  return (file, argv, opts) => {
+    seen.push([file, ...argv]);
+    if (file === 'git' && argv[0] === 'show') return { status: 0, stdout: tipLog, stderr: '' };
+    return emailSh()(file, argv, opts);
+  };
+}
+
+test('deliver --resume AC#4 — worktree mode reads eligibility from the BRANCH-TIP log, not the main checkout', async () => {
+  await withTempRepo(async (repoRoot) => {
+    // Main checkout holds a resumable needs-decision stop; the branch tip does not.
+    const { logFile } = await seedNeedsDecisionStop(repoRoot);
+    const tipLog = JSON.stringify({ ...approvedEvent(DELIVER_FEATURE) }) + '\n';
+    const seen = [];
+    const before = readFileSync(logFile, 'utf8');
+    const { code, stderr } = await runDeliverCaptured({
+      repoRoot,
+      env: { RAD_WORKTREE: '1' },
+      args: ['--resume', '--context', 'go'],
+      sh: branchTipSh(tipLog, seen),
+      runWave: async () => ({ outcome: 'success' }),
+    });
+    assert.equal(code, 2, `expected exit 2; stderr:\n${stderr}`);
+    assert.match(stderr, /nothing to resume: stop-feature has no deliver-stopped event/);
+    assert.ok(
+      seen.some((c) => c[1] === 'show' && c[2] === `rad/${DELIVER_FEATURE}:.agents/state/${DELIVER_FEATURE}/events.jsonl`),
+      'eligibility reads the work-branch tip via git show',
+    );
+    assert.ok(!seen.some((c) => String(c[0]).includes('worktree') || c.includes('worktree')), 'no worktree created');
+    assert.equal(readFileSync(logFile, 'utf8'), before);
+  });
+});
+
+test('deliver --resume AC#4 — worktree mode: a failed stop on the branch tip is refused even when main has none', async () => {
+  await withTempRepo(async (repoRoot) => {
+    seedApprovedTwoWavePlan(repoRoot);
+    const stopped = {
+      feature: DELIVER_FEATURE, type: 'deliver-stopped', actor: 'harness', ts: '2026-09-29T00:00:00.000Z',
+      data: { class: 'failed', reason: 'abort-scope', decision: 'fix the scope', wave: 1 },
+    };
+    const tipLog = [approvedEvent(DELIVER_FEATURE), stopped].map((e) => JSON.stringify(e)).join('\n') + '\n';
+    const { code, stderr } = await runDeliverCaptured({
+      repoRoot,
+      env: { RAD_WORKTREE: '1' },
+      args: ['--resume', '--context', 'go'],
+      sh: branchTipSh(tipLog, []),
+      runWave: async () => ({ outcome: 'success' }),
+    });
+    assert.equal(code, 2, `expected exit 2; stderr:\n${stderr}`);
+    assert.match(stderr, /cannot resume a failed stop \(abort-scope\): fix the scope/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// rad stop-status (AC#9) — read-only dormant-stop report.
+// ---------------------------------------------------------------------------
+
+/** Invoke `node cli.js stop-status ...` as a subprocess. Returns { status, stdout, stderr }. */
+function runStopStatusProc(argv, opts = {}) {
+  try {
+    const stdout = execFileSync(process.execPath, [CLI, 'stop-status', ...argv], {
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+      ...opts,
+    });
+    return { status: 0, stdout, stderr: '' };
+  } catch (err) {
+    return { status: err.status ?? 1, stdout: err.stdout ?? '', stderr: err.stderr ?? '' };
+  }
+}
+
+const needsDecisionStopEvent = {
+  feature: 'f', type: 'deliver-stopped', actor: 'harness', ts: '2026-09-29T00:00:01.000Z',
+  data: { class: 'needs-decision', reason: 'token-budget', decision: 'raise RAD_TOKEN_BUDGET', wave: 2 },
+};
+const jsonl = (events) => events.map((e) => JSON.stringify(e)).join('\n') + '\n';
+
+test('stop-status AC#9 — dormant needs-decision stop in the feature log → the dormant line, exit 0', async () => {
+  await withTempRepo(async (repoRoot) => {
+    await seedNeedsDecisionStop(repoRoot);
+    const { value: code, stdout } = await captureStdout(() => stopStatusCommand([DELIVER_FEATURE], { repoRoot }));
+    assert.equal(code, 0);
+    assert.match(stdout, /^dormant class=needs-decision reason=failed-attempt-cap wave=1 decision="[^"]*"\n$/);
+  });
+});
+
+test('stop-status AC#9 — --stdin dormant stop → exact line', () => {
+  const { status, stdout } = runStopStatusProc(['f', '--stdin'], { input: jsonl([needsDecisionStopEvent]) });
+  assert.equal(status, 0);
+  assert.equal(stdout, 'dormant class=needs-decision reason=token-budget wave=2 decision="raise RAD_TOKEN_BUDGET"\n');
+});
+
+test('stop-status AC#9 — a stop with no wave prints wave=unknown', () => {
+  const noWave = { ...needsDecisionStopEvent, data: { ...needsDecisionStopEvent.data, wave: undefined } };
+  const { status, stdout } = runStopStatusProc(['f', '--stdin'], { input: jsonl([noWave]) });
+  assert.equal(status, 0);
+  assert.match(stdout, / wave=unknown /);
+});
+
+test('stop-status AC#9 — no stop → none; a failed stop → none', () => {
+  assert.equal(runStopStatusProc(['f', '--stdin'], { input: '' }).stdout, 'none\n');
+  const failed = { ...needsDecisionStopEvent, data: { ...needsDecisionStopEvent.data, class: 'failed' } };
+  assert.equal(runStopStatusProc(['f', '--stdin'], { input: jsonl([failed]) }).stdout, 'none\n');
+});
+
+test('stop-status AC#9 — needs-decision stop followed by deliver-started → none', () => {
+  const started = { feature: 'f', type: 'deliver-started', actor: 'harness', ts: '2026-09-29T00:00:02.000Z' };
+  const { status, stdout } = runStopStatusProc(['f', '--stdin'], { input: jsonl([needsDecisionStopEvent, started]) });
+  assert.equal(status, 0);
+  assert.equal(stdout, 'none\n');
+});
+
+test('stop-status AC#9 — malformed stdin → exit 1 with the message on stderr', () => {
+  const { status, stdout, stderr } = runStopStatusProc(['f', '--stdin'], { input: '{"type":"deliver-stopped"\n' });
+  assert.equal(status, 1);
+  assert.equal(stdout, '');
+  assert.match(stderr, /rad stop-status: malformed event log: line 1/);
+});
+
+test('stop-status AC#9 — missing feature / unknown flag / extra positional → usage, exit 2', () => {
+  for (const argv of [[], ['--bogus', 'f'], ['f', 'extra']]) {
+    const { status, stderr } = runStopStatusProc(argv, { input: '' });
+    assert.equal(status, 2, `argv ${JSON.stringify(argv)} should exit 2`);
+    assert.match(stderr, /Usage: rad stop-status <feature> \[--stdin\]/);
+  }
 });
