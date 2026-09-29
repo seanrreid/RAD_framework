@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { deliverSpine } from '../spine.js';
 import { loadMatrix } from '../matrix.js';
 import { fingerprint } from '../fingerprint.js';
+import { validateTransition } from '../transitions.js';
+import { phaseOf } from '../events.js';
 
 const MATRIX = loadMatrix();
 
@@ -1573,4 +1575,125 @@ test('(wm-c) AC#2 waveModels omitted vs {} vs {1: ""} vs non-string → deep-equ
   const started = omitted.filter((e) => e.type === 'wave-started');
   assert.equal(started.length, 2);
   assert.ok(started.every((e) => !('model' in e.data)));
+});
+
+// ── deliver-stop-contract: deliver-stopped at every terminal (#77, Task 1.2) ──
+
+/** A fake state whose append enforces the real validateTransition, as the git
+ * store does — so a sequence it accepts is a legal on-disk sequence. */
+function makeValidatingState({ gateResult = passingGate, plan = { waves: [{ n: 1 }] } } = {}) {
+  const state = makeFakeState({ gateResult, plan });
+  const rawAppend = state.append;
+  state.append = (event) => {
+    validateTransition(event, { history: state.appended });
+    rawAppend(event);
+  };
+  return state;
+}
+
+async function runStopped({ state = makeValidatingState(), runWave = async () => ({ outcome: 'success' }), sh = () => ({ status: 0 }), ...extra } = {}) {
+  const result = await deliverSpine({
+    feature: 'demo', state, docs: {}, matrix: MATRIX, gates: {}, runWave, sh, now: fixedClock(), ...extra,
+  });
+  return { state, result };
+}
+
+/** Assert the run ends with exactly one deliver-stopped, as the LAST event. */
+function assertOneTrailingStop(state, expected) {
+  const stops = state.appended.filter((e) => e.type === 'deliver-stopped');
+  assert.equal(stops.length, 1, 'exactly one deliver-stopped');
+  const last = state.appended[state.appended.length - 1];
+  assert.equal(last.type, 'deliver-stopped', 'deliver-stopped is the last event');
+  assert.equal(last.actor, 'harness');
+  assert.equal(typeof last.ts, 'string');
+  for (const [k, v] of Object.entries(expected)) assert.deepEqual(last.data[k], v, `data.${k}`);
+  assert.equal(typeof last.data.decision, 'string');
+  return last;
+}
+
+test('(stop-a) AC#2 every post-start terminal ends with exactly one classified deliver-stopped', async () => {
+  const seededCompleted = () => {
+    const s = makeValidatingState({ plan: { waves: [{ n: 1 }, { n: 2 }] } });
+    s.appended.push({ feature: 'demo', type: 'deliver-started' }, { feature: 'demo', type: 'wave-complete', data: { wave: 1 } });
+    return s;
+  };
+  const orphanState = () => {
+    const s = makeValidatingState();
+    s.appended.push({ feature: 'demo', type: 'deliver-started' }, { feature: 'demo', type: 'wave-started', data: { wave: 1, attempt: 1 } });
+    return s;
+  };
+  let flip = 0;
+  const cases = [
+    { name: 'token-budget', args: { tokenBudget: 1, state: (() => { const s = makeValidatingState(); s.appended.push({ feature: 'demo', type: 'wave-attempt', data: { wave: 0, outcome: 'success', usage: { total: 5 } } }); return s; })() },
+      expect: { class: 'needs-decision', reason: 'token-budget', wave: 1 } },
+    { name: 'resume-verify', args: { state: seededCompleted(), sh: (s) => ({ status: s.endsWith('check-tests-present.sh') ? 1 : 0 }) },
+      expect: { class: 'failed', reason: 'resume-verify' } },
+    { name: 'orphan (matrix surface)', args: { state: orphanState() },
+      expect: { class: 'needs-decision', reason: 'fail-timeout', wave: 1, action: 'surface', outcome: 'fail-timeout' } },
+    { name: 'pre-wave hook-veto', args: { runHooks: makeVetoSpy({ point: 'pre-wave', outcome: 'abort-user' }).runHooks },
+      expect: { class: 'failed', reason: 'abort-user', wave: 1, action: 'abort', outcome: 'abort-user' } },
+    { name: 'doom-loop', args: { runWave: async () => ({ outcome: 'fail-tests', summary: 'same' }) },
+      expect: { class: 'failed', reason: 'doom-loop', wave: 1, outcome: 'fail-tests' } },
+    { name: 'matrix abort', args: { runWave: async () => ({ outcome: 'fail-scope' }) },
+      expect: { class: 'failed', reason: 'fail-scope', wave: 1, action: 'abort', outcome: 'fail-scope' } },
+    { name: 'matrix surface', args: { runWave: async () => ({ outcome: 'fail-timeout' }) },
+      expect: { class: 'needs-decision', reason: 'fail-timeout', wave: 1, action: 'surface', outcome: 'fail-timeout' } },
+    { name: 'budget', args: { maxAttempts: 2, runWave: async () => ({ outcome: 'fail-tests', summary: `s${flip++}` }) },
+      expect: { class: 'failed', reason: 'budget', wave: 1 } },
+    { name: 'post-check', args: { sh: (s) => ({ status: s.endsWith('check-scope.sh') ? 1 : 0 }) },
+      expect: { class: 'failed', reason: 'post-check' } },
+  ];
+  const seen = new Set();
+  for (const c of cases) {
+    const { state, result } = await runStopped(c.args);
+    assert.equal(result.ok, false, c.name);
+    seen.add(result.stopped);
+    const stop = assertOneTrailingStop(state, c.expect);
+    for (const key of ['wave', 'action', 'outcome']) {
+      if (!(key in c.expect)) assert.ok(!(key in stop.data) || stop.data[key] === result[key], `${c.name}: ${key}`);
+    }
+  }
+  // Every post-start `stopped` value the spine can return today is covered.
+  assert.deepEqual([...seen].sort(), ['budget', 'doom-loop', 'hook-veto', 'matrix', 'post-check', 'resume-verify', 'token-budget']);
+});
+
+test('(stop-b) AC#2 deliver-stopped data carries class/reason/decision and only the known wave/action/outcome', async () => {
+  const { state } = await runStopped({ sh: (s) => ({ status: s.endsWith('open-pr.sh') ? 3 : 0 }) });
+  const stop = assertOneTrailingStop(state, { class: 'failed', reason: 'post-check' });
+  assert.deepEqual(stop.data, { class: 'failed', reason: 'post-check', decision: 'post-check open-pr.sh exited 3' });
+});
+
+test('(stop-c) AC#2 pre-start gate stop appends nothing', async () => {
+  const { state, result } = await runStopped({ state: makeValidatingState({ gateResult: blockedGate }) });
+  assert.equal(result.stopped, 'gate');
+  assert.deepEqual(state.appended, []);
+});
+
+test('(stop-d) AC#2 success appends no deliver-stopped and keeps the pre-existing sequence', async () => {
+  const { state, result } = await runStopped({ state: makeValidatingState({ plan: twoWaves }) });
+  assert.deepEqual(result, { ok: true, waves: 2 });
+  assert.ok(!state.appended.some((e) => e.type === 'deliver-stopped'));
+  assert.deepEqual(state.appended.map((e) => e.type), [
+    'deliver-started', 'wave-started', 'wave-attempt', 'wave-complete',
+    'wave-started', 'wave-attempt', 'wave-complete', 'pr-opened',
+  ]);
+});
+
+test('(stop-e) AC#2 deliver-stopped establishes no phase; a re-run may append after it', async () => {
+  const state = makeValidatingState();
+  const first = await runStopped({ state, runWave: async () => ({ outcome: 'fail-scope' }) });
+  assert.equal(first.result.stopped, 'matrix');
+  const before = state.appended.slice(0, -1);
+  assert.equal(phaseOf(state.appended), phaseOf(before), 'deliver-stopped moves no phase');
+  // The re-run appends deliver-started etc. through the validating append — legal.
+  const second = await runStopped({ state });
+  assert.deepEqual(second.result, { ok: true, waves: 1 });
+  assert.equal(state.appended[state.appended.length - 1].type, 'pr-opened');
+});
+
+test('(stop-f) an unclassifiable terminal throws out of the spine (never swallowed)', async () => {
+  await assert.rejects(
+    runStopped({ runWave: async () => ({ outcome: 'fail-timeout' }), matrix: { ...MATRIX, implement: { ...MATRIX.implement, 'fail-timeout': { action: 'escalate' } } } }),
+    /classifyStop: unknown action/,
+  );
 });

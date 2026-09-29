@@ -20,7 +20,13 @@
  *   'pr-opened' | 'revision-requested' | 'research-created' | 'plan-created' |
  *   'hook-observed' | 'hook-veto' | 'hook-failed' | 'done' |
  *   'owner-claimed' | 'owner-released' | 'architecture-approved' |
- *   'capture-failed' | 'wave-started'.
+ *   'capture-failed' | 'wave-started' | 'deliver-stopped'.
+ *   `deliver-stopped` is the fifth AUDIT-ONLY event (#77): the deliver spine
+ *   appends exactly one as the LAST event of every run that stopped after
+ *   `deliver-started` (never on success, never on a pre-start gate stop). Its
+ *   `data` is `{ class: 'needs-decision' | 'failed', reason, decision[, wave,
+ *   action, outcome] }` (see harness/stops.js). It establishes NO phase (absent
+ *   from PHASE_BY_TYPE), so a later re-run may append after it.
  *   `wave-started` is the fourth AUDIT-ONLY event (#119): the deliver spine
  *   appends `{ wave, attempt[, model] }` BEFORE running a wave's agent, so a
  *   crash mid-run leaves a durable trace. It establishes NO phase (absent from
@@ -155,7 +161,9 @@ const PHASE_BY_TYPE = {
   // so they establish no phase and the fold is unaffected. (Listed here in a
   // comment, not as keys, on purpose.) `capture-failed` in particular records a
   // fail-open degradation of prompt enrichment — adding it as a key would let a
-  // non-decision move a feature's phase.
+  // non-decision move a feature's phase. `deliver-stopped` is likewise
+  // audit-only and deliberately absent: it records HOW a run ended, and keying
+  // it would give a stopped run a phase and could block a re-run's appends.
 };
 
 /** Phase ordering — earliest first; later phases dominate in the fold. */

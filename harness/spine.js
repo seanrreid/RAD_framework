@@ -30,6 +30,7 @@ import { resolveOutcome } from './matrix.js';
 import { fingerprint } from './fingerprint.js';
 import { resumeFrom, totalUsage, findOrphanAttempts, priorAttemptState } from './events.js';
 import { OUTCOME_VOCAB } from './hook-runner.js';
+import { classifyStop } from './stops.js';
 
 /** The fail-closed aborting outcome a veto resolves to when its token is somehow
  * not a member of the frozen vocabulary. Mirrors the runner's own fallback so an
@@ -42,6 +43,32 @@ const VETO_ABORT_OUTCOME = 'abort-user';
  * 'abort-user' (which the matrix resolves to `abort`), never an unknown token. */
 function safeVetoOutcome(outcome) {
   return OUTCOME_VOCAB.has(outcome) ? outcome : VETO_ABORT_OUTCOME;
+}
+
+/** Result fields copied onto `deliver-stopped` data when the terminal knows them. */
+const STOP_CONTEXT_KEYS = ['wave', 'action', 'outcome'];
+
+/**
+ * The ONE exit for every post-`deliver-started` terminal (#77): append a single
+ * audit-only `deliver-stopped` event classifying the stop, then return `result`
+ * unchanged. classifyStop throws on an unknown shape; that throw is NOT caught —
+ * an unclassifiable terminal is a harness bug and must surface, not be bucketed.
+ * Classification runs before the append, so a throw appends nothing.
+ */
+function stopRun(result, { state, feature, now }) {
+  const { class: cls, reason, decision } = classifyStop(result);
+  const context = {};
+  for (const key of STOP_CONTEXT_KEYS) {
+    if (result[key] !== undefined && result[key] !== null) context[key] = result[key];
+  }
+  state.append({
+    feature,
+    type: 'deliver-stopped',
+    actor: 'harness',
+    ts: now(),
+    data: { class: cls, reason, decision, ...context },
+  });
+  return result;
 }
 
 /** Bounded attempt budget per wave — the hard ceiling. The doom-loop breaker is
@@ -353,6 +380,9 @@ export async function deliverSpine({
   }
 
   state.append({ feature, type: 'deliver-started', actor: 'harness', ts: now() });
+  // Every return below this line is a stop (except success) and MUST go
+  // through stopRun so the run's last event is exactly one `deliver-stopped`.
+  const stopCtx = { state, feature, now };
 
   // ── Hook pre-flight (Task 2.2). Validate the hooks dir ONCE up front so an
   // unreadable/malformed dir surfaces deterministically here rather than mid-wave.
@@ -407,14 +437,14 @@ export async function deliverSpine({
         ts: now(),
         data: { wave: wave.n, reason: 'token-budget', spent, budget: tokenBudget },
       });
-      return { stopped: 'token-budget', ok: false, wave: wave.n, spent, budget: tokenBudget };
+      return stopRun({ stopped: 'token-budget', ok: false, wave: wave.n, spent, budget: tokenBudget }, stopCtx);
     }
 
     if (completed.size > 0 && !resumeVerified) {
       resumeVerified = true; // run exactly once, before the first non-skipped wave
       const verify = sh('scripts/check-tests-present.sh', feature);
       if (verify.status !== 0) {
-        return { stopped: 'resume-verify', ok: false };
+        return stopRun({ stopped: 'resume-verify', ok: false }, stopCtx);
       }
     }
 
@@ -423,7 +453,7 @@ export async function deliverSpine({
     // the matrix before any new attempt runs. Its token spend was never
     // recorded, so the budget breaker under-counts it — that is unrecoverable. ──
     const orphaned = convergeOrphans({ history, wave, matrix, state, feature, now, runHooks });
-    if (orphaned) return orphaned;
+    if (orphaned) return stopRun(orphaned, stopCtx);
 
     // ── Resume seeding (#119): continue the attempt budget and the doom-loop
     // fingerprint from attempts recorded since the wave's last terminal
@@ -463,7 +493,10 @@ export async function deliverSpine({
           ts: now(),
           data: { wave: wave.n, action, outcome: vetoOutcome, source: 'hook', point: 'pre-wave', hook: preVeto.hook },
         });
-        return { stopped: 'hook-veto', ok: false, wave: wave.n, action, outcome: vetoOutcome, point: 'pre-wave' };
+        return stopRun(
+          { stopped: 'hook-veto', ok: false, wave: wave.n, action, outcome: vetoOutcome, point: 'pre-wave', hook: preVeto.hook },
+          stopCtx,
+        );
       }
 
       appendWaveStarted({ state, feature, now, wave, attempt, waveModels });
@@ -700,12 +733,7 @@ export async function deliverSpine({
               ? { wave: wave.n, reason: 'doom-loop', source: 'hook', point: vetoSource.point, hook: vetoSource.hook }
               : { wave: wave.n, reason: 'doom-loop' },
           });
-          return {
-            stopped: 'doom-loop',
-            ok: false,
-            wave: wave.n,
-            outcome,
-          };
+          return stopRun({ stopped: 'doom-loop', ok: false, wave: wave.n, outcome }, stopCtx);
         }
         lastPrint = print;
         // Back-pressure (issue #90): carry THIS attempt's failure into the next
@@ -743,13 +771,7 @@ export async function deliverSpine({
           ? { wave: wave.n, action, outcome, source: 'hook', point: vetoSource.point, hook: vetoSource.hook }
           : { wave: wave.n, action },
       });
-      return {
-        stopped: 'matrix',
-        ok: false,
-        wave: wave.n,
-        action,
-        outcome,
-      };
+      return stopRun({ stopped: 'matrix', ok: false, wave: wave.n, action, outcome }, stopCtx);
     }
 
     if (!advanced) {
@@ -769,7 +791,7 @@ export async function deliverSpine({
         ts: now(),
         data: { wave: wave.n, reason: 'budget-exhausted' },
       });
-      return { stopped: 'budget', ok: false, wave: wave.n };
+      return stopRun({ stopped: 'budget', ok: false, wave: wave.n }, stopCtx);
     }
   }
 
@@ -778,7 +800,7 @@ export async function deliverSpine({
   for (const script of POST_CHECKS) {
     const check = sh(`scripts/${script}`, feature);
     if (check.status !== 0) {
-      return { stopped: 'post-check', ok: false, check: script, status: check.status };
+      return stopRun({ stopped: 'post-check', ok: false, check: script, status: check.status }, stopCtx);
     }
   }
 
