@@ -1,7 +1,10 @@
 # Plan: Invariant Registry + Anchor Lint, and Matrix/Gates Replay Check
 Created: 2026-09-29
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-09-29T18:22:14.858Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/invariant-registry-and-replay
 Adopted-From: https://github.com/seanrreid/RAD_framework/issues/97, https://github.com/seanrreid/RAD_framework/issues/67
 Issue-Title: Invariant registry + anchor lint (#97) + Event-log replay regression check for matrix.yaml/gates.yaml changes (#67)
