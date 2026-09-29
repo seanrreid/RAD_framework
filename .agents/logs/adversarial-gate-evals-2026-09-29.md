@@ -18,3 +18,4 @@ Executor role: architect
 | 6 | Wave 3 | Delivery eval cases | ✓ complete | 8017bfa | 16:23 |
 | — | Amend | Re-approved after amendment 2 | — | — | 16:27 |
 | — | Wave 4 | Approval re-check before the first wave | ✗ blocked_spec (5 #151 tests encode the exemption) → amendment 3 | — | 16:37 |
+| — | Amend | Re-approved after amendment 3 | — | — | 16:37 |
