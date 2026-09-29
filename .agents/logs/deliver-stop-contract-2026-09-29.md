@@ -13,3 +13,5 @@ Executor role: architect
 | 3 | 2 | 2.1 Between-wave approval re-check | complete | f2a1703 | 2026-09-29T15:02:16Z |
 | 4 | 2 | 2.2 Between-wave scope check | complete | d8cbbb0 | 2026-09-29T15:03:33Z |
 | 5 | 2 | 2.3 Cumulative failed-attempt cap | complete | 9789dce | 2026-09-29T15:04:20Z |
+| 6 | Wave 3 | rad deliver exit codes, completion fold, cap parsing, approval port | ⚠ done_with_concerns (fold rejects resumed runs → amendment 1) | d357b0c | 15:10 UTC |
+| 7 | Wave 3 | Stop-contract docs | ✓ complete | 8a85dd6 | 15:10 UTC |

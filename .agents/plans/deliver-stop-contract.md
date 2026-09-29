@@ -1,7 +1,7 @@
 # Plan: Deliver Stop Contract (typed terminals, needs-decision exit, between-wave checks)
 Created: 2026-09-28
 Author: architect
-Status: in-progress
+Status: pending-review
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-09-29T14:54:08.158Z
 Recorded-By: sean@torchcodelab.com
@@ -31,6 +31,8 @@ Issue-Title: Autonomous-mode stop contract (#77) + Attendedness as a dimension o
 
    A wall-clock ceiling is **not** in v1. A CI-failure cap belongs to a CI-watch loop, since it runs after deliver has ended, and stays out of scope.
 4. **Captured straight into this plan.** Program Design is the design record.
+
+**Amendment 1 (2026-09-29, during delivery, after Task 3.1):** the completion fold as first written required every `wave-complete` *after the latest `deliver-started`*. That makes a successful **resumed** run (whose earlier waves completed in a previous run) exit 1 `completion not evidenced`. The fold now counts `wave-complete` events across the whole history, exactly as `resumeFrom` does for skipping, and still requires `pr-opened` after the latest `deliver-started`, so the current run must itself have finished and opened the PR. Also: the Wave 1 implementation added a `resume-verify` row (class `failed`) to the classification table for a post-start stop the table had missed.
 
 ## Scope
 
@@ -62,7 +64,7 @@ Issue-Title: Autonomous-mode stop contract (#77) + Attendedness as a dimension o
    - A malformed value (non-integer, zero, negative) makes `rad deliver` **exit 2** before any event is appended, never a silent fallback.
 6. `rad deliver`:
    - exits **3** for any `needs-decision` stop, **1** for `failed`, and **0** only when the spine returned `ok` **and** the pure `deliverCompleted(history, waveCount)` fold confirms it
-   - the fold requires, after the latest `deliver-started`, a `wave-complete` for every wave 1..N and a `pr-opened`; if `ok` is not confirmed by the fold, the result is exit 1 with `completion not evidenced`
+   - the fold requires a `wave-complete` for every wave 1..N **anywhere in the history** (the same notion as `resumeFrom`, which the spine uses to skip already-completed waves on resume) **and** a `pr-opened` after the latest `deliver-started` (amendment 1); if `ok` is not confirmed by the fold, the result is exit 1 with `completion not evidenced`
    - the stderr failure line gains `class=<class>` and `decision="<text>"`
    - `approvalIntact` is implemented by recomputing `planFingerprint` of the plan on disk and comparing it to the latest `approved` event's `data.fingerprint`; a legacy event with no fingerprint passes, matching `check-plan-approved.sh`
 7. `docs/rad-wave-contract.md` gains a "Stop contract" section: completion criteria, the classification table, exit codes, the evaluation rule (only observable state counts), and the statement that the harness never parks, so attended vs unattended is the caller's concern. `docs/harness-state-store.md` documents `deliver-stopped` as audit-only. CLAUDE.md documents `RAD_MAX_FAILED_ATTEMPTS` and the exit codes.
@@ -93,7 +95,7 @@ Issue-Title: Autonomous-mode stop contract (#77) + Attendedness as a dimension o
 | harness/cli.js | 80-100 | `NEEDS_DECISION_EXIT_CODE = 3` |
 | harness/cli.js | 700-800 | Parse `RAD_MAX_FAILED_ATTEMPTS`; `approvalIntact` port; exit mapping; completion fold; stderr `class=`/`decision=` |
 | harness/test/cli.test.js | 440-499 | Exit 3 / 1 / 0 and malformed-cap exit 2 tests |
-| docs/rad-wave-contract.md | 180-254 | New "Stop contract" section |
+| docs/rad-wave-contract.md | 180-254 | New "Stop contract" section; completion-fold wording per amendment 1 |
 | docs/harness-state-store.md | 220-300 | `deliver-stopped`, classification, between-wave checks |
 | CLAUDE.md | 164-192 | `RAD_MAX_FAILED_ATTEMPTS` + deliver exit codes |
 
@@ -112,6 +114,7 @@ Issue-Title: Autonomous-mode stop contract (#77) + Attendedness as a dimension o
 | `token-budget` | — | needs-decision | `token budget {budget} reached (spent {spent}); raise RAD_TOKEN_BUDGET or stop` |
 | `failed-attempt-cap` | — | needs-decision | `{failed} failed attempts reached RAD_MAX_FAILED_ATTEMPTS={cap}; raise the cap, re-plan, or stop` |
 | `approval-changed` | — | needs-decision | `the plan changed since approval (or approval no longer holds); re-approve before re-running` |
+| `resume-verify` | — | failed | resume found a promised test file missing (deterministic check) — amendment 1 |
 | `gate` (pre-start) | — | needs-decision | `plan not approved; run /rad-approve` (no event: nothing started) |
 
 The rule behind the table: `needs-decision` means a limit or policy a human can lift, or a non-deterministic condition. `failed` means a deterministic check showed the work is wrong. Unknown `stopped` values or actions throw.
@@ -276,7 +279,7 @@ What:
   - `ok` without fold confirmation gives 1 with `completion not evidenced`.
   - Otherwise use `classifyStop(result).class`: `needs-decision` gives 3, `failed` gives 1.
   - Append `class=` and `decision="…"` to the stderr line.
-- **Completion fold:** add `deliverCompleted` to the `events.js` read helpers. Pure, never throws, false on bad input.
+- **Completion fold:** add `deliverCompleted` to the `events.js` read helpers: every wave 1..N has a `wave-complete` anywhere in the history (as `resumeFrom` counts them), and a `pr-opened` exists after the latest `deliver-started`. Pure, never throws, false on bad input.
 
 Tests:
 - a `surface` terminal gives exit 3, and the stderr line has `class=needs-decision`
@@ -285,8 +288,13 @@ Tests:
 - `ok` with a history missing a `wave-complete` gives 1
 - a malformed cap (`abc`, `0`, `-1`) gives exit 2 and no events
 - a plan edited between waves (the fake `runWave` rewrites the plan file) gives exit 3 with `approval-changed`
-- the fold: complete, missing wave, missing `pr-opened`, `pr-opened` before the latest `deliver-started`, `[]` / `null`
+- the fold: complete, missing wave, missing `pr-opened`, `pr-opened` before the latest `deliver-started`, **a resumed run whose earlier waves completed before the latest `deliver-started` (complete)**, `[]` / `null`
 Validate: AC#5, AC#6 — `npm test --prefix harness`.
+
+#### Task 3.3: Completion fold counts resumed waves (amendment 1)
+File: harness/events.js:960-1010, harness/test/events.test.js:1040-1120, harness/test/cli.test.js:440-560, docs/rad-wave-contract.md:180-254
+What: Change `deliverCompleted` so every wave 1..N needs a `wave-complete` anywhere in the history, counted the way `resumeFrom` counts them (reuse `resumeFrom` if it fits), while `pr-opened` must still come after the latest `deliver-started`. Add fold tests: a resumed run whose earlier waves completed before the latest start is complete; a run missing a wave anywhere is not complete; a `pr-opened` only before the latest start is not complete. Add a cli test: a resumed 2-wave deliver, with wave 1 completed in a prior run, exits 0. Fix the fold's description in the docs' Stop contract section to match.
+Validate: AC#6 — `npm test --prefix harness`; the docs wording matches the fold.
 
 #### Task 3.2: Stop-contract docs
 File: docs/rad-wave-contract.md:180-254, docs/harness-state-store.md:220-300, CLAUDE.md:164-192
@@ -306,6 +314,7 @@ Tables and code examples go in fenced blocks where they contain `|`. This task h
 Validate: AC#7 — read-through.
 
 ## Tests to Write
+- [ ] deliverCompleted: resumed run (earlier waves completed before the latest deliver-started) counts as complete — harness/test/events.test.js
 - [ ] classifyStop: every table row, templating, unknown/malformed input throws — harness/test/stops.test.js
 - [ ] deliver-stopped: exactly one, last, correct class for every terminal; success deep-equal; gate appends nothing — harness/test/spine.test.js
 - [ ] approval re-check: gate flip / port false / port throws stop before the wave; default and single-wave unaffected — harness/test/spine.test.js
