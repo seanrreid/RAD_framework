@@ -285,6 +285,12 @@ time for the paths a new plan declares.
 
 ## Anchor index
 
+Line anchors below drift as the code moves; treat them as a reading guide, not a
+contract. The authoritative claim → enforcement map is
+[`docs/invariants.yaml`](invariants.yaml), linted fail-closed by
+`scripts/lint-invariants.sh` (every anchor must resolve) — start any audit there,
+and run `scripts/lint-invariants.sh --inventory` for the recorded bypass list.
+
 | Concept | File | Anchor |
 |---|---|---|
 | Spine boundaries | `harness/spine.js` | `2-27` |
@@ -315,4 +321,5 @@ time for the paths a new plan declares.
 - [harness-state-store.md](harness-state-store.md) — the two ports, events, folds
 - [rad-wave-contract.md](rad-wave-contract.md) — the provider-neutral agent contract
 - [rad-cli.md](rad-cli.md) — the CLI subcommands and adapter selection
+- [invariants.md](invariants.md) — the invariant registry: claims, enforcement anchors, recorded bypasses
 - [`scripts/hooks/README.md`](../scripts/hooks/README.md) — the hook invocation contract
