@@ -103,6 +103,25 @@ async function approvalChangeReason({ state, feature, approvalIntact }) {
   return null;
 }
 
+/**
+ * Append the audit-only `run-resumed` event (resume-with-operator-context):
+ * records the operator's context and the stop it resumes from. Only the stop's
+ * identifying fields are recorded — `wave` only when the stop carried one.
+ */
+function appendRunResumed({ state, feature, now, resume }) {
+  const { class: cls, reason, wave } = resume.stop;
+  const stop = { class: cls, reason };
+  if (wave !== undefined && wave !== null) stop.wave = wave;
+  state.append({
+    feature,
+    type: 'run-resumed',
+    actor: 'harness',
+    recordedBy: resume.recordedBy,
+    ts: now(),
+    data: { context: resume.context, recordedBy: resume.recordedBy, stop },
+  });
+}
+
 /** The one wave-attempt outcome the failed-attempt cap does NOT count. */
 const SUCCESS_OUTCOME = 'success';
 
@@ -402,10 +421,11 @@ function convergeOrphans({ history, wave, matrix, state, feature, now, runHooks 
  * @param {Object} args.docs - ArtifactStore (read/write); unused branches reserved
  * @param {Object} args.matrix - a pre-loaded stop-condition matrix
  * @param {Object} args.gates - the loaded gate policy (passed through for parity)
- * @param {(wave: Object, attemptCtx: { attempt: number, priorFailure: (Object|null) }) => Promise<{ outcome: string }>} args.runWave
+ * @param {(wave: Object, attemptCtx: { attempt: number, priorFailure: (Object|null), operatorContext?: Object }) => Promise<{ outcome: string }>} args.runWave
  *   MODEL boundary. The second argument is ADDITIVE attempt context: the 1-based
  *   `attempt` number and the previous attempt's captured `priorFailure` (null on
- *   the first attempt, and whenever capture degraded). A runWave/adapter that
+ *   the first attempt, and whenever capture degraded), plus `operatorContext` on
+ *   the run's first call only when `resume` is set. A runWave/adapter that
  *   IGNORES it behaves exactly as it did before it existed — the spine's control
  *   flow does not depend on the callee reading it.
  * @param {(script: string, feature: string) => { status: number }} args.sh - Bash boundary
@@ -439,6 +459,13 @@ function convergeOrphans({ history, wave, matrix, state, feature, now, runHooks 
  *   changes nothing). Reuses the runner's own discovery (no duplicated FS logic);
  *   defaults to a no-op so omitting it is exactly today's behavior (AC#1). It may
  *   throw on a malformed dir; the spine lets that surface to the caller.
+ * @param {{ context: string, recordedBy: string, stop: { class: string, reason: string, decision: string, wave?: number, action?: string, outcome?: string } }|null} [args.resume]
+ *   OPTIONAL operator resume context (the latest stop's data plus the operator's
+ *   free-text context). When set, an audit-only `run-resumed` event is appended
+ *   directly after `deliver-started` (never when the entry gate refuses), and the
+ *   FIRST runWave call of this run — whichever wave/attempt that is — receives
+ *   `operatorContext: { context, stop }` on its attemptCtx; every later call omits
+ *   the key. Null/absent adds no event and no attemptCtx key (byte-for-byte today).
  * @returns {Promise<Object>} structured terminal result
  */
 export async function deliverSpine({
@@ -458,6 +485,7 @@ export async function deliverSpine({
   hookPreflight = NOOP_PREFLIGHT,
   approvalIntact = ALWAYS_INTACT,
   maxFailedAttempts = null,
+  resume = null,
 }) {
   // ── DET gate: approval. The human (or proxy) decided earlier; here we ENFORCE
   // it. A blocked gate is a normal outcome — return structured, append nothing
@@ -468,6 +496,7 @@ export async function deliverSpine({
   }
 
   state.append({ feature, type: 'deliver-started', actor: 'harness', ts: now() });
+  if (resume) appendRunResumed({ state, feature, now, resume });
   // Every return below this line is a stop (except success) and MUST go
   // through stopRun so the run's last event is exactly one `deliver-stopped`.
   const stopCtx = { state, feature, now };
@@ -518,6 +547,10 @@ export async function deliverSpine({
   // Cumulative failed-attempt count for the cap, seeded from the log so it
   // spans resumed runs until a deliver-stopped resets it.
   let failedAttempts = failedAttemptsSinceStop(history);
+
+  // Operator resume context rides on the FIRST runWave call of this run only —
+  // not attempt===1: skipped waves and resumed attempt counts make that wrong.
+  let operatorContextPending = Boolean(resume);
 
   // ── DET wave loop — the MATRIX decides what happens next, not a counter. ──
   for (const wave of waves) {
@@ -619,7 +652,12 @@ export async function deliverSpine({
 
       // ADDITIVE second argument: attempt context. A runWave that ignores it is
       // unchanged; one that reads it can make attempt N+1 differ from attempt N.
-      const result = await runWave(wave, { attempt, priorFailure });
+      const attemptCtx = { attempt, priorFailure };
+      if (operatorContextPending) {
+        attemptCtx.operatorContext = { context: resume.context, stop: resume.stop };
+        operatorContextPending = false;
+      }
+      const result = await runWave(wave, attemptCtx);
 
       // ── Hook: post-wave (veto-capable point). Fired after the wave result,
       // before the per-wave test-presence gate. A veto here REPLACES the wave's
