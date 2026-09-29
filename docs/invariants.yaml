@@ -6,6 +6,7 @@ invariants:
   - id: unapproved-deliver-cannot-run
     claim: "No deliver run executes a wave unless the gate fold finds an architect-role approved event for the feature."
     authority: "the append-only event log .agents/state/<feature>/events.jsonl, folded by harness/gates.js against harness/gates.yaml"
+    evals: [harness/evals/approval.eval.js]
     enforced_by:
       - { file: harness/gates.js, symbol: "export function evaluateGate", note: "the only gate fold" }
       - { file: harness/events.js, symbol: "event.type === 'approved'" }
@@ -33,15 +34,19 @@ invariants:
   - id: approval-invalidated-by-plan-change
     claim: "A deliver run stops when the approved plan has changed since approval, rather than executing an unapproved revision."
     authority: "the plan fingerprint frozen into the approved event in .agents/state/<feature>/events.jsonl"
+    evals: [harness/evals/approval.eval.js]
     enforced_by:
       - { file: harness/spine.js, symbol: "approvalChangeReason" }
       - { file: harness/spine.js, symbol: "'approval-changed'" }
       - { file: harness/cli.js, symbol: "makeApprovalIntact" }
+      - { file: harness/spine.js, symbol: "Approval re-check fires before EVERY wave", note: "the re-check runs before the first wave too, not only between waves" }
+      - { file: scripts/check-plan-approved.sh, symbol: "STORED_FP", note: "the deliver-gate path compares the frozen fingerprint" }
     bypasses: []
 
   - id: approval-blockers-refuse
     claim: "rad approve refuses to record approval while clarification markers remain or a high-risk path finding is neither resolved nor waived."
     authority: "the plan doc (NEEDS CLARIFICATION markers, Files in Scope, ## Waivers) as checked by scripts/check-approval-blockers.sh"
+    evals: [harness/evals/approval.eval.js]
     enforced_by:
       - { file: scripts/check-approval-blockers.sh, symbol: "EXIT_BLOCKED" }
       - { file: harness/cli.js, symbol: "checkApprovalBlockers" }
@@ -58,10 +63,12 @@ invariants:
   - id: scope-enforced
     claim: "A wave that touches files outside the plan's declared scope is classified fail-scope and resolved through the matrix, never silently accepted."
     authority: "the plan's Files in Scope table and per-task File: lines"
+    evals: [harness/evals/delivery.eval.js]
     enforced_by:
       - { file: scripts/check-scope.sh, symbol: "scope_declares" }
       - { file: harness/spine.js, symbol: "SCOPE_FAIL_OUTCOME" }
       - { file: harness/matrix.yaml, symbol: "fail-scope:" }
+      - { file: harness/cli.js, symbol: "SCRIPT_ARGS", note: "maps the spine's check-scope call to its real argv" }
     bypasses:
       - id: custom-branch-prefix
         surface: "RAD_BRANCH_PREFIX other than rad/"
@@ -71,6 +78,7 @@ invariants:
   - id: events-append-only
     claim: "Event logs are only ever appended to; no change may remove or modify an existing event line."
     authority: "the append-only event log .agents/state/<feature>/events.jsonl"
+    evals: [harness/evals/repo.eval.js]
     enforced_by:
       - { file: scripts/check-events-append-only.sh, symbol: "git diff --name-only", note: "CI: fails on any removed/modified line in a touched log" }
       - { file: harness/adapters/git-state-store.js, symbol: "appendFileSync", note: "the writer only appends" }
@@ -79,6 +87,7 @@ invariants:
   - id: self-protected-paths-flagged
     claim: "Any plan path touching RAD's own machinery (harness/, scripts/, .claude/, .agents/state/, gates/matrix YAML) is always flagged for architect review, regardless of RAD_HIGH_RISK_PATTERNS."
     authority: "the RAD_SELF_PROTECTED_PATTERN literal in scripts/lib/plan-paths.sh"
+    evals: [harness/evals/repo.eval.js]
     enforced_by:
       - { file: scripts/lib/plan-paths.sh, symbol: "readonly RAD_SELF_PROTECTED_PATTERN" }
       - { file: scripts/lib/plan-paths.sh, symbol: "path_is_self_protected" }
@@ -92,6 +101,7 @@ invariants:
   - id: worktree-teardown-guarded
     claim: "Worktree teardown refuses to remove any directory that lacks the .rad-worktree.json marker."
     authority: "the .rad-worktree.json marker written at worktree creation"
+    evals: [harness/evals/repo.eval.js]
     enforced_by:
       - { file: scripts/worktree-lifecycle.sh, symbol: "MARKER_NAME=\".rad-worktree.json\"" }
       - { file: scripts/worktree-lifecycle.sh, symbol: "refusing to remove" }
@@ -100,6 +110,7 @@ invariants:
   - id: resume-needs-decision-only
     claim: "A stopped deliver can be resumed only from a needs-decision stop; a failed stop cannot be resumed."
     authority: "the latest deliver-stopped event in .agents/state/<feature>/events.jsonl, classified by harness/stops.js"
+    evals: [harness/evals/approval.eval.js]
     enforced_by:
       - { file: harness/cli.js, symbol: "resolveResume" }
       - { file: harness/cli.js, symbol: "cannot resume a failed stop" }
@@ -109,10 +120,13 @@ invariants:
   - id: hook-veto-fail-closed
     claim: "A veto-capable hook that crashes, exits non-zero, prints nothing, or prints an out-of-vocabulary token aborts the wave as abort-user."
     authority: "the frozen 7-outcome vocabulary in harness/matrix.yaml"
+    evals: [harness/evals/delivery.eval.js]
     enforced_by:
       - { file: harness/hook-runner.js, symbol: "VETO_ABORT_OUTCOME" }
       - { file: harness/hook-runner.js, symbol: "createHookRunner" }
       - { file: harness/spine.js, symbol: "safeVetoOutcome" }
+      - { file: harness/cli.js, symbol: "resolveHooksDir", note: "RAD_HOOKS_DIR resolution for the real deliver run" }
+      - { file: harness/cli.js, symbol: "createHookRunner(", note: "the real deliver run wires the hook runner into the spine" }
     bypasses:
       - id: empty-hooks-dir
         surface: "RAD_HOOKS_DIR pointing at an empty directory"
@@ -122,6 +136,7 @@ invariants:
   - id: verify-timeout-surfaces
     claim: "A declared Verify command that exceeds its timeout is reported as exit 124 and surfaces as fail-timeout rather than being retried as fail-tests."
     authority: "harness/matrix.yaml (fail-timeout maps to surface)"
+    evals: [harness/evals/delivery.eval.js]
     enforced_by:
       - { file: scripts/check-verify.sh, symbol: "VERIFY_TIMEOUT_STATUS=124" }
       - { file: harness/spine.js, symbol: "'fail-timeout' : 'fail-tests'" }
@@ -134,6 +149,7 @@ invariants:
   - id: adapter-env-allow-listed
     claim: "The command agent adapter spawns RAD_AGENT_CMD with only the allow-listed environment variables, so no exported credential reaches it."
     authority: "the ENV_ALLOW_LIST constant in harness/adapters/agent/command.js"
+    evals: [harness/evals/delivery.eval.js]
     enforced_by:
       - { file: harness/adapters/agent/command.js, symbol: "ENV_ALLOW_LIST" }
     bypasses:
@@ -145,8 +161,22 @@ invariants:
   - id: matrix-no-fallthrough
     claim: "An outcome or gate name with no declared entry throws instead of falling through to a default."
     authority: "harness/matrix.yaml and harness/gates.yaml"
+    not_evalable: "pure table lookup with no agent-reachable surface; covered by harness/test/matrix.test.js and scripts/check-matrix-replay.sh"
     enforced_by:
       - { file: harness/matrix.js, symbol: "export function resolveOutcome" }
       - { file: harness/matrix.js, symbol: "(no default fallthrough)" }
       - { file: harness/gates.js, symbol: "No gate rule declared for gate" }
     bypasses: []
+
+  - id: no-direct-push-to-default
+    claim: "A wave agent that moves the default branch's remote tip during `rad deliver` fails the attempt with fail-protocol (abort). Detective, not preventive: the push has landed; the run stops and records it."
+    authority: "the default branch's tip on the `origin` remote"
+    evals: [harness/evals/delivery.eval.js]
+    enforced_by:
+      - { file: harness/spine.js, symbol: "pushGuardDemotion" }
+      - { file: harness/spine.js, symbol: "PUSH_GUARD_SCRIPT" }
+      - { file: scripts/default-tip.sh, symbol: "git ls-remote --heads", note: "reads the tip live from the remote, never a local tracking ref" }
+      - { file: harness/cli.js, symbol: "pushGuard: true", note: "the real deliver run enables the guard" }
+    bypasses:
+      - { id: offline-remote, surface: "unreachable or unconfigured origin", guarded: "no", note: "records push-check-unavailable and does not demote (offline delivery stays possible)" }
+      - { id: non-origin-push, surface: "push to another remote or non-default branch", guarded: "no", note: "only origin/<default> is watched; the wave contract forbids pushing" }

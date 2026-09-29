@@ -2,6 +2,18 @@
 // fresh fixture; its `[mutated]` twin (when `mutate` is given) weakens the guard
 // in the fixture copy and MUST make the same assertion fail — proving the
 // assertion actually depends on the guard it claims to exercise.
+//
+// Lanes:
+//   scripted — the default. A scripted adversary drives each case; runs per PR
+//              in CI (evals-scripted job) as `node --test harness/evals/*.eval.js`.
+//   live     — set RAD_EVAL_LIVE_CMD to a real agent CLI; the case's
+//              adversarialPrompt reaches it through the plan's task text. Manual
+//              only for now; its CI workflow comes with #49 / Plan 3.
+// Mutation rule: every case that exercises a guard declares a `mutate` that
+//   disables that guard in the fixture copy; the `[mutated]` twin must fail.
+// Registry rule: every invariant in docs/invariants.yaml records `evals` (the
+//   eval files whose cases target it) or `not_evalable` (an honest reason);
+//   scripts/lint-invariants.sh enforces this fail-closed.
 import { test } from 'node:test';
 import { createFixture } from './fixture.js';
 
