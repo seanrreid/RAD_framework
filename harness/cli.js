@@ -18,8 +18,8 @@
  */
 
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { readFileSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
 import process from 'node:process';
 
 import { createGitStateStore, defaultSh } from './adapters/git-state-store.js';
@@ -31,12 +31,17 @@ import { createCommandAdapter, probeCommand } from './adapters/agent/command.js'
 import { sanitizeErrorMessage } from './adapters/agent/contract.js';
 import { loadMatrix } from './matrix.js';
 import { classifyStop, STOP_CLASSES } from './stops.js';
-import { deliverCompleted, latestStop, dormantStop } from './events.js';
+import {
+  deliverCompleted, latestStop, dormantStop, fileDeficitSignals, forecastForPaths, DEFICITS,
+} from './events.js';
+import { taskFilesFromPlanText, mergeTaskFiles } from './plan-tasks.js';
 
 /** Usage line for `rad deliver` (help, parse errors, and the command table). */
 const DELIVER_USAGE = 'rad deliver <feature> [--model <model-id>] [--resume --context <text>]';
 /** Usage line for `rad stop-status`. */
 const STOP_STATUS_USAGE = 'rad stop-status <feature> [--stdin]';
+/** Usage line for `rad forecast`. */
+const FORECAST_USAGE = 'rad forecast <plan>';
 
 const SUBCOMMANDS = {
   approve: {
@@ -65,6 +70,11 @@ const SUBCOMMANDS = {
     summary: 'Report whether a feature has a dormant needs-decision stop (read-only).',
     usage: STOP_STATUS_USAGE,
     run: (argv, ctx) => stopStatusCommand(argv, ctx),
+  },
+  forecast: {
+    summary: "Advisory plan-time reliability readout for a plan's declared paths (read-only).",
+    usage: FORECAST_USAGE,
+    run: (argv, ctx) => forecastCommand(argv, ctx),
   },
   'owner-claim': {
     summary: 'Claim the single-writer lock on a feature (records who holds it).',
@@ -1791,6 +1801,157 @@ export async function stopStatusCommand(argv, ctx) {
     return 1;
   }
   process.stdout.write(`${formatStopStatus(stop)}\n`);
+  return 0;
+}
+
+/** Suggested remedy per deficit proxy (#93) — advisory wording, never a verdict. */
+const FORECAST_REMEDIES = Object.freeze({
+  opaqueAbstraction: 'a boundary/decomposition note',
+  missingDocumentation: 'a comment explaining the governing constraint',
+  insufficientTesting: 'a characterization test for the uncovered behavior',
+});
+/** Plan-path set source of truth: plan_scope_paths in scripts/lib/plan-paths.sh. */
+const PLAN_SCOPE_PATHS_SCRIPT = '. scripts/lib/plan-paths.sh && plan_scope_paths "$1"';
+/** Repo-relative dirs `rad forecast` folds across (read-only). */
+const PLANS_DIR = join('.agents', 'plans');
+const STATE_DIR = join('.agents', 'state');
+const EVENTS_FILE = 'events.jsonl';
+
+/** Exactly one positional `<plan>`; throws on unknown flags or extras. */
+function parseForecastArgs(argv) {
+  let plan;
+  for (const arg of argv) {
+    if (arg.startsWith('--')) throw new Error(`unknown option '${arg}'`);
+    if (plan !== undefined) throw new Error(`unexpected argument '${arg}'`);
+    plan = arg;
+  }
+  if (!isNonEmpty(plan)) throw new Error('a plan path is required');
+  return plan;
+}
+
+/** The plan's declared path set, via plan_scope_paths (never re-parsed in JS). */
+function forecastScopePaths(sh, repoRoot, planPath) {
+  const res = sh('bash', ['-c', PLAN_SCOPE_PATHS_SCRIPT, '_', planPath], { cwd: repoRoot });
+  if (res.status !== 0) {
+    throw new Error(`plan_scope_paths failed: ${(res.stderr || `exit ${res.status}`).trim()}`);
+  }
+  return res.stdout.split('\n').map((l) => l.trim()).filter((l) => l !== '');
+}
+
+/** Sorted entry names of a dir, or [] when it does not exist. */
+function sortedEntries(dir, opts = {}) {
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir, { withFileTypes: true })
+    .filter((e) => (opts.dirs ? e.isDirectory() : e.isFile()))
+    .map((e) => e.name)
+    .sort();
+}
+
+/** task title -> declared File: paths, merged across every plan under .agents/plans. */
+function forecastTaskFiles(repoRoot) {
+  const dir = join(repoRoot, PLANS_DIR);
+  const acc = {};
+  for (const name of sortedEntries(dir).filter((n) => n.endsWith('.md'))) {
+    mergeTaskFiles(acc, taskFilesFromPlanText(readFileSync(join(dir, name), 'utf8')));
+  }
+  return acc;
+}
+
+/**
+ * Every feature's event log, concatenated; an event omitting `feature` is
+ * stamped from its dir name. A malformed line throws naming the feature.
+ */
+function forecastHistory(repoRoot) {
+  const dir = join(repoRoot, STATE_DIR);
+  const history = [];
+  let features = 0;
+  for (const feature of sortedEntries(dir, { dirs: true })) {
+    const log = join(dir, feature, EVENTS_FILE);
+    if (!existsSync(log)) continue;
+    let events;
+    try {
+      events = parseEventsJsonlStrict(readFileSync(log, 'utf8'));
+    } catch (err) {
+      throw new Error(`malformed event log for ${feature}: ${err.message}`);
+    }
+    features += 1;
+    for (const e of events) history.push(isNonEmpty(e.feature) ? e : { ...e, feature });
+  }
+  return { history, features };
+}
+
+/** One advisory line per present deficit of each forecast row. */
+function formatForecastRows(rows) {
+  const lines = [];
+  for (const { path, deficits } of rows) {
+    for (const deficit of DEFICITS) {
+      const entry = deficits[deficit];
+      if (!entry) continue;
+      lines.push(`forecast: ${path} — ${deficit} in ${entry.features.length} feature(s) `
+        + `(${entry.features.join(', ')}); consider ${FORECAST_REMEDIES[deficit]}`);
+    }
+  }
+  return lines;
+}
+
+/** The closing summary line. */
+function forecastSummary(rowCount, pathCount, featureCount) {
+  const history = `(history: ${featureCount} feature(s))`;
+  if (rowCount === 0) return `forecast: no reliability signals for ${pathCount} path(s) ${history}`;
+  return `forecast: ${rowCount} of ${pathCount} path(s) have reliability signals ${history}; `
+    + 'advisory only — these are proxies, not verdicts';
+}
+
+/**
+ * `forecast <plan>` — advisory, read-only plan-time readout: the #93 deficit
+ * proxies recorded across every feature's event log, filtered to the paths the
+ * plan declares. Bad argv / unreadable plan / plan_scope_paths failure → exit 2;
+ * malformed event log → exit 1. Writes nothing.
+ *
+ * @param {string[]} argv - args after `forecast`
+ * @param {{ repoRoot: string, sh?: typeof defaultSh }} ctx
+ * @returns {Promise<number>}
+ */
+export async function forecastCommand(argv, ctx) {
+  const { repoRoot } = ctx;
+  const sh = ctx.sh ?? defaultSh;
+  let plan;
+  try {
+    plan = parseForecastArgs(argv);
+  } catch (err) {
+    process.stderr.write(`rad forecast: ${err.message}\nUsage: ${FORECAST_USAGE}\n`);
+    return USAGE_EXIT_CODE;
+  }
+  const planPath = resolve(repoRoot, plan);
+  let paths;
+  try {
+    readFileSync(planPath, 'utf8');
+  } catch (err) {
+    process.stderr.write(`rad forecast: cannot read plan ${plan}: ${err.message}\n`);
+    return USAGE_EXIT_CODE;
+  }
+  try {
+    paths = forecastScopePaths(sh, repoRoot, planPath);
+  } catch (err) {
+    process.stderr.write(`rad forecast: ${err.message}\n`);
+    return USAGE_EXIT_CODE;
+  }
+  return printForecast(repoRoot, paths);
+}
+
+/** Fold history + taskFiles, print rows and summary; exit 1 on a malformed log. */
+function printForecast(repoRoot, paths) {
+  let folded;
+  try {
+    folded = forecastHistory(repoRoot);
+  } catch (err) {
+    process.stderr.write(`rad forecast: ${err.message}\n`);
+    return FAILED_EXIT_CODE;
+  }
+  const signals = fileDeficitSignals(folded.history, forecastTaskFiles(repoRoot));
+  const rows = forecastForPaths(signals, paths);
+  const lines = [...formatForecastRows(rows), forecastSummary(rows.length, paths.length, folded.features)];
+  process.stdout.write(`${lines.join('\n')}\n`);
   return 0;
 }
 
