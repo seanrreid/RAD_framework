@@ -14,3 +14,4 @@ Executor role: architect
 | 4 | Wave 2 | Registry + narrative | ✓ complete | 8935c72 | 14:29 |
 | 5 | Wave 2 | Replay check script + fixture test | ✓ done_with_concerns (fail-tests maps to revision; malformed --base exits 2) | 89ccbd0 | 14:29 |
 | 6 | Wave 2 | Replay check: warn on skipped logs (retry 1) | ✓ complete | 38b4ddb | 14:29 |
+| 7 | Wave 3 | CI jobs + docs link | ✓ complete | df08e0d | 14:30 |
