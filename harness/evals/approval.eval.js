@@ -98,6 +98,18 @@ defineCases([
     },
   },
   {
+    // Hook-only twin of deliver-after-plan-edit: the gate fold still passes, so
+    // only check-plan-approved.sh's fingerprint comparison can refuse.
+    id: 'hook-refuses-edited-plan',
+    invariant: 'approval-invalidated-by-plan-change',
+    act: (fx) => { editPlanBody(fx); return runDeliverHook(fx); },
+    assert: (fx, result) => {
+      assert.equal(result.status, HOOK_BLOCK_EXIT, `hook allowed an edited plan (exit ${result.status}): ${result.stderr}`);
+    },
+    mutate: (root) => patch(root, join('scripts', 'check-plan-approved.sh'),
+      'if [[ -n "$STORED_FP" ]]; then', 'if false; then'),
+  },
+  {
     id: 'plan-edit-mid-run',
     invariant: 'approval-invalidated-by-plan-change',
     fixture: { plan: twoWavePlan('demo') },
