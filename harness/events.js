@@ -987,3 +987,43 @@ export function priorAttemptState(history, wave) {
   }
   return out;
 }
+
+/** Index of the LAST `deliver-started` in `history`, or -1 when there is none. */
+function lastDeliverStartedIndex(history) {
+  for (let i = history.length - 1; i >= 0; i -= 1) {
+    const event = history[i];
+    if (event && event.type === 'deliver-started') return i;
+  }
+  return -1;
+}
+
+/**
+ * Pure fold → did the LATEST deliver run evidence completion? True iff, AFTER
+ * the last `deliver-started`, there is a `wave-complete` (numeric `data.wave`)
+ * for EVERY wave 1..waveCount AND a `pr-opened`. The exit-0 authority for
+ * `rad deliver` (#77): a spine `ok` alone is not completion. FAIL-CLOSED: false
+ * on a non-array history, a non-positive-integer waveCount, or no
+ * `deliver-started`; never throws.
+ *
+ * @param {Event[]} history - in-memory event array (no I/O performed)
+ * @param {number} waveCount - the plan's wave count (waves numbered 1..N)
+ * @returns {boolean}
+ */
+export function deliverCompleted(history, waveCount) {
+  if (!Array.isArray(history) || !Number.isInteger(waveCount) || waveCount < 1) return false;
+  const start = lastDeliverStartedIndex(history);
+  if (start === -1) return false;
+  const completedWaves = new Set();
+  let prOpened = false;
+  for (const event of history.slice(start + 1)) {
+    if (!event) continue;
+    if (event.type === 'pr-opened') prOpened = true;
+    if (event.type === 'wave-complete' && event.data && typeof event.data.wave === 'number') {
+      completedWaves.add(event.data.wave);
+    }
+  }
+  for (let n = 1; n <= waveCount; n += 1) {
+    if (!completedWaves.has(n)) return false;
+  }
+  return prOpened;
+}

@@ -6,7 +6,8 @@ import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-import { approveCommand, gateCommand, parsePlanCtx } from '../cli.js';
+import { approveCommand, gateCommand, parsePlanCtx, deliverCommand } from '../cli.js';
+import { planFingerprint } from '../plan-fingerprint.js';
 import { createGitStateStore, defaultSh } from '../adapters/git-state-store.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -495,5 +496,208 @@ test('AC#1 (gate) — --stdin path: empty stdin fails closed → non-zero exit',
     });
     assert.ok(status !== 0, `gate --stdin should fail closed on empty stdin; got ${status}`);
     assert.ok(stdout.includes('passed=false'), `stdout should report passed=false; got:\n${stdout}`);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// rad deliver — stop-contract exit codes, completion fold, cap parsing, and
+// the approvalIntact port (#77, AC#5 cli part + AC#6). Driven through
+// deliverCommand with an injected runWave and a mock sh (no agent, no git).
+// ---------------------------------------------------------------------------
+
+const DELIVER_FEATURE = 'stop-feature';
+/** Env knobs these tests control; saved and restored around each run. */
+const DELIVER_ENV_KEYS = ['RAD_MAX_FAILED_ATTEMPTS', 'RAD_WORKTREE', 'RAD_TOKEN_BUDGET', 'RAD_SYNC'];
+
+/** A two-wave plan doc body; `extra` appends body text (changes the fingerprint). */
+function twoWavePlanText(extra = '') {
+  return [
+    `# ${DELIVER_FEATURE}`,
+    '',
+    'Status: approved',
+    `Branch: rad/${DELIVER_FEATURE}`,
+    '',
+    '## Waves',
+    '',
+    '### Wave 1',
+    '',
+    '- [ ] Task A',
+    '',
+    '### Wave 2',
+    '',
+    '- [ ] Task B',
+    extra,
+  ].join('\n');
+}
+
+/** Seed the plan doc and an approved event carrying its body fingerprint. */
+function seedApprovedTwoWavePlan(repoRoot) {
+  const planFile = join(repoRoot, '.agents', 'plans', `${DELIVER_FEATURE}.md`);
+  mkdirSync(dirname(planFile), { recursive: true });
+  const text = twoWavePlanText();
+  writeFileSync(planFile, text, 'utf8');
+  const event = {
+    ...approvedEvent(DELIVER_FEATURE),
+    data: { fingerprint: planFingerprint(text).hash },
+  };
+  const logFile = writeEventLog(repoRoot, DELIVER_FEATURE, [event]);
+  return { planFile, logFile };
+}
+
+const okSh = () => ({ status: 0, stdout: '', stderr: '' });
+
+/** Run deliverCommand with the given env overrides, capturing stderr. */
+async function runDeliverCaptured({ repoRoot, runWave, sh = okSh, env = {} }) {
+  const saved = Object.fromEntries(DELIVER_ENV_KEYS.map((k) => [k, process.env[k]]));
+  for (const k of DELIVER_ENV_KEYS) delete process.env[k];
+  Object.assign(process.env, env);
+  const originalErr = process.stderr.write.bind(process.stderr);
+  let stderr = '';
+  process.stderr.write = (chunk) => { stderr += chunk; return true; };
+  try {
+    const { value: code } = await captureStdout(() =>
+      deliverCommand([DELIVER_FEATURE], { repoRoot, sh, runWave }),
+    );
+    return { code, stderr };
+  } finally {
+    process.stderr.write = originalErr;
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+}
+
+const readLog = (logFile) => readFileSync(logFile, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+
+test('deliver AC#6 — ok with the fold confirming completion → exit 0', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const { logFile } = seedApprovedTwoWavePlan(repoRoot);
+    const { code, stderr } = await runDeliverCaptured({
+      repoRoot,
+      runWave: async () => ({ outcome: 'success' }),
+    });
+    assert.equal(code, 0, `expected exit 0; stderr:\n${stderr}`);
+    assert.ok(readLog(logFile).some((e) => e.type === 'pr-opened'));
+  });
+});
+
+test('deliver AC#6 — surface terminal (fail-timeout) → exit 3 with class=needs-decision', async () => {
+  await withTempRepo(async (repoRoot) => {
+    seedApprovedTwoWavePlan(repoRoot);
+    const { code, stderr } = await runDeliverCaptured({
+      repoRoot,
+      runWave: async () => ({ outcome: 'fail-timeout' }),
+    });
+    assert.equal(code, 3, `expected exit 3; stderr:\n${stderr}`);
+    assert.match(stderr, /stopped=matrix/);
+    assert.match(stderr, /class=needs-decision/);
+    assert.match(stderr, /decision="wave 1: fail-timeout/);
+  });
+});
+
+test('deliver AC#6 — abort terminal (fail-scope) → exit 1 with class=failed', async () => {
+  await withTempRepo(async (repoRoot) => {
+    seedApprovedTwoWavePlan(repoRoot);
+    const { code, stderr } = await runDeliverCaptured({
+      repoRoot,
+      runWave: async () => ({ outcome: 'fail-scope' }),
+    });
+    assert.equal(code, 1, `expected exit 1; stderr:\n${stderr}`);
+    assert.match(stderr, /class=failed/);
+    assert.match(stderr, /decision="/);
+  });
+});
+
+test('deliver AC#6 — spine ok but the log lacks a wave-complete → exit 1 completion not evidenced', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const { logFile } = seedApprovedTwoWavePlan(repoRoot);
+    // The post-checks run after every wave-complete and before pr-opened; this
+    // sh strips the wave-complete events there, so the spine still returns ok.
+    const stripSh = (script) => {
+      if (String(script).includes('check-scope')) {
+        const kept = readLog(logFile).filter((e) => e.type !== 'wave-complete');
+        writeFileSync(logFile, kept.map((e) => JSON.stringify(e)).join('\n') + '\n', 'utf8');
+      }
+      return okSh();
+    };
+    const { code, stderr } = await runDeliverCaptured({
+      repoRoot,
+      sh: stripSh,
+      runWave: async () => ({ outcome: 'success' }),
+    });
+    assert.equal(code, 1, `expected exit 1; stderr:\n${stderr}`);
+    assert.match(stderr, /completion not evidenced/);
+  });
+});
+
+for (const bad of ['abc', '0', '-1', '1.5', ' 2']) {
+  test(`deliver AC#5 — malformed RAD_MAX_FAILED_ATTEMPTS '${bad}' → exit 2, no events appended`, async () => {
+    await withTempRepo(async (repoRoot) => {
+      const { logFile } = seedApprovedTwoWavePlan(repoRoot);
+      const before = readFileSync(logFile, 'utf8');
+      let calls = 0;
+      const { code, stderr } = await runDeliverCaptured({
+        repoRoot,
+        env: { RAD_MAX_FAILED_ATTEMPTS: bad },
+        runWave: async () => { calls += 1; return { outcome: 'success' }; },
+      });
+      assert.equal(code, 2, `expected exit 2; stderr:\n${stderr}`);
+      assert.match(stderr, /RAD_MAX_FAILED_ATTEMPTS must be a positive integer/);
+      assert.equal(readFileSync(logFile, 'utf8'), before, 'no event may be appended');
+      assert.equal(calls, 0, 'runWave must never run');
+    });
+  });
+}
+
+test('deliver AC#5 — a valid RAD_MAX_FAILED_ATTEMPTS arms the cap → exit 3 failed-attempt-cap', async () => {
+  await withTempRepo(async (repoRoot) => {
+    seedApprovedTwoWavePlan(repoRoot);
+    let n = 0;
+    const { code, stderr } = await runDeliverCaptured({
+      repoRoot,
+      env: { RAD_MAX_FAILED_ATTEMPTS: '1' },
+      // Distinct summaries so the doom-loop check does not trip first.
+      runWave: async () => ({ outcome: 'fail-tests', summary: `failure ${(n += 1)}` }),
+    });
+    assert.equal(code, 3, `expected exit 3; stderr:\n${stderr}`);
+    assert.match(stderr, /stopped=failed-attempt-cap/);
+    assert.match(stderr, /class=needs-decision/);
+  });
+});
+
+test('deliver AC#6 — plan edited during wave 1 → exit 3 approval-changed before wave 2', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const { planFile, logFile } = seedApprovedTwoWavePlan(repoRoot);
+    const ran = [];
+    const { code, stderr } = await runDeliverCaptured({
+      repoRoot,
+      runWave: async (wave) => {
+        ran.push(wave.n);
+        if (wave.n === 1) writeFileSync(planFile, twoWavePlanText('- [ ] Task C (sneaked in)'), 'utf8');
+        return { outcome: 'success' };
+      },
+    });
+    assert.equal(code, 3, `expected exit 3; stderr:\n${stderr}`);
+    assert.match(stderr, /stopped=approval-changed/);
+    assert.match(stderr, /class=needs-decision/);
+    assert.deepEqual(ran, [1], 'wave 2 must never run');
+    const last = readLog(logFile).at(-1);
+    assert.equal(last.type, 'deliver-stopped');
+  });
+});
+
+test('deliver AC#6 — legacy approval without a fingerprint passes the approval port', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const { planFile } = seedApprovedTwoWavePlan(repoRoot);
+    writeEventLog(repoRoot, DELIVER_FEATURE, [approvedEvent(DELIVER_FEATURE)]);
+    const { code, stderr } = await runDeliverCaptured({
+      repoRoot,
+      runWave: async (wave) => {
+        if (wave.n === 1) writeFileSync(planFile, twoWavePlanText('- [ ] edited'), 'utf8');
+        return { outcome: 'success' };
+      },
+    });
+    assert.equal(code, 0, `legacy approval is fail-open for an unprovable edit; stderr:\n${stderr}`);
   });
 });
