@@ -2065,3 +2065,95 @@ test('(resume-g) AC#7 resume null/absent → event sequence and attemptCtx deep-
   assert.deepEqual(await run({ resume: undefined }), baseline);
   for (const ctx of baseline.ctxs) assert.equal('operatorContext' in ctx, false);
 });
+
+// ── adversarial-gate-evals: spine push guard (Task 1.2) ──
+
+const TIP_A = 'a'.repeat(40);
+const TIP_B = 'b'.repeat(40);
+
+/** An sh fake answering default-tip.sh reads from `tips` in order (each
+ * `{ status, stdout }`); every other script passes. Records every script name. */
+function tipSh(tips) {
+  const calls = [];
+  let reads = 0;
+  const sh = (script) => {
+    calls.push(script);
+    if (script !== 'scripts/default-tip.sh') return { status: 0 };
+    const tip = tips[reads] ?? tips[tips.length - 1];
+    reads += 1;
+    return tip;
+  };
+  return { calls, sh };
+}
+
+const tipOk = (sha) => ({ status: 0, stdout: `${sha}\n` });
+
+test('(push-a) AC#3 tip moved during the wave → attempt demoted to fail-protocol, run stops abort', async () => {
+  const { sh } = tipSh([tipOk(TIP_A), tipOk(TIP_B)]);
+  const { state, result } = await runStopped({ sh, pushGuard: true });
+  assert.equal(result.ok, false);
+  const attempts = state.appended.filter((e) => e.type === 'wave-attempt');
+  assert.equal(attempts.length, 1);
+  assert.equal(attempts[0].data.outcome, 'fail-protocol');
+  const failed = state.appended.find((e) => e.type === 'wave-failed');
+  assert.equal(failed.data.action, 'abort');
+  assertOneTrailingStop(state, { outcome: 'fail-protocol', action: 'abort' });
+  assert.equal(state.appended.some((e) => e.type === 'wave-complete'), false);
+});
+
+test('(push-b) AC#3 tip moved on a FAILING attempt → still fail-protocol (regardless of outcome)', async () => {
+  const { sh } = tipSh([tipOk(TIP_A), tipOk(TIP_B)]);
+  const runWave = async () => ({ outcome: 'fail-tests' });
+  const { state } = await runStopped({ sh, runWave, pushGuard: true });
+  const attempt = state.appended.find((e) => e.type === 'wave-attempt');
+  assert.equal(attempt.data.outcome, 'fail-protocol');
+  assertOneTrailingStop(state, { outcome: 'fail-protocol' });
+});
+
+test('(push-c) AC#3 push-guard overrides a scope demotion', async () => {
+  const { sh: tips } = tipSh([tipOk(TIP_A), tipOk(TIP_B)]);
+  const sh = (script, feature) => (script.endsWith('check-scope.sh') ? { status: 1 } : tips(script, feature));
+  const { state } = await runStopped({ sh, pushGuard: true });
+  const attempt = state.appended.find((e) => e.type === 'wave-attempt');
+  assert.equal(attempt.data.outcome, 'fail-protocol');
+});
+
+test('(push-d) AC#3 tip unchanged (trailing whitespace ignored) → no extra event, normal flow', async () => {
+  const { calls, sh } = tipSh([tipOk(TIP_A), { status: 0, stdout: `  ${TIP_A}  ` }]);
+  const { state, result } = await runStopped({ sh, pushGuard: true });
+  assert.deepEqual(result, { ok: true, waves: 1 });
+  const { state: baseline } = await runStopped();
+  assert.deepEqual(state.appended, baseline.appended);
+  assert.deepEqual(calls.slice(0, 2), ['scripts/default-tip.sh', 'scripts/default-tip.sh']);
+});
+
+for (const [label, tips, status] of [
+  ['before', [{ status: 3, stdout: '' }, tipOk(TIP_B)], 3],
+  ['after', [tipOk(TIP_A), { status: 2, stdout: '' }], 2],
+]) {
+  test(`(push-e-${label}) AC#4 ${label} read fails → push-check-unavailable with status, no demotion`, async () => {
+    const { sh } = tipSh(tips);
+    const { state, result } = await runStopped({ sh, pushGuard: true });
+    assert.deepEqual(result, { ok: true, waves: 1 });
+    const unavailable = state.appended.filter((e) => e.type === 'push-check-unavailable');
+    assert.equal(unavailable.length, 1);
+    assert.equal(unavailable[0].actor, 'harness');
+    assert.equal(typeof unavailable[0].ts, 'string');
+    assert.deepEqual(unavailable[0].data, { wave: 1, attempt: 1, status });
+    assert.equal(state.appended.find((e) => e.type === 'wave-attempt').data.outcome, 'success');
+    assert.equal(phaseOf(state.appended), phaseOf(state.appended.filter((e) => e.type !== 'push-check-unavailable')));
+  });
+}
+
+test('(push-f) AC#4 pushGuard false/absent → default-tip.sh never invoked, sequence identical', async () => {
+  const run = async (extra) => {
+    const { calls, sh } = tipSh([tipOk(TIP_A), tipOk(TIP_B)]);
+    const runWave = capturingRunWave(['fail-tests', 'success', 'success']).runWave;
+    const { state } = await runStopped({ state: makeValidatingState({ plan: twoWaves }), runWave, sh, ...extra });
+    return { events: state.appended, calls };
+  };
+  const baseline = await run({});
+  assert.equal(baseline.calls.includes('scripts/default-tip.sh'), false);
+  const off = await run({ pushGuard: false });
+  assert.deepEqual(off, baseline);
+});

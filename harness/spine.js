@@ -205,6 +205,51 @@ function scopeDemotion(sh, feature) {
   };
 }
 
+/** Reads the remote default branch's tip sha (via the `sh` port; the CLI maps it
+ * to `default-tip.sh origin <base>`). Read immediately before and after every
+ * runWave when `pushGuard` is on, so a wave that pushed to the default branch is
+ * caught at the attempt that did it. */
+const PUSH_GUARD_SCRIPT = 'scripts/default-tip.sh';
+
+/** The EXISTING outcome a moved default tip demotes to (matrix `abort`): a push
+ * to the default branch is a protocol violation, never a retryable failure. */
+const PUSH_GUARD_OUTCOME = 'fail-protocol';
+
+/**
+ * Push guard: compare the default-tip reads taken around runWave. Returns null
+ * when the tip did not move OR either read failed (the caller records the
+ * unavailability as audit, never demotes on it), else the demotion
+ * `{ outcome, gateOutput, gated }` with gate-derived fingerprint fields only.
+ */
+function pushGuardDemotion(before, after) {
+  if (before.status !== 0 || after.status !== 0) return null;
+  if ((before.stdout ?? '').trim() === (after.stdout ?? '').trim()) return null;
+  return {
+    outcome: PUSH_GUARD_OUTCOME,
+    gateOutput: '',
+    gated: {
+      outcome: PUSH_GUARD_OUTCOME,
+      gateStatus: 1,
+      categories: ['push-guard'],
+      summary: 'default branch tip moved during the wave',
+    },
+  };
+}
+
+/** Append the audit-only `push-check-unavailable` when either tip read failed;
+ * carries the first non-zero status. A no-op when both reads succeeded. */
+function recordPushCheckUnavailable({ state, feature, now, wave, attempt, before, after }) {
+  const status = before.status !== 0 ? before.status : after.status;
+  if (status === 0) return;
+  state.append({
+    feature,
+    type: 'push-check-unavailable',
+    actor: 'harness',
+    ts: now(),
+    data: { wave: wave.n, attempt, status },
+  });
+}
+
 /** Post-check guardrails, run in order after all waves. The test-PRESENCE gate
  * now runs per-wave (a promised-but-absent test file blocks AT the wave that
  * promised it, not at the end), so check-tests-present is no longer an end
@@ -466,6 +511,13 @@ function convergeOrphans({ history, wave, matrix, state, feature, now, runHooks 
  *   FIRST runWave call of this run — whichever wave/attempt that is — receives
  *   `operatorContext: { context, stop }` on its attemptCtx; every later call omits
  *   the key. Null/absent adds no event and no attemptCtx key (byte-for-byte today).
+ * @param {boolean} [args.pushGuard] - OPTIONAL push guard (default false). When
+ *   true, the default branch tip is read through `sh(PUSH_GUARD_SCRIPT, feature)`
+ *   immediately before and after every runWave. A moved tip demotes that attempt
+ *   to `fail-protocol` (matrix `abort`) regardless of the agent's outcome, and
+ *   overrides any presence/Verify/scope demotion or post-wave veto. A failed read
+ *   appends an audit-only `push-check-unavailable` and does not demote. False
+ *   never calls the script — the event sequence is byte-for-byte today's.
  * @returns {Promise<Object>} structured terminal result
  */
 export async function deliverSpine({
@@ -486,6 +538,7 @@ export async function deliverSpine({
   approvalIntact = ALWAYS_INTACT,
   maxFailedAttempts = null,
   resume = null,
+  pushGuard = false,
 }) {
   // ── DET gate: approval. The human (or proxy) decided earlier; here we ENFORCE
   // it. A blocked gate is a normal outcome — return structured, append nothing
@@ -657,7 +710,12 @@ export async function deliverSpine({
         attemptCtx.operatorContext = { context: resume.context, stop: resume.stop };
         operatorContextPending = false;
       }
+      const tipBefore = pushGuard ? sh(PUSH_GUARD_SCRIPT, feature) : null;
       const result = await runWave(wave, attemptCtx);
+      const tipAfter = pushGuard ? sh(PUSH_GUARD_SCRIPT, feature) : null;
+      if (pushGuard) {
+        recordPushCheckUnavailable({ state, feature, now, wave, attempt, before: tipBefore, after: tipAfter });
+      }
 
       // ── Hook: post-wave (veto-capable point). Fired after the wave result,
       // before the per-wave test-presence gate. A veto here REPLACES the wave's
@@ -777,6 +835,16 @@ export async function deliverSpine({
             if (demoted) ({ outcome, gateOutput, gated } = demoted);
           }
         }
+      }
+
+      // ── Push guard. Applied REGARDLESS of the reported outcome (a push to the
+      // default branch is a protocol violation even on a failing attempt) and
+      // LAST, so it overrides every demotion and veto above; the outcome is then
+      // no longer the veto's, so the veto provenance tag is dropped. ──
+      const pushDemoted = pushGuard ? pushGuardDemotion(tipBefore, tipAfter) : null;
+      if (pushDemoted) {
+        ({ outcome, gateOutput, gated } = pushDemoted);
+        vetoSource = null;
       }
 
       // `tasks` rides on the same REAL runWave result as `usage` and is likewise
