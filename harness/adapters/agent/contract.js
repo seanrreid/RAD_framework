@@ -87,13 +87,72 @@ function renderPriorFailure(priorFailure) {
   return `\n${PRIOR_FAILURE_HEADING}\n\n${body}\n`;
 }
 
+/** The label opening the optional resumed-run section. */
+const OPERATOR_CONTEXT_HEADING = '## Operator Context (resumed run)';
+
+/** Minimum Markdown code-fence length (a plain ``` fence). */
+const MIN_FENCE_LENGTH = 3;
+
+/**
+ * A backtick fence strictly longer than any backtick run inside `text`, so the
+ * operator's verbatim input can never close the fence early (CommonMark: a
+ * closing fence must be at least as long as the opening one).
+ *
+ * @param {string} text
+ * @returns {string}
+ */
+function fenceFor(text) {
+  const runs = text.match(/`+/g) ?? [];
+  const longest = runs.reduce((max, run) => Math.max(max, run.length), 0);
+  return '`'.repeat(Math.max(MIN_FENCE_LENGTH, longest + 1));
+}
+
+/**
+ * Render the OPTIONAL `## Operator Context (resumed run)` section.
+ *
+ * Returns '' for null/undefined so the empty case reproduces the prompt
+ * BYTE-FOR-BYTE (AC#7); like renderPriorFailure, the section owns its own
+ * surrounding blank lines. The operator's context is carried VERBATIM — never
+ * trimmed, truncated, or escaped — inside a fence longer than any backtick run
+ * it contains.
+ *
+ * Constraint: a present-but-malformed value throws rather than rendering a
+ * partial section — a resumed run must not silently lose the operator's input.
+ *
+ * @param {{ context: string, stop: { class: string, reason: string, decision: string, wave?: number } } | null | undefined} operatorContext
+ * @returns {string} '' or the section, wrapped in its own separators
+ */
+function renderOperatorContext(operatorContext) {
+  if (operatorContext === null || operatorContext === undefined) return '';
+
+  const { context, stop } = operatorContext;
+  if (typeof context !== 'string') {
+    throw new TypeError('operatorContext.context must be a string');
+  }
+  if (!stop || typeof stop !== 'object') {
+    throw new TypeError('operatorContext.stop must be an object');
+  }
+
+  const wave = stop.wave ?? 'unknown';
+  const fence = fenceFor(context);
+  const body = [
+    `The previous run stopped (${stop.class}, reason: ${stop.reason}, wave ${wave}):\n${stop.decision}`,
+    'The operator resumed it with this input (verbatim):',
+    `${fence}\n${context}\n${fence}`,
+  ].join('\n\n');
+
+  return `\n${OPERATOR_CONTEXT_HEADING}\n\n${body}\n`;
+}
+
 /**
  * Build the wave prompt string from plan state, following the exact template
  * defined in .claude/commands/team/rad-deliver.md Step 6.
  *
  * @param {Object} wave - wave descriptor from the plan
  * @param {Object} planCtx - orchestrator plan context; may additionally carry the
- *   OPTIONAL `priorFailure` attempt context folded in by the deliver CLI
+ *   OPTIONAL `priorFailure` attempt context folded in by the deliver CLI, and the
+ *   OPTIONAL `operatorContext` ({ context, stop }) supplied when an operator
+ *   resumes a stopped run — rendered verbatim after the prior-failure section
  * @returns {string}
  */
 export function buildWavePrompt(wave, planCtx) {
@@ -104,6 +163,7 @@ export function buildWavePrompt(wave, planCtx) {
     executionNotes = {},
     acceptanceCriteria = [],
     priorFailure = null,
+    operatorContext = null,
   } = planCtx;
 
   const { doNotTouch = [], keyFiles = [], reminders = [] } = executionNotes;
@@ -127,6 +187,10 @@ export function buildWavePrompt(wave, planCtx) {
   // the template below renders byte-for-byte the prompt it rendered before this
   // section existed.
   const priorFailureBlock = renderPriorFailure(priorFailure);
+
+  // '' when the run was not resumed with operator input — same byte-for-byte
+  // guarantee as priorFailureBlock (AC#7).
+  const operatorContextBlock = renderOperatorContext(operatorContext);
 
   const acBlock = acceptanceCriteria.length
     ? acceptanceCriteria.map((ac, i) => `- AC#${i + 1}: ${ac}`).join('\n')
@@ -164,7 +228,7 @@ ${keyFilesBlock}
 
 ### Reminders
 ${remindersBlock}
-${priorFailureBlock}
+${priorFailureBlock}${operatorContextBlock}
 ## Guardrail Extensions
 
 Before writing any code, complete this protocol:

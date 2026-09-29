@@ -470,3 +470,104 @@ test('command adapter — a RAD_USAGE line carries cacheRead / cacheWrite / cost
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// ---------------------------------------------------------------------------
+// buildWavePrompt — AC#2/AC#3/AC#7 the optional `## Operator Context (resumed run)`
+// section. Absence changes nothing; presence carries the operator's input
+// verbatim, fenced so it cannot close its own fence, after any prior failure.
+// ---------------------------------------------------------------------------
+
+const OPERATOR_HEADING = '## Operator Context (resumed run)';
+const OPERATOR_STOP = {
+  class: 'needs-decision',
+  reason: 'fail-scope',
+  decision: 'Wave touched a file outside scope — allow it or re-plan?',
+  wave: 2,
+};
+
+test('buildWavePrompt — AC#7 absent operatorContext renders the prompt byte-for-byte', () => {
+  const legacy = buildWavePrompt(PROMPT_WAVE, PROMPT_CTX); // no key at all
+  for (const operatorContext of [null, undefined]) {
+    const explicit = buildWavePrompt(PROMPT_WAVE, { ...PROMPT_CTX, operatorContext });
+    assert.equal(explicit, legacy, `an explicit ${String(operatorContext)} must change nothing`);
+  }
+  assert.ok(!legacy.includes('Operator Context'), 'no section when not resumed');
+});
+
+test('buildWavePrompt — AC#2 operator context renders verbatim after Reminders, before Guardrail Extensions', () => {
+  const context = '  Allow the out-of-scope edit to docs/x.md.\n\nKeep trailing space ';
+  const prompt = buildWavePrompt(PROMPT_WAVE, {
+    ...PROMPT_CTX,
+    operatorContext: { context, stop: OPERATOR_STOP },
+  });
+  const expected = [
+    '',
+    OPERATOR_HEADING,
+    '',
+    'The previous run stopped (needs-decision, reason: fail-scope, wave 2):',
+    OPERATOR_STOP.decision,
+    '',
+    'The operator resumed it with this input (verbatim):',
+    '',
+    '```',
+    context,
+    '```',
+    '',
+  ].join('\n');
+  assert.ok(prompt.includes(expected), 'section rendered exactly, context untrimmed');
+  const reminders = prompt.indexOf('### Reminders');
+  const heading = prompt.indexOf(OPERATOR_HEADING);
+  const guardrails = prompt.indexOf('## Guardrail Extensions');
+  assert.ok(reminders < heading && heading < guardrails, 'slotted between Reminders and Guardrail Extensions');
+});
+
+test('buildWavePrompt — AC#3 the fence outgrows any backtick run inside the context', () => {
+  const cases = [
+    ['use ```js blocks```', '````'],
+    ['nested ```` four', '`````'],
+    ['single ` and double `` only', '```'],
+    ['', '```'],
+  ];
+  for (const [context, fence] of cases) {
+    const prompt = buildWavePrompt(PROMPT_WAVE, {
+      ...PROMPT_CTX,
+      operatorContext: { context, stop: OPERATOR_STOP },
+    });
+    assert.ok(
+      prompt.includes(`(verbatim):\n\n${fence}\n${context}\n${fence}\n`),
+      `fence ${fence.length} for ${JSON.stringify(context)}`,
+    );
+  }
+});
+
+test('buildWavePrompt — AC#2 with both sections, Prior Attempt Failure precedes Operator Context', () => {
+  const prompt = buildWavePrompt(PROMPT_WAVE, {
+    ...PROMPT_CTX,
+    priorFailure: { attempt: 1, outcome: 'fail-tests' },
+    operatorContext: { context: 'proceed', stop: OPERATOR_STOP },
+  });
+  const prior = prompt.indexOf('## Prior Attempt Failure');
+  const operator = prompt.indexOf(OPERATOR_HEADING);
+  assert.ok(prior !== -1 && operator !== -1, 'both sections rendered');
+  assert.ok(prior < operator, 'prior failure renders first');
+  assert.ok(prompt.includes('fail-tests\n\n## Operator Context'), 'exactly one blank line between sections');
+});
+
+test('buildWavePrompt — AC#2 a stop without a wave reads "wave unknown"', () => {
+  const { wave: _omit, ...stop } = OPERATOR_STOP;
+  const prompt = buildWavePrompt(PROMPT_WAVE, {
+    ...PROMPT_CTX,
+    operatorContext: { context: 'go', stop },
+  });
+  assert.ok(prompt.includes('(needs-decision, reason: fail-scope, wave unknown):'));
+});
+
+test('buildWavePrompt — a malformed operatorContext throws instead of dropping the input', () => {
+  for (const bad of [{ stop: OPERATOR_STOP }, { context: 42, stop: OPERATOR_STOP }, { context: 'x' }, {}]) {
+    assert.throws(
+      () => buildWavePrompt(PROMPT_WAVE, { ...PROMPT_CTX, operatorContext: bad }),
+      TypeError,
+      `rejects ${JSON.stringify(bad)}`,
+    );
+  }
+});
