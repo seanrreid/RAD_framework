@@ -1,7 +1,10 @@
 # Plan: Deliver Stop Contract (typed terminals, needs-decision exit, between-wave checks)
 Created: 2026-09-28
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-09-29T14:54:08.158Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/deliver-stop-contract
 Adopted-From: https://github.com/seanrreid/RAD_framework/issues/77, https://github.com/seanrreid/RAD_framework/issues/108
 Issue-Title: Autonomous-mode stop contract (#77) + Attendedness as a dimension of the stop-condition matrix (#108)
