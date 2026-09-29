@@ -1,7 +1,7 @@
 # Plan: Invariant Registry + Anchor Lint, and Matrix/Gates Replay Check
 Created: 2026-09-29
 Author: architect
-Status: approved
+Status: in-progress
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-09-29T18:22:14.858Z
 Recorded-By: sean@torchcodelab.com
