@@ -1,7 +1,7 @@
 # Plan: Adversarial Gate Evals + Composed-Path Fixes + Push Guard
 Created: 2026-09-29
 Author: architect
-Status: approved
+Status: in-progress
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-09-29T20:27:36.972Z
 Recorded-By: sean@torchcodelab.com

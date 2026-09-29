@@ -16,3 +16,4 @@ Executor role: architect
 | 4 | Wave 2 | Eval fixture builder + runner | ✓ done_with_concerns (pre-fix repro stops fail-tests→doom-loop; detect-platform.sh ignores CLAUDE.md platform:) | c49529d | 16:15 |
 | 5 | Wave 3 | Approval and repository eval cases | ✓ done_with_concerns (CLI does not check fingerprint before wave 1 → amendment 2) | 519bb83 | 16:23 |
 | 6 | Wave 3 | Delivery eval cases | ✓ complete | 8017bfa | 16:23 |
+| — | Amend | Re-approved after amendment 2 | — | — | 16:27 |
