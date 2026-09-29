@@ -20,6 +20,7 @@ import {
   cacheUsage,
   findOrphanAttempts,
   priorAttemptState,
+  deliverCompleted,
   modelTierSpend,
   modelTierAdvisories,
   UPGRADE_RETRY_RATE,
@@ -1056,6 +1057,81 @@ test('priorAttemptState is zeroed on invalid history or wave input', () => {
     assert.deepStrictEqual(priorAttemptState(history, wave), PRIOR_ZERO);
   }
   assert.deepStrictEqual(priorAttemptState([null, { type: 'wave-attempt' }], 1), PRIOR_ZERO);
+});
+
+// ── deliverCompleted (#77) ───────────────────────────────────────────────────
+// The rad-deliver exit-0 authority: a wave-complete for every wave 1..N
+// ANYWHERE in the history (as resumeFrom counts them) AND a pr-opened after the
+// LATEST deliver-started.
+
+const ev = (type, data) => ({ feature: 'f', type, actor: 'harness', ...(data ? { data } : {}) });
+const COMPLETE_RUN = [
+  ev('approved'),
+  ev('deliver-started'),
+  ev('wave-attempt', { wave: 1, outcome: 'success' }),
+  ev('wave-complete', { wave: 1 }),
+  ev('wave-attempt', { wave: 2, outcome: 'success' }),
+  ev('wave-complete', { wave: 2 }),
+  ev('pr-opened'),
+];
+
+test('deliverCompleted is true for a complete latest run', () => {
+  assert.equal(deliverCompleted(deepFreeze(COMPLETE_RUN), 2), true);
+});
+
+test('deliverCompleted is false when a wave-complete is missing', () => {
+  const history = deepFreeze(COMPLETE_RUN.filter((e) => !(e.type === 'wave-complete' && e.data.wave === 2)));
+  assert.equal(deliverCompleted(history, 2), false);
+  // A string wave id never counts as wave 1.
+  const stringWave = deepFreeze([ev('deliver-started'), ev('wave-complete', { wave: '1' }), ev('pr-opened')]);
+  assert.equal(deliverCompleted(stringWave, 1), false);
+});
+
+test('deliverCompleted is false when pr-opened is missing', () => {
+  assert.equal(deliverCompleted(deepFreeze(COMPLETE_RUN.filter((e) => e.type !== 'pr-opened')), 2), false);
+});
+
+test('deliverCompleted counts waves a prior run completed (resumed run)', () => {
+  // Run 1 completed wave 1 then stopped; run 2 resumed, ran only wave 2, opened the PR.
+  const resumed = deepFreeze([
+    ev('approved'),
+    ev('deliver-started'),
+    ev('wave-attempt', { wave: 1, outcome: 'success' }),
+    ev('wave-complete', { wave: 1 }),
+    ev('deliver-stopped', { class: 'failed' }),
+    ev('deliver-started'),
+    ev('wave-attempt', { wave: 2, outcome: 'success' }),
+    ev('wave-complete', { wave: 2 }),
+    ev('pr-opened'),
+  ]);
+  assert.equal(deliverCompleted(resumed, 2), true);
+  // A wave missing from the whole history is still not complete.
+  assert.equal(deliverCompleted(resumed, 3), false);
+});
+
+test('deliverCompleted requires pr-opened after the latest deliver-started', () => {
+  // A prior complete run, then a re-run that started and stopped: every wave is
+  // complete somewhere, but the latest run never opened the PR.
+  const history = deepFreeze([...COMPLETE_RUN, ev('deliver-started'), ev('deliver-stopped', { class: 'failed' })]);
+  assert.equal(deliverCompleted(history, 2), false);
+  // pr-opened only before the latest deliver-started does not count.
+  const prBefore = deepFreeze([
+    ev('pr-opened'),
+    ev('deliver-started'),
+    ev('wave-complete', { wave: 1 }),
+  ]);
+  assert.equal(deliverCompleted(prBefore, 1), false);
+});
+
+test('deliverCompleted is false on bad input and never throws', () => {
+  for (const input of [[], null, undefined, 'x', 7, {}, { length: 2 }]) {
+    assert.equal(deliverCompleted(input, 2), false);
+  }
+  for (const count of [0, -1, 1.5, NaN, '2', null, undefined]) {
+    assert.equal(deliverCompleted(deepFreeze(COMPLETE_RUN), count), false);
+  }
+  assert.equal(deliverCompleted([null, 7, { type: 'wave-complete' }], 1), false);
+  assert.equal(deliverCompleted(deepFreeze(COMPLETE_RUN.filter((e) => e.type !== 'deliver-started')), 2), false);
 });
 
 // ── modelTierSpend / modelTierAdvisories ─────────────────────────────────────

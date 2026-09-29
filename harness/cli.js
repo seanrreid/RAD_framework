@@ -30,6 +30,8 @@ import { deliverSpine } from './spine.js';
 import { createCommandAdapter, probeCommand } from './adapters/agent/command.js';
 import { sanitizeErrorMessage } from './adapters/agent/contract.js';
 import { loadMatrix } from './matrix.js';
+import { classifyStop, STOP_CLASSES } from './stops.js';
+import { deliverCompleted } from './events.js';
 
 const SUBCOMMANDS = {
   approve: {
@@ -92,6 +94,17 @@ const PREFLIGHT_TIMEOUT_ENV = 'RAD_AGENT_PREFLIGHT_TIMEOUT_SECONDS';
 const POSITIVE_INTEGER_PATTERN = /^[1-9][0-9]*$/;
 /** Exit code for a malformed deliver configuration value. */
 const USAGE_EXIT_CODE = 2;
+/** Exit code for a deliver stop a human can lift (#77 `needs-decision`). */
+const NEEDS_DECISION_EXIT_CODE = 3;
+/** Exit code for a deliver stop showing the work is wrong (#77 `failed`). */
+const FAILED_EXIT_CODE = 1;
+
+/**
+ * Env var arming the spine's cumulative failed-attempt cap (#77). Unset or
+ * empty = off; anything but a positive integer is a hard usage error (exit 2,
+ * before any event) — a typo must never silently disable the cap.
+ */
+const MAX_FAILED_ATTEMPTS_ENV = 'RAD_MAX_FAILED_ATTEMPTS';
 
 /** The harness package root (where cli.js lives). */
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -647,6 +660,99 @@ async function setupWorktreeRun({ ctx, feature, model, agentKind, repoRoot, sh }
 }
 
 /**
+ * Parse RAD_MAX_FAILED_ATTEMPTS. Unset/empty → `cap: null` (the cap is off);
+ * a positive integer → that cap; anything else → `{ ok: false }` (exit 2).
+ *
+ * @returns {{ ok: true, cap: number|null } | { ok: false, raw: string }}
+ */
+function maxFailedAttemptsFromEnv() {
+  const raw = process.env[MAX_FAILED_ATTEMPTS_ENV];
+  if (raw === undefined || raw === '') return { ok: true, cap: null };
+  if (!POSITIVE_INTEGER_PATTERN.test(raw)) return { ok: false, raw };
+  return { ok: true, cap: Number(raw) };
+}
+
+/** The LATEST `approved` event in `history`, or null when there is none. */
+function latestApprovedEvent(history) {
+  const approvals = (Array.isArray(history) ? history : []).filter((e) => e && e.type === 'approved');
+  return approvals.length > 0 ? approvals[approvals.length - 1] : null;
+}
+
+/**
+ * Build the spine's `approvalIntact` port (#77): re-read the plan doc on EVERY
+ * call and compare its body fingerprint to the LATEST approved event's
+ * `data.fingerprint`. A legacy approval carrying no fingerprint passes (matches
+ * check-plan-approved.sh — an edit cannot be proven). Fail-closed otherwise: an
+ * unreadable plan or a missing approved event is not intact.
+ *
+ * @returns {() => { ok: true } | { ok: false, reason: string }}
+ */
+function makeApprovalIntact({ root, state, feature }) {
+  const planFile = join(root, '.agents', 'plans', `${feature}.md`);
+  return () => {
+    let text;
+    try {
+      text = readFileSync(planFile, 'utf8');
+    } catch (err) {
+      return { ok: false, reason: `plan doc unreadable: ${sanitizeErrorMessage(err?.message ?? String(err))}` };
+    }
+    const approved = latestApprovedEvent(state.history(feature));
+    if (!approved) return { ok: false, reason: 'no approved event in the log' };
+    const stored = approved.data?.fingerprint;
+    if (typeof stored !== 'string' || stored === '') return { ok: true };
+    const current = planFingerprint(text).hash;
+    if (current === stored) return { ok: true };
+    return { ok: false, reason: `plan fingerprint ${current} differs from approved ${stored}` };
+  };
+}
+
+/**
+ * Fail-closed completion check: a spine `ok` exits 0 only when the event log
+ * itself evidences it (deliverCompleted). Must run BEFORE worktree teardown,
+ * which removes the tree the log lives in.
+ *
+ * @returns {{ completed: boolean, detail: string }}
+ */
+function completionEvidence(result, state, feature) {
+  if (!result.ok) return { completed: false, detail: '' };
+  try {
+    const completed = deliverCompleted(state.history(feature), result.waves);
+    return { completed, detail: completed ? '' : 'event log lacks wave-complete/pr-opened' };
+  } catch (err) {
+    return { completed: false, detail: `event log unreadable: ${sanitizeErrorMessage(err?.message ?? String(err))}` };
+  }
+}
+
+/**
+ * Classify a stopped terminal. An unclassifiable shape (classifyStop throws) is
+ * reported as `failed` with the reason in the decision — never exit 0 or 3.
+ */
+function classifyTerminal(result) {
+  try {
+    return classifyStop(result);
+  } catch (err) {
+    return { class: STOP_CLASSES.FAILED, reason: 'unclassified', decision: `unclassified stop: ${err.message}` };
+  }
+}
+
+/** Write the machine-greppable failure line and return the stop's exit code. */
+function reportStop({ result, feature, worktree, root }) {
+  const stop = classifyTerminal(result);
+  process.stderr.write(
+    `rad deliver: failed feature=${feature} stopped=${result.stopped}` +
+    (result.wave !== undefined ? ` wave=${result.wave}` : '') +
+    (result.action ? ` action=${result.action}` : '') +
+    (result.check ? ` check=${result.check}` : '') +
+    (result.spent !== undefined ? ` spent=${result.spent}` : '') +
+    (result.budget !== undefined ? ` budget=${result.budget}` : '') +
+    (worktree ? ` worktree=${root}` : '') +
+    ` class=${stop.class} decision="${stop.decision}"` +
+    '\n',
+  );
+  return stop.class === STOP_CLASSES.NEEDS_DECISION ? NEEDS_DECISION_EXIT_CODE : FAILED_EXIT_CODE;
+}
+
+/**
  * `deliver <feature> [--model <model-id>]`.
  *
  * Reads the approved plan, constructs an SDK-backed runWave, and drives
@@ -695,6 +801,16 @@ export async function deliverCommand(argv, ctx) {
     return 1;
   }
 
+  // Failed-attempt cap: parsed BEFORE setup so a malformed value exits 2 with
+  // no worktree created and no event appended.
+  const failedCap = maxFailedAttemptsFromEnv();
+  if (!failedCap.ok) {
+    process.stderr.write(
+      `rad deliver: ${MAX_FAILED_ATTEMPTS_ENV} must be a positive integer (got '${failedCap.raw}')\n`,
+    );
+    return USAGE_EXIT_CODE;
+  }
+
   // Optional worktree isolation. RAD_WORKTREE follows the env-knob convention:
   // unset/empty = OFF (exact today's behavior — main checkout, no worktree port,
   // everything rooted at repoRoot); any non-empty value = ON: the gate is read
@@ -736,6 +852,8 @@ export async function deliverCommand(argv, ctx) {
       // Per-wave `Model:` ids (parseWaveModels — the sole Model: parser), recorded
       // on each wave-started. Empty for a plan that declares none.
       waveModels: planCtx.waveModels,
+      approvalIntact: makeApprovalIntact({ root, state, feature }),
+      maxFailedAttempts: failedCap.cap,
     });
   } catch (err) {
     // Unexpected spine throw: still preserve the worktree (so the operator can
@@ -750,17 +868,19 @@ export async function deliverCommand(argv, ctx) {
     return 1;
   }
 
-  // Worktree cleanup, keyed off the spine's terminal-result shape: complete (tear
-  // down) on success, preserve (keep for inspection) on any stopped terminal.
+  const evidence = completionEvidence(result, state, feature);
+
+  // Worktree cleanup: complete (tear down) only on EVIDENCED success, preserve
+  // (keep for inspection) on any stop or an ok the log does not confirm.
   if (worktree) {
-    if (result.ok) {
+    if (evidence.completed) {
       worktree.complete(feature);
     } else {
       worktree.preserve(feature);
     }
   }
 
-  if (result.ok) {
+  if (evidence.completed) {
     // Best-effort publish (RAD_SYNC-gated): deliver recorded wave events on the
     // work-branch tip; push it so the process memory is portable across machines.
     // Never fails the verb (offline-fail-safe). Worktree mode pushes the branch it
@@ -774,19 +894,18 @@ export async function deliverCommand(argv, ctx) {
     return 0;
   }
 
-  // Structured failure line (machine-greppable). When a worktree was preserved,
-  // surface its path so the operator can find the isolated tree.
-  process.stderr.write(
-    `rad deliver: failed feature=${feature} stopped=${result.stopped}` +
-    (result.wave !== undefined ? ` wave=${result.wave}` : '') +
-    (result.action ? ` action=${result.action}` : '') +
-    (result.check ? ` check=${result.check}` : '') +
-    (result.spent !== undefined ? ` spent=${result.spent}` : '') +
-    (result.budget !== undefined ? ` budget=${result.budget}` : '') +
-    (worktree ? ` worktree=${root}` : '') +
-    '\n',
-  );
-  return 1;
+  if (result.ok) {
+    // The spine said ok but the log does not evidence it: fail closed.
+    process.stderr.write(
+      `rad deliver: failed feature=${feature} completion not evidenced (${evidence.detail})` +
+      (worktree ? ` worktree=${root}` : '') +
+      '\n',
+    );
+    return FAILED_EXIT_CODE;
+  }
+
+  // Structured failure line (machine-greppable); exit code by stop class.
+  return reportStop({ result, feature, worktree, root });
 }
 
 /**

@@ -52,7 +52,7 @@ interface StateStore {
   // TransitionError and is never written (see Decision 4).
   append(event: Event): void
 
-  // GATE — a deterministic predicate the harness pauses on (first-class; see below)
+  // GATE — a deterministic predicate the harness stops on (first-class; see below)
   gate(feature, name): GateResult    // { passed, reason, requiredRole?, satisfiedBy? }
 }
 
@@ -272,6 +272,16 @@ Two refinements we take from Case alongside the table:
   implementer as structured feedback (`revision`), capped (Case uses two cycles),
   with the fingerprint breaker as the early-exit.
 
+**`surface` is a terminal return, not a pause.** The harness never parks waiting
+for a human: `surface` (like `abort`) ends the run with a typed stop, classified
+`needs-decision` by `harness/stops.js`. Attended vs unattended is the caller's
+concern — see the Stop contract in [`rad-wave-contract.md`](./rad-wave-contract.md).
+
+**`deliver-stopped` is audit-only.** Every stop after `deliver-started` appends
+one `deliver-stopped` event `{ class, reason, decision, wave?, action?, outcome? }`.
+It is deliberately absent from `PHASE_BY_TYPE`, so it never moves the phase and a
+re-run after it is legal. Success appends none (success is `pr-opened`).
+
 ## `rad-deliver` as a harness spine, calling the ports
 
 This is the audit's step-1 prototype, written against the ports and driven by the
@@ -288,7 +298,7 @@ const docs  = openArtifacts()    // adapter from config: 'git' | 'fs' | …
 const g = state.gate(feature, 'approved')
 if (!g.passed) {
   log(`Blocked: ${g.reason}`)
-  return { stopped: 'gate', gate: 'approved' }   // pause — do not automate the decision away
+  return { stopped: 'gate', gate: 'approved' }   // terminal stop — do not automate the decision away
 }
 
 const plan = state.plan(feature)

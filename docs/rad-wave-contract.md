@@ -215,6 +215,99 @@ Run-level failures the adapter detects before/around parsing map directly:
 
 ---
 
+## Stop contract
+
+Every `rad deliver` run ends in exactly one typed terminal. The classification
+lives in `harness/stops.js` (`classifyStop`), which is pure and fail-closed: an
+unknown `stopped` value, an unknown matrix action, or a malformed result
+**throws** — there is no default class, so a new terminal must be added to the
+table, never silently bucketed.
+
+### Completion criteria
+
+A run is **complete** only when the event log shows it: a `wave-complete` for
+every plan wave **anywhere** in the history (counted as `resumeFrom` counts
+them, so waves a prior run completed still count after a resume) **and** a
+`pr-opened` after the latest `deliver-started`, so the current run itself
+finished and opened the PR (the pure `deliverCompleted` fold). **The agent's claim is not evidence** — a
+`WAVE_RESULT` saying `complete` only feeds the matrix; completion is read from
+recorded events, never from the agent's text. A run whose spine returns without
+that evidence exits `1` ("completion not evidenced").
+
+### Evaluation rule
+
+Every stop decision is evaluated over **observable state only** — the event log,
+the plan doc and its fingerprint, and the exit codes of deterministic checks.
+No stop is resolved by model judgment.
+
+### Classification table
+
+Two classes: `needs-decision` (a limit or policy a human can lift, or a
+non-deterministic condition — a retry, a raised limit, or a re-approval may
+succeed) and `failed` (a deterministic check showed the work is wrong for the
+plan — re-running unchanged cannot succeed).
+
+| `stopped` | Class | `reason` | Decision line |
+|-----------|-------|----------|---------------|
+| `matrix`, action `surface` | `needs-decision` | matrix outcome | `{wave}: {outcome} — non-deterministic failure (e.g. timeout/orphaned attempt); retry, raise the limit, or split the wave` |
+| `matrix`, action `abort` | `failed` | matrix outcome | `{wave}: {outcome} — the work is wrong for the plan; fix the plan or the code and re-run` |
+| `hook-veto` | per its action (`surface` / `abort`, as above) | matrix outcome | the matching matrix line + ` — vetoed by hook {hook} at {point}` |
+| `doom-loop` | `failed` | `doom-loop` | `{wave} failed identically twice — a retry cannot fix it` |
+| `budget` (maxAttempts) | `failed` | `budget` | `{wave} exhausted its attempts` |
+| `post-check` | `failed` | `post-check` | `post-check {check} exited {status}` |
+| `resume-verify` | `failed` | `resume-verify` | `resume verify: a test file promised by an already-completed wave is missing; restore it and re-run` |
+| `token-budget` | `needs-decision` | `token-budget` | `token budget {budget} reached (spent {spent}); raise RAD_TOKEN_BUDGET or stop` |
+| `failed-attempt-cap` | `needs-decision` | `failed-attempt-cap` | `{failed} failed attempts reached RAD_MAX_FAILED_ATTEMPTS={cap}; raise the cap, re-plan, or stop` |
+| `approval-changed` | `needs-decision` | `approval-changed` | `the plan changed since approval (or approval no longer holds); re-approve before re-running` |
+| `gate` (pre-start) | `needs-decision` | `gate` | `plan not approved; run /rad-approve` |
+
+`{wave}` renders as `wave N` (or `the wave` when absent); any other absent
+placeholder renders as `unknown`.
+
+Every stop after `deliver-started` appends exactly one audit-only
+`deliver-stopped` event `{ class, reason, decision, wave?, action?, outcome? }`.
+Success appends none — success is `pr-opened`. A pre-start `gate` stop happens
+before `deliver-started` and so records no event.
+
+### Between-wave checks
+
+After each successful wave, before the next one starts, the spine runs:
+
+- **Approval re-check** — the gate fold plus the plan fingerprint compared to the
+  approved one. A lapsed approval or an edited plan stops with `approval-changed`.
+- **Scope check** — `scripts/check-scope.sh`. A non-zero exit demotes the wave to
+  `fail-scope`, which the matrix routes to `abort`.
+
+The end-of-run post-checks are retained unchanged.
+
+### `RAD_MAX_FAILED_ATTEMPTS`
+
+Opt-in (positive integer). Counts cumulative non-success wave-attempts since the
+latest `deliver-stopped`; reaching the cap stops with `failed-attempt-cap`. A
+malformed value (non-numeric, zero, negative) exits `2` before any event is
+appended. Unset = no cap.
+
+### Exit codes
+
+| Code | Meaning |
+|------|---------|
+| `0` | complete (evidenced by the `deliverCompleted` fold) |
+| `1` | failed — including "completion not evidenced" |
+| `2` | usage / config error |
+| `3` | needs a human decision |
+
+The stderr failure line carries `class=` and `decision=`.
+
+### The harness never parks
+
+`surface` is a **terminal return, not a pause** — the harness never waits for a
+human mid-run. Attended vs unattended is the **caller's** concern: an unattended
+caller (CI, a script) branches on the exit code; a `/rad-deliver` session is the
+attended wrapper that relays the decision line to the operator. No attendedness
+input exists in the harness.
+
+---
+
 ## Writing a new adapter
 
 Both shipped adapters follow the same skeleton; reuse the shared helpers in

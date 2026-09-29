@@ -30,6 +30,7 @@ import { resolveOutcome } from './matrix.js';
 import { fingerprint } from './fingerprint.js';
 import { resumeFrom, totalUsage, findOrphanAttempts, priorAttemptState } from './events.js';
 import { OUTCOME_VOCAB } from './hook-runner.js';
+import { classifyStop } from './stops.js';
 
 /** The fail-closed aborting outcome a veto resolves to when its token is somehow
  * not a member of the frozen vocabulary. Mirrors the runner's own fallback so an
@@ -42,6 +43,89 @@ const VETO_ABORT_OUTCOME = 'abort-user';
  * 'abort-user' (which the matrix resolves to `abort`), never an unknown token. */
 function safeVetoOutcome(outcome) {
   return OUTCOME_VOCAB.has(outcome) ? outcome : VETO_ABORT_OUTCOME;
+}
+
+/** Result fields copied onto `deliver-stopped` data when the terminal knows them. */
+const STOP_CONTEXT_KEYS = ['wave', 'action', 'outcome'];
+
+/**
+ * The ONE exit for every post-`deliver-started` terminal (#77): append a single
+ * audit-only `deliver-stopped` event classifying the stop, then return `result`
+ * unchanged. classifyStop throws on an unknown shape; that throw is NOT caught —
+ * an unclassifiable terminal is a harness bug and must surface, not be bucketed.
+ * Classification runs before the append, so a throw appends nothing.
+ */
+function stopRun(result, { state, feature, now }) {
+  const { class: cls, reason, decision } = classifyStop(result);
+  const context = {};
+  for (const key of STOP_CONTEXT_KEYS) {
+    if (result[key] !== undefined && result[key] !== null) context[key] = result[key];
+  }
+  state.append({
+    feature,
+    type: 'deliver-stopped',
+    actor: 'harness',
+    ts: now(),
+    data: { class: cls, reason, decision, ...context },
+  });
+  return result;
+}
+
+/** Neutral approval-integrity port. The default injected `approvalIntact`:
+ * always intact, so omitting it changes nothing (the between-wave re-check then
+ * reduces to re-running the approved gate). */
+const ALWAYS_INTACT = () => ({ ok: true });
+
+/** Render a thrown value's message for a stop reason. */
+function errorMessage(err) {
+  return err && err.message ? err.message : String(err);
+}
+
+/**
+ * Between-wave approval re-check (#77): does the approval this run started
+ * under still hold? Re-runs the `approved` gate, then the injected
+ * `approvalIntact` port. FAIL-CLOSED: a port that throws, or returns anything
+ * but `{ ok: true }`, is NOT intact. Returns null when approval holds, else a
+ * reason string for the `approval-changed` stop.
+ */
+async function approvalChangeReason({ state, feature, approvalIntact }) {
+  const g = await state.gate(feature, 'approved');
+  if (!g.passed) return `approved gate no longer passes: ${g.reason}`;
+  let intact;
+  try {
+    intact = await approvalIntact();
+  } catch (err) {
+    return `approvalIntact threw: ${errorMessage(err)}`;
+  }
+  if (!intact || intact.ok !== true) {
+    return `approval not intact: ${(intact && intact.reason) || 'no reason given'}`;
+  }
+  return null;
+}
+
+/** The one wave-attempt outcome the failed-attempt cap does NOT count. */
+const SUCCESS_OUTCOME = 'success';
+
+/**
+ * Count non-success `wave-attempt` events since the latest `deliver-stopped`
+ * (or from log start when there is none), across ALL waves. Pure. A stop resets
+ * the count, so a re-run after a stop gets a fresh failed-attempt budget.
+ *
+ * @param {Array<{ type: string, data?: { outcome?: string } }>} history
+ * @returns {number}
+ */
+export function failedAttemptsSinceStop(history) {
+  let failed = 0;
+  for (const event of history) {
+    if (event.type === 'deliver-stopped') failed = 0;
+    else if (event.type === 'wave-attempt' && event.data?.outcome !== SUCCESS_OUTCOME) failed += 1;
+  }
+  return failed;
+}
+
+/** The cap is on only for a positive integer; null/0/negative/non-integer = off. */
+function capEnabled(cap) {
+  return Number.isInteger(cap) && cap > 0;
 }
 
 /** Bounded attempt budget per wave — the hard ceiling. The doom-loop breaker is
@@ -72,6 +156,35 @@ const VERIFY_SCRIPT = 'scripts/check-verify.sh';
  * a hang, so a wedged command must surface rather than burn the attempt budget.
  * Kept in lockstep with VERIFY_TIMEOUT_STATUS in scripts/check-verify.sh. */
 const VERIFY_TIMEOUT_STATUS = 124;
+
+/** The scope guardrail, also run per wave (#77) after an advancing outcome so
+ * an out-of-scope edit stops the run AT the wave that made it, not after every
+ * later wave has built on it. The end post-check (POST_CHECKS) is kept. */
+const SCOPE_SCRIPT = 'scripts/check-scope.sh';
+
+/** The EXISTING outcome a failed per-wave scope check demotes to (matrix `abort`). */
+const SCOPE_FAIL_OUTCOME = 'fail-scope';
+
+/**
+ * Per-wave scope gate: run check-scope.sh through the `sh` port (the same call
+ * shape as the end post-check). Returns null when it passes — the caller then
+ * appends NOTHING extra — else the demotion `{ outcome, gateOutput, gated }`,
+ * with gate-derived fingerprint fields only (mirroring the Verify demotion).
+ */
+function scopeDemotion(sh, feature) {
+  const scope = sh(SCOPE_SCRIPT, feature);
+  if (scope.status === 0) return null;
+  return {
+    outcome: SCOPE_FAIL_OUTCOME,
+    gateOutput: scope.stdout ?? '',
+    gated: {
+      outcome: SCOPE_FAIL_OUTCOME,
+      gateStatus: scope.status,
+      categories: ['check-scope'],
+      summary: `check-scope gate failed (status ${scope.status})`,
+    },
+  };
+}
 
 /** Post-check guardrails, run in order after all waves. The test-PRESENCE gate
  * now runs per-wave (a promised-but-absent test file blocks AT the wave that
@@ -343,6 +456,8 @@ export async function deliverSpine({
   waveModels = {},
   runHooks = NOOP_HOOKS,
   hookPreflight = NOOP_PREFLIGHT,
+  approvalIntact = ALWAYS_INTACT,
+  maxFailedAttempts = null,
 }) {
   // ── DET gate: approval. The human (or proxy) decided earlier; here we ENFORCE
   // it. A blocked gate is a normal outcome — return structured, append nothing
@@ -353,6 +468,9 @@ export async function deliverSpine({
   }
 
   state.append({ feature, type: 'deliver-started', actor: 'harness', ts: now() });
+  // Every return below this line is a stop (except success) and MUST go
+  // through stopRun so the run's last event is exactly one `deliver-stopped`.
+  const stopCtx = { state, feature, now };
 
   // ── Hook pre-flight (Task 2.2). Validate the hooks dir ONCE up front so an
   // unreadable/malformed dir surfaces deterministically here rather than mid-wave.
@@ -393,9 +511,28 @@ export async function deliverSpine({
   // resuming). On a fresh run the log carries no wave-attempt usage, so this is 0. ──
   let spent = totalUsage(history).total;
 
+  // The first wave this run executes was covered by the entry gate above; every
+  // later one re-checks approval first (#77).
+  let firstWaveOfRun = true;
+
+  // Cumulative failed-attempt count for the cap, seeded from the log so it
+  // spans resumed runs until a deliver-stopped resets it.
+  let failedAttempts = failedAttemptsSinceStop(history);
+
   // ── DET wave loop — the MATRIX decides what happens next, not a counter. ──
   for (const wave of waves) {
     if (completed.has(wave.n)) continue;
+
+    // Approval re-check fires before the budget check and before any
+    // wave-started: a plan re-edited (or un-approved) mid-run must not keep
+    // running under the approval it no longer has.
+    if (!firstWaveOfRun) {
+      const reason = await approvalChangeReason({ state, feature, approvalIntact });
+      if (reason) {
+        return stopRun({ stopped: 'approval-changed', ok: false, wave: wave.n, reason }, stopCtx);
+      }
+    }
+    firstWaveOfRun = false;
 
     // Budget check fires before running THIS wave (and before resume-verify) so
     // an over-budget run stops without doing any further model work.
@@ -407,14 +544,14 @@ export async function deliverSpine({
         ts: now(),
         data: { wave: wave.n, reason: 'token-budget', spent, budget: tokenBudget },
       });
-      return { stopped: 'token-budget', ok: false, wave: wave.n, spent, budget: tokenBudget };
+      return stopRun({ stopped: 'token-budget', ok: false, wave: wave.n, spent, budget: tokenBudget }, stopCtx);
     }
 
     if (completed.size > 0 && !resumeVerified) {
       resumeVerified = true; // run exactly once, before the first non-skipped wave
       const verify = sh('scripts/check-tests-present.sh', feature);
       if (verify.status !== 0) {
-        return { stopped: 'resume-verify', ok: false };
+        return stopRun({ stopped: 'resume-verify', ok: false }, stopCtx);
       }
     }
 
@@ -423,7 +560,7 @@ export async function deliverSpine({
     // the matrix before any new attempt runs. Its token spend was never
     // recorded, so the budget breaker under-counts it — that is unrecoverable. ──
     const orphaned = convergeOrphans({ history, wave, matrix, state, feature, now, runHooks });
-    if (orphaned) return orphaned;
+    if (orphaned) return stopRun(orphaned, stopCtx);
 
     // ── Resume seeding (#119): continue the attempt budget and the doom-loop
     // fingerprint from attempts recorded since the wave's last terminal
@@ -439,6 +576,15 @@ export async function deliverSpine({
     let priorFailure = null;
 
     for (let attempt = prior.attempts + 1; attempt <= maxAttempts; attempt += 1) {
+      // ── Failed-attempt cap (#77): checked before the pre-wave hooks and any
+      // wave-started, so a capped run does no further agent work. ──
+      if (capEnabled(maxFailedAttempts) && failedAttempts >= maxFailedAttempts) {
+        return stopRun(
+          { stopped: 'failed-attempt-cap', ok: false, wave: wave.n, failed: failedAttempts, cap: maxFailedAttempts },
+          stopCtx,
+        );
+      }
+
       // ── Hook: pre-wave (veto-capable point). Fired BEFORE runWave. A veto here
       // aborts the wave without running the agent: route the veto outcome through
       // the existing matrix and terminate the same way an agent-emitted outcome
@@ -463,7 +609,10 @@ export async function deliverSpine({
           ts: now(),
           data: { wave: wave.n, action, outcome: vetoOutcome, source: 'hook', point: 'pre-wave', hook: preVeto.hook },
         });
-        return { stopped: 'hook-veto', ok: false, wave: wave.n, action, outcome: vetoOutcome, point: 'pre-wave' };
+        return stopRun(
+          { stopped: 'hook-veto', ok: false, wave: wave.n, action, outcome: vetoOutcome, point: 'pre-wave', hook: preVeto.hook },
+          stopCtx,
+        );
       }
 
       appendWaveStarted({ state, feature, now, wave, attempt, waveModels });
@@ -582,6 +731,13 @@ export async function deliverSpine({
               };
             }
           }
+          // ── Per-wave SCOPE gate (#77). Only an outcome still advancing after
+          // the presence and Verify gates is checked; a failure demotes it to
+          // fail-scope BEFORE the attempt is recorded or the matrix resolves. ──
+          if (resolveOutcome('implement', outcome, matrix).action === 'advance') {
+            const demoted = scopeDemotion(sh, feature);
+            if (demoted) ({ outcome, gateOutput, gated } = demoted);
+          }
         }
       }
 
@@ -638,6 +794,7 @@ export async function deliverSpine({
       // OPTIONAL (a command adapter may emit none) — a missing total contributes
       // 0, never NaN.
       spent += result.usage?.total ?? 0;
+      if (outcome !== SUCCESS_OUTCOME) failedAttempts += 1;
 
       // ── Hook: on-outcome (observe-only). Fired after the matrix resolves the
       // outcome, before the action is dispatched. Observe + emit only. ──
@@ -700,12 +857,7 @@ export async function deliverSpine({
               ? { wave: wave.n, reason: 'doom-loop', source: 'hook', point: vetoSource.point, hook: vetoSource.hook }
               : { wave: wave.n, reason: 'doom-loop' },
           });
-          return {
-            stopped: 'doom-loop',
-            ok: false,
-            wave: wave.n,
-            outcome,
-          };
+          return stopRun({ stopped: 'doom-loop', ok: false, wave: wave.n, outcome }, stopCtx);
         }
         lastPrint = print;
         // Back-pressure (issue #90): carry THIS attempt's failure into the next
@@ -743,13 +895,7 @@ export async function deliverSpine({
           ? { wave: wave.n, action, outcome, source: 'hook', point: vetoSource.point, hook: vetoSource.hook }
           : { wave: wave.n, action },
       });
-      return {
-        stopped: 'matrix',
-        ok: false,
-        wave: wave.n,
-        action,
-        outcome,
-      };
+      return stopRun({ stopped: 'matrix', ok: false, wave: wave.n, action, outcome }, stopCtx);
     }
 
     if (!advanced) {
@@ -769,7 +915,7 @@ export async function deliverSpine({
         ts: now(),
         data: { wave: wave.n, reason: 'budget-exhausted' },
       });
-      return { stopped: 'budget', ok: false, wave: wave.n };
+      return stopRun({ stopped: 'budget', ok: false, wave: wave.n }, stopCtx);
     }
   }
 
@@ -778,7 +924,7 @@ export async function deliverSpine({
   for (const script of POST_CHECKS) {
     const check = sh(`scripts/${script}`, feature);
     if (check.status !== 0) {
-      return { stopped: 'post-check', ok: false, check: script, status: check.status };
+      return stopRun({ stopped: 'post-check', ok: false, check: script, status: check.status }, stopCtx);
     }
   }
 

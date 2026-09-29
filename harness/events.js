@@ -20,7 +20,13 @@
  *   'pr-opened' | 'revision-requested' | 'research-created' | 'plan-created' |
  *   'hook-observed' | 'hook-veto' | 'hook-failed' | 'done' |
  *   'owner-claimed' | 'owner-released' | 'architecture-approved' |
- *   'capture-failed' | 'wave-started'.
+ *   'capture-failed' | 'wave-started' | 'deliver-stopped'.
+ *   `deliver-stopped` is the fifth AUDIT-ONLY event (#77): the deliver spine
+ *   appends exactly one as the LAST event of every run that stopped after
+ *   `deliver-started` (never on success, never on a pre-start gate stop). Its
+ *   `data` is `{ class: 'needs-decision' | 'failed', reason, decision[, wave,
+ *   action, outcome] }` (see harness/stops.js). It establishes NO phase (absent
+ *   from PHASE_BY_TYPE), so a later re-run may append after it.
  *   `wave-started` is the fourth AUDIT-ONLY event (#119): the deliver spine
  *   appends `{ wave, attempt[, model] }` BEFORE running a wave's agent, so a
  *   crash mid-run leaves a durable trace. It establishes NO phase (absent from
@@ -155,7 +161,9 @@ const PHASE_BY_TYPE = {
   // so they establish no phase and the fold is unaffected. (Listed here in a
   // comment, not as keys, on purpose.) `capture-failed` in particular records a
   // fail-open degradation of prompt enrichment — adding it as a key would let a
-  // non-decision move a feature's phase.
+  // non-decision move a feature's phase. `deliver-stopped` is likewise
+  // audit-only and deliberately absent: it records HOW a run ended, and keying
+  // it would give a stopped run a phase and could block a re-run's appends.
 };
 
 /** Phase ordering — earliest first; later phases dominate in the fold. */
@@ -978,4 +986,39 @@ export function priorAttemptState(history, wave) {
     }
   }
   return out;
+}
+
+/** Index of the LAST `deliver-started` in `history`, or -1 when there is none. */
+function lastDeliverStartedIndex(history) {
+  for (let i = history.length - 1; i >= 0; i -= 1) {
+    const event = history[i];
+    if (event && event.type === 'deliver-started') return i;
+  }
+  return -1;
+}
+
+/**
+ * Pure fold → did the LATEST deliver run evidence completion? True iff there is
+ * a `wave-complete` for EVERY wave 1..waveCount ANYWHERE in the history —
+ * counted exactly as `resumeFrom` counts them, because a resumed run skips
+ * waves a prior run completed, so their evidence precedes the latest
+ * `deliver-started` — AND a `pr-opened` AFTER the last `deliver-started` (the
+ * current run itself finished and opened the PR). The exit-0 authority for
+ * `rad deliver` (#77): a spine `ok` alone is not completion. FAIL-CLOSED: false
+ * on a non-array history, a non-positive-integer waveCount, or no
+ * `deliver-started`; never throws.
+ *
+ * @param {Event[]} history - in-memory event array (no I/O performed)
+ * @param {number} waveCount - the plan's wave count (waves numbered 1..N)
+ * @returns {boolean}
+ */
+export function deliverCompleted(history, waveCount) {
+  if (!Array.isArray(history) || !Number.isInteger(waveCount) || waveCount < 1) return false;
+  const start = lastDeliverStartedIndex(history);
+  if (start === -1) return false;
+  const completedWaves = resumeFrom(history);
+  for (let n = 1; n <= waveCount; n += 1) {
+    if (!completedWaves.has(n)) return false;
+  }
+  return history.slice(start + 1).some((event) => event && event.type === 'pr-opened');
 }

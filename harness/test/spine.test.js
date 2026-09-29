@@ -1,8 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { deliverSpine } from '../spine.js';
+import { deliverSpine, failedAttemptsSinceStop } from '../spine.js';
 import { loadMatrix } from '../matrix.js';
 import { fingerprint } from '../fingerprint.js';
+import { validateTransition } from '../transitions.js';
+import { phaseOf } from '../events.js';
 
 const MATRIX = loadMatrix();
 
@@ -94,7 +96,9 @@ test('(b) happy path → all waves advance, post-checks called in order, pr-open
     shCalls.map((c) => c.script),
     [
       'scripts/check-tests-present.sh', // wave 1 gate
+      'scripts/check-scope.sh', // wave 1 scope gate (#77)
       'scripts/check-tests-present.sh', // wave 2 gate
+      'scripts/check-scope.sh', // wave 2 scope gate (#77)
       'scripts/check-scope.sh', // end post-check
       'scripts/open-pr.sh', // end post-check
     ],
@@ -116,11 +120,23 @@ test('(b) happy path → all waves advance, post-checks called in order, pr-open
   ]);
 });
 
+/** An sh fake that fails ONLY the nth check-scope.sh call (1-based). Since #77
+ * check-scope also runs per wave, so an END post-check failure is the last call. */
+function failNthScope(n) {
+  let scopeCalls = 0;
+  return (script) => {
+    if (!script.endsWith('check-scope.sh')) return { status: 0 };
+    scopeCalls += 1;
+    return { status: scopeCalls === n ? 1 : 0 };
+  };
+}
+
 test('(b2) a failing end post-check (check-scope) halts before pr-opened', async () => {
   const state = makeFakeState({ gateResult: passingGate, plan: { waves: [{ n: 1 }] } });
   const runWave = async () => ({ outcome: 'success' });
-  // The per-wave presence gate passes (status 0); the end check-scope post-check fails.
-  const sh = (script) => (script.endsWith('check-scope.sh') ? { status: 1 } : { status: 0 });
+  // The per-wave presence + scope gates pass; only the END check-scope post-check
+  // (the second check-scope call of a one-wave run, #77) fails.
+  const sh = failNthScope(2);
   const result = await deliverSpine({
     feature: 'demo',
     state,
@@ -760,7 +776,9 @@ test('(w2-b) BACKWARD-COMPAT SNAPSHOT: default no-op runHooks → event sequence
     shCalls.map((c) => c.script),
     [
       'scripts/check-tests-present.sh',
+      'scripts/check-scope.sh', // per-wave scope gate (#77)
       'scripts/check-tests-present.sh',
+      'scripts/check-scope.sh', // per-wave scope gate (#77)
       'scripts/check-scope.sh',
       'scripts/open-pr.sh',
     ],
@@ -1088,13 +1106,15 @@ test('(w5-a) AC#1 absent Verify: declaring none is byte-for-byte today — no ch
     );
   }
 
-  // The sh call order is the legacy one: per-wave presence gates, then the end
-  // post-checks. Nothing was inserted.
+  // The sh call order is the legacy one: per-wave presence + scope gates, then
+  // the end post-checks. No check-verify call was inserted.
   assert.deepEqual(
     legacy.spy.calls.map((c) => c.script),
     [
       'scripts/check-tests-present.sh',
+      'scripts/check-scope.sh', // per-wave scope gate (#77)
       'scripts/check-tests-present.sh',
+      'scripts/check-scope.sh', // per-wave scope gate (#77)
       'scripts/check-scope.sh',
       'scripts/open-pr.sh',
     ],
@@ -1573,4 +1593,372 @@ test('(wm-c) AC#2 waveModels omitted vs {} vs {1: ""} vs non-string → deep-equ
   const started = omitted.filter((e) => e.type === 'wave-started');
   assert.equal(started.length, 2);
   assert.ok(started.every((e) => !('model' in e.data)));
+});
+
+// ── deliver-stop-contract: deliver-stopped at every terminal (#77, Task 1.2) ──
+
+/** A fake state whose append enforces the real validateTransition, as the git
+ * store does — so a sequence it accepts is a legal on-disk sequence. */
+function makeValidatingState({ gateResult = passingGate, plan = { waves: [{ n: 1 }] } } = {}) {
+  const state = makeFakeState({ gateResult, plan });
+  const rawAppend = state.append;
+  state.append = (event) => {
+    validateTransition(event, { history: state.appended });
+    rawAppend(event);
+  };
+  return state;
+}
+
+async function runStopped({ state = makeValidatingState(), runWave = async () => ({ outcome: 'success' }), sh = () => ({ status: 0 }), ...extra } = {}) {
+  const result = await deliverSpine({
+    feature: 'demo', state, docs: {}, matrix: MATRIX, gates: {}, runWave, sh, now: fixedClock(), ...extra,
+  });
+  return { state, result };
+}
+
+/** Assert the run ends with exactly one deliver-stopped, as the LAST event. */
+function assertOneTrailingStop(state, expected) {
+  const stops = state.appended.filter((e) => e.type === 'deliver-stopped');
+  assert.equal(stops.length, 1, 'exactly one deliver-stopped');
+  const last = state.appended[state.appended.length - 1];
+  assert.equal(last.type, 'deliver-stopped', 'deliver-stopped is the last event');
+  assert.equal(last.actor, 'harness');
+  assert.equal(typeof last.ts, 'string');
+  for (const [k, v] of Object.entries(expected)) assert.deepEqual(last.data[k], v, `data.${k}`);
+  assert.equal(typeof last.data.decision, 'string');
+  return last;
+}
+
+test('(stop-a) AC#2 every post-start terminal ends with exactly one classified deliver-stopped', async () => {
+  const seededCompleted = () => {
+    const s = makeValidatingState({ plan: { waves: [{ n: 1 }, { n: 2 }] } });
+    s.appended.push({ feature: 'demo', type: 'deliver-started' }, { feature: 'demo', type: 'wave-complete', data: { wave: 1 } });
+    return s;
+  };
+  const orphanState = () => {
+    const s = makeValidatingState();
+    s.appended.push({ feature: 'demo', type: 'deliver-started' }, { feature: 'demo', type: 'wave-started', data: { wave: 1, attempt: 1 } });
+    return s;
+  };
+  let flip = 0;
+  const cases = [
+    { name: 'token-budget', args: { tokenBudget: 1, state: (() => { const s = makeValidatingState(); s.appended.push({ feature: 'demo', type: 'wave-attempt', data: { wave: 0, outcome: 'success', usage: { total: 5 } } }); return s; })() },
+      expect: { class: 'needs-decision', reason: 'token-budget', wave: 1 } },
+    { name: 'resume-verify', args: { state: seededCompleted(), sh: (s) => ({ status: s.endsWith('check-tests-present.sh') ? 1 : 0 }) },
+      expect: { class: 'failed', reason: 'resume-verify' } },
+    { name: 'orphan (matrix surface)', args: { state: orphanState() },
+      expect: { class: 'needs-decision', reason: 'fail-timeout', wave: 1, action: 'surface', outcome: 'fail-timeout' } },
+    { name: 'pre-wave hook-veto', args: { runHooks: makeVetoSpy({ point: 'pre-wave', outcome: 'abort-user' }).runHooks },
+      expect: { class: 'failed', reason: 'abort-user', wave: 1, action: 'abort', outcome: 'abort-user' } },
+    { name: 'doom-loop', args: { runWave: async () => ({ outcome: 'fail-tests', summary: 'same' }) },
+      expect: { class: 'failed', reason: 'doom-loop', wave: 1, outcome: 'fail-tests' } },
+    { name: 'matrix abort', args: { runWave: async () => ({ outcome: 'fail-scope' }) },
+      expect: { class: 'failed', reason: 'fail-scope', wave: 1, action: 'abort', outcome: 'fail-scope' } },
+    { name: 'matrix surface', args: { runWave: async () => ({ outcome: 'fail-timeout' }) },
+      expect: { class: 'needs-decision', reason: 'fail-timeout', wave: 1, action: 'surface', outcome: 'fail-timeout' } },
+    { name: 'budget', args: { maxAttempts: 2, runWave: async () => ({ outcome: 'fail-tests', summary: `s${flip++}` }) },
+      expect: { class: 'failed', reason: 'budget', wave: 1 } },
+    { name: 'post-check', args: { sh: failNthScope(2) },
+      expect: { class: 'failed', reason: 'post-check' } },
+  ];
+  const seen = new Set();
+  for (const c of cases) {
+    const { state, result } = await runStopped(c.args);
+    assert.equal(result.ok, false, c.name);
+    seen.add(result.stopped);
+    const stop = assertOneTrailingStop(state, c.expect);
+    for (const key of ['wave', 'action', 'outcome']) {
+      if (!(key in c.expect)) assert.ok(!(key in stop.data) || stop.data[key] === result[key], `${c.name}: ${key}`);
+    }
+  }
+  // Every post-start `stopped` value the spine can return today is covered.
+  assert.deepEqual([...seen].sort(), ['budget', 'doom-loop', 'hook-veto', 'matrix', 'post-check', 'resume-verify', 'token-budget']);
+});
+
+test('(stop-b) AC#2 deliver-stopped data carries class/reason/decision and only the known wave/action/outcome', async () => {
+  const { state } = await runStopped({ sh: (s) => ({ status: s.endsWith('open-pr.sh') ? 3 : 0 }) });
+  const stop = assertOneTrailingStop(state, { class: 'failed', reason: 'post-check' });
+  assert.deepEqual(stop.data, { class: 'failed', reason: 'post-check', decision: 'post-check open-pr.sh exited 3' });
+});
+
+test('(stop-c) AC#2 pre-start gate stop appends nothing', async () => {
+  const { state, result } = await runStopped({ state: makeValidatingState({ gateResult: blockedGate }) });
+  assert.equal(result.stopped, 'gate');
+  assert.deepEqual(state.appended, []);
+});
+
+test('(stop-d) AC#2 success appends no deliver-stopped and keeps the pre-existing sequence', async () => {
+  const { state, result } = await runStopped({ state: makeValidatingState({ plan: twoWaves }) });
+  assert.deepEqual(result, { ok: true, waves: 2 });
+  assert.ok(!state.appended.some((e) => e.type === 'deliver-stopped'));
+  assert.deepEqual(state.appended.map((e) => e.type), [
+    'deliver-started', 'wave-started', 'wave-attempt', 'wave-complete',
+    'wave-started', 'wave-attempt', 'wave-complete', 'pr-opened',
+  ]);
+});
+
+test('(stop-e) AC#2 deliver-stopped establishes no phase; a re-run may append after it', async () => {
+  const state = makeValidatingState();
+  const first = await runStopped({ state, runWave: async () => ({ outcome: 'fail-scope' }) });
+  assert.equal(first.result.stopped, 'matrix');
+  const before = state.appended.slice(0, -1);
+  assert.equal(phaseOf(state.appended), phaseOf(before), 'deliver-stopped moves no phase');
+  // The re-run appends deliver-started etc. through the validating append — legal.
+  const second = await runStopped({ state });
+  assert.deepEqual(second.result, { ok: true, waves: 1 });
+  assert.equal(state.appended[state.appended.length - 1].type, 'pr-opened');
+});
+
+test('(stop-f) an unclassifiable terminal throws out of the spine (never swallowed)', async () => {
+  await assert.rejects(
+    runStopped({ runWave: async () => ({ outcome: 'fail-timeout' }), matrix: { ...MATRIX, implement: { ...MATRIX.implement, 'fail-timeout': { action: 'escalate' } } } }),
+    /classifyStop: unknown action/,
+  );
+});
+
+// ── deliver-stop-contract: between-wave approval re-check (#77, Task 2.1) ──
+
+/** A validating state whose `approved` gate passes for the first `passes`
+ * calls, then fails — i.e. approval is revoked mid-run. */
+function makeRevokingState({ passes, plan = twoWaves }) {
+  const state = makeValidatingState({ plan });
+  let calls = 0;
+  state.gate = async () => {
+    calls += 1;
+    return calls <= passes ? passingGate : { passed: false, reason: 'plan fingerprint changed', satisfiedBy: null };
+  };
+  return state;
+}
+
+function wave2Started(state) {
+  return state.appended.some((e) => e.type === 'wave-started' && e.data.wave === 2);
+}
+
+test('(ac-a) AC#3 gate flips to failed before wave 2 → approval-changed, no wave-2 wave-started', async () => {
+  const { state, result } = await runStopped({ state: makeRevokingState({ passes: 1 }) });
+  assert.equal(result.stopped, 'approval-changed');
+  assert.equal(result.ok, false);
+  assert.equal(result.wave, 2);
+  assert.match(result.reason, /plan fingerprint changed/);
+  assert.ok(!wave2Started(state), 'wave 2 never started');
+  assertOneTrailingStop(state, { class: 'needs-decision', reason: 'approval-changed', wave: 2 });
+});
+
+test('(ac-b) AC#3 approvalIntact {ok:false} → approval-changed with its reason, no wave-2 wave-started', async () => {
+  const { state, result } = await runStopped({
+    state: makeValidatingState({ plan: twoWaves }),
+    approvalIntact: () => ({ ok: false, reason: 'plan edited after approval' }),
+  });
+  assert.equal(result.stopped, 'approval-changed');
+  assert.match(result.reason, /plan edited after approval/);
+  assert.ok(!wave2Started(state));
+  assertOneTrailingStop(state, { class: 'needs-decision', reason: 'approval-changed', wave: 2 });
+});
+
+test('(ac-c) AC#3 a throwing approvalIntact is NOT intact (fail-closed), message kept in reason', async () => {
+  const { state, result } = await runStopped({
+    state: makeValidatingState({ plan: twoWaves }),
+    approvalIntact: () => {
+      throw new Error('cannot read plan doc');
+    },
+  });
+  assert.equal(result.stopped, 'approval-changed');
+  assert.match(result.reason, /cannot read plan doc/);
+  assert.ok(!wave2Started(state));
+  assertOneTrailingStop(state, { class: 'needs-decision', reason: 'approval-changed', wave: 2 });
+});
+
+test('(ac-d) AC#3 non-object / missing-ok approvalIntact results are not intact', async () => {
+  for (const bad of [undefined, null, {}, { ok: 'yes' }]) {
+    const { result } = await runStopped({ state: makeValidatingState({ plan: twoWaves }), approvalIntact: () => bad });
+    assert.equal(result.stopped, 'approval-changed', JSON.stringify(bad));
+  }
+});
+
+test('(ac-e) AC#3 default port → event sequence deep-equal to an explicit always-intact port', async () => {
+  const baseline = await runStopped({ state: makeValidatingState({ plan: twoWaves }) });
+  const explicit = await runStopped({ state: makeValidatingState({ plan: twoWaves }), approvalIntact: () => ({ ok: true }) });
+  assert.deepEqual(baseline.result, { ok: true, waves: 2 });
+  assert.deepEqual(explicit.state.appended, baseline.state.appended);
+});
+
+test('(ac-f) AC#3 a single-wave plan never calls approvalIntact (nor re-runs the gate)', async () => {
+  let portCalls = 0;
+  const state = makeRevokingState({ passes: 1, plan: { waves: [{ n: 1 }] } });
+  const { result } = await runStopped({ state, approvalIntact: () => { portCalls += 1; return { ok: true }; } });
+  assert.deepEqual(result, { ok: true, waves: 1 });
+  assert.equal(portCalls, 0);
+});
+
+test('(ac-g) AC#3 a resumed run skips the check for its first executed wave', async () => {
+  const state = makeValidatingState({ plan: twoWaves });
+  state.appended.push({ feature: 'demo', type: 'deliver-started' }, { feature: 'demo', type: 'wave-complete', data: { wave: 1 } });
+  let portCalls = 0;
+  const { result } = await runStopped({ state, approvalIntact: () => { portCalls += 1; return { ok: false }; } });
+  assert.deepEqual(result, { ok: true, waves: 2 });
+  assert.equal(portCalls, 0);
+});
+
+// ── deliver-stop-contract: between-wave scope check (#77, Task 2.2) ──
+
+/** An sh spy: records every (script, arg); `status(script, arg)` scripts the exit. */
+function makeShSpy(status = () => 0) {
+  const calls = [];
+  const sh = (script, arg) => {
+    calls.push({ script, arg });
+    return { status: status(script, arg), stdout: `${script} out` };
+  };
+  return { sh, calls };
+}
+
+test('(sc-a) AC#4 scope fails after wave 1 → fail-scope recorded, matrix abort, failed, wave 2 never runs', async () => {
+  const spy = makeShSpy((s) => (s === 'scripts/check-scope.sh' ? 1 : 0));
+  let runs = 0;
+  const { state, result } = await runStopped({
+    state: makeValidatingState({ plan: twoWaves }),
+    runWave: async () => { runs += 1; return { outcome: 'success' }; },
+    sh: spy.sh,
+  });
+  assert.deepEqual(result, { stopped: 'matrix', ok: false, wave: 1, action: 'abort', outcome: 'fail-scope' });
+  assert.equal(runs, 1, 'wave 2 never ran');
+  const attempt = state.appended.find((e) => e.type === 'wave-attempt');
+  assert.equal(attempt.data.outcome, 'fail-scope');
+  assert.ok(!state.appended.some((e) => e.type === 'wave-complete'));
+  assert.ok(!wave2Started(state));
+  assertOneTrailingStop(state, { class: 'failed', reason: 'fail-scope', wave: 1, action: 'abort', outcome: 'fail-scope' });
+  // The scope gate ran after the presence gate, with the same call shape as the end post-check.
+  assert.deepEqual(spy.calls, [
+    { script: 'scripts/check-tests-present.sh', arg: 'demo' },
+    { script: 'scripts/check-scope.sh', arg: 'demo' },
+  ]);
+});
+
+test('(sc-b) AC#4 scope passes → events deep-equal to baseline; only the sh spy sees the extra calls', async () => {
+  const spy = makeShSpy();
+  const withScope = await runStopped({ state: makeValidatingState({ plan: twoWaves }), sh: spy.sh });
+  const baseline = await runStopped({ state: makeValidatingState({ plan: twoWaves }) });
+  assert.deepEqual(withScope.result, { ok: true, waves: 2 });
+  assert.deepEqual(withScope.state.appended, baseline.state.appended);
+  assert.deepEqual(withScope.state.appended.map((e) => e.type), [
+    'deliver-started', 'wave-started', 'wave-attempt', 'wave-complete',
+    'wave-started', 'wave-attempt', 'wave-complete', 'pr-opened',
+  ]);
+  // Two per-wave scope calls + the retained end post-check.
+  assert.equal(spy.calls.filter((c) => c.script === 'scripts/check-scope.sh').length, 3);
+});
+
+test('(sc-c) AC#4 scope check is not called after a failed attempt (retry then success calls it once)', async () => {
+  const spy = makeShSpy();
+  let i = 0;
+  const { result } = await runStopped({
+    runWave: async () => (i++ === 0 ? { outcome: 'fail-tests', summary: 'first' } : { outcome: 'success' }),
+    sh: spy.sh,
+  });
+  assert.deepEqual(result, { ok: true, waves: 1 });
+  const order = spy.calls.map((c) => c.script);
+  // attempt 1 failed: no gate calls; attempt 2: presence + scope; then end post-checks.
+  assert.deepEqual(order, [
+    'scripts/check-tests-present.sh', 'scripts/check-scope.sh', 'scripts/check-scope.sh', 'scripts/open-pr.sh',
+  ]);
+});
+
+test('(sc-d) AC#4 scope is not run when the presence gate or a declared Verify demoted the attempt', async () => {
+  const presence = makeShSpy((s) => (s === 'scripts/check-tests-present.sh' ? 1 : 0));
+  await runStopped({ sh: presence.sh, maxAttempts: 1 });
+  assert.ok(!presence.calls.some((c) => c.script === 'scripts/check-scope.sh'));
+
+  const verify = makeShSpy((s) => (s === 'scripts/check-verify.sh' ? 1 : 0));
+  await runStopped({ sh: verify.sh, maxAttempts: 1, waveVerify: { 1: 'npm test' } });
+  assert.ok(!verify.calls.some((c) => c.script === 'scripts/check-scope.sh'));
+});
+
+test('(sc-e) AC#4 scope runs AFTER a declared Verify passes, and its failure still demotes', async () => {
+  const spy = makeShSpy((s) => (s === 'scripts/check-scope.sh' ? 2 : 0));
+  const { state, result } = await runStopped({ sh: spy.sh, waveVerify: { 1: 'npm test' } });
+  assert.equal(result.outcome, 'fail-scope');
+  assert.deepEqual(spy.calls.map((c) => c.script), [
+    'scripts/check-tests-present.sh', 'scripts/check-verify.sh', 'scripts/check-scope.sh',
+  ]);
+  const attempt = state.appended.find((e) => e.type === 'wave-attempt');
+  assert.deepEqual(attempt.data.verify, { command: 'npm test', status: 0, passed: true });
+  assert.equal(attempt.data.outcome, 'fail-scope');
+});
+
+// ── deliver-stop-contract: cumulative failed-attempt cap (#77, Task 2.3) ──
+
+test('(cap-a) AC#5 failedAttemptsSinceStop counts non-success attempts across waves, reset by deliver-stopped', () => {
+  const attempt = (wave, outcome) => ({ type: 'wave-attempt', data: { wave, outcome } });
+  assert.equal(failedAttemptsSinceStop([]), 0);
+  assert.equal(failedAttemptsSinceStop([attempt(1, 'fail-tests'), attempt(1, 'success'), attempt(2, 'fail-scope')]), 2);
+  assert.equal(failedAttemptsSinceStop([attempt(1, 'fail-tests'), { type: 'deliver-stopped', data: {} }, attempt(2, 'fail-tests')]), 1);
+  assert.equal(failedAttemptsSinceStop([attempt(1, 'fail-tests'), { type: 'deliver-stopped', data: {} }]), 0);
+  assert.equal(failedAttemptsSinceStop([{ type: 'wave-started', data: { wave: 1 } }, attempt(1, 'success')]), 0);
+});
+
+test('(cap-b) AC#5 cap 2 → two failing attempts stop before the third (no third wave-started)', async () => {
+  let n = 0;
+  const { state, result } = await runStopped({
+    maxFailedAttempts: 2,
+    runWave: async () => ({ outcome: 'fail-tests', summary: `s${n++}` }),
+  });
+  assert.deepEqual(result, { stopped: 'failed-attempt-cap', ok: false, wave: 1, failed: 2, cap: 2 });
+  assert.equal(n, 2, 'runWave called exactly twice');
+  assert.equal(state.appended.filter((e) => e.type === 'wave-started').length, 2);
+  const stop = assertOneTrailingStop(state, { class: 'needs-decision', reason: 'failed-attempt-cap', wave: 1 });
+  assert.match(stop.data.decision, /2 failed attempts reached RAD_MAX_FAILED_ATTEMPTS=2/);
+});
+
+test('(cap-c) AC#5 the cap counts across waves, not per wave', async () => {
+  // Each wave fails once then succeeds: 1 failure in wave 1 + 1 in wave 2 = 2 → stop before wave 2's retry.
+  const calls = { 1: 0, 2: 0 };
+  const { result } = await runStopped({
+    state: makeValidatingState({ plan: twoWaves }),
+    maxFailedAttempts: 2,
+    runWave: async (wave) => (calls[wave.n]++ === 0 ? { outcome: 'fail-tests', summary: `w${wave.n}` } : { outcome: 'success' }),
+  });
+  assert.deepEqual(result, { stopped: 'failed-attempt-cap', ok: false, wave: 2, failed: 2, cap: 2 });
+  assert.deepEqual(calls, { 1: 2, 2: 1 });
+});
+
+test('(cap-d) AC#5 a prior deliver-stopped resets the count (a re-run gets a fresh budget)', async () => {
+  const state = makeValidatingState();
+  state.appended.push(
+    { feature: 'demo', type: 'deliver-started' },
+    { feature: 'demo', type: 'wave-attempt', data: { wave: 1, attempt: 1, outcome: 'fail-tests' } },
+    { feature: 'demo', type: 'wave-attempt', data: { wave: 1, attempt: 2, outcome: 'fail-tests' } },
+    { feature: 'demo', type: 'wave-failed', data: { wave: 1, reason: 'budget-exhausted' } },
+    { feature: 'demo', type: 'deliver-stopped', data: { class: 'failed', reason: 'budget', decision: 'x' } },
+  );
+  const { result } = await runStopped({ state, maxFailedAttempts: 2 });
+  assert.deepEqual(result, { ok: true, waves: 1 });
+
+  // Without the reset (no deliver-stopped), the same history is already at the cap.
+  const unreset = makeValidatingState();
+  unreset.appended.push(
+    { feature: 'demo', type: 'deliver-started' },
+    { feature: 'demo', type: 'wave-attempt', data: { wave: 1, attempt: 1, outcome: 'fail-tests' } },
+    { feature: 'demo', type: 'wave-attempt', data: { wave: 1, attempt: 2, outcome: 'fail-tests' } },
+  );
+  const capped = await runStopped({ state: unreset, maxFailedAttempts: 2, maxAttempts: 5 });
+  assert.equal(capped.result.stopped, 'failed-attempt-cap');
+});
+
+test('(cap-e) AC#5 null/off (and non-positive / non-integer) → deep-equal to baseline', async () => {
+  const run = async (extra) => {
+    let n = 0;
+    return (await runStopped({ runWave: async () => (n++ < 2 ? { outcome: 'fail-tests', summary: `s${n}` } : { outcome: 'success' }), ...extra })).state.appended;
+  };
+  const baseline = await run({});
+  assert.equal(baseline[baseline.length - 1].type, 'pr-opened');
+  for (const off of [null, 0, -1, 1.5, '2']) {
+    assert.deepEqual(await run({ maxFailedAttempts: off }), baseline, `maxFailedAttempts=${JSON.stringify(off)}`);
+  }
+});
+
+test('(cap-f) AC#5 success attempts are not counted', async () => {
+  const { result } = await runStopped({
+    state: makeValidatingState({ plan: { waves: [{ n: 1 }, { n: 2 }, { n: 3 }] } }),
+    maxFailedAttempts: 1,
+  });
+  assert.deepEqual(result, { ok: true, waves: 3 });
 });
