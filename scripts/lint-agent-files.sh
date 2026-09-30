@@ -37,6 +37,12 @@ readonly SCOPE_MAP_SOURCE=".rad/config.yml agent_scope_map"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="${1:-$SCRIPT_DIR/..}"
+# Legacy argument form accepted: a path naming an existing regular FILE (e.g.
+# the pre-#87 `CLAUDE.md` argument) resolves to its directory as the repo root.
+# Config is still read ONLY from .rad/config.yml — no CLAUDE.md data fallback.
+if [[ -f "$ROOT" ]]; then
+  ROOT="$(dirname -- "$ROOT")"
+fi
 AGENTS_DIR="${2:-.claude/agents}"
 RAD_CLI="$ROOT/harness/cli.js"
 
