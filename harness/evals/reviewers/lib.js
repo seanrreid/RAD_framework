@@ -1,5 +1,6 @@
 // Reviewer eval library: builds a hermetic review repo from a fixture dir,
 // builds the reviewer prompt, and judges the reviewer's rad-findings output.
+// Prompt/parse helpers live in harness/review.js and are re-exported here.
 // Pure functions (stripFrontmatter, buildReviewPrompt, parseFindings, judgeTrial,
 // judgeMajority) never throw on malformed input. readExpect and buildReviewRepo
 // do I/O and throw named errors on failure.
@@ -7,27 +8,20 @@ import { spawnSync } from 'node:child_process';
 import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { buildReviewPrompt, parseFindings, reviewInstruction, stripFrontmatter } from '../../review.js';
+
+export { buildReviewPrompt, parseFindings, stripFrontmatter };
 
 export const PRIORITY_RANK = Object.freeze({ HIGH: 3, MEDIUM: 2, LOW: 1 });
 /** Priorities that make a negative (clean) fixture fail. */
 const BLOCKING_PRIORITIES = new Set(['HIGH', 'MEDIUM']);
-const FRONTMATTER = /^---\r?\n[\s\S]*?\r?\n---\r?\n?/;
-const FINDINGS_BLOCK = /````rad-findings[^\n]*\n([\s\S]*?)````/g;
 /** Env prefixes stripped so a developer's RAD_* or GIT_* never leaks into the fixture repo. */
 const STRIPPED_ENV = /^(RAD_|GIT_)/;
 const REVIEW_BRANCH = 'review';
 const FIXTURE_EMAIL = 'reviewer-eval@evals.invalid';
 const FIXTURE_NAME = 'Reviewer Eval';
 
-export const REVIEW_INSTRUCTION = [
-  '---',
-  '',
-  '## Task',
-  '',
-  'Review the changes on the current branch versus main (`git diff main...HEAD`).',
-  'Follow your process above. End your response with the ````rad-findings block',
-  'exactly as specified, containing every finding you report.',
-].join('\n');
+export const REVIEW_INSTRUCTION = reviewInstruction('main');
 
 const REVIEW_CLAUDE_MD = [
   '# Project Context', '',
@@ -35,30 +29,6 @@ const REVIEW_CLAUDE_MD = [
   '| Backend | Node.js / plain JS + HTML fixtures |', '',
   '## Coding Conventions', '', '- None special.', '',
 ].join('\n');
-
-export function stripFrontmatter(md) {
-  if (typeof md !== 'string') return '';
-  return md.replace(FRONTMATTER, '');
-}
-
-export function buildReviewPrompt(agentMd) {
-  return `${stripFrontmatter(agentMd).trim()}\n\n${REVIEW_INSTRUCTION}\n`;
-}
-
-/** Parsed JSON of the LAST rad-findings block, or null if missing/malformed. */
-export function parseFindings(stdout) {
-  if (typeof stdout !== 'string') return null;
-  const blocks = [...stdout.matchAll(FINDINGS_BLOCK)];
-  if (blocks.length === 0) return null;
-  let parsed;
-  try {
-    parsed = JSON.parse(blocks[blocks.length - 1][1]);
-  } catch {
-    return null; // unparseable output is a judged outcome ('invalid'), not an error
-  }
-  const isObject = parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed);
-  return isObject && Array.isArray(parsed.findings) ? parsed : null;
-}
 
 function isValidExpect(expect) {
   if (!expect || typeof expect !== 'object') return false;

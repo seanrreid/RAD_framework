@@ -283,6 +283,62 @@ export async function probeCommand({
   return { ok: false, error: describeExitFailure(run) };
 }
 
+/** Default wall-clock ceiling for runCommandPrompt (matches the wave default). */
+export const COMMAND_PROMPT_TIMEOUT_MS = 600_000;
+
+/**
+ * Run an arbitrary prompt through the configured CLI and return its raw
+ * stdout. Shares spawnOnce with waves and the probe, so the allow-listed env,
+ * `{prompt}`-placeholder-vs-stdin delivery, output cap, and kill-on-timeout
+ * apply identically. Never parses WAVE_RESULT.
+ *
+ * Never throws on child failure (non-zero exit, spawn error, timeout, output
+ * overflow) — those resolve `{ ok: false, stdout, error }` with a sanitized,
+ * capped error. Throws a TypeError only on programmer error: a missing or
+ * blank `cmd`, or a non-string `prompt`.
+ *
+ * @param {Object} opts
+ * @param {string} opts.cmd - the CLI to spawn (e.g. "codex exec")
+ * @param {string} opts.prompt - fed on stdin unless `cmd` has a `{prompt}` token
+ * @param {string} [opts.repoRoot] - cwd for the child
+ * @param {number} [opts.timeoutMs] - wall-clock deadline (default COMMAND_PROMPT_TIMEOUT_MS)
+ * @param {string} [opts.label] - names the run in its timeout message
+ * @param {number} [opts.killGraceMs] - internal: SIGTERM→SIGKILL grace (tests)
+ * @returns {Promise<{ ok: true, stdout: string } | { ok: false, stdout: string, error: string }>}
+ */
+export async function runCommandPrompt({
+  cmd, prompt, repoRoot, timeoutMs = COMMAND_PROMPT_TIMEOUT_MS, label = 'command',
+  killGraceMs = KILL_GRACE_MS,
+} = {}) {
+  if (typeof cmd !== 'string' || cmd.trim() === '') {
+    throw new TypeError('runCommandPrompt: cmd must be a non-empty string');
+  }
+  if (typeof prompt !== 'string') {
+    throw new TypeError('runCommandPrompt: prompt must be a string');
+  }
+  const abortController = new AbortController();
+  const spawned = spawnOnce(cmd, prompt, repoRoot, undefined, {
+    signal: abortController.signal, killGraceMs,
+  });
+  let run;
+  try {
+    run = await withTimeout(spawned, timeoutMs, abortController, label);
+  } catch (err) {
+    // Spawn error (ENOENT) or the wall-clock deadline — no usable stdout.
+    const raw = String(err?.message ?? err).slice(0, EXIT_EXCERPT_CHARS);
+    return { ok: false, stdout: '', error: sanitizeErrorMessage(raw) };
+  }
+  if (run.truncated) {
+    return {
+      ok: false,
+      stdout: run.stdout,
+      error: `${label} output exceeded ${MAX_OUTPUT_BYTES} bytes — process killed (output truncated)`,
+    };
+  }
+  if (run.code === 0) return { ok: true, stdout: run.stdout };
+  return { ok: false, stdout: run.stdout, error: describeExitFailure(run) };
+}
+
 /**
  * Create a command-backed runWave.
  *

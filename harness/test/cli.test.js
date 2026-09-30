@@ -1,15 +1,17 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, readFileSync, existsSync, mkdirSync, writeFileSync, chmodSync } from 'node:fs';
-import { join, dirname, resolve } from 'node:path';
+import { basename, join, dirname, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import {
   approveCommand, gateCommand, parsePlanCtx, deliverCommand, stopStatusCommand, forecastCommand, digestCommand,
-  resolveHooksDir, makeSpineScriptPort, SCRIPT_ARG_KEYS,
+  resolveHooksDir, makeSpineScriptPort, SCRIPT_ARG_KEYS, reviewCommand, resolveAgent,
 } from '../cli.js';
+import { buildReviewPrompt, reviewInstruction } from '../review.js';
+import { REVIEW_INSTRUCTION } from '../evals/reviewers/lib.js';
 import { planFingerprint } from '../plan-fingerprint.js';
 import { createGitStateStore, defaultSh } from '../adapters/git-state-store.js';
 
@@ -1420,5 +1422,275 @@ test('digest AC#4 — explicit --branch/--base override defaults; default-branch
     assert.equal(calls.some((c) => c.file.endsWith('get-default-branch.sh')), false);
     const scope = calls.find((c) => c.args.join(' ').includes('check-scope.sh'));
     assert.deepEqual(scope.args.slice(-2), ['topic', 'trunk']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// harness/review.js — shared reviewer prompt (moved from review.test.js)
+// ---------------------------------------------------------------------------
+
+const LEGACY_INSTRUCTION = [
+  '---', '', '## Task', '',
+  'Review the changes on the current branch versus main (`git diff main...HEAD`).',
+  'Follow your process above. End your response with the ````rad-findings block',
+  'exactly as specified, containing every finding you report.',
+].join('\n');
+
+test('reviewInstruction default and eval REVIEW_INSTRUCTION are byte-identical to the legacy text', () => {
+  assert.equal(reviewInstruction(), LEGACY_INSTRUCTION);
+  assert.equal(REVIEW_INSTRUCTION, LEGACY_INSTRUCTION);
+});
+
+test('reviewInstruction interpolates a valid base ref', () => {
+  const text = reviewInstruction('origin/release-1.2_x');
+  assert.match(text, /versus origin\/release-1\.2_x \(`git diff origin\/release-1\.2_x\.\.\.HEAD`\)/);
+});
+
+test('reviewInstruction falls back to main for invalid bases (never throws)', () => {
+  for (const bad of ['', '-rf', '--output=x', 'main; rm -rf /', 'a b', '$(x)', null, 42, {}]) {
+    assert.equal(reviewInstruction(bad), LEGACY_INSTRUCTION, `base=${String(bad)}`);
+  }
+});
+
+test('buildReviewPrompt threads base and defaults to main', () => {
+  const md = '---\nname: x\n---\nBody\n';
+  assert.equal(buildReviewPrompt(md), `Body\n\n${LEGACY_INSTRUCTION}\n`);
+  assert.match(buildReviewPrompt(md, { base: 'develop' }), /git diff develop\.\.\.HEAD/);
+  assert.equal(buildReviewPrompt(md, undefined), buildReviewPrompt(md));
+});
+
+// ---------------------------------------------------------------------------
+// rad review — the cross-vendor review lane (AC#3, AC#4, AC#5, AC#7, AC#9)
+// ---------------------------------------------------------------------------
+
+const REVIEWER = 'fake-reviewer';
+const REVIEWER_BODY = 'You are the fake reviewer. Check everything.';
+const FINDINGS_OUT = 'analysis...\n````rad-findings\n{"findings":[{"id":"a"},{"id":"b"}]}\n````\n';
+
+/** Seed `.claude/agents/<REVIEWER>.md` (with frontmatter) under repoRoot. */
+function seedReviewer(repoRoot) {
+  const dir = join(repoRoot, '.claude', 'agents');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, `${REVIEWER}.md`), `---\nname: ${REVIEWER}\nmodel: x\n---\n${REVIEWER_BODY}\n`);
+}
+
+/**
+ * A node fake agent: dumps its stdin + env as JSON to `<dir>/<name>.dump.json`,
+ * then prints `out`. Returns the `node <path>` cmd string.
+ */
+function fakeReviewCmd(dir, name, out) {
+  const file = join(dir, `${name}.js`);
+  const dump = join(dir, `${name}.dump.json`);
+  writeFileSync(file, [
+    "const fs = require('node:fs');",
+    "let stdin = ''; process.stdin.on('data', (c) => { stdin += c; });",
+    'process.stdin.on(\'end\', () => {',
+    `  fs.writeFileSync(${JSON.stringify(dump)}, JSON.stringify({ stdin, env: process.env }));`,
+    `  process.stdout.write(${JSON.stringify(out)});`,
+    '});',
+  ].join('\n'));
+  return { cmd: `${process.execPath} ${file}`, dump: () => JSON.parse(readFileSync(dump, 'utf8')) };
+}
+
+/** Temp repo with the fake reviewer seeded. */
+async function withReviewRepo(fn) {
+  return withTempRepo(async (repoRoot) => {
+    seedReviewer(repoRoot);
+    return fn(repoRoot);
+  });
+}
+
+/**
+ * Run reviewCommand capturing string writes to stdout/stderr. Non-string chunks
+ * pass through: while a real fake agent is spawned the test runner keeps
+ * streaming its (binary) reporter protocol on stdout, which must not be eaten.
+ */
+async function runReview(argv, ctx) {
+  const captured = { stdout: '', stderr: '' };
+  const originals = { stdout: process.stdout.write, stderr: process.stderr.write };
+  for (const name of ['stdout', 'stderr']) {
+    process[name].write = function write(chunk, ...rest) {
+      if (typeof chunk !== 'string') return originals[name].call(this, chunk, ...rest);
+      captured[name] += chunk;
+      return true;
+    };
+  }
+  try {
+    const code = await reviewCommand(argv, ctx);
+    return { code, ...captured };
+  } finally {
+    process.stdout.write = originals.stdout;
+    process.stderr.write = originals.stderr;
+  }
+}
+
+/** Temporarily set process.env keys (undefined deletes), restoring afterwards. */
+async function withProcessEnv(vars, fn) {
+  const saved = Object.fromEntries(Object.keys(vars).map((k) => [k, process.env[k]]));
+  const apply = (v) => Object.entries(v).forEach(([k, val]) => {
+    if (val === undefined) delete process.env[k]; else process.env[k] = val;
+  });
+  apply(vars);
+  try {
+    return await fn();
+  } finally {
+    apply(saved);
+  }
+}
+
+test('review — usage errors exit 2 with the usage line', async () => {
+  await withReviewRepo(async (repoRoot) => {
+    const env = { RAD_AGENT_CMD: 'never-run' };
+    const bad = [[], ['Bad_Name'], ['../x'], [REVIEWER, 'extra'], [REVIEWER, '--nope'],
+      [REVIEWER, '--base'], [REVIEWER, '--base', '-rf'], [REVIEWER, '--base', 'a;b'], [REVIEWER, '--base', '']];
+    for (const argv of bad) {
+      const { code, stdout, stderr } = await runReview(argv, { repoRoot, env });
+      assert.equal(code, 2, `argv=${JSON.stringify(argv)}`);
+      assert.equal(stdout, '');
+      assert.match(stderr, /Usage: rad review <reviewer> \[--base <ref>\]/);
+    }
+  });
+});
+
+test('review — unreadable agent file exits 2 naming it', async () => {
+  await withReviewRepo(async (repoRoot) => {
+    const { code, stderr } = await runReview(['missing-one'], { repoRoot, env: { RAD_AGENT_CMD: 'x' } });
+    assert.equal(code, 2);
+    assert.match(stderr, /cannot read reviewer agent \.claude\/agents\/missing-one\.md/);
+  });
+});
+
+test('review — neither command var set (or blank) exits 2 naming both', async () => {
+  await withReviewRepo(async (repoRoot) => {
+    for (const env of [{}, { RAD_REVIEW_AGENT_CMD: '', RAD_AGENT_CMD: '   ' }]) {
+      const { code, stderr } = await runReview([REVIEWER, '--base', 'main'], { repoRoot, env });
+      assert.equal(code, 2);
+      assert.match(stderr, /no review agent configured — set RAD_REVIEW_AGENT_CMD or RAD_AGENT_CMD/);
+    }
+  });
+});
+
+test('review — malformed RAD_REVIEW_TIMEOUT_SECONDS exits 2 (never silently defaults)', async () => {
+  await withReviewRepo(async (repoRoot) => {
+    for (const bad of ['0', '-3', '1.5', 'abc', ' 5', '10s']) {
+      const env = { RAD_AGENT_CMD: 'x', RAD_REVIEW_TIMEOUT_SECONDS: bad };
+      const { code, stderr } = await runReview([REVIEWER, '--base', 'main'], { repoRoot, env });
+      assert.equal(code, 2, `timeout=${bad}`);
+      assert.match(stderr, /RAD_REVIEW_TIMEOUT_SECONDS must be a positive integer/);
+    }
+  });
+});
+
+test('review — stdout verbatim; timeout seconds become ms (default 600s); label names the reviewer', async () => {
+  await withReviewRepo(async (repoRoot) => {
+    const calls = [];
+    const fake = async (opts) => { calls.push(opts); return { ok: true, stdout: FINDINGS_OUT }; };
+    const argv = [REVIEWER, '--base', 'main'];
+    const first = await runReview(argv, { repoRoot, env: { RAD_AGENT_CMD: 'x' }, runCommandPrompt: fake });
+    assert.equal(first.code, 0);
+    assert.equal(first.stdout, FINDINGS_OUT, 'agent stdout is printed verbatim');
+    await runReview(argv, { repoRoot, env: { RAD_AGENT_CMD: 'x', RAD_REVIEW_TIMEOUT_SECONDS: '7' }, runCommandPrompt: fake });
+    assert.equal(calls[0].timeoutMs, 600_000);
+    assert.equal(calls[1].timeoutMs, 7000);
+    assert.equal(calls[0].label, `rad review ${REVIEWER}`);
+    assert.equal(calls[0].repoRoot, repoRoot);
+  });
+});
+
+test('review — findings block → exit 0, stdout verbatim, findings=<n>; RAD_REVIEW_AGENT_CMD wins', async () => {
+  await withReviewRepo(async (repoRoot) => {
+    const winner = fakeReviewCmd(repoRoot, 'winner', FINDINGS_OUT);
+    const loser = fakeReviewCmd(repoRoot, 'loser', 'nope');
+    const env = { RAD_REVIEW_AGENT_CMD: winner.cmd, RAD_AGENT_CMD: loser.cmd };
+    const { code, stdout, stderr } = await runReview([REVIEWER, '--base', 'main'], { repoRoot, env });
+    assert.equal(code, 0, stderr);
+    assert.equal(stdout, FINDINGS_OUT);
+    assert.equal(stderr,
+      `rad review: reviewer=${REVIEWER} agent=RAD_REVIEW_AGENT_CMD executable=${basename(process.execPath)} findings=2\n`);
+    assert.equal(existsSync(join(repoRoot, 'loser.dump.json')), false);
+    assert.equal(stderr.includes(winner.cmd), false, 'full command string is never printed');
+  });
+});
+
+test('review — falls back to RAD_AGENT_CMD; no findings block → exit 1, stdout still printed', async () => {
+  await withReviewRepo(async (repoRoot) => {
+    const fake = fakeReviewCmd(repoRoot, 'plain', 'looks fine to me\n');
+    const { code, stdout, stderr } = await runReview([REVIEWER, '--base', 'main'],
+      { repoRoot, env: { RAD_REVIEW_AGENT_CMD: '', RAD_AGENT_CMD: fake.cmd } });
+    assert.equal(code, 1);
+    assert.equal(stdout, 'looks fine to me\n');
+    assert.match(stderr, /agent=RAD_AGENT_CMD executable=\S+ findings=none\n$/);
+  });
+});
+
+test('review — failed run reports a sanitized error and exits 1 even with findings', async () => {
+  await withReviewRepo(async (repoRoot) => {
+    const fake = async () => ({ ok: false, stdout: FINDINGS_OUT, error: 'exit 3: "bad"\nsk-ant-abcdefghijklmnop' });
+    const { code, stdout, stderr } = await runReview([REVIEWER, '--base', 'main'],
+      { repoRoot, env: { RAD_AGENT_CMD: '/opt/bin/codex exec --secret-flag' }, runCommandPrompt: fake });
+    assert.equal(code, 1);
+    assert.equal(stdout, FINDINGS_OUT);
+    assert.match(stderr, /executable=codex findings=2 error="exit 3: 'bad' \[REDACTED\]"\n$/);
+    assert.equal(stderr.includes('--secret-flag'), false);
+  });
+});
+
+test('review — stdin carries the agent body (frontmatter stripped) and the --base diff', async () => {
+  await withReviewRepo(async (repoRoot) => {
+    const fake = fakeReviewCmd(repoRoot, 'stdin', FINDINGS_OUT);
+    const { code } = await runReview([REVIEWER, '--base', 'origin/dev'], { repoRoot, env: { RAD_AGENT_CMD: fake.cmd } });
+    assert.equal(code, 0);
+    const { stdin } = fake.dump();
+    assert.ok(stdin.startsWith(REVIEWER_BODY), stdin);
+    assert.equal(stdin.includes('model: x'), false);
+    assert.match(stdin, /`git diff origin\/dev\.\.\.HEAD`/);
+  });
+});
+
+test('review — base defaults to the default-branch script, else main; script failure → exit 1', async () => {
+  await withReviewRepo(async (repoRoot) => {
+    const calls = [];
+    const fake = async (opts) => { calls.push(opts); return { ok: true, stdout: FINDINGS_OUT }; };
+    const ctxFor = (stdout, status = 0) => ({
+      repoRoot, env: { RAD_AGENT_CMD: 'x' }, runCommandPrompt: fake, sh: () => ({ status, stdout, stderr: '' }),
+    });
+    assert.equal((await runReview([REVIEWER], ctxFor('trunk\n'))).code, 0);
+    assert.match(calls[0].prompt, /git diff trunk\.\.\.HEAD/);
+    assert.equal((await runReview([REVIEWER], ctxFor(''))).code, 0);
+    assert.match(calls[1].prompt, /git diff main\.\.\.HEAD/);
+    const failed = await runReview([REVIEWER], ctxFor('', 7));
+    assert.equal(failed.code, 1);
+    assert.match(failed.stderr, /^rad review: cannot resolve default branch/);
+    assert.equal(calls.length, 2, 'no agent run after a base-resolution failure');
+  });
+});
+
+test('review AC#5 — an exported secret never reaches the review agent env', async () => {
+  await withReviewRepo(async (repoRoot) => {
+    const fake = fakeReviewCmd(repoRoot, 'envdump', FINDINGS_OUT);
+    await withProcessEnv({ RAD_REVIEW_SECRET_PROBE: 'shh-123', ANTHROPIC_API_KEY: 'sk-ant-probe', RAD_AGENT_CMD: undefined,
+      RAD_REVIEW_AGENT_CMD: fake.cmd }, async () => {
+      const { code } = await runReview([REVIEWER, '--base', 'main'], { repoRoot });
+      assert.equal(code, 0);
+    });
+    const { env } = fake.dump();
+    assert.equal(env.RAD_REVIEW_SECRET_PROBE, undefined);
+    assert.equal(env.ANTHROPIC_API_KEY, undefined);
+    assert.equal(env.RAD_REVIEW_AGENT_CMD, undefined);
+  });
+});
+
+test('review AC#7 — two lanes: rad review runs B while deliver resolution still yields A', async () => {
+  await withReviewRepo(async (repoRoot) => {
+    const a = fakeReviewCmd(repoRoot, 'laneA', 'A ran\n');
+    const b = fakeReviewCmd(repoRoot, 'laneB', FINDINGS_OUT);
+    await withProcessEnv({ RAD_AGENT_CMD: a.cmd, RAD_REVIEW_AGENT_CMD: b.cmd }, async () => {
+      const { code, stdout } = await runReview([REVIEWER, '--base', 'main'], { repoRoot });
+      assert.equal(code, 0);
+      assert.equal(stdout, FINDINGS_OUT);
+      assert.deepEqual(resolveAgent({}, 'command'), { kind: 'command', cmd: a.cmd });
+    });
+    assert.equal(existsSync(join(repoRoot, 'laneA.dump.json')), false);
+    assert.equal(existsSync(join(repoRoot, 'laneB.dump.json')), true);
   });
 });

@@ -18,7 +18,7 @@
  */
 
 import { fileURLToPath } from 'node:url';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { readFileSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
 import process from 'node:process';
 import { spawnSync } from 'node:child_process';
@@ -29,7 +29,7 @@ import { planFingerprint } from './plan-fingerprint.js';
 import { makeWorktreeLifecycle } from './adapters/worktree.js';
 import { deliverSpine } from './spine.js';
 import { createHookRunner } from './hook-runner.js';
-import { createCommandAdapter, probeCommand } from './adapters/agent/command.js';
+import { createCommandAdapter, probeCommand, runCommandPrompt } from './adapters/agent/command.js';
 import { sanitizeErrorMessage } from './adapters/agent/contract.js';
 import { loadMatrix } from './matrix.js';
 import { classifyStop, STOP_CLASSES } from './stops.js';
@@ -38,6 +38,7 @@ import {
 } from './events.js';
 import { taskFilesFromPlanText, mergeTaskFiles } from './plan-tasks.js';
 import { gatherDigestInputs, buildDigest, renderDigest } from './digest.js';
+import { buildReviewPrompt, parseFindings } from './review.js';
 
 /** Usage line for `rad deliver` (help, parse errors, and the command table). */
 const DELIVER_USAGE = 'rad deliver <feature> [--model <model-id>] [--resume --context <text>]';
@@ -47,6 +48,8 @@ const STOP_STATUS_USAGE = 'rad stop-status <feature> [--stdin]';
 const FORECAST_USAGE = 'rad forecast <plan>';
 /** Usage line for `rad digest`. */
 const DIGEST_USAGE = 'rad digest <feature> [--branch <ref>] [--base <ref>]';
+/** Usage line for `rad review`. */
+const REVIEW_USAGE = 'rad review <reviewer> [--base <ref>]';
 
 const SUBCOMMANDS = {
   approve: {
@@ -85,6 +88,11 @@ const SUBCOMMANDS = {
     summary: "Ranked, read-only review digest for a feature's deliver PR (Gate 2 aid).",
     usage: DIGEST_USAGE,
     run: (argv, ctx) => digestCommand(argv, ctx),
+  },
+  review: {
+    summary: 'Run one reviewer agent through the review lane (RAD_REVIEW_AGENT_CMD, else RAD_AGENT_CMD).',
+    usage: REVIEW_USAGE,
+    run: (argv, ctx) => reviewCommand(argv, ctx),
   },
   'owner-claim': {
     summary: 'Claim the single-writer lock on a feature (records who holds it).',
@@ -620,7 +628,7 @@ function loadPlanCtx(root, feature) {
  * @returns {{ injected: Function } | { kind: 'sdk', apiKey: string }
  *   | { kind: 'command', cmd: string } | { code: number }}
  */
-function resolveAgent(ctx, agentKind) {
+export function resolveAgent(ctx, agentKind) {
   if (ctx.runWave) return { injected: ctx.runWave };
   if (agentKind === 'sdk') {
     // SDK path: requires ANTHROPIC_API_KEY (checked before any SDK construction
@@ -2340,6 +2348,153 @@ export async function digestCommand(argv, ctx) {
   const inputs = await gatherDigestInputs({ repoRoot, sh, feature, branch, base });
   process.stdout.write(renderDigest(buildDigest(inputs)));
   return 0;
+}
+
+/** Reviewer name grammar: it becomes a path segment under .claude/agents/. */
+const REVIEWER_PATTERN = /^[a-z0-9-]+$/;
+/** Base ref grammar (no leading '-': it is interpolated into a git diff instruction). */
+const REVIEW_BASE_PATTERN = /^[A-Za-z0-9._/-]+$/;
+/** Review-lane command env vars, in precedence order. */
+const REVIEW_AGENT_ENV_VARS = Object.freeze(['RAD_REVIEW_AGENT_CMD', 'RAD_AGENT_CMD']);
+/** Env var overriding the review wall-clock ceiling, in whole seconds. */
+const REVIEW_TIMEOUT_ENV = 'RAD_REVIEW_TIMEOUT_SECONDS';
+const REVIEW_DEFAULT_TIMEOUT_SECONDS = 600;
+const REVIEW_FALLBACK_BASE = 'main';
+
+function isSafeReviewBase(ref) {
+  return REVIEW_BASE_PATTERN.test(ref) && !ref.startsWith('-');
+}
+
+/** One positional `<reviewer>` + optional `--base <ref>`; throws on anything else. */
+function parseReviewArgs(argv) {
+  const out = {};
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg === '--base') {
+      const value = argv[i + 1];
+      if (!isNonEmpty(value) || !isSafeReviewBase(value)) throw new Error('--base requires a valid ref');
+      out.base = value;
+      i += 1;
+    } else if (arg.startsWith('-')) {
+      throw new Error(`unknown option '${arg}'`);
+    } else if (out.reviewer === undefined) {
+      out.reviewer = arg;
+    } else {
+      throw new Error(`unexpected argument '${arg}'`);
+    }
+  }
+  if (!isNonEmpty(out.reviewer)) throw new Error('a reviewer name is required');
+  if (!REVIEWER_PATTERN.test(out.reviewer)) throw new Error(`invalid reviewer name '${out.reviewer}'`);
+  return out;
+}
+
+/** First non-empty review-lane command var → { cmd, source }, else null. */
+function resolveReviewAgent(env) {
+  const source = REVIEW_AGENT_ENV_VARS.find((name) => isNonEmpty(env[name]?.trim()));
+  return source ? { cmd: env[source], source } : null;
+}
+
+/** RAD_REVIEW_TIMEOUT_SECONDS → ms (default 600s); throws on a malformed value. */
+function reviewTimeoutMs(env) {
+  const raw = env[REVIEW_TIMEOUT_ENV];
+  if (raw === undefined || raw === '') return REVIEW_DEFAULT_TIMEOUT_SECONDS * 1000;
+  if (!POSITIVE_INTEGER_PATTERN.test(raw)) {
+    throw new Error(`${REVIEW_TIMEOUT_ENV} must be a positive integer (got '${raw}')`);
+  }
+  return Number(raw) * 1000;
+}
+
+/** --base, else the default-branch script, else 'main'; throws on an unusable default. */
+function resolveReviewBase(args, { sh, repoRoot }) {
+  if (args.base !== undefined) return args.base;
+  const base = readDefaultBranch({ sh, repoRoot, root: repoRoot, verb: 'rad review' }) || REVIEW_FALLBACK_BASE;
+  if (!isSafeReviewBase(base)) throw new Error(`rad review: default branch '${base}' is not a valid ref`);
+  return base;
+}
+
+/** The one-line stderr summary. Never includes the full command string. */
+function reviewSummaryLine({ reviewer, agent, findings, result }) {
+  const executable = basename(agent.cmd.trim().split(/\s+/)[0]);
+  const count = findings ? String(findings.findings.length) : 'none';
+  let line = `rad review: reviewer=${reviewer} agent=${agent.source} executable=${executable} findings=${count}`;
+  if (!result.ok) {
+    const error = sanitizeErrorMessage(String(result.error)).replace(/"/g, "'").replace(/[\r\n]+/g, ' ');
+    line += ` error="${error}"`;
+  }
+  return `${line}\n`;
+}
+
+/** Validate argv + config; returns the run inputs, or { code } after writing the reason. */
+function prepareReview(argv, ctx, env) {
+  let args;
+  try {
+    args = parseReviewArgs(argv);
+  } catch (err) {
+    process.stderr.write(`rad review: ${err.message}\nUsage: ${REVIEW_USAGE}\n`);
+    return { code: USAGE_EXIT_CODE };
+  }
+  const agentRel = join('.claude', 'agents', `${args.reviewer}.md`);
+  let agentMd;
+  try {
+    agentMd = readFileSync(join(ctx.repoRoot, agentRel), 'utf8');
+  } catch (err) {
+    process.stderr.write(`rad review: cannot read reviewer agent ${agentRel}: ${err.message}\n`);
+    return { code: USAGE_EXIT_CODE };
+  }
+  const agent = resolveReviewAgent(env);
+  if (!agent) {
+    process.stderr.write('rad review: no review agent configured — set RAD_REVIEW_AGENT_CMD or RAD_AGENT_CMD\n');
+    return { code: USAGE_EXIT_CODE };
+  }
+  let timeoutMs;
+  try {
+    timeoutMs = reviewTimeoutMs(env);
+  } catch (err) {
+    process.stderr.write(`rad review: ${err.message}\n`);
+    return { code: USAGE_EXIT_CODE };
+  }
+  return { args, agentMd, agent, timeoutMs };
+}
+
+/**
+ * `review <reviewer> [--base <ref>]` — run one `.claude/agents/<reviewer>.md`
+ * reviewer through the review lane: RAD_REVIEW_AGENT_CMD if set, else
+ * RAD_AGENT_CMD, spawned via runCommandPrompt (same allow-listed env as waves).
+ * Prints the agent's stdout verbatim and a one-line stderr summary naming the
+ * winning env var and the executable's basename only. Exit 0 when the output
+ * carries a parseable rad-findings block; 1 when it does not or the run failed;
+ * 2 on bad argv/config. Writes no events and does not affect `rad deliver`.
+ *
+ * @param {string[]} argv - args after `review`
+ * @param {{ repoRoot: string, sh?: typeof defaultSh, env?: Object,
+ *   runCommandPrompt?: typeof runCommandPrompt }} ctx
+ * @returns {Promise<number>}
+ */
+export async function reviewCommand(argv, ctx) {
+  const env = ctx.env ?? process.env;
+  const prep = prepareReview(argv, ctx, env);
+  if (prep.code !== undefined) return prep.code;
+  const { args, agentMd, agent, timeoutMs } = prep;
+  const { reviewer } = args;
+  let base;
+  try {
+    base = resolveReviewBase(args, { sh: ctx.sh ?? defaultSh, repoRoot: ctx.repoRoot });
+  } catch (err) {
+    process.stderr.write(`rad review: ${err.message.replace(/^rad review: /, '')}\n`);
+    return FAILED_EXIT_CODE;
+  }
+  const run = ctx.runCommandPrompt ?? runCommandPrompt;
+  const result = await run({
+    cmd: agent.cmd,
+    prompt: buildReviewPrompt(agentMd, { base }),
+    repoRoot: ctx.repoRoot,
+    timeoutMs,
+    label: `rad review ${reviewer}`,
+  });
+  process.stdout.write(result.stdout ?? '');
+  const findings = parseFindings(result.stdout);
+  process.stderr.write(reviewSummaryLine({ reviewer, agent, findings, result }));
+  return findings && result.ok ? 0 : FAILED_EXIT_CODE;
 }
 
 /**
