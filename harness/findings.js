@@ -87,3 +87,37 @@ export function reviewerCalibration(records, minLabeled = CALIBRATION_MIN_LABELE
   const entries = [...tallyByReviewer(records)].map(([name, tally]) => [name, withRates(tally, min)]);
   return { reviewers: Object.fromEntries(entries), minLabeled: min };
 }
+
+// Priority buckets findingsByFile tallies; anything else counts toward total only.
+const PRIORITY_KEYS = Object.freeze({ HIGH: 'high', MEDIUM: 'medium', LOW: 'low' });
+
+function emptyFileTally() {
+  return { total: 0, high: 0, medium: 0, low: 0, categories: new Set() };
+}
+
+/**
+ * Per-file review-history tally for the given paths: only `type:'finding'`
+ * records whose `file` is one of `paths` count. Paths with no findings are
+ * omitted; categories are de-duplicated and sorted. Non-array input → {};
+ * never throws.
+ *
+ * @param {Object[]} records - parsed findings.jsonl records
+ * @param {string[]} paths - the paths of interest
+ * @returns {Object<string, { total: number, high: number, medium: number, low: number, categories: string[] }>}
+ */
+export function findingsByFile(records, paths) {
+  if (!Array.isArray(records) || !Array.isArray(paths)) return {};
+  const wanted = new Set(paths.filter((p) => typeof p === 'string'));
+  const tallies = new Map(); // Map, not {}: a path named "__proto__" must not hit the prototype
+  for (const record of records) {
+    if (!isObject(record) || record.type !== FINDING_TYPE || !wanted.has(record.file)) continue;
+    if (!tallies.has(record.file)) tallies.set(record.file, emptyFileTally());
+    const tally = tallies.get(record.file);
+    tally.total += 1;
+    const key = typeof record.priority === 'string' ? PRIORITY_KEYS[record.priority.toUpperCase()] : undefined;
+    if (key) tally[key] += 1;
+    if (typeof record.category === 'string' && record.category) tally.categories.add(record.category);
+  }
+  const entries = [...tallies].map(([file, t]) => [file, { ...t, categories: [...t.categories].sort() }]);
+  return Object.fromEntries(entries);
+}
