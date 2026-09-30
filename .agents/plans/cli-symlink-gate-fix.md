@@ -1,7 +1,10 @@
 # Plan: CLI Symlink Gate Fix (fail-closed main-module guard)
 Created: 2026-09-30
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-09-30T20:58:42.733Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/cli-symlink-gate-fix
 Adopted-From: https://github.com/seanrreid/RAD_framework/issues/168
 Issue-Title: Approval gate fails open when harness/cli.js is invoked via a symlinked path (main-module guard)
