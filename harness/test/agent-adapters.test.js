@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import {
   createCommandAdapter,
   probeCommand,
+  runCommandPrompt,
   PREFLIGHT_PROMPT,
   PREFLIGHT_TIMEOUT_MS,
 } from '../adapters/agent/command.js';
@@ -1037,5 +1038,98 @@ test('deliverCommand preflight — an empty timeout override keeps the default a
 
     assert.ok(!stderr.includes('RAD_AGENT_PREFLIGHT_TIMEOUT_SECONDS'), stderr);
     assert.equal(await invocations(log), 'PW', 'probe ran under the default, then the wave');
+  });
+});
+
+// ===========================================================================
+// runCommandPrompt — cross-vendor-review-lane AC#2
+// ===========================================================================
+
+test('runCommandPrompt — exit 0 resolves ok with raw stdout (no WAVE_RESULT parsing)', async () => {
+  await withTempDir(async (dir) => {
+    const cmd = fakeCmd(dir, 'ok.js', "process.stdout.write('review: looks fine');\n");
+    const result = await runCommandPrompt({ cmd, prompt: 'review this', repoRoot: dir });
+    assert.deepEqual(result, { ok: true, stdout: 'review: looks fine' });
+  });
+});
+
+test('runCommandPrompt — non-zero exit resolves not-ok with a sanitized error and the stdout', async () => {
+  await withTempDir(async (dir) => {
+    const secret = 'sk-ant-' + 'a'.repeat(30);
+    const cmd = fakeCmd(
+      dir,
+      'fail.js',
+      `process.stdout.write('partial');process.stderr.write('bad key ${secret}');process.exit(3);\n`,
+    );
+    const result = await runCommandPrompt({ cmd, prompt: 'p', repoRoot: dir });
+    assert.equal(result.ok, false);
+    assert.equal(result.stdout, 'partial');
+    assert.match(result.error, /^command exited with code 3: bad key \[REDACTED\]$/);
+    assert.ok(!result.error.includes(secret), 'secret redacted from the error');
+  });
+});
+
+test('runCommandPrompt — missing executable resolves not-ok (never throws)', async () => {
+  await withTempDir(async (dir) => {
+    const result = await runCommandPrompt({ cmd: join(dir, 'no-such-reviewer'), prompt: 'p', repoRoot: dir });
+    assert.equal(result.ok, false);
+    assert.equal(result.stdout, '');
+    assert.match(result.error, /ENOENT/);
+  });
+});
+
+test('runCommandPrompt — missing/blank cmd or non-string prompt is a programmer error (throws)', async () => {
+  await assert.rejects(runCommandPrompt({ prompt: 'p' }), TypeError);
+  await assert.rejects(runCommandPrompt({ cmd: '   ', prompt: 'p' }), TypeError);
+  await assert.rejects(runCommandPrompt({ cmd: 'true' }), TypeError);
+});
+
+test('runCommandPrompt — timeout kills the child and the error names the timeout', async () => {
+  await withTempDir(async (dir) => {
+    await withHangingAgent(dir, {}, async (agent, readPid) => {
+      const started = Date.now();
+      const result = await runCommandPrompt({
+        cmd: agent.cmd, prompt: 'p', repoRoot: dir, timeoutMs: KILL_TEST_TIMEOUT_MS, label: 'reviewer',
+      });
+      assert.ok(Date.now() - started < PROMPT_RESOLVE_CEILING_MS, 'resolved promptly after the deadline');
+      assert.equal(result.ok, false);
+      assert.equal(result.error, `reviewer timed out after ${KILL_TEST_TIMEOUT_MS}ms`);
+      assert.equal(await waitForDeath(readPid(), 3_000), false, 'child PID is gone after the timeout');
+      const fs = await import('node:fs');
+      assert.equal(fs.existsSync(agent.marker), false, 'post-timeout marker never written');
+    });
+  });
+});
+
+test('runCommandPrompt — a secret env var in the parent is absent from the child', async () => {
+  await withTempDir(async (dir) => {
+    const SENTINEL = 'RAD_TEST_RUNNER_SECRET';
+    process.env[SENTINEL] = 'leak-me-if-you-can';
+    try {
+      const cmd = fakeCmd(dir, 'env-dump.js', 'process.stdout.write(JSON.stringify(process.env));\n');
+      const result = await runCommandPrompt({ cmd, prompt: 'p', repoRoot: dir });
+      assert.equal(result.ok, true, result.error);
+      const childEnv = JSON.parse(result.stdout);
+      assert.equal(childEnv[SENTINEL], undefined, 'secret did not reach the child');
+      assert.equal(childEnv.PATH, process.env.PATH, 'allow-listed PATH forwarded');
+    } finally {
+      delete process.env[SENTINEL];
+    }
+  });
+});
+
+test('runCommandPrompt — prompt goes on stdin by default, into argv with a {prompt} token', async () => {
+  await withTempDir(async (dir) => {
+    const echo = fakeCmd(
+      dir,
+      'echo.js',
+      "let s='';process.stdin.on('data',(d)=>{s+=d;});" +
+        "process.stdin.on('end',()=>{process.stdout.write(JSON.stringify({stdin:s,argv:process.argv.slice(2)}));});\n",
+    );
+    const viaStdin = await runCommandPrompt({ cmd: echo, prompt: 'hello-reviewer', repoRoot: dir });
+    assert.deepEqual(JSON.parse(viaStdin.stdout), { stdin: 'hello-reviewer', argv: [] });
+
+    const viaArgv = await runCommandPrompt({ cmd: `${echo} {prompt}`, prompt: 'hello-reviewer', repoRoot: dir });
+    assert.deepEqual(JSON.parse(viaArgv.stdout), { stdin: '', argv: ['hello-reviewer'] });
   });
 });
