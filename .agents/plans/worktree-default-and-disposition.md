@@ -1,7 +1,10 @@
 # Plan: Worktree Isolation by Default + Intake Disposition
 Created: 2026-09-30
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-09-30T16:52:19.701Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/worktree-default-and-disposition
 Adopted-From: https://github.com/seanrreid/RAD_framework/issues/61, https://github.com/seanrreid/RAD_framework/issues/94
 Issue-Title: Make worktree isolation the default for /rad-deliver (#61) + Intake early-exit taxonomy (#94)
