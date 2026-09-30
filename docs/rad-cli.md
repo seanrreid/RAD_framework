@@ -210,6 +210,84 @@ arguments, an invalid feature name, or an unreadable plan.
 
 ---
 
+### rad review
+
+```
+rad review <reviewer> [--base <ref>]
+```
+
+Runs one reviewer agent (`.claude/agents/<reviewer>.md`) through a CLI you
+choose — typically a **different vendor's** agent than the one that wrote the
+code — and prints its output. It records no events, opens no PR, and has no
+effect on `rad deliver`. `--base` defaults to `scripts/get-default-branch.sh`
+(falling back to `main`); the prompt asks the reviewer to inspect
+`git diff <base>...HEAD`.
+
+**Resolution order.** The command is the first non-empty of
+`RAD_REVIEW_AGENT_CMD`, then `RAD_AGENT_CMD`. Neither set → exit 2. The agent
+file is read relative to the RAD checkout that holds `harness/cli.js` (not the
+current directory), and the command runs there.
+
+**Env allow-list.** The command runs under the same allow-listed env as the
+`rad deliver` command adapter — only `PATH HOME LANG LC_ALL TMPDIR TERM USER` —
+so the CLI must authenticate from on-disk config or the OS keychain. Exported
+tokens (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, …) are **not** forwarded; use a
+wrapper script if the CLI needs one. The prompt goes on stdin, unless the command
+contains a `{prompt}` token, which is replaced by the prompt as a single argv
+element.
+
+**Output.** The agent's stdout is printed verbatim. One summary line goes to
+stderr, naming the winning env var and only the executable's basename — never
+the full command string:
+
+```
+rad review: reviewer=<reviewer> agent=<RAD_REVIEW_AGENT_CMD|RAD_AGENT_CMD> executable=<basename> findings=<n|none>
+```
+
+**Exit codes:** `0` when the output carries a parseable ` ```rad-findings `
+block; `1` when the command failed (non-zero exit, spawn error, timeout) or
+printed no parseable block; `2` on bad arguments, an unreadable reviewer file,
+no configured command, or a malformed timeout.
+
+**Timeout.** `RAD_REVIEW_TIMEOUT_SECONDS` (default **600**) is the wall-clock
+ceiling. A malformed value (non-numeric, zero, negative) exits **2** rather than
+falling back to the default.
+
+**How `/rad-review` uses it.** When `RAD_REVIEW_AGENT_CMD` is set, `/rad-review`
+Steps 4 and 4b run `rad review quality-reviewer` / `rad review
+accessibility-reviewer` instead of the in-session sub-agents, take stdout as the
+reviewer's output (its `rad-findings` block is persisted to
+`.agents/findings.jsonl` as usual), and note a non-zero exit in the report
+without stopping. The cycle record gains `review_agent: {source, executable}`
+(the basename only). Unset → the sub-agents run as before. `RAD_AGENT_CMD`
+alone does **not** switch `/rad-review` over; only `RAD_REVIEW_AGENT_CMD` does.
+
+**Caveat.** A reviewer from a different vendor than the implementer reduces
+*correlated* blind spots (the same model rarely catches its own habitual
+mistakes), but it is not a correctness guarantee — a second model can miss what
+the first missed, or flag false alarms. Treat its findings like any reviewer's.
+
+This is **not** the same as `RAD_REVIEW_EVAL_CMD` (see [`evals.md`](./evals.md)),
+which scores reviewer prompts against fixtures; `RAD_REVIEW_AGENT_CMD` runs a
+real review of the current branch.
+
+#### Provider cookbook
+
+Each command must be logged in beforehand under your own account (it gets no
+exported tokens). "Verified" means a smoke run of `rad review quality-reviewer
+--base main` against a scratch repo whose branch adds a hardcoded API key exited
+**0** with **≥1** finding.
+
+| Agent | `RAD_REVIEW_AGENT_CMD` | Prompt delivery | Notes | Verified |
+|-------|------------------------|-----------------|-------|----------|
+| Claude Code | `claude -p` | stdin | Log in once with `claude` interactively. | 2026-09-30 — exit 0, 2 findings |
+| Codex | `codex exec` | stdin (`codex exec` reads the prompt from stdin when no argument is given) | Log in with `codex login`. Runs in its default sandbox; review only reads. | 2026-09-30 — exit 0, 1 finding |
+| opencode | `opencode run {prompt}` | argv (`{prompt}`) | `opencode run` is the non-interactive mode; add `-m provider/model` to pick a model. Configure credentials with `opencode auth` (alias of `opencode providers`). | 2026-09-30 — exit 0, 1 finding |
+| aider | `aider --message {prompt}` | argv (`{prompt}`) | Needs provider credentials on disk (e.g. `.aider.conf.yml`), not exported keys. | no — aider not installed on the test machine |
+| Flue | `npx flue run src/agents/<name>.ts -m {prompt}` | argv (`{prompt}`) | Requires a Flue project defining the reviewer agent. | no — needs a Flue project |
+
+---
+
 ### rad deliver
 
 ```
@@ -232,6 +310,7 @@ The runner is chosen by environment variable — there is no config-file loader.
 | `RAD_AGENT_PREFLIGHT` | `off` | — (probe runs) | exactly `off` skips the command-path startup preflight |
 | `RAD_AGENT_PREFLIGHT_TIMEOUT_SECONDS` | positive integer | `60` | preflight probe deadline; malformed exits 2 |
 | `RAD_TOKEN_BUDGET` | positive integer | — | per-deliver cumulative token ceiling (cost breaker) |
+| `RAD_REVIEW_AGENT_CMD` | any command string | — (falls back to `RAD_AGENT_CMD`) | review-lane CLI for [`rad review`](#rad-review) and `/rad-review`; not used by `rad deliver` |
 
 **Per-path credential requirements:**
 

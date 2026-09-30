@@ -123,7 +123,21 @@ note that and skip — do not fabricate criteria.)
 
 ### Step 4: Quality review
 
-Spawn the `quality-reviewer` agent on the changed files:
+If `RAD_REVIEW_AGENT_CMD` is set, run the reviewer through the review lane
+instead of a sub-agent (`$BASE` is the default branch from Step 1):
+
+```bash
+node harness/cli.js review quality-reviewer --base "$BASE"
+```
+
+Include its stdout as the quality-reviewer's full output — its `rad-findings`
+block is persisted in Step 7 as today. Keep its one-line stderr summary
+(`rad review: reviewer=… agent=… executable=<basename> findings=…`) for the
+Step 7 cycle record. A non-zero exit (1 = the command failed or printed no
+`rad-findings` block; 2 = usage/config) → record the exit code and that stderr
+line in the report and continue with the remaining steps.
+
+Otherwise, spawn the `quality-reviewer` agent on the changed files as today:
 
 ```
 Use the quality-reviewer agent on all files changed since branching from the default branch.
@@ -134,7 +148,12 @@ to blocking issues in the summary.
 
 ### Step 4b: Accessibility review
 
-Spawn the `accessibility-reviewer` agent on changed frontend files:
+If `RAD_REVIEW_AGENT_CMD` is set, run
+`node harness/cli.js review accessibility-reviewer --base "$BASE"` exactly as in
+Step 4: its stdout is the accessibility-reviewer's full output, and a non-zero
+exit → record the exit code and stderr line in the report and continue.
+
+Otherwise, spawn the `accessibility-reviewer` agent on changed frontend files:
 
 ```
 Use the accessibility-reviewer agent on all files changed since branching from the default branch.
@@ -292,8 +311,14 @@ without the field are classified by the documented keyword fallback in
 Then append one cycle summary record:
 
 ```json
-{"type":"cycle","cycle_id":"[CYCLE_ID]","feature":"[FEATURE]","date":"[DATE]","outcome":"[READY_FOR_ARCHITECT_REVIEW | NEEDS_FIXES_FIRST]","high":[total HIGH across all reviewers],"medium":[total MEDIUM],"low":[total LOW]}
+{"type":"cycle","cycle_id":"[CYCLE_ID]","feature":"[FEATURE]","date":"[DATE]","outcome":"[READY_FOR_ARCHITECT_REVIEW | NEEDS_FIXES_FIRST]","high":[total HIGH across all reviewers],"medium":[total MEDIUM],"low":[total LOW],"review_agent":{"source":"[subagent | RAD_REVIEW_AGENT_CMD]","executable":"[basename or null]"}}
 ```
+
+`review_agent.source` is `"RAD_REVIEW_AGENT_CMD"` when Steps 4/4b ran
+`harness/cli.js review`, else `"subagent"`. `executable` is the `executable=`
+basename from the `rad review` stderr line, or `null` for the sub-agent path.
+Never record the full command string — it may carry flags or paths the log
+should not hold.
 
 Append — never overwrite. Create the file if it does not exist.
 
