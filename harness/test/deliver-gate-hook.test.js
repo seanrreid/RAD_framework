@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { readFileSync } from 'node:fs';
+import { createFixture } from '../evals/lib/fixture.js';
 
 // Resolve repo root from this test file (harness/test/ -> repo root) so the suite
 // runs the real, shipped hook script against the real approval gate.
@@ -118,4 +120,46 @@ test('AC#4: malformed JSON on stdin → exit 2 (block, fail-closed)', () => {
   // Proves the hook denies despite the harness treating malformed output as
   // NON-blocking — the hook converts the parse failure to an explicit exit 2.
   assert.equal(runHook('not json'), 2, 'malformed payload must fail closed');
+});
+
+// ── #162: the block message names the real cause ─────────────────────────────
+// Driven in a throwaway fixture repo holding its own copy of scripts/ + harness/,
+// so the hook's repo-root resolution and the real fingerprint compare both run.
+const UNAPPROVED_MESSAGE = (slug) => `deliver blocked: no approved event for ${slug} — run /rad-approve first`;
+
+function runFixtureHook(fx) {
+  const res = spawnSync('node', [join('scripts', 'deliver-gate-hook.mjs')], {
+    cwd: fx.root,
+    input: skillPayload('team:rad-deliver', fx.feature),
+    encoding: 'utf8',
+  });
+  assert.notEqual(res.status, null, `hook did not exit normally: ${res.error ?? ''}`);
+  return res;
+}
+
+test('#162: approved-then-edited plan → exit 2 and the block names the fingerprint mismatch', () => {
+  const fx = createFixture({ feature: 'edited-demo' });
+  try {
+    assert.equal(runFixtureHook(fx).status, 0, 'the unedited approved plan must be allowed');
+    const rel = join('.agents', 'plans', `${fx.feature}.md`);
+    fx.writeFile(rel, `${readFileSync(join(fx.root, rel), 'utf8')}\n- added after approval\n`);
+    const res = runFixtureHook(fx);
+    assert.equal(res.status, 2, `an edited approved plan must be blocked: ${res.stderr}`);
+    assert.match(res.stderr, /fingerprint mismatch/);
+    assert.match(res.stderr, /re-approve with \/rad-approve edited-demo/);
+    assert.doesNotMatch(res.stderr, /no approved event/);
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test('#162: unapproved plan → exit 2 with the unchanged "no approved event" message', () => {
+  const fx = createFixture({ feature: 'unapproved-demo', approve: false });
+  try {
+    const res = runFixtureHook(fx);
+    assert.equal(res.status, 2, 'an unapproved deliver must be blocked with exit 2');
+    assert.equal(res.stderr, `${UNAPPROVED_MESSAGE(fx.feature)}\n`);
+  } finally {
+    fx.cleanup();
+  }
 });

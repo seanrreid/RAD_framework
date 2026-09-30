@@ -123,7 +123,9 @@ if [[ -f "$PLAN_FILE" ]]; then
     fi
     CURRENT_FP="${CURRENT_FP//$'\n'/}"
     if [[ "$STORED_FP" != "$CURRENT_FP" ]]; then
-      echo "ERROR: plan modified after approval — re-run /rad-approve (fingerprint mismatch for '${FEATURE}')."
+      # stderr, last line: deliver-gate-hook.mjs surfaces this line verbatim as
+      # its block reason, so it must name the cause (not "no approved event").
+      echo "plan changed since approval (fingerprint mismatch) — re-approve with /rad-approve ${FEATURE}" >&2
       exit 1
     fi
   fi
