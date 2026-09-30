@@ -172,19 +172,33 @@ function writeApprovedPlan(root, feature) {
  *   mainHead / mainStatus / worktreeList: the main checkout's `git rev-parse
  *   --abbrev-ref HEAD`, `git status --porcelain`, and `git worktree list --porcelain`
  *   defaultBranch: stdout of get-default-branch.sh
+ *   staged: whether `git diff --cached --quiet` reports staged run events
+ *   commitStatus: exit status of the run-events `git commit`
  */
 function makeDeliverSh({
   worktreePath = '/nonexistent', branchEvents = APPROVED_EVENTS_JSONL,
   mainHead = 'main', mainStatus = '', worktreeList = '', defaultBranch = '',
+  staged = true, commitStatus = 0,
 } = {}) {
   const lifecycle = []; // { cmd, args, cwd }
   const gitShows = []; // { args, cwd }
   const gitCalls = []; // { args, cwd } — main-checkout inspection + checkout
   const spineCwds = []; // cwd of each other script call
+  const runEventCalls = []; // { args, cwd } — run-events add / diff --cached / commit
+  const order = []; // 'git <sub>' | 'lifecycle <cmd>', in call order
   const gitReplies = {
     'rev-parse': mainHead, status: mainStatus, worktree: worktreeList, checkout: '',
   };
+  const runEventReplies = {
+    add: () => 0, diff: () => (staged ? 1 : 0), commit: () => commitStatus,
+  };
   const sh = (file, args, opts) => {
+    if (file === 'git' && Object.hasOwn(runEventReplies, args[0])) {
+      runEventCalls.push({ args, cwd: opts?.cwd });
+      order.push(`git ${args[0]}`);
+      const status = runEventReplies[args[0]]();
+      return { status, stdout: '', stderr: status > 1 ? 'fatal: commit refused' : '' };
+    }
     if (file === 'git' && Object.hasOwn(gitReplies, args[0])) {
       gitCalls.push({ args, cwd: opts?.cwd });
       return { status: 0, stdout: `${gitReplies[args[0]]}\n`, stderr: '' };
@@ -195,6 +209,7 @@ function makeDeliverSh({
     }
     if (typeof file === 'string' && file.endsWith('worktree-lifecycle.sh')) {
       lifecycle.push({ cmd: args[0], args, cwd: opts?.cwd });
+      order.push(`lifecycle ${args[0]}`);
       // `create` must return the resolved path on the last stdout line.
       if (args[0] === 'create') {
         return { status: 0, stdout: `${worktreePath}\n`, stderr: '' };
@@ -216,6 +231,8 @@ function makeDeliverSh({
   sh.gitShows = gitShows;
   sh.gitCalls = gitCalls;
   sh.spineCwds = spineCwds;
+  sh.runEventCalls = runEventCalls;
+  sh.order = order;
   return sh;
 }
 
@@ -459,6 +476,75 @@ test('deliver: RAD_WORKTREE="0" → unisolated (no lifecycle, no main-checkout i
     assert.equal(code, 0);
     assert.equal(sh.lifecycle.length, 0);
     assert.equal(sh.gitCalls.length, 0, 'opt-out must not inspect or switch the main checkout');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Amendment 1 — run events are committed in the worktree BEFORE the non-forced
+// lifecycle remove, so a successful isolated deliver leaves a clean tree.
+// ---------------------------------------------------------------------------
+
+const RUN_EVENTS_SUBJECT = `deliver(${FEATURE}): record deliver run events`;
+/** A `git commit` status that makes the run-events commit fail. */
+const COMMIT_FAILED_STATUS = 128;
+
+test('deliver: success → run events added + committed in the worktree BEFORE remove', async () => {
+  await withTempDirs(async (repoRoot, worktreeDir) => {
+    writeApprovedPlan(worktreeDir, FEATURE);
+    const sh = makeDeliverSh({ worktreePath: worktreeDir });
+
+    const code = await runDeliver({ worktree: undefined, repoRoot, sh, runWave: async () => ({ outcome: 'success' }) });
+
+    assert.equal(code, 0);
+    assert.deepEqual(sh.order.slice(-4), ['git add', 'git diff', 'git commit', 'lifecycle remove']);
+    const [add, , commit] = sh.runEventCalls;
+    assert.deepEqual(add.args, ['add', '--', `.agents/state/${FEATURE}/`]);
+    assert.deepEqual(commit.args, ['commit', '-m', RUN_EVENTS_SUBJECT]);
+    assert.ok(sh.runEventCalls.every((c) => c.cwd === worktreeDir), 'git runs in the worktree root');
+  });
+});
+
+test('deliver: success with nothing staged → no commit call, remove still runs', async () => {
+  await withTempDirs(async (repoRoot, worktreeDir) => {
+    writeApprovedPlan(worktreeDir, FEATURE);
+    const sh = makeDeliverSh({ worktreePath: worktreeDir, staged: false });
+
+    const code = await runDeliver({ worktree: undefined, repoRoot, sh, runWave: async () => ({ outcome: 'success' }) });
+
+    assert.equal(code, 0);
+    assert.deepEqual(sh.order.slice(-3), ['git add', 'git diff', 'lifecycle remove']);
+    assert.ok(!sh.order.includes('git commit'), 'nothing staged → no commit');
+  });
+});
+
+test('deliver: run-events commit fails → preserve + pointer, exit 1, remove NOT called', async () => {
+  await withTempDirs(async (repoRoot, worktreeDir) => {
+    writeApprovedPlan(worktreeDir, FEATURE);
+    const sh = makeDeliverSh({ worktreePath: worktreeDir, commitStatus: COMMIT_FAILED_STATUS });
+
+    const { code, stderr } = await runCaptured({
+      worktree: undefined, repoRoot, sh, runWave: async () => ({ outcome: 'success' }),
+    });
+
+    assert.equal(code, 1);
+    const cmds = sh.lifecycle.map((c) => c.cmd);
+    assert.ok(cmds.includes('preserve'), 'a failed commit preserves the worktree');
+    assert.ok(!cmds.includes('remove'), 'never remove (let alone force) a dirty worktree');
+    assert.ok(stderr.includes('could not commit run events'), stderr);
+    assert.ok(stderr.includes('fatal: commit refused'), 'the git reason is surfaced');
+    assert.ok(stderr.includes(`rad deliver: worktree preserved at ${worktreeDir}`), stderr);
+  });
+});
+
+test('deliver: RAD_WORKTREE="0" success → no run-events add/diff/commit calls', async () => {
+  await withTempDirs(async (repoRoot) => {
+    writeApprovedPlan(repoRoot, FEATURE);
+    const sh = makeDeliverSh();
+
+    const code = await runDeliver({ worktree: false, repoRoot, sh, runWave: async () => ({ outcome: 'success' }) });
+
+    assert.equal(code, 0);
+    assert.equal(sh.runEventCalls.length, 0, 'unisolated runs make no new git calls');
   });
 });
 

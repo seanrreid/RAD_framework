@@ -702,7 +702,7 @@ export function worktreeEnabled(env = process.env) {
   return env.RAD_WORKTREE !== WORKTREE_OFF_VALUE;
 }
 
-/** Run a git command in the main checkout; a non-zero exit throws (fail-closed). */
+/** Run a git command in `repoRoot` (main checkout or worktree); a non-zero exit throws (fail-closed). */
 function mainGit(sh, repoRoot, args) {
   const res = sh('git', args, { cwd: repoRoot });
   if (res.status !== 0) {
@@ -827,6 +827,48 @@ function preserveAfterSetupFailure(worktree, feature, root) {
     const safe = sanitizeErrorMessage(err?.message ?? String(err));
     process.stderr.write(`rad deliver: worktree preserve failed — ${safe}\n`);
   }
+}
+
+/** `git diff --cached --quiet` exit status meaning "staged changes exist". */
+const GIT_DIFF_HAS_CHANGES = 1;
+
+/**
+ * Commit the run-state the spine wrote inside the worktree so it persists on
+ * the work branch and the NON-forced lifecycle remove sees a clean tree.
+ * Commits only when something is staged. Any git failure throws.
+ */
+function commitRunEvents({ sh, root, feature }) {
+  mainGit(sh, root, ['add', '--', `.agents/state/${feature}/`]);
+  const staged = sh('git', ['diff', '--cached', '--quiet'], { cwd: root });
+  if (staged.status === 0) return;
+  if (staged.status !== GIT_DIFF_HAS_CHANGES) {
+    const detail = String(staged.stderr || staged.stdout || 'no output').trim();
+    throw new Error(`git diff --cached --quiet exited ${staged.status}: ${detail}`);
+  }
+  mainGit(sh, root, ['commit', '-m', `deliver(${feature}): record deliver run events`]);
+}
+
+/**
+ * Tear down on evidenced success (after committing the run events), else
+ * preserve. A commit failure preserves the worktree — never a forced remove.
+ * @returns {number|null} an exit code to return, or null to continue
+ */
+function finishWorktree({ worktree, completed, sh, root, feature }) {
+  if (!completed) {
+    worktree.preserve(feature);
+    writePreservedPointer(feature, root);
+    return null;
+  }
+  try {
+    commitRunEvents({ sh, root, feature });
+  } catch (err) {
+    const safe = sanitizeErrorMessage(err?.message ?? String(err));
+    process.stderr.write(`rad deliver: could not commit run events in the worktree — ${safe}\n`);
+    preserveAfterSetupFailure(worktree, feature, root);
+    return 1;
+  }
+  worktree.complete(feature);
+  return null;
 }
 
 /**
@@ -1261,12 +1303,8 @@ export async function deliverCommand(argv, ctx) {
   // Worktree cleanup: complete (tear down) only on EVIDENCED success, preserve
   // (keep for inspection) on any stop or an ok the log does not confirm.
   if (worktree) {
-    if (evidence.completed) {
-      worktree.complete(feature);
-    } else {
-      worktree.preserve(feature);
-      writePreservedPointer(feature, root);
-    }
+    const cleanupCode = finishWorktree({ worktree, completed: evidence.completed, sh, root, feature });
+    if (cleanupCode !== null) return cleanupCode;
   }
 
   if (evidence.completed) {
