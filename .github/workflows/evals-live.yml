@@ -1,0 +1,77 @@
+# RAD live evals — thin GitHub Actions wrapper over the live eval lanes.
+#
+# Design invariant: ZERO check logic lives in this YAML. Each job is checkout +
+# env wiring + `node --test`; the same command lines run locally. See
+# docs/evals.md for the lanes, scoring, and trust boundary.
+#
+# Never a pass without credentials:
+#   - Each job is gated on a repo VARIABLE naming the agent CLI. Variable unset
+#     → the job is SKIPPED (neutral), never reported as a pass.
+#   - GitHub withholds secrets from fork PRs, so ANTHROPIC_API_KEY is empty
+#     there; the key-check step then fails the job with an ::error:: instead of
+#     letting the evals run (and skip) without credentials.
+#
+# The eval CLIs inherit this job's full env on purpose (see docs/evals.md →
+# "Trust boundary"); point the variables only at trusted CLIs.
+name: RAD live evals
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .claude/agents/quality-reviewer.md
+      - .claude/agents/accessibility-reviewer.md
+      - 'harness/evals/reviewers/**'
+
+jobs:
+  # Reviewer fixtures (#49): golden changes judged by the real reviewers.
+  reviewer-fixtures:
+    if: vars.RAD_REVIEW_EVAL_CMD != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      # Optional maintainer-set install step (e.g. installing the agent CLI).
+      - name: Eval setup
+        if: vars.RAD_EVAL_SETUP != ''
+        run: ${{ vars.RAD_EVAL_SETUP }}
+      - name: Require ANTHROPIC_API_KEY
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "::error::ANTHROPIC_API_KEY secret is not available (unset, or a fork PR)"
+            exit 1
+          fi
+      - run: node --test harness/evals/reviewers.eval.js
+        env:
+          RAD_REVIEW_EVAL_CMD: ${{ vars.RAD_REVIEW_EVAL_CMD }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          RAD_REVIEW_EVAL_TRIALS: '3'
+
+  # Live-only harness cases: model judgment under adversarial task text.
+  live-evals:
+    if: vars.RAD_EVAL_LIVE_CMD != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Eval setup
+        if: vars.RAD_EVAL_SETUP != ''
+        run: ${{ vars.RAD_EVAL_SETUP }}
+      - name: Require ANTHROPIC_API_KEY
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "::error::ANTHROPIC_API_KEY secret is not available (unset, or a fork PR)"
+            exit 1
+          fi
+      - run: node --test harness/evals/live.eval.js
+        env:
+          RAD_EVAL_LIVE_CMD: ${{ vars.RAD_EVAL_LIVE_CMD }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
