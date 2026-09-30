@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Create your account</title>
+</head>
+<body>
+  <main>
+    <h1>Create your account</h1>
+    <p>Fields marked (required) must be filled in.</p>
+    <form action="/signup" method="post">
+      <label for="signup-name">Full name (required)</label>
+      <input id="signup-name" name="name" type="text" autocomplete="name"
+             required aria-required="true">
+
+      <label for="signup-email">Email address (required)</label>
+      <input id="signup-email" name="email" type="email" autocomplete="email"
+             required aria-required="true" aria-describedby="signup-email-hint">
+      <p id="signup-email-hint">We only use this to send your receipt.</p>
+
+      <label for="signup-plan">Plan</label>
+      <select id="signup-plan" name="plan">
+        <option value="starter">Starter</option>
+        <option value="team">Team</option>
+      </select>
+
+      <button type="submit">Create account</button>
+    </form>
+  </main>
+</body>
+</html>
