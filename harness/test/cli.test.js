@@ -1192,8 +1192,8 @@ test('script args — a real deliver passes each script its argv contract', asyn
       '--title', `Deliver: ${DELIVER_FEATURE}`, '--body', 'RAD deliver: 2 wave(s) complete',
       '--head', branch, '--no-draft', '--label', 'rad:deliver',
     ]]);
-    // The base branch is resolved once per run, from the run root's CLAUDE.md.
-    assert.deepEqual(rec.argsFor('scripts/get-default-branch.sh'), [[join(repoRoot, 'CLAUDE.md')]]);
+    // The base branch is resolved once per run, from the run root's .rad/config.yml.
+    assert.deepEqual(rec.argsFor('scripts/get-default-branch.sh'), [[repoRoot]]);
   });
 });
 

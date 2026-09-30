@@ -697,7 +697,7 @@ async function buildRunWave(agent, { model, root, planCtx }) {
 async function setupMainRun({ ctx, feature, model, agentKind, repoRoot, sh }) {
   const planCtx = loadPlanCtx(repoRoot, feature);
   if (!planCtx) return { code: 1 };
-  const state = createGitStateStore({ repoRoot, sh, claudeMd: join(repoRoot, 'CLAUDE.md') });
+  const state = createGitStateStore({ repoRoot, sh });
   // Gate check: approved status must be established before any wave execution.
   const g = await state.gate(feature, APPROVED_GATE);
   if (!g.passed) {
@@ -907,7 +907,7 @@ async function setupWorktreeRun({ ctx, feature, model, agentKind, repoRoot, sh }
     preserveAfterSetupFailure(worktree, feature, root);
     return built;
   }
-  const state = createGitStateStore({ repoRoot: root, sh, claudeMd: join(root, 'CLAUDE.md') });
+  const state = createGitStateStore({ repoRoot: root, sh });
   return { root, planCtx, state, runWave: built.runWave, worktree, workBranch };
 }
 
@@ -938,7 +938,7 @@ function readResumeHistory({ feature, repoRoot, sh }) {
     return readBranchTipHistory({ feature, branch: conventionWorkBranch(feature), repoRoot, sh });
   }
   try {
-    const state = createGitStateStore({ repoRoot, sh, claudeMd: join(repoRoot, 'CLAUDE.md') });
+    const state = createGitStateStore({ repoRoot, sh });
     return { ok: true, history: state.history(feature) };
   } catch (err) {
     return { ok: false, reason: sanitizeErrorMessage(err?.message ?? String(err)) };
@@ -1102,7 +1102,7 @@ function resolveWorkBranch(setup, planCtx, feature) {
  * so callers omit the optional base argument.
  */
 function readDefaultBranch({ sh, repoRoot, root, verb = 'rad deliver' }) {
-  const res = sh(join(repoRoot, DEFAULT_BRANCH_SCRIPT), [join(root, 'CLAUDE.md')], { cwd: root });
+  const res = sh(join(repoRoot, DEFAULT_BRANCH_SCRIPT), [root], { cwd: root });
   if (res.status !== 0) {
     throw new Error(`${verb}: cannot resolve default branch (${DEFAULT_BRANCH_SCRIPT} exited ${res.status})`);
   }
@@ -1500,7 +1500,7 @@ function checkApprovalBlockers(sh, repoRoot, planFile) {
  *   - Direct mode (no --on-behalf-of): the running git user MUST be a configured
  *     architect (check-role.sh architect). approvedBy/recordedBy = running user.
  *   - Proxy mode (--on-behalf-of <name> + required --evidence <text>): <name>
- *     MUST validate as a configured architect (check-role.sh architect CLAUDE.md
+ *     MUST validate as a configured architect (check-role.sh architect <repoRoot>
  *     <name>); the running user need NOT be an architect. approvedBy = <name>,
  *     recordedBy = running user.
  *
@@ -1536,7 +1536,6 @@ export async function approveCommand(argv, ctx) {
     return 1;
   }
 
-  const claudeMd = join(repoRoot, 'CLAUDE.md');
   const roleScript = join(repoRoot, 'scripts', 'check-role.sh');
 
   const planFile = join(repoRoot, '.agents', 'plans', `${feature}.md`);
@@ -1545,7 +1544,7 @@ export async function approveCommand(argv, ctx) {
     return 1;
   }
 
-  const store = createGitStateStore({ repoRoot, sh, claudeMd });
+  const store = createGitStateStore({ repoRoot, sh });
 
   // Read the plan doc once: the `Branch:` header (for the best-effort sync push)
   // and the body fingerprint (stamped onto the approved event so the gate-read
@@ -1589,9 +1588,9 @@ export async function approveCommand(argv, ctx) {
       process.stderr.write('rad approve: --on-behalf-of requires --evidence (cite where the architect approved)\n');
       return 1;
     }
-    const roleCheck = sh(roleScript, ['architect', claudeMd, onBehalfOf], { cwd: repoRoot });
+    const roleCheck = sh(roleScript, ['architect', repoRoot, onBehalfOf], { cwd: repoRoot });
     if (roleCheck.status !== 0) {
-      process.stderr.write(`rad approve: '${onBehalfOf}' is not a configured architect in CLAUDE.md — cannot record their approval\n`);
+      process.stderr.write(`rad approve: '${onBehalfOf}' is not a configured architect in .rad/config.yml — cannot record their approval\n`);
       if (isNonEmpty(roleCheck.stderr)) process.stderr.write(roleCheck.stderr);
       return 1;
     }
@@ -1603,7 +1602,7 @@ export async function approveCommand(argv, ctx) {
       process.stderr.write('rad approve: --evidence is only valid with --on-behalf-of\n');
       return 1;
     }
-    const roleCheck = sh(roleScript, ['architect', claudeMd], { cwd: repoRoot });
+    const roleCheck = sh(roleScript, ['architect', repoRoot], { cwd: repoRoot });
     if (roleCheck.status !== 0) {
       process.stderr.write('rad approve: permission denied — direct approval requires the architect role\n');
       if (isNonEmpty(roleCheck.stdout)) process.stderr.write(roleCheck.stdout);
@@ -1752,8 +1751,7 @@ export async function architectureApproveCommand(argv, ctx) {
     return 1;
   }
 
-  const claudeMd = join(repoRoot, 'CLAUDE.md');
-  const store = createGitStateStore({ repoRoot, sh, claudeMd });
+  const store = createGitStateStore({ repoRoot, sh });
 
   // Resolve the running git user (the recorder).
   const userResult = sh('git', ['config', 'user.email'], { cwd: repoRoot });
@@ -1858,8 +1856,7 @@ export async function statusCommand(argv, ctx) {
   }
 
   const { phase } = parsed;
-  const claudeMd = join(repoRoot, 'CLAUDE.md');
-  const state = createGitStateStore({ repoRoot, sh, claudeMd });
+  const state = createGitStateStore({ repoRoot, sh });
 
   const features = state.list(phase ? { phase } : {});
 
@@ -1997,8 +1994,7 @@ export async function gateCommand(argv, ctx) {
       // Feed the piped JSONL through the SAME pure fold the on-disk path uses.
       result = evaluateGate(name, readEventsFromStdin());
     } else {
-      const claudeMd = join(repoRoot, 'CLAUDE.md');
-      const state = createGitStateStore({ repoRoot, sh, claudeMd });
+      const state = createGitStateStore({ repoRoot, sh });
       result = await state.gate(feature, name);
     }
   } catch (err) {
@@ -2110,7 +2106,7 @@ export async function stopStatusCommand(argv, ctx) {
   try {
     const history = stdin
       ? parseEventsJsonlStrict(readFileSync(0, 'utf8')) // fd 0 = stdin
-      : createGitStateStore({ repoRoot, sh, claudeMd: join(repoRoot, 'CLAUDE.md') }).history(feature);
+      : createGitStateStore({ repoRoot, sh }).history(feature);
     stop = dormantStop(history);
   } catch (err) {
     process.stderr.write(`rad stop-status: ${sanitizeErrorMessage(err?.message ?? String(err))}\n`);
@@ -2593,8 +2589,7 @@ async function ownerVerb(argv, ctx, which) {
     return 1;
   }
 
-  const claudeMd = join(repoRoot, 'CLAUDE.md');
-  const store = createGitStateStore({ repoRoot, sh, claudeMd });
+  const store = createGitStateStore({ repoRoot, sh });
 
   let result;
   try {

@@ -435,7 +435,6 @@ test('regression: RAD_LOW_RISK_PATTERNS=.* does not let a non-architect direct a
   let stderr = '';
   try {
     await withTempRepo(async (repoRoot) => {
-      writeFileSync(join(repoRoot, 'CLAUDE.md'), '# CLAUDE\n', 'utf8');
       const feature = 'low-risk-feature';
       writeMinimalPlan(repoRoot, feature);
 
@@ -491,7 +490,6 @@ async function approveWithBlocker(blocker, extraArgs = []) {
   let stderr = '';
   try {
     return await withTempRepo(async (repoRoot) => {
-      writeFileSync(join(repoRoot, 'CLAUDE.md'), '# CLAUDE\n', 'utf8');
       const feature = 'blocker-feature';
       writeMinimalPlan(repoRoot, feature);
       const blockerCalls = [];
