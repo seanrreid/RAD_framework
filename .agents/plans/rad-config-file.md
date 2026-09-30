@@ -1,7 +1,10 @@
 # Plan: RAD Config File + Readers (`.rad/config.yml`, hard cutover)
 Created: 2026-09-30
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-09-30T18:49:48.558Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/rad-config-file
 Adopted-From: https://github.com/seanrreid/RAD_framework/issues/87
 Issue-Title: Split RAD config out of CLAUDE.md: config is data the harness folds, not prose the model reads (part 1 of 2)
