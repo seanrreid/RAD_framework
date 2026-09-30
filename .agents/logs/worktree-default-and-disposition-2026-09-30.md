@@ -13,3 +13,4 @@ Executor role: architect
 | 3 | Wave 2 | Isolation eval + registry | ✓ done_with_concerns (found: successful worktree run exits 1 — uncommitted events block non-force remove → amendment 1) | f47e09d | 13:03 |
 | 4 | Wave 2 | Research, plan and adopt skills | ✓ complete | c706e95 | 13:03 |
 | 5 | Wave 2 | Docs | ✓ complete | 559e8fc | 13:03 |
+| — | Amend | Re-approved after amendment 1 | — | — | 14:07 |
