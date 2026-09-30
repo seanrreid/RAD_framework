@@ -1,7 +1,10 @@
 # Plan: Cross-Vendor Review Lane (`rad review`)
 Created: 2026-09-30
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-09-30T18:49:50.139Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/cross-vendor-review-lane
 Adopted-From: https://github.com/seanrreid/RAD_framework/issues/110
 Issue-Title: Cross-vendor review lane: let the review agent resolve to a different provider than the delivery agent
