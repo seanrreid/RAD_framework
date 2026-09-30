@@ -1,7 +1,8 @@
 # Plan: Worktree Isolation by Default + Intake Disposition
 Created: 2026-09-30
 Author: architect
-Status: in-progress
+Status: complete
+Completed-At: 2026-09-30T18:15:06Z
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-09-30T18:07:11.399Z
 Recorded-By: sean@torchcodelab.com
