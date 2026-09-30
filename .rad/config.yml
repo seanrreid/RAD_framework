@@ -1,0 +1,127 @@
+# RAD configuration — the single source of config data (platform, roles, scope map).
+# Validate with: rad config validate
+version: 1
+platform: github        # github | gitlab | bitbucket | forgejo | manual
+default_branch: main
+roles:
+  architect:
+    - sean@torchcodelab.com
+  developers: []
+  designers: []
+agent_scope_map:
+  - agent: hooks-parent-orchestrator
+    type: parent-orchestrator
+    reads: nothing
+    roles: [architect]
+  - agent: spine-integration-orchestrator
+    type: role-orchestrator
+    reads: nothing
+    roles: [architect]
+  - agent: spine-mapper
+    type: context-tool
+    reads: "harness/spine.js, matrix.js, matrix.yaml"
+    roles: [architect]
+  - agent: hook-runtime-orchestrator
+    type: role-orchestrator
+    reads: nothing
+    roles: [architect]
+  - agent: hook-surface-mapper
+    type: context-tool
+    reads: "contract.js, events writer, scripts/**"
+    roles: [architect]
+  - agent: portable-memory-parent-orchestrator
+    type: parent-orchestrator
+    reads: nothing
+    roles: [architect]
+  - agent: sync-transport-orchestrator
+    type: role-orchestrator
+    reads: nothing
+    roles: [architect]
+  - agent: sync-surface-mapper
+    type: context-tool
+    reads: "rad-approve/deliver verb sites, git-vs-host-CLI invocation, detect-platform.sh + mirror scripts, CLAUDE.md RAD config, .env.example"
+    roles: [architect]
+  - agent: event-fold-orchestrator
+    type: role-orchestrator
+    reads: nothing
+    roles: [architect]
+  - agent: event-fold-mapper
+    type: context-tool
+    reads: "harness/gates.js, events.js, gates.yaml, branch-tip read sites"
+    roles: [architect]
+  - agent: approval-authority-parent-orchestrator
+    type: parent-orchestrator
+    reads: nothing
+    roles: [architect]
+  - agent: approval-event-model-orchestrator
+    type: role-orchestrator
+    reads: nothing
+    roles: [architect]
+  - agent: approval-event-mapper
+    type: context-tool
+    reads: "harness/events.js, transitions.js, gates.js, gates.yaml, adapters/git-state-store.js (recordApproval)"
+    roles: [architect]
+  - agent: approval-command-integration-orchestrator
+    type: role-orchestrator
+    reads: nothing
+    roles: [architect]
+  - agent: approval-command-mapper
+    type: context-tool
+    reads: ".claude/commands/architect/rad-design.md + rad-approve.md, harness/cli.js, check-plan-approved.sh"
+    roles: [architect]
+  - agent: insights-feedback-parent-orchestrator
+    type: parent-orchestrator
+    reads: nothing
+    roles: [developer]
+  - agent: event-metrics-orchestrator
+    type: role-orchestrator
+    reads: nothing
+    roles: [developer]
+  - agent: event-metrics-mapper
+    type: context-tool
+    reads: "harness/events.js read side, spine outcome/usage record sites, gates.yaml vocab, .agents/state/*/events.jsonl samples"
+    roles: [developer]
+  - agent: findings-loop-orchestrator
+    type: role-orchestrator
+    reads: nothing
+    roles: [developer]
+  - agent: findings-surface-mapper
+    type: context-tool
+    reads: ".agents/findings.jsonl samples, rad-insights + wrap skills, CLAUDE.md conventions, lint-plan.sh"
+    roles: [developer]
+  - agent: harness-ci-parent-orchestrator
+    type: parent-orchestrator
+    reads: nothing
+    roles: [architect]
+  - agent: ci-wiring-orchestrator
+    type: role-orchestrator
+    reads: nothing
+    roles: [architect]
+  - agent: ci-surface-mapper
+    type: context-tool
+    reads: "scripts/*.sh conventions, deliver-gate-hook.mjs, platform scripts, harness test entries"
+    roles: [architect]
+  - agent: integrity-checks-orchestrator
+    type: role-orchestrator
+    reads: nothing
+    roles: [architect]
+  - agent: integrity-surface-mapper
+    type: context-tool
+    reads: "gates.js, events.js, plan-fingerprint.js, git-state-store.js recordApproval, git-sync.sh, events.jsonl samples"
+    roles: [architect]
+  - agent: convention-lints-orchestrator
+    type: role-orchestrator
+    reads: nothing
+    roles: [architect]
+  - agent: lint-surface-mapper
+    type: context-tool
+    reads: "lint-plan.sh, check-scope.sh, lib/plan-paths.sh, .claude/agents samples, CLAUDE.md scope map"
+    roles: [architect]
+  - agent: quality-reviewer
+    type: reviewer
+    reads: "current diff or specified files, CLAUDE.md conventions"
+    roles: [architect, developer, designer]
+  - agent: accessibility-reviewer
+    type: reviewer
+    reads: "current diff or specified files, CLAUDE.md stack info"
+    roles: [architect, developer, designer]
