@@ -3,7 +3,7 @@
 // fs/git). Each `mutate` disables exactly that guard in the fixture copy, so
 // the `[mutated]` twin proves the assertion depends on the guard.
 import assert from 'node:assert/strict';
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { defaultPlan } from './lib/fixture.js';
 import { defineCases } from './lib/runner.js';
@@ -30,6 +30,14 @@ function patchFile(root, rel, from, to) {
 const typesOf = (events) => events.map((e) => e.type);
 const lastOf = (events, type) => events.filter((e) => e.type === type).at(-1);
 const attemptOutcomes = (events) => events.filter((e) => e.type === 'wave-attempt').map((e) => e.data?.outcome);
+const WORKTREES_DIR = 'worktrees';
+/** Events from the isolated worktree's log; [] when no worktree was created. */
+function worktreeEvents(fx) {
+  const log = join(fx.base, WORKTREES_DIR, FEATURE, '.agents', 'state', FEATURE, 'events.jsonl');
+  if (!existsSync(log)) return [];
+  return readFileSync(log, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+}
+const currentBranch = (fx) => fx.git('rev-parse', '--abbrev-ref', 'HEAD').stdout.trim();
 const originMainTip = (fx) => fx.run('git', ['--git-dir', join(fx.base, 'bitbucket.org', 'origin.git'), 'rev-parse', 'main']).stdout.trim();
 
 const verifyHangPlan = defaultPlan(FEATURE).replace(
@@ -140,5 +148,29 @@ defineCases([
     // so no push-check-unavailable is recorded and the wave never completes.
     mutate: (root) => writeFileSync(join(root, 'scripts', 'default-tip.sh'),
       "#!/usr/bin/env bash\nhead -c 20 /dev/urandom | od -An -tx1 | tr -d ' \\n'\n"),
+  },
+  {
+    id: 'deliver-isolated-by-default',
+    invariant: 'deliver-runs-isolated',
+    adversary: 'in-scope-commit',
+    // RAD_WORKTREE '' exercises the default (the fixture otherwise forces '0');
+    // the worktree base lives under fx.base so cleanup removes it.
+    act: (fx) => fx.deliver([], { RAD_WORKTREE: '', RAD_WORKTREE_DIR: join(fx.base, WORKTREES_DIR) }),
+    // Exit 0 is not asserted: the spine appends events to the worktree's log
+    // without committing them, so the success-path `git worktree remove` (no
+    // --force by design) refuses the dirty tree and deliver exits 1 with the
+    // worktree preserved. Assert the wave advanced from the worktree's own log.
+    assert: (fx) => {
+      const types = typesOf(worktreeEvents(fx));
+      assert.ok(types.includes('wave-complete'), `no wave-complete in the worktree log: ${types}`);
+      const onBranch = fx.git('log', '--oneline', `rad/${FEATURE}`, '--', 'src/feature.txt').stdout.trim();
+      assert.notEqual(onBranch, '', 'the adversary commit is not on the work branch');
+      assert.equal(existsSync(join(fx.root, 'src', 'feature.txt')), false, 'the agent wrote into the main checkout');
+      assert.equal(currentBranch(fx), 'main', 'the main checkout was not switched off the work branch');
+    },
+    // Unset/'' treated as off → the agent runs in the operator's checkout.
+    // No need to hide the edit: the scope check diffs commits, not the working tree.
+    mutate: (root) => patchFile(root, 'harness/cli.js',
+      'return env.RAD_WORKTREE !== WORKTREE_OFF_VALUE;', "return env.RAD_WORKTREE === '1';"),
   },
 ]);

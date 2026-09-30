@@ -114,6 +114,19 @@ invariants:
       - { file: scripts/worktree-lifecycle.sh, symbol: "refusing to remove" }
     bypasses: []
 
+  - id: deliver-runs-isolated
+    claim: "`rad deliver` runs wave agents in a dedicated git worktree by default, never in the operator's checkout; it switches a clean main checkout off the work branch, refuses a dirty one, and never falls back to the main checkout when worktree creation fails"
+    authority: "the RAD_WORKTREE setting (only the exact value 0 opts out)"
+    evals: [harness/evals/delivery.eval.js]
+    enforced_by:
+      - { file: harness/cli.js, symbol: "export function worktreeEnabled", note: "isolation is on unless RAD_WORKTREE is exactly 0" }
+      - { file: harness/cli.js, symbol: "with uncommitted changes, so the worktree ", note: "ensureBranchFree/releaseMainCheckout: a dirty main checkout on the work branch exits 2" }
+      - { file: harness/cli.js, symbol: "is already checked out in another worktree", note: "ensureBranchFree: a branch held by another worktree exits 2" }
+      - { file: scripts/worktree-lifecycle.sh, symbol: "MARKER_NAME", note: "marks the isolated tree the run is rooted at" }
+    bypasses:
+      - { id: worktree-opt-out, surface: "RAD_WORKTREE=0", guarded: "no", note: "operator opt-out for environments where worktrees are impractical" }
+      - { id: skill-deliver-path, surface: "/rad-deliver skill (sub-agent path)", guarded: "no", note: "the skill runs wave sub-agents in the checkout it is invoked from; worktree isolation applies to the rad deliver CLI only" }
+
   - id: resume-needs-decision-only
     claim: "A stopped deliver can be resumed only from a needs-decision stop; a failed stop cannot be resumed."
     authority: "the latest deliver-stopped event in .agents/state/<feature>/events.jsonl, classified by harness/stops.js"
