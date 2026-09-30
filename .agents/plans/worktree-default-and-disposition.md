@@ -1,9 +1,9 @@
 # Plan: Worktree Isolation by Default + Intake Disposition
 Created: 2026-09-30
 Author: architect
-Status: pending-review
+Status: approved
 Approved-By: sean@torchcodelab.com
-Approved-At: 2026-09-30T16:52:19.701Z
+Approved-At: 2026-09-30T18:07:11.399Z
 Recorded-By: sean@torchcodelab.com
 Branch: rad/worktree-default-and-disposition
 Adopted-From: https://github.com/seanrreid/RAD_framework/issues/61, https://github.com/seanrreid/RAD_framework/issues/94
