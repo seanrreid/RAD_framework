@@ -16,24 +16,37 @@
 #     quality-reviewer): basic frontmatter is linted, but they are exempt from
 #     the context-tool description/model rules and the scope-map bijection.
 #
-# Part 2 — scope-map sync against the `### Agent Scope Map` table in CLAUDE.md:
-#   - every table row's agent name must have a matching <agents-dir>/<name>.md;
-#   - every agent file WITH a roles: field must have a table row.
+# Part 2 — scope-map sync against `agent_scope_map` in .rad/config.yml (read via
+# `rad config get agent_scope_map`, one JSON object per row):
+#   - every row's agent name must have a matching <agents-dir>/<name>.md;
+#   - every agent file WITH a roles: field must have a row.
 #
-# Usage: scripts/lint-agent-files.sh [claude-md] [agents-dir]
-#   defaults: CLAUDE.md  .claude/agents
+# Usage: scripts/lint-agent-files.sh [repo-root] [agents-dir]
+#   defaults: this script's checkout  .claude/agents
 #
 # Exit codes:
 #   0 = clean
-#   1 = one or more violations (each reported with file + reason)
-#   2 = usage error (CLAUDE.md or agents dir not found)
+#   1 = one or more violations (each reported with file + reason), or a
+#       missing/invalid .rad/config.yml (reason reported — fails closed)
+#   2 = usage error (RAD harness or agents dir not found)
 
 set -euo pipefail
 
-CLAUDE_MD="${1:-CLAUDE.md}"
-AGENTS_DIR="${2:-.claude/agents}"
+readonly CONFIG_KEY_ABSENT_EXIT=3
+readonly SCOPE_MAP_SOURCE=".rad/config.yml agent_scope_map"
 
-[[ -f "$CLAUDE_MD" ]]  || { echo "ERROR: CLAUDE.md not found at: $CLAUDE_MD"; exit 2; }
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="${1:-$SCRIPT_DIR/..}"
+# Legacy argument form accepted: a path naming an existing regular FILE (e.g.
+# the pre-#87 `CLAUDE.md` argument) resolves to its directory as the repo root.
+# Config is still read ONLY from .rad/config.yml — no CLAUDE.md data fallback.
+if [[ -f "$ROOT" ]]; then
+  ROOT="$(dirname -- "$ROOT")"
+fi
+AGENTS_DIR="${2:-.claude/agents}"
+RAD_CLI="$ROOT/harness/cli.js"
+
+[[ -f "$RAD_CLI" ]]    || { echo "ERROR: RAD harness not found at: $RAD_CLI (repo-root: $ROOT)"; exit 2; }
 [[ -d "$AGENTS_DIR" ]] || { echo "ERROR: agents dir not found at: $AGENTS_DIR"; exit 2; }
 
 VIOLATIONS=0
@@ -157,28 +170,55 @@ for file in "$AGENTS_DIR"/*.md; do
 done
 
 # ── Part 2: Agent Scope Map sync (read-only — report drift, never rewrite) ─────
-MAP_ROWS=$(awk '/^### Agent Scope Map/ { found=1; next } found && /^### / { exit } found && /^\|/ { print }' "$CLAUDE_MD" \
-  | grep -v '^| *Agent ' | grep -v '^|[-| ]*$' \
-  | awk -F'|' '{ print $2 }' \
-  | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' \
-  | grep -v '^$' || true)
+# scope_map_agents — print the `agent` field of each agent_scope_map row (one
+# compact JSON object per stdin line); a malformed row is a hard error.
+scope_map_agents() {
+  node -e '
+    const lines = require("fs").readFileSync(0, "utf8").split("\n").filter(Boolean);
+    for (const line of lines) {
+      const row = JSON.parse(line);
+      if (typeof row.agent !== "string" || row.agent === "") {
+        throw new Error(`agent_scope_map row has no agent name: ${line}`);
+      }
+      process.stdout.write(`${row.agent}\n`);
+    }
+  '
+}
 
-# Every table row must have a matching agent file.
+MAP_ERR=$(mktemp "${TMPDIR:-/tmp}/lint-agent-files.XXXXXX")
+trap 'rm -f "$MAP_ERR"' EXIT
+
+MAP_RC=0
+MAP_JSON=$(node "$RAD_CLI" config get agent_scope_map 2>"$MAP_ERR") || MAP_RC=$?
+if [[ "$MAP_RC" -eq "$CONFIG_KEY_ABSENT_EXIT" ]]; then
+  MAP_JSON=""
+elif [[ "$MAP_RC" -ne 0 ]]; then
+  echo "✗ .rad/config.yml: cannot read agent_scope_map (rad config get exit $MAP_RC):"
+  sed 's/^/  /' "$MAP_ERR"
+  exit 1
+fi
+
+if ! MAP_ROWS=$(printf '%s\n' "$MAP_JSON" | scope_map_agents); then
+  echo "✗ .rad/config.yml: agent_scope_map rows could not be parsed"
+  exit 1
+fi
+
+# Every scope-map row must have a matching agent file.
 if [[ -n "$MAP_ROWS" ]]; then
   while IFS= read -r row; do
     [[ -z "$row" ]] && continue
     if [[ ! -f "$AGENTS_DIR/$row.md" ]]; then
-      violation "$CLAUDE_MD" "Agent Scope Map row '$row' has no matching $AGENTS_DIR/$row.md"
+      violation "$SCOPE_MAP_SOURCE" "row '$row' has no matching $AGENTS_DIR/$row.md"
     fi
   done <<< "$MAP_ROWS"
 fi
 
-# Every roles-declaring agent file must have a table row.
+# Every roles-declaring agent file must have a scope-map row.
 if [[ -n "$ROLE_AGENTS" ]]; then
   while IFS= read -r agent; do
     [[ -z "$agent" ]] && continue
     if ! printf '%s\n' "$MAP_ROWS" | grep -qx "$agent"; then
-      violation "$AGENTS_DIR/$agent.md" "declares roles: but has no Agent Scope Map row in $CLAUDE_MD"
+      violation "$AGENTS_DIR/$agent.md" "declares roles: but has no row in $SCOPE_MAP_SOURCE"
     fi
   done <<< "$ROLE_AGENTS"
 fi
@@ -187,5 +227,5 @@ if [[ "$VIOLATIONS" -ne 0 ]]; then
   exit 1
 fi
 
-echo "PASS: agent files and Agent Scope Map are in sync"
+echo "PASS: agent files and the .rad/config.yml agent_scope_map are in sync"
 exit 0

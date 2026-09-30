@@ -92,6 +92,8 @@
 
 ## RAD Configuration
 
+<!-- authoritative config now lives in .rad/config.yml (#87); this block is removed in #87b -->
+
 ### Git Platform
 
 ```
@@ -341,12 +343,15 @@ built in. A path set covering RAD's own machinery is **always** treated as
 high-risk:
 
 ```
-^harness/|^scripts/|^\.claude/|^\.agents/state/|(^|/)gates\.ya?ml$|(^|/)matrix\.ya?ml$
+^harness/|^scripts/|^\.claude/|^\.agents/state/|(^|/)gates\.ya?ml$|(^|/)matrix\.ya?ml$|^\.rad/
 ```
 
 `scripts/lint-plan.sh` always emits an advisory warning for such a path
 regardless of `RAD_HIGH_RISK_PATTERNS`. Rationale: a change to RAD's own
 machinery always requires architect review.
+`.rad/config.yml` — the authoritative roles, platform, default branch and agent
+scope map — is self-protected too, so a plan that edits RAD's config is always
+flagged for architect review.
 
 The set lives as a literal (`RAD_SELF_PROTECTED_PATTERN`) in
 `scripts/lib/plan-paths.sh`; changing it requires a reviewed commit — there is

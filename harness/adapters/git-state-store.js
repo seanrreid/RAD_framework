@@ -245,10 +245,11 @@ function parsePlan(text) {
 /**
  * Create a Git StateStore.
  *
- * @param {{ repoRoot: string, sh?: typeof defaultSh, claudeMd?: string }} opts
+ * @param {{ repoRoot: string, sh?: typeof defaultSh, configRoot?: string }} opts
  *   - repoRoot: absolute path to the repo working tree
  *   - sh:       injectable shell-out helper (defaults to execFileSync-based)
- *   - claudeMd: path to CLAUDE.md for check-role.sh (defaults to <repoRoot>/CLAUDE.md)
+ *   - configRoot: repo root whose .rad/config.yml check-role.sh reads roles from
+ *                 (defaults to repoRoot)
  * @returns {import('../events.js').StateStore & {
  *   recordApproval: (a: { feature: string, actor: string, recordedBy?: string, ts?: string, evidence?: Object, fingerprint?: string }) => void,
  *   recordArchitectureApproved: (a: { slug: string, onBehalfOf: string, recordedBy?: string, evidence?: Object, ts?: string }) => void
@@ -257,11 +258,11 @@ function parsePlan(text) {
 export function createGitStateStore({
   repoRoot,
   sh = defaultSh,
-  claudeMd,
+  configRoot,
   evaluateGate,
 } = {}) {
   if (!repoRoot) throw new Error('createGitStateStore: repoRoot is required');
-  const claudeMdPath = claudeMd ?? join(repoRoot, 'CLAUDE.md');
+  const roleConfigRoot = configRoot ?? repoRoot;
 
   // Resolve the gate evaluator lazily so the store loads without js-yaml: the
   // dynamic import of gates.js (which pulls in js-yaml, the one runtime dep)
@@ -445,7 +446,7 @@ export function createGitStateStore({
     // are freezing — in proxy mode the runner (recordedBy) is not the one being
     // checked. Refuse before writing anything on a failed check.
     const roleScript = join(repoRoot, 'scripts', 'check-role.sh');
-    const roleCheck = sh(roleScript, [requiredRole, claudeMdPath, actor], { cwd: repoRoot });
+    const roleCheck = sh(roleScript, [requiredRole, roleConfigRoot, actor], { cwd: repoRoot });
     if (roleCheck.status !== 0) {
       throw new Error(
         `recordApproval: role check failed — actor '${actor}' does not hold role '${requiredRole}': ` +
@@ -510,7 +511,7 @@ export function createGitStateStore({
     // proxy mode the physical runner is not the one being checked. Refuse before
     // writing anything on a failed check.
     const roleScript = join(repoRoot, 'scripts', 'check-role.sh');
-    const roleCheck = sh(roleScript, [requiredRole, claudeMdPath, onBehalfOf], {
+    const roleCheck = sh(roleScript, [requiredRole, roleConfigRoot, onBehalfOf], {
       cwd: repoRoot,
     });
     if (roleCheck.status !== 0) {

@@ -10,7 +10,10 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Physical path (pwd -P): cli.js runs main() only when argv[1] equals its
+# realpath, and macOS mktemp dirs live under the /var -> /private/var symlink.
 TMP="$(mktemp -d)"
+TMP="$(cd "$TMP" && pwd -P)"
 trap 'rm -rf "$TMP"' EXIT
 REPO="$TMP/repo"
 OUT="$TMP/out.txt"
@@ -27,14 +30,21 @@ g() {
     -c commit.gpgsign=false "$@" >/dev/null
 }
 
+# setup_repo — scripts + harness/ (minus node_modules/test; the config reader
+# get-default-branch.sh uses) + a .rad/config.yml declaring default_branch: main.
 setup_repo() {
-  mkdir -p "$REPO/scripts/lib" "$REPO/.agents/plans" "$REPO/src"
+  local p
+  mkdir -p "$REPO/scripts/lib" "$REPO/harness" "$REPO/.rad" "$REPO/.agents/plans" "$REPO/src"
   cp "$HERE/check-plan-convergence.sh" "$HERE/get-default-branch.sh" "$REPO/scripts/"
   cp "$HERE/lib/"*.sh "$REPO/scripts/lib/"
+  for p in "$HERE/../harness/"*; do
+    case "$(basename "$p")" in node_modules|test) ;; *) cp -R "$p" "$REPO/harness/" ;; esac
+  done
   git init -q -b main "$REPO"
-  printf 'default_branch: main\n' > "$REPO/CLAUDE.md"
+  printf 'version: 1\nplatform: manual\ndefault_branch: main\nroles:\n  architect:\n    - arch@example.com\n' \
+    > "$REPO/.rad/config.yml"
   echo seed > "$REPO/README"
-  g add CLAUDE.md README scripts
+  g add .rad README scripts harness
   g commit -q -m seed
 }
 

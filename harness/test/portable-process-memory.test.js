@@ -394,7 +394,6 @@ test('AC#5 — bestEffortSyncPush short-circuits with RAD_SYNC unset (no sh call
     const { approveCommand } = await import('../cli.js');
     const { defaultSh } = await import('../adapters/git-state-store.js');
 
-    writeFileSync(join(repoRoot, 'CLAUDE.md'), '# CLAUDE\n', 'utf8');
     const feature = 'noxsync';
     const plansDir = join(repoRoot, '.agents', 'plans');
     mkdirSync(plansDir, { recursive: true });

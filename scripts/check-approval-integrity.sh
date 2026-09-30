@@ -15,9 +15,10 @@
 #                       then the events JSONL must satisfy the pure gate fold
 #                       (`rad gate <feature> approved --stdin`).
 #   (c) AUTHENTICITY  — the introducing commit's git author email must match the
-#                       architect identity parsed from CLAUDE.md Role Assignments
-#                       (same parse as check-role.sh). RAD_ARCHITECT_OVERRIDE
-#                       wins when set.
+#                       architect identity in .rad/config.yml roles.architect
+#                       (read via `rad config get`, as check-role.sh does).
+#                       RAD_ARCHITECT_OVERRIDE wins when set; a missing/invalid
+#                       config fails closed.
 #   (d) OWNERSHIP     — advisory ONLY: if the log's last ownership event is an
 #                       owner-claimed with no later owner-released, print an
 #                       "advisory:" line. Never affects the exit code.
@@ -44,6 +45,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 CLI="$REPO_ROOT/harness/cli.js"
+readonly CONFIG_KEY_ABSENT_EXIT=3
 
 WORK_BRANCH="${1:-}"
 BASE_BRANCH="${2:-$("$SCRIPT_DIR/get-default-branch.sh" 2>/dev/null || echo main)}"
@@ -202,17 +204,25 @@ fi
 echo "ok: gate — approved gate satisfied by the event fold"
 
 # ── (c) AUTHENTICITY — introducing commit authored by the architect ───────────
+# RAD_ARCHITECT_OVERRIDE wins; otherwise roles.architect from .rad/config.yml
+# (one identity per line). A missing/invalid config fails closed.
 if [[ -n "${RAD_ARCHITECT_OVERRIDE:-}" ]]; then
-  ARCHITECT="$RAD_ARCHITECT_OVERRIDE"
+  ARCHITECTS="$RAD_ARCHITECT_OVERRIDE"
 else
-  # Same Role Assignments parse as check-role.sh (architect line, first match).
-  ARCHITECT=$(grep "^architect:" CLAUDE.md 2>/dev/null | head -1 \
-    | sed "s/^architect:[[:space:]]*//" \
-    | sed 's/^[[:space:]]*//;s/[[:space:]]*$//') || ARCHITECT=""
+  ARCH_RC=0
+  ARCH_ERR=$(mktemp "${TMPDIR:-/tmp}/check-approval-integrity.XXXXXX")
+  ARCHITECTS=$(node "$CLI" config get roles.architect 2>"$ARCH_ERR") || ARCH_RC=$?
+  if [[ "$ARCH_RC" -ne 0 && "$ARCH_RC" -ne "$CONFIG_KEY_ABSENT_EXIT" ]]; then
+    echo "FAIL: cannot read roles.architect from .rad/config.yml (rad config get exit ${ARCH_RC}). Failing closed."
+    sed 's/^/  /' "$ARCH_ERR"
+    rm -f "$ARCH_ERR"
+    exit 1
+  fi
+  rm -f "$ARCH_ERR"
 fi
 
-if [[ -z "$ARCHITECT" ]]; then
-  echo "FAIL: no architect configured (CLAUDE.md Role Assignments empty and RAD_ARCHITECT_OVERRIDE unset). Failing closed."
+if [[ -z "$ARCHITECTS" ]]; then
+  echo "FAIL: no architect configured (roles.architect in .rad/config.yml empty and RAD_ARCHITECT_OVERRIDE unset). Failing closed."
   exit 1
 fi
 
@@ -224,8 +234,18 @@ if [[ -z "$AUTHOR_EMAIL" ]]; then
   exit 1
 fi
 
-if [[ "$AUTHOR_EMAIL" != "$ARCHITECT" && "$AUTHOR_USER" != "$ARCHITECT" ]]; then
-  echo "FAIL: approval commit ${APPROVAL_COMMIT} authored by '${AUTHOR_EMAIL}', not the configured architect '${ARCHITECT}'."
+ARCHITECT=""
+while IFS= read -r candidate; do
+  [[ -z "$candidate" ]] && continue
+  if [[ "$AUTHOR_EMAIL" == "$candidate" || "$AUTHOR_USER" == "$candidate" ]]; then
+    ARCHITECT="$candidate"
+    break
+  fi
+done <<< "$ARCHITECTS"
+
+if [[ -z "$ARCHITECT" ]]; then
+  ARCH_LIST=$(printf '%s\n' "$ARCHITECTS" | paste -sd ',' -)
+  echo "FAIL: approval commit ${APPROVAL_COMMIT} authored by '${AUTHOR_EMAIL}', not the configured architect '${ARCH_LIST}'."
   exit 1
 fi
 echo "ok: authenticity — approval commit authored by architect '${ARCHITECT}'"

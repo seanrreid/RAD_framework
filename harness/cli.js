@@ -19,7 +19,7 @@
 
 import { fileURLToPath } from 'node:url';
 import { basename, dirname, join, resolve } from 'node:path';
-import { readFileSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync } from 'node:fs';
 import process from 'node:process';
 import { spawnSync } from 'node:child_process';
 
@@ -39,6 +39,9 @@ import {
 import { taskFilesFromPlanText, mergeTaskFiles } from './plan-tasks.js';
 import { gatherDigestInputs, buildDigest, renderDigest } from './digest.js';
 import { buildReviewPrompt, parseFindings } from './review.js';
+import {
+  CONFIG_PATH, loadConfig, getConfigValue, migrateFromClaudeMd, serializeConfig, validateConfig,
+} from './config.js';
 
 /** Usage line for `rad deliver` (help, parse errors, and the command table). */
 const DELIVER_USAGE = 'rad deliver <feature> [--model <model-id>] [--resume --context <text>]';
@@ -50,6 +53,8 @@ const FORECAST_USAGE = 'rad forecast <plan>';
 const DIGEST_USAGE = 'rad digest <feature> [--branch <ref>] [--base <ref>]';
 /** Usage line for `rad review`. */
 const REVIEW_USAGE = 'rad review <reviewer> [--base <ref>]';
+/** Usage line for `rad config`. */
+const CONFIG_USAGE = 'rad config get <key> | rad config validate | rad config migrate [--from <path>] [--force]';
 
 const SUBCOMMANDS = {
   approve: {
@@ -93,6 +98,11 @@ const SUBCOMMANDS = {
     summary: 'Run one reviewer agent through the review lane (RAD_REVIEW_AGENT_CMD, else RAD_AGENT_CMD).',
     usage: REVIEW_USAGE,
     run: (argv, ctx) => reviewCommand(argv, ctx),
+  },
+  config: {
+    summary: 'Read, validate, or migrate the RAD config file (.rad/config.yml).',
+    usage: CONFIG_USAGE,
+    run: (argv, ctx) => configCommand(argv, ctx),
   },
   'owner-claim': {
     summary: 'Claim the single-writer lock on a feature (records who holds it).',
@@ -687,7 +697,7 @@ async function buildRunWave(agent, { model, root, planCtx }) {
 async function setupMainRun({ ctx, feature, model, agentKind, repoRoot, sh }) {
   const planCtx = loadPlanCtx(repoRoot, feature);
   if (!planCtx) return { code: 1 };
-  const state = createGitStateStore({ repoRoot, sh, claudeMd: join(repoRoot, 'CLAUDE.md') });
+  const state = createGitStateStore({ repoRoot, sh });
   // Gate check: approved status must be established before any wave execution.
   const g = await state.gate(feature, APPROVED_GATE);
   if (!g.passed) {
@@ -897,7 +907,7 @@ async function setupWorktreeRun({ ctx, feature, model, agentKind, repoRoot, sh }
     preserveAfterSetupFailure(worktree, feature, root);
     return built;
   }
-  const state = createGitStateStore({ repoRoot: root, sh, claudeMd: join(root, 'CLAUDE.md') });
+  const state = createGitStateStore({ repoRoot: root, sh });
   return { root, planCtx, state, runWave: built.runWave, worktree, workBranch };
 }
 
@@ -928,7 +938,7 @@ function readResumeHistory({ feature, repoRoot, sh }) {
     return readBranchTipHistory({ feature, branch: conventionWorkBranch(feature), repoRoot, sh });
   }
   try {
-    const state = createGitStateStore({ repoRoot, sh, claudeMd: join(repoRoot, 'CLAUDE.md') });
+    const state = createGitStateStore({ repoRoot, sh });
     return { ok: true, history: state.history(feature) };
   } catch (err) {
     return { ok: false, reason: sanitizeErrorMessage(err?.message ?? String(err)) };
@@ -1092,7 +1102,7 @@ function resolveWorkBranch(setup, planCtx, feature) {
  * so callers omit the optional base argument.
  */
 function readDefaultBranch({ sh, repoRoot, root, verb = 'rad deliver' }) {
-  const res = sh(join(repoRoot, DEFAULT_BRANCH_SCRIPT), [join(root, 'CLAUDE.md')], { cwd: root });
+  const res = sh(join(repoRoot, DEFAULT_BRANCH_SCRIPT), [root], { cwd: root });
   if (res.status !== 0) {
     throw new Error(`${verb}: cannot resolve default branch (${DEFAULT_BRANCH_SCRIPT} exited ${res.status})`);
   }
@@ -1490,7 +1500,7 @@ function checkApprovalBlockers(sh, repoRoot, planFile) {
  *   - Direct mode (no --on-behalf-of): the running git user MUST be a configured
  *     architect (check-role.sh architect). approvedBy/recordedBy = running user.
  *   - Proxy mode (--on-behalf-of <name> + required --evidence <text>): <name>
- *     MUST validate as a configured architect (check-role.sh architect CLAUDE.md
+ *     MUST validate as a configured architect (check-role.sh architect <repoRoot>
  *     <name>); the running user need NOT be an architect. approvedBy = <name>,
  *     recordedBy = running user.
  *
@@ -1526,7 +1536,6 @@ export async function approveCommand(argv, ctx) {
     return 1;
   }
 
-  const claudeMd = join(repoRoot, 'CLAUDE.md');
   const roleScript = join(repoRoot, 'scripts', 'check-role.sh');
 
   const planFile = join(repoRoot, '.agents', 'plans', `${feature}.md`);
@@ -1535,7 +1544,7 @@ export async function approveCommand(argv, ctx) {
     return 1;
   }
 
-  const store = createGitStateStore({ repoRoot, sh, claudeMd });
+  const store = createGitStateStore({ repoRoot, sh });
 
   // Read the plan doc once: the `Branch:` header (for the best-effort sync push)
   // and the body fingerprint (stamped onto the approved event so the gate-read
@@ -1579,9 +1588,9 @@ export async function approveCommand(argv, ctx) {
       process.stderr.write('rad approve: --on-behalf-of requires --evidence (cite where the architect approved)\n');
       return 1;
     }
-    const roleCheck = sh(roleScript, ['architect', claudeMd, onBehalfOf], { cwd: repoRoot });
+    const roleCheck = sh(roleScript, ['architect', repoRoot, onBehalfOf], { cwd: repoRoot });
     if (roleCheck.status !== 0) {
-      process.stderr.write(`rad approve: '${onBehalfOf}' is not a configured architect in CLAUDE.md — cannot record their approval\n`);
+      process.stderr.write(`rad approve: '${onBehalfOf}' is not a configured architect in .rad/config.yml — cannot record their approval\n`);
       if (isNonEmpty(roleCheck.stderr)) process.stderr.write(roleCheck.stderr);
       return 1;
     }
@@ -1593,7 +1602,7 @@ export async function approveCommand(argv, ctx) {
       process.stderr.write('rad approve: --evidence is only valid with --on-behalf-of\n');
       return 1;
     }
-    const roleCheck = sh(roleScript, ['architect', claudeMd], { cwd: repoRoot });
+    const roleCheck = sh(roleScript, ['architect', repoRoot], { cwd: repoRoot });
     if (roleCheck.status !== 0) {
       process.stderr.write('rad approve: permission denied — direct approval requires the architect role\n');
       if (isNonEmpty(roleCheck.stdout)) process.stderr.write(roleCheck.stdout);
@@ -1742,8 +1751,7 @@ export async function architectureApproveCommand(argv, ctx) {
     return 1;
   }
 
-  const claudeMd = join(repoRoot, 'CLAUDE.md');
-  const store = createGitStateStore({ repoRoot, sh, claudeMd });
+  const store = createGitStateStore({ repoRoot, sh });
 
   // Resolve the running git user (the recorder).
   const userResult = sh('git', ['config', 'user.email'], { cwd: repoRoot });
@@ -1848,8 +1856,7 @@ export async function statusCommand(argv, ctx) {
   }
 
   const { phase } = parsed;
-  const claudeMd = join(repoRoot, 'CLAUDE.md');
-  const state = createGitStateStore({ repoRoot, sh, claudeMd });
+  const state = createGitStateStore({ repoRoot, sh });
 
   const features = state.list(phase ? { phase } : {});
 
@@ -1987,8 +1994,7 @@ export async function gateCommand(argv, ctx) {
       // Feed the piped JSONL through the SAME pure fold the on-disk path uses.
       result = evaluateGate(name, readEventsFromStdin());
     } else {
-      const claudeMd = join(repoRoot, 'CLAUDE.md');
-      const state = createGitStateStore({ repoRoot, sh, claudeMd });
+      const state = createGitStateStore({ repoRoot, sh });
       result = await state.gate(feature, name);
     }
   } catch (err) {
@@ -2100,7 +2106,7 @@ export async function stopStatusCommand(argv, ctx) {
   try {
     const history = stdin
       ? parseEventsJsonlStrict(readFileSync(0, 'utf8')) // fd 0 = stdin
-      : createGitStateStore({ repoRoot, sh, claudeMd: join(repoRoot, 'CLAUDE.md') }).history(feature);
+      : createGitStateStore({ repoRoot, sh }).history(feature);
     stop = dormantStop(history);
   } catch (err) {
     process.stderr.write(`rad stop-status: ${sanitizeErrorMessage(err?.message ?? String(err))}\n`);
@@ -2583,8 +2589,7 @@ async function ownerVerb(argv, ctx, which) {
     return 1;
   }
 
-  const claudeMd = join(repoRoot, 'CLAUDE.md');
-  const store = createGitStateStore({ repoRoot, sh, claudeMd });
+  const store = createGitStateStore({ repoRoot, sh });
 
   let result;
   try {
@@ -2602,6 +2607,138 @@ async function ownerVerb(argv, ctx, which) {
     `rad ${verb}: ok feature=${feature} action=${which} holder=${result.holder} at=${result.ts}\n`,
   );
   return 0;
+}
+
+// ---------------------------------------------------------------------------
+// rad config — read, validate, or migrate .rad/config.yml (#87)
+// ---------------------------------------------------------------------------
+
+/** Exit code for `rad config get` on a key the (valid) config does not carry. */
+const CONFIG_KEY_ABSENT_EXIT_CODE = 3;
+/** The operator-facing line for a repo with no config file yet. */
+const CONFIG_MISSING_MESSAGE = `rad: no ${CONFIG_PATH} — run 'rad config migrate'\n`;
+
+/** Print a config load failure (missing or invalid) to stderr; returns FAILED_EXIT_CODE. */
+function reportConfigLoadFailure(loaded) {
+  if (loaded.missing) {
+    process.stderr.write(CONFIG_MISSING_MESSAGE);
+  } else {
+    process.stderr.write(`rad config: ${CONFIG_PATH} is invalid:\n`);
+    for (const e of loaded.errors) process.stderr.write(`  - ${e}\n`);
+  }
+  return FAILED_EXIT_CODE;
+}
+
+/** Render a config value for stdout: scalar as-is; list one item per line (objects as compact JSON). */
+function formatConfigValue(value) {
+  const one = (v) => (v !== null && typeof v === 'object' ? JSON.stringify(v) : String(v));
+  if (Array.isArray(value)) return value.map((v) => `${one(v)}\n`).join('');
+  return `${one(value)}\n`;
+}
+
+async function configGet(args, repoRoot) {
+  if (args.length !== 1 || args[0].startsWith('-')) return configUsage('get needs exactly one <key>');
+  const loaded = await loadConfig(repoRoot);
+  if (!loaded.ok) return reportConfigLoadFailure(loaded);
+  const got = getConfigValue(loaded.doc, args[0]);
+  if (!got.found) {
+    process.stderr.write(`rad config: key '${args[0]}' is not set in ${CONFIG_PATH}\n`);
+    return CONFIG_KEY_ABSENT_EXIT_CODE;
+  }
+  process.stdout.write(formatConfigValue(got.value));
+  return 0;
+}
+
+async function configValidate(args, repoRoot) {
+  if (args.length !== 0) return configUsage(`validate takes no arguments (got '${args[0]}')`);
+  const loaded = await loadConfig(repoRoot);
+  if (!loaded.ok) return reportConfigLoadFailure(loaded);
+  process.stdout.write(`✓ ${CONFIG_PATH} valid\n`);
+  return 0;
+}
+
+/** Parse `migrate [--from <path>] [--force]`; throws on malformed argv. */
+function parseMigrateArgs(args) {
+  const out = { from: undefined, force: false };
+  for (let i = 0; i < args.length; i += 1) {
+    if (args[i] === '--force') out.force = true;
+    else if (args[i] === '--from') {
+      if (!isNonEmpty(args[i + 1]) || args[i + 1].startsWith('--')) throw new Error('--from requires a path');
+      out.from = args[i + 1];
+      i += 1;
+    } else throw new Error(`unknown argument '${args[i]}'`);
+  }
+  return out;
+}
+
+/** Build the validated migrated doc from CLAUDE.md text, or report why not (returns an exit code). */
+function buildMigratedDoc(text, fromPath) {
+  const migrated = migrateFromClaudeMd(text);
+  for (const w of migrated.warnings) process.stderr.write(`rad config migrate: warning: ${w}\n`);
+  if (migrated.missing.length) {
+    process.stderr.write(`rad config migrate: ${fromPath} is missing required key(s): ${migrated.missing.join(', ')}\n`);
+    return { code: FAILED_EXIT_CODE };
+  }
+  const errors = validateConfig(migrated.doc);
+  if (errors.length) {
+    process.stderr.write(`rad config migrate: migrated config from ${fromPath} is invalid:\n`);
+    for (const e of errors) process.stderr.write(`  - ${e}\n`);
+    return { code: FAILED_EXIT_CODE };
+  }
+  return { migrated };
+}
+
+async function configMigrate(args, repoRoot) {
+  let opts;
+  try {
+    opts = parseMigrateArgs(args);
+  } catch (err) {
+    return configUsage(`migrate: ${err.message}`);
+  }
+  const fromPath = opts.from ? resolve(opts.from) : join(repoRoot, 'CLAUDE.md');
+  const target = join(repoRoot, CONFIG_PATH);
+  if (existsSync(target) && !opts.force) {
+    process.stderr.write(`rad config migrate: ${target} already exists — pass --force to overwrite\n`);
+    return FAILED_EXIT_CODE;
+  }
+  if (!existsSync(fromPath)) {
+    process.stderr.write(`rad config migrate: cannot read ${fromPath}: no such file\n`);
+    return FAILED_EXIT_CODE;
+  }
+  const built = buildMigratedDoc(readFileSync(fromPath, 'utf8'), fromPath);
+  if (built.code !== undefined) return built.code;
+  mkdirSync(dirname(target), { recursive: true });
+  writeFileSync(target, serializeConfig(built.migrated.doc));
+  process.stdout.write(`rad config migrate: wrote ${CONFIG_PATH} (${fromPath} was not modified)\n`);
+  process.stdout.write('Remove these config blocks from CLAUDE.md once the readers are cut over:\n');
+  for (const b of built.migrated.blocks) process.stdout.write(`  ${b.name}: lines ${b.start}-${b.end}\n`);
+  return 0;
+}
+
+function configUsage(message) {
+  process.stderr.write(`rad config: ${message}\nUsage: ${CONFIG_USAGE}\n`);
+  return USAGE_EXIT_CODE;
+}
+
+const CONFIG_ACTIONS = { get: configGet, validate: configValidate, migrate: configMigrate };
+
+/**
+ * `config get <key> | validate | migrate [--from <path>] [--force]`.
+ *
+ * get: prints the value (lists one item per line; scope-map rows as compact
+ * JSON) — exit 0; absent key → 3; missing/invalid config → 1; bad argv → 2.
+ * validate: exit 0 valid, 1 missing/invalid. migrate: writes .rad/config.yml
+ * from CLAUDE.md (never edits it); refuses to overwrite without --force.
+ *
+ * @param {string[]} argv - args after `config`
+ * @param {{ repoRoot: string }} ctx
+ * @returns {Promise<number>}
+ */
+export async function configCommand(argv, ctx) {
+  const [action, ...args] = argv;
+  const run = CONFIG_ACTIONS[action];
+  if (!run) return configUsage(action === undefined ? 'an action is required' : `unknown action '${action}'`);
+  return run(args, ctx.repoRoot);
 }
 
 // Run only when invoked as a script (not when imported by a test).

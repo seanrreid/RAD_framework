@@ -13,7 +13,10 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Physical path (pwd -P): cli.js runs main() only when argv[1] equals its
+# realpath, and macOS mktemp dirs live under the /var -> /private/var symlink.
 TMP="$(mktemp -d)"
+TMP="$(cd "$TMP" && pwd -P)"
 trap 'rm -rf "$TMP"' EXIT
 
 fail() { echo "✗ $1"; exit 1; }
@@ -26,13 +29,22 @@ OUT="$TMP/out.txt"
 ERR="$TMP/err.txt"
 
 # setup_grepo — fixture repo on main, pushed to a local bare origin, carrying
-# the scripts the drafter and lint need plus a CLAUDE.md with conventions.
+# the scripts the drafter and lint need, harness/ (minus node_modules/test; the
+# config reader), a .rad/config.yml declaring default_branch: main, and a
+# CLAUDE.md with conventions (no config — line 2 is a non-config placeholder so
+# the Coding Conventions range stays at lines 4-7).
 setup_grepo() {
-  mkdir -p "$GREPO/scripts/lib" "$GREPO/.agents"
+  local p
+  mkdir -p "$GREPO/scripts/lib" "$GREPO/.agents" "$GREPO/harness" "$GREPO/.rad"
   cp "$HERE/draft-insights-plan.sh" "$HERE/lint-plan.sh" "$HERE/check-approval-blockers.sh" \
     "$HERE/get-default-branch.sh" "$GREPO/scripts/"
   cp "$HERE/lib/plan-paths.sh" "$GREPO/scripts/lib/"
-  printf '# Project\ndefault_branch: main\n\n## Coding Conventions\n\n- existing bullet\n\n## Testing Standards\n' \
+  for p in "$HERE/../harness/"*; do
+    case "$(basename "$p")" in node_modules|test) ;; *) cp -R "$p" "$GREPO/harness/" ;; esac
+  done
+  printf 'version: 1\nplatform: manual\ndefault_branch: main\nroles:\n  architect:\n    - arch@example.com\n' \
+    > "$GREPO/.rad/config.yml"
+  printf '# Project\n**Name:** t\n\n## Coding Conventions\n\n- existing bullet\n\n## Testing Standards\n' \
     > "$GREPO/CLAUDE.md"
   git -C "$GREPO" init -q
   git -C "$GREPO" config user.email t@t.t
