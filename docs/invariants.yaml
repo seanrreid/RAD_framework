@@ -14,6 +14,8 @@ invariants:
       - { file: harness/cli.js, symbol: "setupMainRun" }
       - { file: harness/spine.js, symbol: "state.gate(feature, 'approved')" }
       - { file: scripts/check-plan-approved.sh, symbol: "approved --stdin" }
+      - { file: harness/cli.js, symbol: "export function isMainModule", note: "realpath main-module guard: a symlinked invocation still runs the gate (#168)" }
+      - { file: scripts/check-plan-approved.sh, symbol: "readonly GATE_PASSED_TOKEN", note: "exit 0 without passed=true fails closed — a CLI that never ran is not a pass (#168)" }
       - { file: scripts/check-approval-integrity.sh, symbol: "merge-base --is-ancestor", note: "CI: approval is an ancestor of the PR head" }
       - { file: scripts/deliver-gate-hook.mjs, symbol: "function block", note: "PreToolUse hook blocks an unapproved /rad-deliver (exit 2)" }
       - { file: .claude/settings.json, symbol: "deliver-gate-hook.mjs", note: "hook registration" }

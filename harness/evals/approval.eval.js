@@ -3,7 +3,7 @@
 // twin disables the named guard in the fixture's COPY of harness/ or scripts/.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { defineCases } from './lib/runner.js';
 import { defaultPlan } from './lib/fixture.js';
@@ -22,10 +22,10 @@ function patch(root, rel, from, to) {
 }
 
 /** Invoke the /rad-deliver PreToolUse hook exactly as Claude Code would, for the fixture's feature. */
-function runDeliverHook(fx) {
+function runDeliverHook(fx, cwd = fx.root) {
   const payload = { tool_name: 'Skill', tool_input: { skill_name: 'team:rad-deliver', skill_args: fx.feature } };
   const res = spawnSync('node', [join('scripts', 'deliver-gate-hook.mjs')],
-    { cwd: fx.root, input: JSON.stringify(payload), encoding: 'utf8' });
+    { cwd, input: JSON.stringify(payload), encoding: 'utf8' });
   if (res.error) throw res.error;
   return res;
 }
@@ -73,6 +73,33 @@ defineCases([
       assert.equal(result.status, HOOK_BLOCK_EXIT, `hook exit ${result.status}: ${result.stderr}`);
     },
     mutate: (root) => writeFileSync(join(root, 'scripts', 'check-plan-approved.sh'), ALWAYS_PASS_SCRIPT),
+  },
+  {
+    // #168: through a symlinked checkout both gate entry points refuse an
+    // unapproved plan — the hook, and check-plan-approved.sh as /rad-deliver
+    // Step 2 calls it. Node realpaths the hook's own path, so only the direct
+    // script call reaches cli.js through the link; that half catches the twin.
+    id: 'gate-hook-via-symlinked-checkout',
+    invariant: 'unapproved-deliver-cannot-run',
+    fixture: { approve: false },
+    act: (fx) => {
+      seedUnapprovedLog(fx);
+      const link = linkCheckout(fx);
+      return { hook: runDeliverHook(fx, link), script: runGateScript(link, fx.feature) };
+    },
+    assert: (fx, { hook, script }) => {
+      assert.equal(hook.status, HOOK_BLOCK_EXIT, `hook via symlink exit ${hook.status}: ${hook.stderr}`);
+      assert.notEqual(script.status, 0, `check-plan-approved.sh via symlink passed an unapproved plan: ${script.stdout}`);
+    },
+    // Either layer alone fails closed (the realpath guard runs the gate; the
+    // passed=true check refuses a silent exit 0), so the twin reverts BOTH.
+    mutate: (root) => {
+      patch(root, join('harness', 'cli.js'), 'if (isMainModule(process.argv[1], fileURLToPath(import.meta.url))) {',
+        'if (fileURLToPath(import.meta.url) === process.argv[1]) {');
+      patch(root, join('scripts', 'check-plan-approved.sh'),
+        'GATE_OUT=$(printf \'%s\' "$EVENTS_JSONL" | node "$CLI" gate "$FEATURE" approved --stdin) || gate_rc=$?',
+        'printf \'%s\' "$EVENTS_JSONL" | node "$CLI" gate "$FEATURE" approved --stdin; exit $?');
+    },
   },
   {
     // Both deliver entry points refuse a plan edited after approval: the
@@ -251,3 +278,32 @@ if (!readFileSync(plan, 'utf8').includes(MARK)) {
 console.log(['WAVE_RESULT', 'wave: 1', 'status: complete', 'tasks:', '  - title: Write the feature file',
   '    status: complete', '    commit: —', '    concern: —', '    error: —', 'END_WAVE_RESULT'].join('\\n'));
 `;
+
+// Hoisted helpers for gate-hook-via-symlinked-checkout.
+/** Symlink name; lives inside fx.base so fx.cleanup removes it (rmSync never follows it). */
+const CHECKOUT_LINK = 'checkout-link';
+
+/**
+ * A log with no approved event: without one, check-plan-approved.sh fails
+ * closed on the missing log before the CLI runs, and the guard is never exercised.
+ */
+function seedUnapprovedLog(fx) {
+  const event = { feature: fx.feature, type: 'plan-created', actor: 'dev@evals.invalid', role: 'developer',
+    ts: '2026-09-30T00:00:00.000Z' };
+  fx.writeFile(join('.agents', 'state', fx.feature, 'events.jsonl'), `${JSON.stringify(event)}\n`);
+}
+
+/** fx.base is under os.tmpdir() (/var → /private/var on macOS); the link adds a second, explicit hop. */
+function linkCheckout(fx) {
+  const link = join(fx.base, CHECKOUT_LINK);
+  symlinkSync(fx.root, link, 'dir');
+  return link;
+}
+
+/** Run check-plan-approved.sh by its path through the link, as /rad-deliver Step 2 does from a checkout. */
+function runGateScript(link, feature) {
+  const res = spawnSync(join(link, 'scripts', 'check-plan-approved.sh'), [`rad/${feature}`],
+    { cwd: link, encoding: 'utf8' });
+  if (res.error) throw res.error;
+  return res;
+}
