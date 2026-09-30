@@ -14,3 +14,4 @@ Executor role: architect
 | — | Rebase | Rebased onto main after #164 merged | — | — | 10:28 |
 | 4 | Wave 2 | rad digest command | ✓ complete | 7137f7f | 10:30 |
 | 5 | Wave 2 | /rad-review wiring | ✓ complete | 264ba0d | 10:30 |
+| 6 | Wave 3 | CI summary step + docs | ✓ complete | 95ec23f | 10:34 |
