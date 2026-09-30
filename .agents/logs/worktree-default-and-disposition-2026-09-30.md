@@ -8,3 +8,5 @@ Executor role: architect
 
 | Step | Wave | Task | Status | Commit | Time |
 |------|------|------|--------|--------|------|
+| 1 | Wave 1 | Worktree default + checked-out resolution | ✓ complete | 29b5088 | 12:58 |
+| 2 | Wave 1 | Disposition check script | ✓ complete | b05898a | 12:58 |
