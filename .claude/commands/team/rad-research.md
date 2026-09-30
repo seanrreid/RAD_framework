@@ -154,6 +154,35 @@ If the title is ambiguous, confirm the slug with the user before saving.
 
 ---
 
+### Step 4b: Try to refute the request (disposition)
+
+This step's ONLY job is to try to establish that the request should **not** be
+planned — with a concrete citation. It is not a design step and proposes no
+solution. Research has a bias toward forcing a solution onto every request;
+resist it here. Look for:
+
+- A test that already pins the requested behavior as intended (`not-actionable`)
+- A doc that states the current behavior is deliberate (`not-actionable`)
+- An existing plan in `.agents/plans/` that already covers it (`superseded`)
+- For a vague request: exactly what is missing to scope it (`insufficient-context`)
+
+Record one disposition:
+
+| Disposition | Meaning | Disposition-Evidence |
+|-------------|---------|----------------------|
+| `actionable` | Worth planning | empty |
+| `not-actionable` | Intended behavior, already covered, or out of scope | the citation (file:line, test name, doc path) |
+| `insufficient-context` | Cannot be scoped without specific missing info | the exact missing-items list |
+| `superseded` | An existing plan/feature covers it | the covering plan path or feature |
+
+**Absence of evidence → `actionable`.** A non-actionable disposition without a
+concrete citation is not allowed — if you cannot cite it, the request is
+actionable. A disposition is advice, not a lock: `/rad-plan` and `/rad-adopt`
+refuse a cited non-actionable disposition, but the user can always proceed with
+`--override-disposition "<reason>"`, which is recorded in the plan.
+
+---
+
 ### Step 5: Write the research artifact
 
 Choose the `Status:` by the artifact's intended consumer:
@@ -181,6 +210,8 @@ Save to `.agents/research/[slug].md`:
 Created: [YYYY-MM-DD]
 Author: [developer | architect]
 Status: [pending-design | pending-plan]
+Disposition: [actionable | not-actionable | insufficient-context | superseded]
+Disposition-Evidence: [citation or missing-items list; empty for actionable]
 Source: [file path | URL | inline]
 
 ## Project Summary
@@ -233,6 +264,17 @@ Open questions: [N]
 Next step:
   /rad-design [slug]    (Status: pending-design)
   /rad-plan [slug]      (Status: pending-plan)
+```
+
+When the disposition is **not** `actionable`, omit the `Next step:` hints and
+show this instead:
+
+```
+Disposition: [not-actionable | insufficient-context | superseded]
+Evidence:    [Disposition-Evidence]
+
+/rad-plan and /rad-adopt will refuse this request unless re-run with:
+  --override-disposition "<reason>"
 ```
 
 ---

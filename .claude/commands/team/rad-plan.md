@@ -30,9 +30,36 @@ condensed, single-wave plan for a small, low-risk change:
 
 Without `--light`, every step below runs in standard mode, unchanged.
 
+`--override-disposition "<reason>"` may accompany the description to proceed
+past a research artifact's cited non-actionable disposition (see Step 0). The
+override and its reason are recorded in the plan header.
+
 ---
 
 ## Process
+
+### Step 0: Check the research disposition
+
+Derive the feature slug the same way Step 3 does (kebab-case; if `$ARGUMENTS`
+names a research slug, use it). If `.agents/research/[feature-slug].md` does not
+exist, skip this step — no research artifact, no check.
+
+Otherwise run:
+
+```bash
+scripts/check-disposition.sh .agents/research/[feature-slug].md
+# with --override-disposition "<reason>" in $ARGUMENTS:
+scripts/check-disposition.sh .agents/research/[feature-slug].md --override "<reason>"
+```
+
+- **Exit 1** — cited non-actionable disposition. Stop and show its output (the
+  disposition, the evidence, and the `--override-disposition "<reason>"` syntax).
+  Do not research and do not write a plan. In an unattended run this is a stop —
+  report and end, never wait for input.
+- **Exit 2** — usage error or unreadable artifact. Report the error and stop.
+- **Exit 0** — proceed. If the output begins `overridden:`, add
+  `Disposition-Override: [disposition] — [reason]` to the plan's header block
+  (after `Branch:`, and after `Tier:` in a light plan).
 
 ### Step 1: Determine role and available agents
 
