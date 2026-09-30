@@ -404,6 +404,8 @@ tip. That event is the **sole gate authority** — `/rad-deliver` gates on it vi
 the read-only `rad gate <feature> approved` query (see `docs/rad-cli.md`). There
 is no plan PR. `/rad-approve` also writes a `Status: approved` header to the plan
 doc, but that header is a **display-only mirror** of the event, never the gate.
+An `approved` event recorded during a `rad deliver` run stops that run
+(`approval-changed`, exit 3); approvals change between runs, never within one (#158).
 Approval requires:
 - [ ] Architect review and approval (recorded on the work-branch tip)
 - [ ] All files within declared agent scope (checked by /rad-review)
