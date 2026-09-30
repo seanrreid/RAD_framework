@@ -2277,3 +2277,47 @@ test('(freeze-f) approvedDuringRun: a resumed run counts only approvals after th
   assert.deepEqual(approvedDuringRun(history), [late]);
   assert.deepEqual(approvedDuringRun(history.slice(0, 6)), []);
 });
+
+// ── #161: the spine's free-text stop reason reaches deliver-stopped as `detail` ──
+
+const APPROVED_DURING_RUN_TEXT =
+  'an approved event was recorded during this run (re-approval must happen between runs, not within one)';
+
+test('(detail-a) AC#6 approvalIntact {ok:false, reason} → deliver-stopped data.detail carries that reason', async () => {
+  const { state, result } = await runStopped({
+    state: makeValidatingState({ plan: twoWaves }),
+    approvalIntact: intactOnlyOnFirstCall(() => ({ ok: false, reason: 'x' })),
+  });
+  assert.equal(result.stopped, 'approval-changed');
+  const stop = assertOneTrailingStop(state, { class: 'needs-decision', reason: 'approval-changed', wave: 2 });
+  assert.equal(typeof stop.data.detail, 'string');
+  assert.match(stop.data.detail, /x/);
+  assert.equal(stop.data.detail, result.reason, 'detail is the result reason, verbatim');
+});
+
+test('(detail-b) AC#6 approval recorded during a run → detail equals the approved-during-run reason', async () => {
+  // Between-wave path (stop before wave 2) and post-loop path (single wave).
+  const between = makeValidatingState({ plan: twoWaves });
+  await runStopped({ state: between, runWave: approvingRunWave(between, 1).runWave });
+  const lastWave = makeValidatingState();
+  await runStopped({ state: lastWave, runWave: approvingRunWave(lastWave, 1).runWave });
+  for (const state of [between, lastWave]) {
+    const stop = assertOneTrailingStop(state, { class: 'needs-decision', reason: 'approval-changed' });
+    assert.equal(stop.data.detail, APPROVED_DURING_RUN_TEXT);
+  }
+});
+
+test('(detail-c) AC#7 stops without a free-text reason append no `detail` key', async () => {
+  let n = 0;
+  const capped = await runStopped({
+    maxFailedAttempts: 2,
+    runWave: async () => ({ outcome: 'fail-tests', summary: `s${n++}` }),
+  });
+  const capStop = assertOneTrailingStop(capped.state, { reason: 'failed-attempt-cap' });
+  assert.ok(!Object.hasOwn(capStop.data, 'detail'), 'failed-attempt-cap carries no detail');
+  const budgetState = makeValidatingState();
+  budgetState.appended.push({ feature: 'demo', type: 'wave-attempt', data: { wave: 0, outcome: 'success', usage: { total: 5 } } });
+  const budget = await runStopped({ state: budgetState, tokenBudget: 1 });
+  const budgetStop = assertOneTrailingStop(budget.state, { reason: 'token-budget' });
+  assert.ok(!Object.hasOwn(budgetStop.data, 'detail'), 'token-budget carries no detail');
+});
