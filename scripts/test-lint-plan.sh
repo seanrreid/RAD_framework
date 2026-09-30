@@ -18,6 +18,9 @@
 #   - stack-order wave advisory (layered waves only; mixed/single/unknown silent)
 #   - missing-mockup advisory (present, absent, fenced refs)
 #   - empty Files in Scope table (#145): named error + exit 1, never silent
+#   - consistency advisories: task citing no AC#, AC cited by no task (comma
+#     lists, whole-token ids), VAGUE_WORDS in ACs / task What:+Validate: (fenced
+#     and backtick spans skipped) — warnings only, exit code unchanged
 # Self-contained (no external harness): writes temp fixture plans, runs the real
 # lint-plan.sh, and asserts on output/exit code. Runs under bash 3.2+ (set -u safe).
 #
@@ -945,6 +948,115 @@ t_empty_files_in_scope() {
   echo "✓ EMPTY-SCOPE(b): same plan with one row ⇒ plan is valid, exit 0"
 }
 
+# ── Consistency advisories: AC ↔ task citations + vague wording ────────────────
+# Named orphan-task / uncited-AC warnings and the VAGUE_WORDS advisory. All are
+# WARNINGS: they never add an error or change the exit code (hermetic GREPO).
+# Args: $1 = output path, $2 = Acceptance Criteria body (may be empty),
+#       $3 = Wave 1 body (task blocks, may be empty).
+write_consistency_plan() {
+  local out="$1" acs="$2" tasks="$3"
+  {
+    printf '# Plan: consistency\nCreated: 2026-09-30\nAuthor: developer\n'
+    printf 'Status: pending-review\nBranch: rad/consistency\n\n## Context\nx\n\n'
+    printf '## Scope\n| In | Out |\n\n## Acceptance Criteria\n'
+    if [[ -n "$acs" ]]; then printf '%s\n' "$acs"; fi
+    printf '\n## Agent Scope\ndeveloper\n\n## Files in Scope\n'
+    printf '| File | Lines | Change |\n|------|-------|--------|\n| src/app.js | 1-2 | x |\n\n'
+    printf '## Execution Notes\n### Do Not Touch\n- None\n\n## Wave Plan\n### Wave 1 — sequential\n'
+    if [[ -n "$tasks" ]]; then printf '%s\n' "$tasks"; fi
+    printf '\n## Tests to Write\n- [ ] t — scripts/test-lint-plan.sh\n\n'
+    printf '## Non-Goals\n- a\n- b\n\n## Risks\nnone\n'
+  } > "$out"
+}
+
+# cons_task <id> <title> <validate> — one task block with a present File: line.
+cons_task() { printf '#### Task %s: %s\nFile: src/app.js:1-2\nValidate: %s\n' "$1" "$2" "$3"; }
+
+t_ac_citation_advisories() {
+  local base="$GREPO/.agents/plans" acs
+  acs=$'1. One.\n2. Two.\n3. Three.'
+  write_consistency_plan "$base/cons-orphan.md" "1. One." \
+    "$(cons_task 1.1 'cited work' 'AC#1 — x')"$'\n'"$(cons_task 1.2 'orphan work' 'runs the suite')"
+  ( tier_lint cons-orphan.md
+    assert_out_has "CONS(a)" "⚠ task 'Task 1.2: orphan work' cites no AC#"
+    assert_out_lacks "CONS(a)" "Task 1.1: cited work' cites no AC#"
+    assert_out_lacks "CONS(a)" "Errors"
+    assert_code "CONS(a)" 0 ) || exit 1
+  echo "✓ CONS(a): task whose Validate: cites no AC# ⇒ named warning, exit 0"
+
+  write_consistency_plan "$base/cons-all.md" "$acs" \
+    "$(cons_task 1.1 'first' 'AC#1 — x')"$'\n'"$(cons_task 1.2 'rest' 'AC#2, AC#3 — x')"
+  ( tier_lint cons-all.md
+    assert_out_lacks "CONS(b)" "cites no AC#"
+    assert_out_lacks "CONS(b)" "is cited by no task"
+    assert_out_has "CONS(b)" "✓ cons-all.md — plan is valid"
+    assert_code "CONS(b)" 0 ) || exit 1
+  echo "✓ CONS(b): every task cites an AC and every AC is cited ⇒ plan is valid"
+
+  write_consistency_plan "$base/cons-uncited.md" "$acs" \
+    "$(cons_task 1.1 'first' 'AC#1 — x')"$'\n'"$(cons_task 1.2 'third' 'AC#3 — x')"
+  ( tier_lint cons-uncited.md
+    assert_out_has "CONS(c)" "⚠ AC#2 is cited by no task"
+    assert_out_lacks "CONS(c)" "AC#1 is cited by no task"
+    assert_out_lacks "CONS(c)" "AC#3 is cited by no task"
+    assert_code "CONS(c)" 0 ) || exit 1
+  echo "✓ CONS(c): numbered AC no task cites ⇒ named warning, exit 0"
+
+  write_consistency_plan "$base/cons-comma.md" "$acs" "$(cons_task 1.1 'all' 'AC#1, AC#3 — x')"
+  ( tier_lint cons-comma.md
+    assert_out_lacks "CONS(d)" "AC#1 is cited by no task"
+    assert_out_lacks "CONS(d)" "AC#3 is cited by no task"
+    assert_out_has "CONS(d)" "⚠ AC#2 is cited by no task" ) || exit 1
+  write_consistency_plan "$base/cons-token.md" "1. One." "$(cons_task 1.1 'twelve' 'AC#12 — x')"
+  ( tier_lint cons-token.md
+    assert_out_has "CONS(d)" "⚠ AC#1 is cited by no task" ) || exit 1
+  echo "✓ CONS(d): comma-list citations each count; AC#12 does not cite AC#1"
+}
+
+t_vague_wording_advisory() {
+  local base="$GREPO/.agents/plans" fenced
+  write_consistency_plan "$base/cons-vague.md" $'1. The API is Robust.\n2. Two.' \
+    "$(printf '#### Task 1.1: t\nWhat: make it seamless\nValidate: AC#1, AC#2 — x')"
+  ( tier_lint cons-vague.md
+    assert_out_has "CONS(e)" "⚠ vague wording 'robust' in AC#1 — state a measurable outcome"
+    assert_out_has "CONS(e)" "⚠ vague wording 'seamless' in Task 1.1 What — state a measurable outcome"
+    assert_out_lacks "CONS(e)" "in AC#2"
+    assert_code "CONS(e)" 0 ) || exit 1
+  echo "✓ CONS(e): VAGUE_WORDS hit in an AC / task What: ⇒ located warning, exit 0"
+
+  fenced=$'1. Uses the `robust` flag.\n```\n2. robust example\n```\n2. Returns 200 within 50ms.'
+  write_consistency_plan "$base/cons-fenced.md" "$fenced" "$(cons_task 1.1 'x' 'AC#1, AC#2 — `seamless` mode')"
+  ( tier_lint cons-fenced.md
+    assert_out_lacks "CONS(f)" "vague wording"
+    assert_out_has "CONS(f)" "✓ cons-fenced.md — plan is valid" ) || exit 1
+  echo "✓ CONS(f): vague word inside a code fence or backtick span ⇒ no warning"
+}
+
+t_consistency_edge_cases() {
+  local base="$GREPO/.agents/plans"
+  write_consistency_plan "$base/cons-noac.md" "" "$(cons_task 1.1 'x' 'AC#1 — x')"
+  ( tier_lint cons-noac.md
+    assert_out_has "CONS(g)" "Acceptance Criteria is empty"
+    assert_out_lacks "CONS(g)" "is cited by no task"
+    assert_out_lacks "CONS(g)" "line "
+    assert_code "CONS(g)" 1 ) || exit 1
+  write_consistency_plan "$base/cons-notasks.md" $'1. One.\n2. Two.' ""
+  ( tier_lint cons-notasks.md
+    assert_out_lacks "CONS(g)" "is cited by no task"
+    assert_out_lacks "CONS(g)" "cites no AC#"
+    assert_code "CONS(g)" 0 ) || exit 1
+  echo "✓ CONS(g): empty AC section / no tasks ⇒ no crash, no citation warnings"
+
+  write_consistency_plan "$base/cons-all-warn.md" $'1. Fast.\n2. Two.' "$(cons_task 1.1 'x' 'runs')"
+  ( tier_lint cons-all-warn.md
+    assert_out_has "CONS(h)" "cites no AC#"
+    assert_out_has "CONS(h)" "AC#1 is cited by no task"
+    assert_out_has "CONS(h)" "vague wording 'fast'"
+    assert_out_lacks "CONS(h)" "Errors"
+    assert_code "CONS(h)" 0 ) || exit 1
+  echo "✓ CONS(h): only the new consistency warnings ⇒ exit status unchanged (0)"
+}
+
 t_missing_task_file
 t_multi_file_task_line
 t_budget_bare_number
@@ -971,4 +1083,7 @@ t_tier_invalid_values
 t_tier_light_blockers
 t_tier_absent_identical
 t_empty_files_in_scope
+t_ac_citation_advisories
+t_vague_wording_advisory
+t_consistency_edge_cases
 echo "ALL PASS"
