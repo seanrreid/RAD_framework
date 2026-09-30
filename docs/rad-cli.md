@@ -151,6 +151,65 @@ plan, or a `plan_scope_paths` failure.
 
 ---
 
+### rad digest
+
+```
+rad digest <feature> [--branch <ref>] [--base <ref>]
+```
+
+A read-only, ranked **review digest** for a feature's deliver PR — the Gate 2
+first read: "where should the architect look?" It records nothing, calls no
+model, opens no PR, and never blocks. `--branch` defaults to the plan's `Branch:`
+header; `--base` defaults to `scripts/get-default-branch.sh`.
+
+It folds, read-only, from `harness/digest.js`:
+
+- **scope** — `scripts/check-scope.sh` over the branch vs base diff
+- **approval** — the plan fingerprint and gate against the feature's event log
+- **high-risk / waivers** — `plan_high_risk_findings` (`scripts/lib/plan-paths.sh`)
+  plus the waivers frozen into the `approved` event
+- **self-protected paths** — RAD's own machinery touched by the diff
+- **deficit forecast** — the `fileDeficitSignals` fold (as `rad forecast`)
+- **finding recurrence** — `.agents/findings.jsonl` per in-scope file
+- **run evidence** — retries, non-success outcomes, the latest stop, and
+  whether completion is evidenced for every declared wave
+
+A failing source becomes an explicit **unavailable** input for that input only —
+never dropped, never fatal to the rest of the digest.
+
+**Ranking** (highest first): scope violations > approval not intact > un-waived
+high-risk > waived high-risk (with its frozen justification) > self-protected
+paths > deficit forecast > finding recurrence > run evidence.
+
+**Output** is markdown:
+
+```
+## Review digest — <feature>
+
+### Look here
+- **<kind>** `<path>` — <detail>        (ranked; or "nothing flagged …")
+
+### Evidence
+- ✓|✗ <check> — <detail>
+- unavailable: <input> — <reason>
+```
+
+**Readers:** `/rad-review` Step 1b (the `### Digest` section, ahead of Scope) and
+the CI `deliver-integrity` job, which appends it to the job summary (a digest
+failure there is a `::warning::`, never a failed job).
+
+**Note:** a feature delivered through the `/rad-deliver` skill (not `rad
+deliver`) has no spine wave events, so the digest shows `completion not
+evidenced for <n> wave(s)` for it. This is deliberate — the digest is
+recall-oriented and does not suppress it; confirm completion from the execution
+log instead.
+
+**Exit codes:** `0` on any digest (including ones with unavailable inputs), `1`
+on a malformed event log or a `get-default-branch.sh` failure, `2` on bad
+arguments, an invalid feature name, or an unreadable plan.
+
+---
+
 ### rad deliver
 
 ```

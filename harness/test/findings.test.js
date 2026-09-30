@@ -5,6 +5,7 @@ import {
   CALIBRATION_MIN_LABELED,
   findingVerdict,
   reviewerCalibration,
+  findingsByFile,
 } from '../findings.js';
 
 const { CONFIRMED, FALSE_ALARM, UNLABELED } = VERDICTS;
@@ -175,4 +176,38 @@ test('real findings.jsonl labeled lines → hand-counted calibration', () => {
     },
     minLabeled: CALIBRATION_MIN_LABELED,
   });
+});
+
+// ── findingsByFile (review digest) ──────────────────────────────────────────
+
+test('findingsByFile counts by priority and dedupes categories', () => {
+  const records = [
+    finding({ file: 'a.js', priority: 'HIGH', category: 'security' }),
+    finding({ file: 'a.js', priority: 'medium', category: 'security' }),
+    finding({ file: 'a.js', priority: 'LOW', category: 'testing' }),
+    finding({ file: 'a.js', priority: 'WEIRD' }),
+    finding({ file: 'b.js', priority: 'LOW', category: 'naming' }),
+    { type: 'cycle', file: 'a.js', priority: 'HIGH' },
+    null,
+  ];
+  assert.deepEqual(findingsByFile(records, ['a.js', 'c.js']), {
+    'a.js': { total: 4, high: 1, medium: 1, low: 1, categories: ['security', 'testing'] },
+  });
+});
+
+test('findingsByFile omits paths with no findings', () => {
+  assert.deepEqual(findingsByFile([finding({ file: 'x.js', priority: 'LOW' })], ['y.js']), {});
+  assert.deepEqual(findingsByFile([], ['y.js']), {});
+});
+
+test('findingsByFile bad input → {} (never throws)', () => {
+  assert.deepEqual(findingsByFile(null, ['a.js']), {});
+  assert.deepEqual(findingsByFile('junk', ['a.js']), {});
+  assert.deepEqual(findingsByFile([finding({ file: 'a.js' })], 'a.js'), {});
+  assert.deepEqual(findingsByFile([finding({ file: 'a.js' })], undefined), {});
+});
+
+test('findingsByFile is safe for a __proto__ path', () => {
+  const out = findingsByFile([finding({ file: '__proto__', priority: 'HIGH' })], ['__proto__']);
+  assert.equal(Object.getOwnPropertyDescriptor(out, '__proto__').value.high, 1);
 });

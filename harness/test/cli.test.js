@@ -7,7 +7,7 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import {
-  approveCommand, gateCommand, parsePlanCtx, deliverCommand, stopStatusCommand, forecastCommand,
+  approveCommand, gateCommand, parsePlanCtx, deliverCommand, stopStatusCommand, forecastCommand, digestCommand,
   resolveHooksDir, makeSpineScriptPort, SCRIPT_ARG_KEYS,
 } from '../cli.js';
 import { planFingerprint } from '../plan-fingerprint.js';
@@ -1303,5 +1303,119 @@ test('deliver #161 — a stop without a free-text reason prints no detail=', asy
     assert.equal(code, 3, `expected exit 3; stderr:\n${stderr}`);
     assert.match(stderr, /stopped=failed-attempt-cap/);
     assert.doesNotMatch(stderr, /detail=/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// rad digest — ranked, read-only review digest (AC#4)
+// ---------------------------------------------------------------------------
+
+const DIGEST_FEATURE = 'dig-feat';
+const DIGEST_PLAN = [
+  '# dig-feat', '', 'Branch: rad/dig-feat', '', '## Files in Scope', '- src/a.js', '',
+  '### Wave 1', '', '#### Task 1.1: Touch A', 'File: src/a.js', '',
+].join('\n');
+
+/** Plan + optional state log for DIGEST_FEATURE under a temp repo. */
+function seedDigestRepo(repoRoot, { log } = {}) {
+  mkdirSync(join(repoRoot, '.agents', 'plans'), { recursive: true });
+  writeFileSync(join(repoRoot, '.agents', 'plans', `${DIGEST_FEATURE}.md`), DIGEST_PLAN, 'utf8');
+  if (log === undefined) return;
+  mkdirSync(join(repoRoot, '.agents', 'state', DIGEST_FEATURE), { recursive: true });
+  writeFileSync(join(repoRoot, '.agents', 'state', DIGEST_FEATURE, 'events.jsonl'), log, 'utf8');
+}
+
+/** sh stub: plan_scope_paths → src/a.js, check-scope → pass, other plan-paths helpers → empty. */
+function digestSh() {
+  const calls = [];
+  const sh = (file, args, opts) => {
+    calls.push({ file, args, opts });
+    const script = args.join(' ');
+    if (script.includes('plan_scope_paths')) return { status: 0, stdout: 'src/a.js\n', stderr: '' };
+    if (script.includes('check-scope.sh')) return { status: 0, stdout: '✓ scope passed\n', stderr: '' };
+    if (file.endsWith('get-default-branch.sh')) return { status: 0, stdout: 'main\n', stderr: '' };
+    return { status: 0, stdout: '', stderr: '' };
+  };
+  return { sh, calls };
+}
+
+for (const [label, argv] of [
+  ['no feature', []],
+  ['--branch without a value', [DIGEST_FEATURE, '--branch']],
+  ['--base followed by a flag', [DIGEST_FEATURE, '--base', '--branch', 'x']],
+  ['unknown flag', [DIGEST_FEATURE, '--nope']],
+  ['extra positional', [DIGEST_FEATURE, 'extra']],
+  ['traversal feature name', ['../etc']],
+]) {
+  test(`digest AC#4 — usage error (${label}) → exit 2 with usage; sh never called`, async () => {
+    await withTempRepo(async (repoRoot) => {
+      const { sh, calls } = digestSh();
+      const { code, stdout, stderr } = await captureStdio(() => digestCommand(argv, { repoRoot, sh }));
+      assert.equal(code, 2);
+      assert.equal(stdout, '');
+      assert.match(stderr, /^rad digest: .*\nUsage: rad digest <feature> \[--branch <ref>\] \[--base <ref>\]\n$/);
+      assert.equal(calls.length, 0);
+    });
+  });
+}
+
+test('digest AC#4 — unreadable plan → exit 2 naming the plan', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const { sh, calls } = digestSh();
+    const { code, stdout, stderr } = await captureStdio(() => digestCommand([DIGEST_FEATURE], { repoRoot, sh }));
+    assert.equal(code, 2);
+    assert.equal(stdout, '');
+    assert.match(stderr, /^rad digest: cannot read plan \.agents\/plans\/dig-feat\.md: /);
+    assert.equal(calls.length, 0);
+  });
+});
+
+test('digest AC#4 — malformed event log → exit 1 naming the feature', async () => {
+  await withTempRepo(async (repoRoot) => {
+    seedDigestRepo(repoRoot, { log: '{"type":\n' });
+    const { sh } = digestSh();
+    const { code, stdout, stderr } = await captureStdio(() => digestCommand([DIGEST_FEATURE], { repoRoot, sh }));
+    assert.equal(code, 1);
+    assert.equal(stdout, '');
+    assert.match(stderr, /^rad digest: malformed event log for dig-feat: /);
+  });
+});
+
+test('digest AC#4 — default-branch script failure → exit 1 (fail-closed, no silent main)', async () => {
+  await withTempRepo(async (repoRoot) => {
+    seedDigestRepo(repoRoot);
+    const sh = (file) => (file.endsWith('get-default-branch.sh')
+      ? { status: 7, stdout: '', stderr: 'boom' } : { status: 0, stdout: '', stderr: '' });
+    const { code, stdout, stderr } = await captureStdio(() => digestCommand([DIGEST_FEATURE], { repoRoot, sh }));
+    assert.equal(code, 1);
+    assert.equal(stdout, '');
+    assert.match(stderr, /^rad digest: cannot resolve default branch/);
+  });
+});
+
+test('digest AC#4 — happy path prints the ranked digest; branch from the plan header, base from the script', async () => {
+  await withTempRepo(async (repoRoot) => {
+    seedDigestRepo(repoRoot, { log: jsonl([{ type: 'deliver-started', feature: DIGEST_FEATURE }]) });
+    const { sh, calls } = digestSh();
+    const { code, stdout, stderr } = await captureStdio(() => digestCommand([DIGEST_FEATURE], { repoRoot, sh }));
+    assert.equal(code, 0, `stderr:\n${stderr}`);
+    assert.match(stdout, /^## Review digest — dig-feat\n/);
+    assert.match(stdout, /\n### Look here\n/);
+    assert.match(stdout, /\n### Evidence\n/);
+    const scope = calls.find((c) => c.args.join(' ').includes('check-scope.sh'));
+    assert.deepEqual(scope.args.slice(-2), ['rad/dig-feat', 'main']);
+  });
+});
+
+test('digest AC#4 — explicit --branch/--base override defaults; default-branch script not run', async () => {
+  await withTempRepo(async (repoRoot) => {
+    seedDigestRepo(repoRoot);
+    const { sh, calls } = digestSh();
+    const { code } = await captureStdio(() => digestCommand(
+      [DIGEST_FEATURE, '--branch', 'topic', '--base', 'trunk'], { repoRoot, sh }));
+    assert.equal(code, 0);
+    assert.equal(calls.some((c) => c.file.endsWith('get-default-branch.sh')), false);
+    const scope = calls.find((c) => c.args.join(' ').includes('check-scope.sh'));
+    assert.deepEqual(scope.args.slice(-2), ['topic', 'trunk']);
   });
 });

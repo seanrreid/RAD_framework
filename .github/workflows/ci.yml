@@ -160,6 +160,11 @@ jobs:
               exit 1
               ;;
           esac
+      # Node is needed only by the review-digest step (harness/cli.js digest).
+      - uses: actions/setup-node@v4
+        if: steps.detect.outputs.skip != 'true'
+        with:
+          node-version: 20
       - name: Check approval integrity
         if: steps.detect.outputs.skip != 'true'
         # The re-emit loop below is output plumbing, not check logic: it
@@ -180,6 +185,23 @@ jobs:
         # because the PR checkout is a detached merge ref — the bare branch
         # name would not resolve and the script's diff would come up empty.
         run: scripts/check-scope.sh ".agents/plans/${{ steps.detect.outputs.feature }}.md" "origin/${{ github.head_ref }}" "${{ github.base_ref }}"
+      - name: Review digest (job summary)
+        if: always() && steps.detect.outputs.skip != 'true'
+        # Advisory, never a gate: the ranked digest is appended to the job
+        # summary; a digest failure is surfaced as a warning annotation and the
+        # step still exits 0. Refs are origin-prefixed (detached merge checkout,
+        # full history fetched above).
+        run: |
+          set +e
+          node harness/cli.js digest "${{ steps.detect.outputs.feature }}" --branch "origin/${GITHUB_HEAD_REF}" --base "origin/${GITHUB_BASE_REF}" > "$RUNNER_TEMP/digest.md" 2>"$RUNNER_TEMP/digest.err"
+          code=$?
+          set -e
+          if [ "$code" -eq 0 ]; then
+            cat "$RUNNER_TEMP/digest.md" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::warning::review digest failed (exit ${code}): $(tr '\n' ' ' < "$RUNNER_TEMP/digest.err")"
+          fi
+          exit 0
 
   # All PRs touching .agents/plans/** — plan lint (ADVISORY, never gates merge).
   # continue-on-error keeps the job green on lint failure; findings surface as

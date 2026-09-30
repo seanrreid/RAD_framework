@@ -145,6 +145,13 @@ user-visible surface, `/rad-research` can offer an HTML mockup saved under
 `.agents/mockups/`; `/rad-design` and `/rad-plan` then reference it, and the plan
 lint warns if a referenced mockup is missing on disk.
 
+**Consistency advisories (warnings only).** The plan lint also cross-checks tasks
+against Acceptance Criteria and flags vague wording — none of these block:
+- `task '<Task N.M: title>' cites no AC#` — every task should trace to a criterion
+- `AC#n is cited by no task` — a criterion with no task delivering it
+- `vague wording '<w>' in <location> — state a measurable outcome` — words from the
+  lint's `VAGUE_WORDS` list (text inside code fences and backticks is ignored)
+
 ---
 
 ## Approving a plan (architect)
@@ -220,6 +227,13 @@ Run this after `/rad-deliver` completes. It checks:
 - Conventions from `CLAUDE.md` are followed
 - All tests from the plan were written
 
+Its report opens with a `### Digest` section — the ranked output of
+`rad digest <feature>` (see `docs/rad-cli.md`), ahead of Scope; if the digest
+fails, the failure is recorded there and the review continues. The checklist also
+carries two advisory items: **Duplication** (new code that re-implements an
+existing helper) and **Terminology drift** (new names for concepts the codebase
+already names).
+
 Fix any HIGH priority issues before requesting architect review.
 MEDIUM and LOW issues can be noted but don't block the PR.
 
@@ -231,13 +245,29 @@ This is Gate 2. You're reviewing the *implementation*. This is the only PR in
 the workflow — it brings both the plan doc and the code from `rad/[feature]`
 onto the default branch in one reviewed merge.
 
+**Read the review digest first.** On a deliver PR, the CI `deliver-integrity`
+job appends the ranked `rad digest` output to its job summary (Actions → the
+run → Summary): **Look here** lists what to inspect, highest-risk first (scope
+violations, approval integrity, high-risk paths, self-protected paths, …), and
+**Evidence** shows which checks passed or were unavailable. Run
+`node harness/cli.js digest <feature>` locally for the same view. A skill-delivered
+feature always shows "completion not evidenced" — confirm against the execution log.
+
 Standard code review, plus RAD-specific checks:
+- [ ] Review digest read (job summary) — every **Look here** item accounted for
 - [ ] Self-review was run (check for `/rad-review` output in PR comments)
 - [ ] All changes are within the plan's declared scope
 - [ ] Execution log looks clean — no surprise retries or failures
 - [ ] Tests are present and test behavior, not implementation
 
 Merge when satisfied. The feature ships.
+
+**Post-merge drift (advisory).** Later, `scripts/check-plan-convergence.sh
+<feature> [--base <ref>]` reports whether the plan's in-scope files have changed
+since the delivery commit — one `<sha7> <date> <author> <subject>` line per
+later change, or `converged — …`. It is never a gate: exit `0` on a report, `2`
+when the feature is not delivered (or bad usage / missing plan), `1` on a git
+failure.
 
 ---
 

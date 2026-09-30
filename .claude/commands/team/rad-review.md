@@ -41,6 +41,23 @@ git diff "$BASE"...HEAD --name-only
   LOG=$(ls .agents/logs/$FEATURE-*.md 2>/dev/null | tail -1)
   ```
 
+### Step 1b: Review digest
+
+```bash
+node harness/cli.js digest "$FEATURE"
+```
+
+Run the read-only review digest and include its full output **verbatim** in the
+report's `### Digest` section. It ranks where to look first (scope violations,
+approval not intact, un-waived then waived high-risk paths, self-protected paths,
+deficit forecast, finding recurrence, run evidence) and shows unavailable inputs
+explicitly. The digest is **advisory only** — it informs the review and never
+changes its pass/fail by itself.
+
+If it exits non-zero (2 = usage error or unreadable plan, 1 = malformed event
+log), record the exit code and its stderr in the `### Digest` section and
+**continue the review** — a digest failure is reported, never a stop.
+
 ### Step 2: Scope check
 
 ```bash
@@ -79,6 +96,20 @@ For each task in the plan, verify the implementation matches the description:
 - Is the change in the right file at roughly the right location?
 - Does it do what the task described — no more, no less?
 - Were non-goals respected?
+
+Then check the plan itself for two consistency problems. These are **advisory** —
+tag each finding with a severity (HIGH / MEDIUM / LOW) in the Plan Fidelity
+section; they do not change the review's pass/fail by themselves:
+- [ ] **Duplication** — near-duplicate or conflicting tasks or ACs within the
+      plan (two tasks doing the same work, or two ACs demanding contradictory
+      outcomes).
+- [ ] **Terminology drift** — one concept named differently across the plan's
+      sections (Goal, ACs, tasks, Files in Scope), or between the plan and the
+      code it produced.
+
+Orphan tasks (citing no AC#), uncited ACs, and vague wording are already flagged
+deterministically by `scripts/lint-plan.sh` in Step 2b — reference those
+warnings here rather than re-deriving them.
 
 ### Step 3b: Acceptance Criteria coverage
 
@@ -182,12 +213,16 @@ Branch: rad/[feature-name]
 Date: [timestamp]
 Files reviewed: [N]
 
+### Digest
+[Verbatim output of `node harness/cli.js digest "$FEATURE"` | ✗ Digest failed (exit [N]): [stderr] — review continued]
+
 ### Scope
 [✓ All changes within plan scope | ✗ Out-of-scope: [files]]
 
 ### Plan Fidelity
 [✓ Implementation matches plan | Issues found:]
 - [issue] — [file:line]
+- [HIGH | MEDIUM | LOW] Duplication / Terminology drift (advisory): [finding] — [plan section or file:line]
 
 ### Acceptance Criteria Coverage
 [✓ All ACs covered by tasks | ✗ Uncovered (HIGH): AC#[N], AC#[M]]

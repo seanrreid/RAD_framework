@@ -28,6 +28,11 @@ BUDGET_COMPUTED=false
 # and "does not exist" already says so. A string, not an array — an empty array
 # expansion is an error under `set -u` on bash 3.2.
 MISSING_IN_SCOPE=""
+# Vague adjectives/phrases that stand in for a measurable outcome. Matched
+# case-insensitively as whole words in AC items and task What:/Validate: fields
+# (fenced code and inline `backtick` spans excluded). Advisory only.
+VAGUE_WORDS=(scalable intuitive fast robust user-friendly seamless efficient easy
+  flexible performant appropriate properly "as needed" "etc.")
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -108,18 +113,65 @@ else
   require_sections "${REQUIRED_SECTIONS[@]}"
 fi
 
+# ── AC ↔ task citation consistency (advisory) ─────────────────────────────────
+# Names every `#### Task` whose Validate: line(s) cite no AC#N, then (only when
+# the plan has tasks) every numbered AC no task cites. A citation is AC#N or ACN
+# as a whole token, so comma lists (`AC#1, AC#3`) count each id and AC#1 never
+# matches AC#12. Fenced code is skipped. Warnings only — never an error.
+plan_ac_citation_findings() {
+  awk -v q="'" '
+    function cite_all(s,   n) {
+      while (match(s, /AC#?[0-9]+/)) {
+        if (RSTART == 1 || substr(s, RSTART - 1, 1) !~ /[A-Za-z0-9_]/) {
+          n = substr(s, RSTART, RLENGTH); sub(/^AC#?/, "", n); cited[n + 0] = 1; hit = 1
+        }
+        s = substr(s, RSTART + RLENGTH)
+      }
+    }
+    function flush_task() {
+      if (title != "" && !hit) print "task " q title q " cites no AC#"
+      title = ""; hit = 0
+    }
+    /^[[:space:]]*```/ { fenced = !fenced; next }
+    fenced { next }
+    /^#+ / {
+      flush_task()
+      if ($0 ~ /^## /) in_ac = ($0 ~ /^## Acceptance Criteria/)
+      if ($0 ~ /^#### Task/) { title = $0; sub(/^#### /, "", title); ntasks++ }
+      next
+    }
+    in_ac && /^[0-9]+\./ { n = $0; sub(/\..*/, "", n); acs[++nac] = n + 0 }
+    title != "" && /^Validate:/ { cite_all($0) }
+    END {
+      flush_task()
+      if (ntasks == 0) exit
+      for (i = 1; i <= nac; i++) if (!(acs[i] in cited)) print "AC#" acs[i] " is cited by no task"
+    }
+  ' "$PLAN_FILE"
+}
+
+# Append each non-empty line of $1 to WARNINGS. An awk failure upstream aborts
+# the lint under set -e (fail loud) rather than silently yielding no findings.
+append_warning_lines() {
+  local line
+  while IFS= read -r line; do
+    if [[ -n "$line" ]]; then WARNINGS+=("$line"); fi
+  done <<< "$1"
+}
+
+collect_ac_citation_warnings() {
+  local findings
+  findings=$(plan_ac_citation_findings)
+  append_warning_lines "$findings"
+}
+
 # ── Acceptance Criteria — non-empty, and every task validates against one ──────
 
 if has_section "Acceptance Criteria"; then
   AC_COUNT=$(section_content "Acceptance Criteria" | grep -cE "^[0-9]+\." || true)
   [[ "$AC_COUNT" -eq 0 ]] && ERRORS+=("## Acceptance Criteria is empty — list at least one numbered, testable outcome")
 
-  # Every task should cite an AC# in its Validate: line.
-  TASKS_TOTAL=$(grep -cE "^#### Task" "$PLAN_FILE" || true)
-  TASKS_WITH_AC=$(grep -E "^Validate:" "$PLAN_FILE" | grep -cE "AC#?[0-9]+" || true)
-  if [[ "$TASKS_TOTAL" -gt 0 && "$TASKS_WITH_AC" -lt "$TASKS_TOTAL" ]]; then
-    WARNINGS+=("$((TASKS_TOTAL - TASKS_WITH_AC)) of $TASKS_TOTAL tasks have a Validate: line that does not cite an AC# — every task should map to an acceptance criterion")
-  fi
+  collect_ac_citation_warnings
 fi
 
 # ── Files in Scope — table has at least one data row ──────────────────────────
@@ -407,6 +459,48 @@ done < <(
     | grep -Fxv -f <(plan_created_paths "$PLAN_FILE") \
     | grep -Fxv -f <(printf '%s' "$MISSING_IN_SCOPE")
 )
+
+# ── Vague wording (advisory) ──────────────────────────────────────────────────
+# One warning per (location, word) for a VAGUE_WORDS hit in a numbered AC item
+# (continuation lines included) or a task's What:/Validate: field (continuation
+# lines until the next `Field:` line or heading). Fenced code and inline
+# `backtick` spans are skipped; the match is case-insensitive and whole-word
+# (letters, digits, `_` and `-` are word characters).
+plan_vague_wording_findings() {
+  local IFS='|'
+  awk -v q="'" -v words="${VAGUE_WORDS[*]}" '
+    BEGIN { nw = split(words, W, "|") }
+    function wordch(c) { return c != "" && c ~ /[a-z0-9_-]/ }
+    function scan(line, loc,   s, i, w, p, off, rest) {
+      s = tolower(line); gsub(/`[^`]*`/, " ", s)
+      for (i = 1; i <= nw; i++) {
+        w = W[i]; off = 0; rest = s
+        while ((p = index(rest, w)) > 0) {
+          if (!wordch(off + p > 1 ? substr(s, off + p - 1, 1) : "") && !wordch(substr(s, off + p + length(w), 1))) {
+            if (!((loc, w) in seen)) { seen[loc, w] = 1; print "vague wording " q w q " in " loc " — state a measurable outcome" }
+            break
+          }
+          off += p; rest = substr(s, off + 1)
+        }
+      }
+    }
+    /^[[:space:]]*```/ { fenced = !fenced; next }
+    fenced { next }
+    /^#+ / {
+      if ($0 ~ /^## /) { in_ac = ($0 ~ /^## Acceptance Criteria/); ac = "" }
+      task = ""; field = ""
+      if ($0 ~ /^#### Task/) { task = $0; sub(/^#### /, "", task); sub(/:.*/, "", task) }
+      next
+    }
+    in_ac && /^[0-9]+\./ { n = $0; sub(/\..*/, "", n); ac = "AC#" (n + 0) }
+    in_ac && ac != "" { scan($0, ac) }
+    task != "" && /^[A-Z][A-Za-z-]*:/ { field = ($0 ~ /^What:/) ? "What" : ($0 ~ /^Validate:/) ? "Validate" : "" }
+    task != "" && field != "" { scan($0, task " " field) }
+  ' "$PLAN_FILE"
+}
+
+VAGUE_FINDINGS=$(plan_vague_wording_findings)
+append_warning_lines "$VAGUE_FINDINGS"
 
 # ── Context budget ────────────────────────────────────────────────────────────
 # Sum line ranges from the Files in Scope table (column 3 = Lines).

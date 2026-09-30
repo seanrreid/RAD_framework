@@ -37,6 +37,7 @@ import {
   deliverCompleted, latestStop, dormantStop, fileDeficitSignals, forecastForPaths, DEFICITS,
 } from './events.js';
 import { taskFilesFromPlanText, mergeTaskFiles } from './plan-tasks.js';
+import { gatherDigestInputs, buildDigest, renderDigest } from './digest.js';
 
 /** Usage line for `rad deliver` (help, parse errors, and the command table). */
 const DELIVER_USAGE = 'rad deliver <feature> [--model <model-id>] [--resume --context <text>]';
@@ -44,6 +45,8 @@ const DELIVER_USAGE = 'rad deliver <feature> [--model <model-id>] [--resume --co
 const STOP_STATUS_USAGE = 'rad stop-status <feature> [--stdin]';
 /** Usage line for `rad forecast`. */
 const FORECAST_USAGE = 'rad forecast <plan>';
+/** Usage line for `rad digest`. */
+const DIGEST_USAGE = 'rad digest <feature> [--branch <ref>] [--base <ref>]';
 
 const SUBCOMMANDS = {
   approve: {
@@ -77,6 +80,11 @@ const SUBCOMMANDS = {
     summary: "Advisory plan-time reliability readout for a plan's declared paths (read-only).",
     usage: FORECAST_USAGE,
     run: (argv, ctx) => forecastCommand(argv, ctx),
+  },
+  digest: {
+    summary: "Ranked, read-only review digest for a feature's deliver PR (Gate 2 aid).",
+    usage: DIGEST_USAGE,
+    run: (argv, ctx) => digestCommand(argv, ctx),
   },
   'owner-claim': {
     summary: 'Claim the single-writer lock on a feature (records who holds it).',
@@ -941,10 +949,10 @@ function resolveWorkBranch(setup, planCtx, feature) {
  * script's always-0 contract and is thrown (fail-closed); empty output yields ''
  * so callers omit the optional base argument.
  */
-function readDefaultBranch({ sh, repoRoot, root }) {
+function readDefaultBranch({ sh, repoRoot, root, verb = 'rad deliver' }) {
   const res = sh(join(repoRoot, DEFAULT_BRANCH_SCRIPT), [join(root, 'CLAUDE.md')], { cwd: root });
   if (res.status !== 0) {
-    throw new Error(`rad deliver: cannot resolve default branch (${DEFAULT_BRANCH_SCRIPT} exited ${res.status})`);
+    throw new Error(`${verb}: cannot resolve default branch (${DEFAULT_BRANCH_SCRIPT} exited ${res.status})`);
   }
   return String(res.stdout ?? '').trim();
 }
@@ -2113,6 +2121,95 @@ function printForecast(repoRoot, paths) {
   const rows = forecastForPaths(signals, paths);
   const lines = [...formatForecastRows(rows), forecastSummary(rows.length, paths.length, folded.features)];
   process.stdout.write(`${lines.join('\n')}\n`);
+  return 0;
+}
+
+/** Feature grammar `rad digest` accepts (mirrors digest.js / the rad/<feature> branch grammar). */
+const DIGEST_FEATURE_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
+/** Base used when get-default-branch.sh prints nothing. */
+const DIGEST_FALLBACK_BASE = 'main';
+/** Flags `rad digest` accepts; each takes exactly one value. */
+const DIGEST_VALUE_FLAGS = Object.freeze({ '--branch': 'branch', '--base': 'base' });
+
+/** One positional `<feature>` + optional `--branch <ref>` / `--base <ref>`; throws on anything else. */
+function parseDigestArgs(argv) {
+  const out = {};
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg.startsWith('--')) {
+      const key = DIGEST_VALUE_FLAGS[arg];
+      if (!key) throw new Error(`unknown option '${arg}'`);
+      const value = argv[i + 1];
+      if (!isNonEmpty(value) || value.startsWith('--')) throw new Error(`${arg} requires a value`);
+      out[key] = value;
+      i += 1;
+    } else if (out.feature === undefined) {
+      out.feature = arg;
+    } else {
+      throw new Error(`unexpected argument '${arg}'`);
+    }
+  }
+  if (!isNonEmpty(out.feature)) throw new Error('a feature name is required');
+  if (!DIGEST_FEATURE_PATTERN.test(out.feature)) throw new Error(`invalid feature name '${out.feature}'`);
+  return out;
+}
+
+/**
+ * Strictly parse the feature's event log when present. A missing log is left to
+ * digest.js (reported unavailable); a malformed one throws naming the feature.
+ */
+function assertDigestLogWellFormed(repoRoot, feature) {
+  const log = join(repoRoot, STATE_DIR, feature, EVENTS_FILE);
+  if (!existsSync(log)) return;
+  try {
+    parseEventsJsonlStrict(readFileSync(log, 'utf8'));
+  } catch (err) {
+    throw new Error(`malformed event log for ${feature}: ${err.message}`);
+  }
+}
+
+/**
+ * `digest <feature> [--branch <ref>] [--base <ref>]` — thin, read-only wrapper
+ * over harness/digest.js: prints the ranked review digest as markdown. Branch
+ * defaults to the plan's `Branch:` header (else `rad/<feature>`); base to
+ * get-default-branch.sh output (else `main`). Bad argv / unreadable plan →
+ * exit 2; malformed event log or base-resolution failure → exit 1. Writes nothing.
+ *
+ * @param {string[]} argv - args after `digest`
+ * @param {{ repoRoot: string, sh?: typeof defaultSh }} ctx
+ * @returns {Promise<number>}
+ */
+export async function digestCommand(argv, ctx) {
+  const { repoRoot } = ctx;
+  const sh = ctx.sh ?? defaultSh;
+  let args;
+  try {
+    args = parseDigestArgs(argv);
+  } catch (err) {
+    process.stderr.write(`rad digest: ${err.message}\nUsage: ${DIGEST_USAGE}\n`);
+    return USAGE_EXIT_CODE;
+  }
+  const { feature } = args;
+  const planRel = join(PLANS_DIR, `${feature}.md`);
+  let planText;
+  try {
+    planText = readFileSync(join(repoRoot, planRel), 'utf8');
+  } catch (err) {
+    process.stderr.write(`rad digest: cannot read plan ${planRel}: ${err.message}\n`);
+    return USAGE_EXIT_CODE;
+  }
+  let branch;
+  let base;
+  try {
+    assertDigestLogWellFormed(repoRoot, feature);
+    branch = args.branch ?? resolveWorkBranch({}, parsePlanCtx(planText), feature);
+    base = args.base ?? (readDefaultBranch({ sh, repoRoot, root: repoRoot, verb: 'rad digest' }) || DIGEST_FALLBACK_BASE);
+  } catch (err) {
+    process.stderr.write(`rad digest: ${err.message.replace(/^rad digest: /, '')}\n`);
+    return FAILED_EXIT_CODE;
+  }
+  const inputs = await gatherDigestInputs({ repoRoot, sh, feature, branch, base });
+  process.stdout.write(renderDigest(buildDigest(inputs)));
   return 0;
 }
 
