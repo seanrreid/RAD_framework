@@ -1,7 +1,7 @@
 # Plan: Cross-Vendor Review Lane (`rad review`)
 Created: 2026-09-30
 Author: architect
-Status: approved
+Status: in-progress
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-09-30T18:49:50.139Z
 Recorded-By: sean@torchcodelab.com
