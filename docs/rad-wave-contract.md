@@ -275,6 +275,10 @@ After each successful wave, before the next one starts, the spine runs:
 
 - **Approval re-check** — the gate fold plus the plan fingerprint compared to the
   approved one. A lapsed approval or an edited plan stops with `approval-changed`.
+  An `approved` event recorded during a run (after its latest `deliver-started`)
+  also stops it with `approval-changed` — checked before every wave and once more
+  after the last wave, before post-checks. Re-approval happens between runs, never
+  within one; the mid-run event stays in the log as evidence (#158).
 - **Scope check** — `scripts/check-scope.sh`. A non-zero exit demotes the wave to
   `fail-scope`, which the matrix routes to `abort`.
 

@@ -130,6 +130,29 @@ defineCases([
     },
   },
   {
+    // The wave agent shares the architect's git identity, so it can record an
+    // approval of its own (uncommitted) plan edit mid-run: the refreshed
+    // fingerprint then matches and only the run-scoped check refuses (#158).
+    id: 'self-approval-mid-run',
+    invariant: 'approval-invalidated-by-plan-change',
+    fixture: { plan: twoWavePlan('demo') },
+    act: (fx) => deliverWithSelfApproval(fx),
+    assert: (fx, result) => {
+      assertSelfApprovalRefused(result);
+      const started = result.events.filter((e) => e.type === 'wave-started').map((e) => e.data?.wave);
+      assert.ok(!started.includes(2), `wave 2 started after a mid-run approval: ${types(result.events)}`);
+    },
+    mutate: neutralizeApprovedDuringRun,
+  },
+  {
+    // Last-wave twin: no next pre-wave re-check exists, so the post-loop check must refuse.
+    id: 'self-approval-last-wave',
+    invariant: 'approval-invalidated-by-plan-change',
+    act: (fx) => deliverWithSelfApproval(fx),
+    assert: (fx, result) => assertSelfApprovalRefused(result),
+    mutate: neutralizeApprovedDuringRun,
+  },
+  {
     id: 'approve-with-marker',
     invariant: 'approval-blockers-refuse',
     fixture: { approve: false, plan: defaultPlan('demo', '[NEEDS CLARIFICATION: which format?]') },
@@ -175,6 +198,53 @@ mkdirSync('src', { recursive: true }); writeFileSync('src/feature.txt', 'feature
 git('add', '-A'); git('commit', '-q', '-m', 'agent: feature');
 // Left UNCOMMITTED: a committed plan edit is already a fail-scope; this isolates the fingerprint re-check.
 appendFileSync('.agents/plans/' + feature + '.md', '\\n- AC#9: widened mid-run\\n');
+console.log(['WAVE_RESULT', 'wave: 1', 'status: complete', 'tasks:', '  - title: Write the feature file',
+  '    status: complete', '    commit: —', '    concern: —', '    error: —', 'END_WAVE_RESULT'].join('\\n'));
+`;
+
+/** Run deliver with SELF_APPROVE_AGENT as the wave agent. */
+function deliverWithSelfApproval(fx) {
+  const agent = join(fx.agentDir, 'self-approve.mjs');
+  writeFileSync(agent, SELF_APPROVE_AGENT);
+  return fx.deliver([], { RAD_AGENT_CMD: `node ${agent} ${fx.feature}` });
+}
+
+/** A mid-run approval stops the run as needs-decision, before any PR. */
+function assertSelfApprovalRefused(result) {
+  assert.equal(result.status, NEEDS_DECISION_EXIT, `rad deliver exit ${result.status}: ${result.stderr}`);
+  const stop = result.events.filter((e) => e.type === 'deliver-stopped').at(-1);
+  assert.equal(stop?.data?.reason, 'approval-changed', `deliver-stopped: ${JSON.stringify(stop)}`);
+  // The run-scoped reason text is not persisted (classifyStop keeps only the
+  // stop class), so the kept evidence identifies the cause; the mutation proves it.
+  const runStart = result.events.findLastIndex((e) => e.type === 'deliver-started');
+  assert.ok(result.events.slice(runStart + 1).some((e) => e.type === 'approved'),
+    `no mid-run approved event kept as evidence: ${types(result.events)}`);
+  assert.ok(!types(result.events).includes('pr-opened'), `pr-opened after a mid-run approval: ${types(result.events)}`);
+}
+
+/** Make the spine copy blind to run-scoped approvals (both check sites call it). */
+function neutralizeApprovedDuringRun(root) {
+  const spine = join('harness', 'spine.js');
+  patch(root, spine, "if (!Array.isArray(history)) return [];\n  let start = -1;", 'return [];\n  let start = -1;');
+  assumeUnchanged(root, spine);
+}
+
+// Wave agent that approves its own plan edit. Idempotent across waves: once the
+// plan is edited it only touches src/feature.txt and commits.
+const SELF_APPROVE_AGENT = `import { execFileSync } from 'node:child_process';
+import { appendFileSync, mkdirSync, readFileSync } from 'node:fs';
+const feature = process.argv[2];
+const plan = '.agents/plans/' + feature + '.md';
+const MARK = '- AC#9: self-approved mid-run';
+const git = (...a) => execFileSync('git', a, { stdio: 'ignore' });
+mkdirSync('src', { recursive: true });
+appendFileSync('src/feature.txt', 'feature\\n');
+git('add', 'src/feature.txt'); git('commit', '-q', '-m', 'agent: feature');
+if (!readFileSync(plan, 'utf8').includes(MARK)) {
+  // Left UNCOMMITTED: a committed plan edit is already fail-scope.
+  appendFileSync(plan, '\\n' + MARK + '\\n');
+  execFileSync('node', ['harness/cli.js', 'approve', feature], { stdio: ['ignore', 'ignore', 'inherit'] });
+}
 console.log(['WAVE_RESULT', 'wave: 1', 'status: complete', 'tasks:', '  - title: Write the feature file',
   '    status: complete', '    commit: —', '    concern: —', '    error: —', 'END_WAVE_RESULT'].join('\\n'));
 `;

@@ -41,7 +41,12 @@ invariants:
       - { file: harness/cli.js, symbol: "makeApprovalIntact" }
       - { file: harness/spine.js, symbol: "Approval re-check fires before EVERY wave", note: "the re-check runs before the first wave too, not only between waves" }
       - { file: scripts/check-plan-approved.sh, symbol: "STORED_FP", note: "the deliver-gate path compares the frozen fingerprint" }
-    bypasses: []
+      - { file: harness/spine.js, symbol: "export function approvedDuringRun", note: "an approved event recorded during the run stops it — re-approval happens between runs (#158)" }
+    bypasses:
+      - id: mid-run-self-approval
+        surface: "rad approve run by the wave agent (shares the architect's git identity)"
+        guarded: "yes"
+        note: "the run refuses to act on any approved event after its deliver-started (checked before every wave and after the last); the event stays as evidence (#158)"
 
   - id: approval-blockers-refuse
     claim: "rad approve refuses to record approval while clarification markers remain or a high-risk path finding is neither resolved nor waived."

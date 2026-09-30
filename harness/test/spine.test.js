@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { deliverSpine, failedAttemptsSinceStop } from '../spine.js';
+import { deliverSpine, failedAttemptsSinceStop, approvedDuringRun } from '../spine.js';
 import { loadMatrix } from '../matrix.js';
 import { fingerprint } from '../fingerprint.js';
 import { validateTransition } from '../transitions.js';
@@ -2185,4 +2185,95 @@ test('(push-f) AC#4 pushGuard false/absent → default-tip.sh never invoked, seq
   assert.equal(baseline.calls.includes('scripts/default-tip.sh'), false);
   const off = await run({ pushGuard: false });
   assert.deepEqual(off, baseline);
+});
+
+// ── run-scoped-approval-freeze: an approval cannot change within a run (#158) ──
+
+const DURING_RUN = /an approved event was recorded during this run/;
+const AGENT_APPROVAL = { feature: 'demo', type: 'approved', actor: 'architect', ts: 't' };
+
+/** A runWave that, during wave `atWave`, records an `approved` event straight
+ * into the log (as an agent running `cli.js approve` would — bypassing the spine). */
+function approvingRunWave(state, atWave) {
+  const calls = [];
+  const runWave = async (wave) => {
+    calls.push(wave.n);
+    if (wave.n === atWave) state.appended.push({ ...AGENT_APPROVAL });
+    return { outcome: 'success' };
+  };
+  return { calls, runWave };
+}
+
+test('(freeze-a) AC#1 approval recorded during wave 1 → approval-changed before wave 2, runWave not called again', async () => {
+  const state = makeValidatingState({ plan: twoWaves });
+  const { calls, runWave } = approvingRunWave(state, 1);
+  const { result } = await runStopped({ state, runWave });
+  assert.equal(result.stopped, 'approval-changed');
+  assert.equal(result.ok, false);
+  assert.equal(result.wave, 2);
+  assert.match(result.reason, DURING_RUN);
+  assert.deepEqual(calls, [1]);
+  assert.ok(!wave2Started(state), 'wave 2 never started');
+  assert.ok(state.appended.some((e) => e.type === 'approved'), 'the agent approval stays as evidence');
+  assertOneTrailingStop(state, { class: 'needs-decision', reason: 'approval-changed', wave: 2 });
+});
+
+test('(freeze-b) AC#2 approval recorded during the last wave → approval-changed, no post-check, no pr-opened', async () => {
+  const state = makeValidatingState();
+  const { runWave } = approvingRunWave(state, 1);
+  const shCalls = [];
+  let portCalls = 0;
+  const { result } = await runStopped({
+    state,
+    runWave,
+    sh: (script) => { shCalls.push(script); return { status: 0 }; },
+    approvalIntact: () => { portCalls += 1; return { ok: true }; },
+  });
+  assert.equal(result.stopped, 'approval-changed');
+  assert.match(result.reason, DURING_RUN);
+  assert.equal(portCalls, 1, 'the post-loop check does not call the approvalIntact port');
+  // The per-wave scope gate also calls check-scope.sh, so compare against a
+  // baseline: the stopped run makes exactly the baseline's calls minus POST_CHECKS.
+  const baselineCalls = [];
+  await runStopped({ sh: (script) => { baselineCalls.push(script); return { status: 0 }; } });
+  assert.deepEqual(baselineCalls.slice(-2), ['scripts/check-scope.sh', 'scripts/open-pr.sh']);
+  assert.deepEqual(shCalls, baselineCalls.slice(0, -2), 'no post-check ran');
+  assert.ok(!state.appended.some((e) => e.type === 'pr-opened'));
+  assertOneTrailingStop(state, { class: 'needs-decision', reason: 'approval-changed', wave: 1 });
+});
+
+test('(freeze-c) AC#3 approval before deliver-started (re-approval between runs) → no stop', async () => {
+  const state = makeValidatingState({ plan: twoWaves });
+  state.appended.push({ ...AGENT_APPROVAL }, { ...AGENT_APPROVAL });
+  const { result } = await runStopped({ state });
+  assert.deepEqual(result, { ok: true, waves: 2 });
+});
+
+test('(freeze-d) AC#4 no mid-run approval → event sequence identical to baseline', async () => {
+  const baseline = await runStopped({ state: makeValidatingState({ plan: twoWaves }) });
+  const again = await runStopped({ state: makeValidatingState({ plan: twoWaves }), runWave: approvingRunWave(null, 99).runWave });
+  assert.deepEqual(baseline.result, { ok: true, waves: 2 });
+  assert.deepEqual(again.state.appended, baseline.state.appended);
+  assert.equal(baseline.state.appended[baseline.state.appended.length - 1].type, 'pr-opened');
+});
+
+test('(freeze-e) approvedDuringRun: non-array / empty / no deliver-started → []', () => {
+  for (const bad of [undefined, null, 'x', 42, {}, []]) assert.deepEqual(approvedDuringRun(bad), [], String(bad));
+  assert.deepEqual(approvedDuringRun([{ type: 'approved' }]), [], 'no deliver-started → none are in-run');
+  assert.deepEqual(approvedDuringRun([null, { type: 'deliver-started' }, undefined, 7]), []);
+});
+
+test('(freeze-f) approvedDuringRun: a resumed run counts only approvals after the LATEST deliver-started', () => {
+  const late = { type: 'approved', ts: 'late' };
+  const history = [
+    { type: 'approved', ts: 'first' },
+    { type: 'deliver-started' },
+    { type: 'approved', ts: 'mid' },
+    { type: 'deliver-stopped' },
+    { type: 'deliver-started' },
+    { type: 'wave-started' },
+    late,
+  ];
+  assert.deepEqual(approvedDuringRun(history), [late]);
+  assert.deepEqual(approvedDuringRun(history.slice(0, 6)), []);
 });

@@ -81,6 +81,27 @@ function errorMessage(err) {
   return err && err.message ? err.message : String(err);
 }
 
+/** Stop reason when an `approved` event lands inside the current run (#158). */
+const APPROVED_DURING_RUN_REASON =
+  'an approved event was recorded during this run (re-approval must happen between runs, not within one)';
+
+/**
+ * The `approved` events recorded after the LATEST `deliver-started` — i.e.
+ * inside the current run. Pure; [] for non-array input or no deliver-started;
+ * never throws. Approval changes happen BETWEEN runs: a wave agent sharing the
+ * architect's git identity can record an approval mid-run (#158), and the run
+ * must refuse to act on it. The event is never removed — it stays as evidence.
+ */
+export function approvedDuringRun(history) {
+  if (!Array.isArray(history)) return [];
+  let start = -1;
+  history.forEach((e, i) => {
+    if (e && e.type === 'deliver-started') start = i;
+  });
+  if (start < 0) return [];
+  return history.slice(start + 1).filter((e) => e && e.type === 'approved');
+}
+
 /**
  * Between-wave approval re-check (#77): does the approval this run started
  * under still hold? Re-runs the `approved` gate, then the injected
@@ -89,6 +110,9 @@ function errorMessage(err) {
  * reason string for the `approval-changed` stop.
  */
 async function approvalChangeReason({ state, feature, approvalIntact }) {
+  // Checked FIRST: the gate below reads the LATEST approval, which a mid-run
+  // approval would satisfy — so a run-scoped approval must stop before it (#158).
+  if (approvedDuringRun(state.history(feature)).length > 0) return APPROVED_DURING_RUN_REASON;
   const g = await state.gate(feature, 'approved');
   if (!g.passed) return `approved gate no longer passes: ${g.reason}`;
   let intact;
@@ -1019,6 +1043,17 @@ export async function deliverSpine({
       });
       return stopRun({ stopped: 'budget', ok: false, wave: wave.n }, stopCtx);
     }
+  }
+
+  // An approval recorded during the LAST wave has no next pre-wave re-check to
+  // catch it: refuse to post-check or open the PR on it (#158). History-only —
+  // the approvalIntact port is deliberately NOT called here (one call per wave).
+  if (approvedDuringRun(state.history(feature)).length > 0) {
+    const lastWave = waves.length > 0 ? waves[waves.length - 1].n : undefined;
+    return stopRun(
+      { stopped: 'approval-changed', ok: false, wave: lastWave, reason: APPROVED_DURING_RUN_REASON },
+      stopCtx,
+    );
   }
 
   // ── DET post-checks: existing bash guardrails, called by path via the injected
