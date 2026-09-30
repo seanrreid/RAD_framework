@@ -1,7 +1,10 @@
 # Plan: Verification Hardening (prefix-agnostic CI, platform setting, stop detail, hook message, PR linking)
 Created: 2026-09-30
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-09-30T14:05:24.053Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/verification-hardening
 Adopted-From: https://github.com/seanrreid/RAD_framework/issues/154, https://github.com/seanrreid/RAD_framework/issues/156, https://github.com/seanrreid/RAD_framework/issues/161, https://github.com/seanrreid/RAD_framework/issues/162, https://github.com/seanrreid/RAD_framework/issues/163
 Issue-Title: CI deliver-integrity skipped under custom prefix (#154) + detect-platform ignores platform: (#156) + stop detail dropped (#161) + misleading hook message (#162) + PRs not auto-closing issues (#163)
