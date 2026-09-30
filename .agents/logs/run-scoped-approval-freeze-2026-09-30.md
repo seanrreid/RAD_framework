@@ -8,3 +8,5 @@ Executor role: architect
 
 | Step | Wave | Task | Status | Commit | Time |
 |------|------|------|--------|--------|------|
+| 1 | Wave 1 | Spine approval freeze | ✓ complete | b272d2a | 08:47 |
+| 2 | Wave 1 | Docs lines | ✓ complete | 0938808 | 08:47 |
