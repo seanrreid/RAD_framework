@@ -226,10 +226,102 @@ t_unapproved_message_unchanged() {
   echo "✓ (f) #162: unapproved plan exits 1 without fingerprint-mismatch wording"
 }
 
+# ── #168: a CLI that exits 0 without a verdict never passes the gate ─────────
+# The gate verb always prints a verdict line; exit 0 with no `passed=true` means
+# the CLI never ran (the symlink main-module guard). A stub harness/cli.js
+# prints $STUB_OUT (if set) and exits $STUB_CODE (default 0), standing in for the
+# real CLI in a copied scripts/ tree so SCRIPT_DIR/../harness/cli.js resolves to it.
+STUB_ROOT="$TMP/stub-root"
+make_stub_root() {
+  mkdir -p "$STUB_ROOT/scripts" "$STUB_ROOT/harness"
+  cp "$SCRIPT" "$HERE/get-default-branch.sh" "$HERE/git-sync.sh" "$STUB_ROOT/scripts/"
+  printf '%s\n' \
+    'if (process.env.STUB_OUT) process.stdout.write(process.env.STUB_OUT + "\n");' \
+    'process.exit(Number(process.env.STUB_CODE || 0));' > "$STUB_ROOT/harness/cli.js"
+}
+
+# run_stub_check STUB_CODE STUB_OUT ERR_FILE → echoes the exit code.
+run_stub_check() {
+  local stub_code="$1" stub_out="$2" err_file="$3"
+  local feature="stub-verdict" d="$TMP/stub-verdict" code
+  mkdir -p "$d/.agents/state/${feature}"
+  printf '%s\n' "${APPROVED_EVENT/FEAT/$feature}" > "$d/.agents/state/${feature}/events.jsonl"
+  set +e
+  ( cd "$d" && STUB_CODE="$stub_code" STUB_OUT="$stub_out" \
+      bash "$STUB_ROOT/scripts/check-plan-approved.sh" "rad/${feature}" main ) >/dev/null 2>"$err_file"
+  code=$?
+  set -e
+  echo "$code"
+}
+
+t_silent_cli_fails_closed() {
+  local err="$TMP/silent.err" code
+  code=$(run_stub_check 0 "" "$err")
+  [[ "$code" -eq 1 ]] || fail "(g) CLI exit 0 with no output must FAIL closed (got $code)"
+  grep -qF "rad gate produced no verdict" "$err" || fail "(g) stderr should say no verdict; got: $(tail -n 1 "$err")"
+  echo "✓ (g) #168: CLI exit 0 with empty output fails closed (exit 1, no-verdict reason)"
+}
+
+t_non_matching_output_fails_closed() {
+  local err="$TMP/nonmatch.err" code
+  code=$(run_stub_check 0 "rad gate: feature=x gate=approved passed=false" "$err")
+  [[ "$code" -eq 1 ]] || fail "(h) CLI exit 0 with passed=false must FAIL closed (got $code)"
+  grep -qF "no verdict" "$err" || fail "(h) stderr should say no verdict; got: $(tail -n 1 "$err")"
+  echo "✓ (h) #168: CLI exit 0 without passed=true fails closed"
+}
+
+t_stub_passed_true_passes() {
+  local err="$TMP/passtrue.err" code
+  code=$(run_stub_check 0 "rad gate: feature=x gate=approved passed=true" "$err")
+  [[ "$code" -eq 0 ]] || fail "(i) CLI exit 0 with passed=true should PASS (got $code)"
+  echo "✓ (i) #168: CLI exit 0 with passed=true passes"
+}
+
+t_stub_nonzero_passes_through() {
+  local err="$TMP/nonzero.err" code
+  code=$(run_stub_check 2 "" "$err")
+  [[ "$code" -eq 2 ]] || fail "(j) a non-zero CLI exit should pass straight through (got $code)"
+  if grep -qF "no verdict" "$err"; then
+    fail "(j) a non-zero CLI exit must not report no-verdict"
+  fi
+  echo "✓ (j) #168: a non-zero CLI exit passes through unchanged"
+}
+
+# get-default-branch.sh reads the same stub CLI (repo-root = $STUB_ROOT).
+t_default_branch_empty_output_errors() {
+  local err="$TMP/gdb-empty.err" code out
+  set +e
+  out=$(STUB_CODE=0 STUB_OUT="" bash "$STUB_ROOT/scripts/get-default-branch.sh" "$STUB_ROOT" 2>"$err")
+  code=$?
+  set -e
+  [[ "$code" -eq 1 ]] || fail "(k) config get exit 0 with no output must exit 1 (got $code, out '$out')"
+  [[ -z "$out" ]] || fail "(k) no branch name may be printed on the error path (got '$out')"
+  grep -qF "exited 0 with no output" "$err" || fail "(k) stderr should name the empty output; got: $(tail -n 1 "$err")"
+  echo "✓ (k) #168: get-default-branch errors on an empty config get (never an empty branch)"
+}
+
+t_default_branch_absent_key_falls_back() {
+  local out
+  out=$(STUB_CODE=3 STUB_OUT="" bash "$STUB_ROOT/scripts/get-default-branch.sh" "$STUB_ROOT" 2>/dev/null) \
+    || fail "(l) absent key (exit 3) should succeed"
+  [[ "$out" == "main" ]] || fail "(l) absent key should fall back to main (got '$out')"
+  out=$(STUB_CODE=0 STUB_OUT="trunk" bash "$STUB_ROOT/scripts/get-default-branch.sh" "$STUB_ROOT") \
+    || fail "(l) a declared branch should succeed"
+  [[ "$out" == "trunk" ]] || fail "(l) declared branch should print as-is (got '$out')"
+  echo "✓ (l) get-default-branch: absent key → main; declared branch printed"
+}
+
 t_doc_approved_no_event
 t_event_present_doc_stale
 t_missing_log_fails_closed
 t_branch_tip_resolution
 t_fingerprint_mismatch_message
 t_unapproved_message_unchanged
+make_stub_root
+t_silent_cli_fails_closed
+t_non_matching_output_fails_closed
+t_stub_passed_true_passes
+t_stub_nonzero_passes_through
+t_default_branch_empty_output_errors
+t_default_branch_absent_key_falls_back
 echo "ALL PASS"

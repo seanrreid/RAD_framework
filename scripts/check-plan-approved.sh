@@ -133,5 +133,21 @@ fi
 
 # Pipe the resolved JSONL through the pure gate fold. The verb exits 0 when the
 # approved gate is satisfied, non-zero otherwise (including an empty log → fail
-# closed). Map its exit code straight through.
-printf '%s' "$EVENTS_JSONL" | node "$CLI" gate "$FEATURE" approved --stdin
+# closed); a non-zero exit is passed straight through. The verb ALWAYS prints a
+# verdict line, so exit 0 without `passed=true` is a CLI that never ran (e.g.
+# the #168 symlink main-module guard) and fails closed — never a pass.
+readonly GATE_PASSED_TOKEN="passed=true"
+gate_rc=0
+GATE_OUT=$(printf '%s' "$EVENTS_JSONL" | node "$CLI" gate "$FEATURE" approved --stdin) || gate_rc=$?
+if [[ -n "$GATE_OUT" ]]; then
+  printf '%s\n' "$GATE_OUT"
+fi
+if [[ "$gate_rc" -ne 0 ]]; then
+  exit "$gate_rc"
+fi
+if [[ "$GATE_OUT" != *"$GATE_PASSED_TOKEN"* ]]; then
+  # stderr, last line: deliver-gate-hook.mjs surfaces this line verbatim as
+  # its block reason, so it must name the cause.
+  echo "rad gate produced no verdict for '${FEATURE}' (exit 0 without ${GATE_PASSED_TOKEN}) — failing closed" >&2
+  exit 1
+fi
