@@ -101,7 +101,7 @@ path_matches() {
 # is deliberately NOT operator-tunable — a literal, never routed through an
 # env var — so a plan cannot loosen the guard that classifies it. Additions
 # require a reviewed commit to this file.
-readonly RAD_SELF_PROTECTED_PATTERN='^harness/|^scripts/|^\.claude/|^\.agents/state/|(^|/)gates\.ya?ml$|(^|/)matrix\.ya?ml$'
+readonly RAD_SELF_PROTECTED_PATTERN='^harness/|^scripts/|^\.claude/|^\.agents/state/|(^|/)gates\.ya?ml$|(^|/)matrix\.ya?ml$|^\.rad/'
 
 # path_is_self_protected <path>
 # True (exit 0) iff <path> falls inside the self-protected set. Delegates to

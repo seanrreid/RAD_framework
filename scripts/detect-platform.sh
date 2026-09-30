@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # detect-platform.sh
 # Detects the git platform and outputs its name.
-# Precedence: CLAUDE.md `platform:` (at the git top level) first; if absent,
-# detection from the origin remote URL.
+# Precedence: `platform` in .rad/config.yml (read via `rad config get` from this
+# script's checkout) first; if the config file or key is absent, detection from
+# the origin remote URL (with a stderr notice). An invalid config → manual.
 # Usage: scripts/detect-platform.sh [--quiet]
 # Output: github | gitlab | bitbucket | forgejo | manual  (always the last stdout line)
 
@@ -11,26 +12,40 @@ set -euo pipefail
 QUIET=${1:-""}
 VALID_PLATFORMS="github|gitlab|bitbucket|forgejo|manual"
 
-# Print the raw `platform:` value from the repo's CLAUDE.md (empty when there
-# is no repo, no CLAUDE.md, or no platform line). Parsing mirrors
-# get-default-branch.sh: first match, strip key, trailing comment, whitespace.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$SCRIPT_DIR/.."
+RAD_CLI="$ROOT/harness/cli.js"
+readonly CONFIG_FILE="$ROOT/.rad/config.yml"
+readonly CONFIG_KEY_ABSENT_EXIT=3
+
+# Sets CONFIG_PLATFORM / CONFIG_STATE from .rad/config.yml via `rad config get`.
+#   CONFIG_STATE=set     — platform read (CONFIG_PLATFORM holds it)
+#   CONFIG_STATE=absent  — no config file (install-time) or no platform key →
+#                          URL detection decides
+#   CONFIG_STATE=invalid — config present but unreadable/invalid → manual
+# Runs in the main shell (not a subshell) so both variables survive.
 read_config_platform() {
-  local top claude_md line rc=0
-  # Outside a git repo there is no top level to anchor CLAUDE.md — not an
-  # error: URL detection (which also yields manual) decides.
-  top=$(git rev-parse --show-toplevel 2>/dev/null) || return 0
-  [[ -n "$top" ]] || return 0
-  claude_md="$top/CLAUDE.md"
-  [[ -f "$claude_md" ]] || return 0
-  line=$(grep -E -m1 '^[[:space:]]*platform:' "$claude_md") || rc=$?
-  # grep exit 1 = no platform line (absent → URL detection); >1 = read error.
-  if (( rc > 1 )); then
-    echo "error: cannot read $claude_md (grep exit $rc)" >&2
-    exit 1
+  CONFIG_PLATFORM=""
+  if [[ ! -f "$CONFIG_FILE" ]]; then
+    echo "notice: no .rad/config.yml — detecting platform from the origin URL (run 'rad config migrate')" >&2
+    CONFIG_STATE="absent"
+    return 0
   fi
-  [[ -n "$line" ]] || return 0
-  printf '%s\n' "$line" \
-    | sed -E 's/^[[:space:]]*platform:[[:space:]]*//; s/[[:space:]]*#.*$//; s/[[:space:]]*$//'
+  local rc=0 err_file
+  err_file=$(mktemp "${TMPDIR:-/tmp}/detect-platform.XXXXXX")
+  CONFIG_PLATFORM=$(node "$RAD_CLI" config get platform 2>"$err_file") || rc=$?
+  if [[ "$rc" -eq 0 && -n "$CONFIG_PLATFORM" ]]; then
+    CONFIG_STATE="set"
+  elif [[ "$rc" -eq 0 || "$rc" -eq "$CONFIG_KEY_ABSENT_EXIT" ]]; then
+    echo "notice: no platform in .rad/config.yml — detecting platform from the origin URL" >&2
+    CONFIG_STATE="absent"
+  else
+    cat "$err_file" >&2
+    echo "warning: cannot read platform from .rad/config.yml (rad config get exit $rc) — using manual" >&2
+    CONFIG_PLATFORM=""
+    CONFIG_STATE="invalid"
+  fi
+  rm -f "$err_file"
 }
 
 detect() {
@@ -62,21 +77,28 @@ detect() {
   fi
 }
 
-CONFIG_PLATFORM=$(read_config_platform)
+read_config_platform
 
-if [[ -n "$CONFIG_PLATFORM" ]]; then
-  SOURCE="from CLAUDE.md"
-  case "$CONFIG_PLATFORM" in
-    github|gitlab|bitbucket|forgejo|manual) PLATFORM="$CONFIG_PLATFORM" ;;
-    *)
-      echo "warning: invalid platform '$CONFIG_PLATFORM' in CLAUDE.md — using manual (valid: $VALID_PLATFORMS)" >&2
-      PLATFORM="manual"
-      ;;
-  esac
-else
-  SOURCE="from origin URL"
-  PLATFORM=$(detect)
-fi
+case "$CONFIG_STATE" in
+  set)
+    SOURCE="from .rad/config.yml"
+    case "$CONFIG_PLATFORM" in
+      github|gitlab|bitbucket|forgejo|manual) PLATFORM="$CONFIG_PLATFORM" ;;
+      *)
+        echo "warning: invalid platform '$CONFIG_PLATFORM' in .rad/config.yml — using manual (valid: $VALID_PLATFORMS)" >&2
+        PLATFORM="manual"
+        ;;
+    esac
+    ;;
+  invalid)
+    SOURCE="invalid .rad/config.yml"
+    PLATFORM="manual"
+    ;;
+  *)
+    SOURCE="from origin URL"
+    PLATFORM=$(detect)
+    ;;
+esac
 
 if [[ "$QUIET" != "--quiet" ]]; then
   echo "Detected platform: $PLATFORM ($SOURCE)"
@@ -85,7 +107,7 @@ if [[ "$QUIET" != "--quiet" ]]; then
     github)
       if ! command -v gh &>/dev/null; then
         echo "WARNING: gh CLI not found. Install from https://cli.github.com/"
-        echo "         or set platform: manual in CLAUDE.md to use manual mode."
+        echo "         or set platform: manual in .rad/config.yml to use manual mode."
       else
         echo "gh CLI found: $(gh --version | head -1)"
       fi
@@ -93,7 +115,7 @@ if [[ "$QUIET" != "--quiet" ]]; then
     gitlab)
       if ! command -v glab &>/dev/null; then
         echo "WARNING: glab CLI not found. Install from https://gitlab.com/gitlab-org/cli"
-        echo "         or set platform: manual in CLAUDE.md to use manual mode."
+        echo "         or set platform: manual in .rad/config.yml to use manual mode."
       else
         echo "glab CLI found: $(glab --version | head -1)"
       fi
