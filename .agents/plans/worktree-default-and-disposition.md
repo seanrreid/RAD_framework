@@ -1,7 +1,7 @@
 # Plan: Worktree Isolation by Default + Intake Disposition
 Created: 2026-09-30
 Author: architect
-Status: in-progress
+Status: pending-review
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-09-30T16:52:19.701Z
 Recorded-By: sean@torchcodelab.com
@@ -131,6 +131,8 @@ An `Explore` agent (general, read-only) mapped:
 | harness/test/agent-adapters.test.js | 755-865 | Direct calls pin `RAD_WORKTREE: '0'` |
 | harness/evals/lib/fixture.js | 125-140 | `deliver` defaults `RAD_WORKTREE: '0'` unless the caller sets it |
 | harness/evals/delivery.eval.js | 140-200 | `deliver-isolated-by-default` case (append) |
+| harness/evals/delivery.eval.js | 200-260 | Amendment 1: `deliver-isolated-by-default` asserts exit 0, worktree removed, events committed |
+| harness/test/worktree.test.js | 430-480 | Amendment 1: success path commits run events before teardown; commit failure preserves |
 | docs/invariants.yaml | 100-200 | `deliver-runs-isolated` entry |
 | scripts/check-disposition.sh | 1-110 | New: AC#7 |
 | scripts/test-check-disposition.sh | 1-150 | New: AC#8 |
@@ -223,6 +225,21 @@ File: CLAUDE.md:249-272, docs/rad-cli.md:386-452, docs/daily-workflow.md:47-55, 
 What: Implement AC#11.
 Validate: AC#11, AC#12 — the docs describe default-on and the disposition flow. Then the full suite (harness, evals, every shell test under both shells, the shell-safety lint and `lint-invariants`).
 
+### Wave 3 — sequential
+Amendment 1: the success path must commit the run's events before worktree teardown.
+
+#### Task 3.1: Commit run events before worktree teardown
+File: harness/cli.js:1155-1180, harness/test/worktree.test.js:430-480, harness/evals/delivery.eval.js:200-260
+What: On the evidenced-success path, before `worktree.complete`, commit the worktree's run events:
+- run `git -C <worktree> add .agents/state/<feature>/events.jsonl` (and any other run-state file the spine wrote under `.agents/state/<feature>/`)
+- then `git -C <worktree> commit -m "deliver(<feature>): record deliver run events"`, only when there are staged changes
+
+The events then persist on the work branch, and the non-forced `git worktree remove` succeeds. If the commit fails, preserve the worktree, print the preserved-tree pointer, and exit 1 with the git reason. Never force-remove.
+Tests:
+- **worktree.test.js** (fake `sh`): success → `add` + `commit` recorded before `remove`; nothing staged → no commit call; commit fails → preserve + exit 1, no `remove`.
+- **delivery.eval.js** `deliver-isolated-by-default`: now asserts exit 0, the worktree dir is gone, `git log rad/<f> -- .agents/state/<f>/events.jsonl` includes the run-events commit, and the main checkout is untouched.
+Validate: AC#3, AC#5 (amendment 1) — `npm test --prefix harness`; `node --test harness/evals/*.eval.js` (including `[mutated]`).
+
 ## Tests to Write
 - [ ] Worktree default, clean-switch, dirty-refuse — harness/test/worktree.test.js
 - [ ] Disposition check — scripts/test-check-disposition.sh
@@ -245,6 +262,7 @@ None. All paths are architect-owned, and the author is the architect.
 - **Self-protected paths:** `harness/`, `scripts/` and `.claude/` trigger advisory lint warnings by design.
 
 ## Issue Gaps
+- **AMENDMENT 1 (2026-09-30, after Wave 2).** Task 2.1's real-git eval found that a successful worktree run exits 1: the spine's `events.jsonl` in the worktree is never committed, so `worktree-lifecycle.sh remove` (deliberately no `--force`) refuses the dirty tree and the run fails, leaving the worktree behind. The defect predates this plan (the opt-in path), but flipping the default would break every successful `rad deliver`. The new Task 3.1 commits the run's events on the work branch before teardown; a commit failure preserves the tree and exits 1, and it never forces removal. The ranges `worktree.test.js:430-480` and `delivery.eval.js:200-260` are added.
 - **ASSUMPTION — flip now.** Default-on, `RAD_WORKTREE=0` opts out, no fallback on create failure. Architect decision, 2026-09-30.
 - **ASSUMPTION — clean-switch / dirty-refuse.** Architect decision, 2026-09-30.
 - **ASSUMPTION — CLI only.** The skill path is unchanged. Architect decision, 2026-09-30.
