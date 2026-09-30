@@ -101,6 +101,7 @@ default_branch: main
 
 `manual` mode: platform scripts print instructions instead of calling CLI tools.
 Run `scripts/detect-platform.sh` to auto-detect from your git remote.
+`scripts/detect-platform.sh` honors this `platform:` setting first, falling back to the origin URL only when it is absent; an invalid value means `manual`, and `manual` never calls a host CLI (#156).
 
 ### Agent Adapter
 
