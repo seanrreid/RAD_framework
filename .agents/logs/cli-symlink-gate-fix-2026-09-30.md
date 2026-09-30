@@ -8,3 +8,5 @@ Executor role: architect
 
 | Step | Wave | Task | Status | Commit | Time |
 |------|------|------|--------|--------|------|
+| 1 | Wave 1 | Realpath main-module guard | ✓ complete | 562125c | 21:06:48Z |
+| 2 | Wave 1 | Fail-closed verdict checks in scripts | ✓ complete | 87d6f42 | 21:06:48Z |
