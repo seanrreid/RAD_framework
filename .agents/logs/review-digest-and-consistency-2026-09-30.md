@@ -12,3 +12,5 @@ Executor role: architect
 | 2 | Wave 1 | lint-plan consistency advisories | ✓ done_with_concerns (re-lint: 11 plans gain advisory warnings, 0 errors) | bb4273c | 10:28 |
 | 3 | Wave 1 | Post-merge convergence check | ✓ complete | 66188b1 | 10:28 |
 | — | Rebase | Rebased onto main after #164 merged | — | — | 10:28 |
+| 4 | Wave 2 | rad digest command | ✓ complete | 7137f7f | 10:30 |
+| 5 | Wave 2 | /rad-review wiring | ✓ complete | 264ba0d | 10:30 |
