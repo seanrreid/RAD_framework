@@ -68,6 +68,80 @@ open_github() {
     2>&1)
 
   echo "$url"
+  # gh prints the PR URL as its last output line (#163).
+  verify_closing_links "$(printf '%s\n' "$url" | tail -n 1)"
+}
+
+# Closing keywords GitHub recognises (#163); matched case-insensitively.
+CLOSING_KEYWORD_RE='(close[sd]?|fix(e[sd])?|resolve[sd]?) #[0-9]+'
+OPENPR_BODY_FILE=""
+trap 'if [[ -n "$OPENPR_BODY_FILE" ]]; then rm -f "$OPENPR_BODY_FILE"; fi' EXIT
+
+# Print the unique issue numbers BODY names with a closing keyword, one per line.
+closing_issues_in_body() {
+  local matches rc=0
+  matches=$(printf '%s\n' "$BODY" | grep -oiE "$CLOSING_KEYWORD_RE") || rc=$?
+  # grep exit 1 = no keyword (nothing to verify); >1 is a real error.
+  [[ $rc -eq 1 ]] && return 0
+  [[ $rc -ne 0 ]] && { echo "ERROR: scanning PR body for closing keywords failed (grep exit $rc)" >&2; return 1; }
+  printf '%s\n' "$matches" | grep -oE '[0-9]+$' | sort -un
+}
+
+# Print the issue numbers GitHub has linked as closing references on PR $1.
+# A failing gh call returns non-zero with its output on stdout for the warning.
+linked_issues_for_pr() {
+  local out
+  out=$(gh pr view "$1" --json closingIssuesReferences \
+    --jq '.closingIssuesReferences[].number' 2>&1) || { printf '%s' "$out"; return 1; }
+  printf '%s\n' "$out"
+}
+
+# Print the numbers in list $1 (newline-separated) absent from list $2.
+missing_issues() {
+  local n nl=$'\n'
+  for n in $1; do
+    case "$nl$2$nl" in
+      *"$nl$n$nl"*) ;;
+      *) printf '%s\n' "$n" ;;
+    esac
+  done
+}
+
+# Re-save BODY on PR $1 via a temp body file (removed by the EXIT trap).
+# Returns non-zero with the failure reason on stdout.
+resave_body() {
+  OPENPR_BODY_FILE=$(mktemp 2>&1) || { printf 'mktemp failed: %s' "$OPENPR_BODY_FILE"; OPENPR_BODY_FILE=""; return 1; }
+  printf '%s' "$BODY" > "$OPENPR_BODY_FILE" || { printf 'could not write %s' "$OPENPR_BODY_FILE"; return 1; }
+  gh pr edit "$1" --body-file "$OPENPR_BODY_FILE" 2>&1
+}
+
+# After a successful gh pr create, confirm GitHub linked every closing-keyword
+# issue; if not, re-save the body ONCE and re-check; still missing → warn.
+# Never closes issues itself, and never changes the exit status (the PR exists).
+verify_closing_links() {
+  local pr_url="$1" wanted linked missing n
+  wanted=$(closing_issues_in_body) || { echo "warning: could not verify closing-issue links for $pr_url" >&2; return 0; }
+  [[ -z "$wanted" ]] && return 0
+
+  if ! linked=$(linked_issues_for_pr "$pr_url"); then
+    echo "warning: could not verify closing-issue links for $pr_url (gh pr view failed: $linked)" >&2
+    return 0
+  fi
+  missing=$(missing_issues "$wanted" "$linked")
+  [[ -z "$missing" ]] && return 0
+
+  local edit_out
+  if ! edit_out=$(resave_body "$pr_url"); then
+    echo "warning: re-saving the PR body to relink closing issues failed: $edit_out" >&2
+  elif linked=$(linked_issues_for_pr "$pr_url"); then
+    missing=$(missing_issues "$wanted" "$linked")
+  else
+    echo "warning: could not re-verify closing-issue links for $pr_url (gh pr view failed: $linked)" >&2
+  fi
+  for n in $missing; do
+    echo "warning: GitHub linked no closing issue for #$n — close it after merge" >&2
+  done
+  return 0
 }
 
 open_gitlab() {

@@ -175,8 +175,61 @@ t_branch_tip_resolution() {
   echo "✓ (d) AC#3: a draft-only branch-tip log (no approved event) FAILS the gate (exit 1)"
 }
 
+# ── (e) #162: approved then edited → exit 1, stderr names the fingerprint cause ─
+# The hook surfaces this stderr line as its block reason, so an edited approved
+# plan must say "fingerprint mismatch", not "no approved event".
+t_fingerprint_mismatch_message() {
+  local feature="fp-edited-after-approval"
+  local d="$TMP/$feature" plan err_file="$TMP/fp-mismatch.err"
+  plan="$d/.agents/plans/${feature}.md"
+  mkdir -p "$d/.agents/plans" "$d/.agents/state/${feature}"
+  printf '# Plan: t\nBranch: rad/%s\n\n## Tasks\n- original task\n' "$feature" > "$plan"
+  local fp
+  fp=$(node "$REPO_ROOT/harness/cli.js" plan-fingerprint "$plan" | tr -d '\n')
+  [[ -n "$fp" ]] || fail "(e) could not compute the fixture plan fingerprint"
+  printf '{"feature":"%s","type":"approved","actor":"sean@torchcodelab.com","role":"architect","ts":"2026-06-12T13:42:41.192Z","data":{"fingerprint":"%s"}}\n' \
+    "$feature" "$fp" > "$d/.agents/state/${feature}/events.jsonl"
+
+  local code
+  code=$(run_check "$feature" main "$d")
+  [[ "$code" -eq 0 ]] || fail "(e) unedited approved plan should PASS before the edit (got $code)"
+
+  printf -- '- added after approval\n' >> "$plan"
+  set +e
+  ( cd "$d" && bash "$SCRIPT" "rad/${feature}" main ) >/dev/null 2>"$err_file"
+  code=$?
+  set -e
+  [[ "$code" -eq 1 ]] || fail "(e) edited approved plan should FAIL with exit 1 (got $code)"
+  local want="plan changed since approval (fingerprint mismatch) — re-approve with /rad-approve ${feature}"
+  grep -qF "$want" "$err_file" || fail "(e) stderr should name the fingerprint mismatch; got: $(tail -n 1 "$err_file")"
+  echo "✓ (e) #162: edited approved plan exits 1 with a fingerprint-mismatch stderr reason"
+}
+
+# ── (f) #162: unapproved plan → exit 1, message unchanged (no fingerprint wording) ─
+t_unapproved_message_unchanged() {
+  local feature="unapproved-message"
+  local d="$TMP/$feature" out_file="$TMP/unapproved.out"
+  mkdir -p "$d/.agents/plans" "$d/.agents/state/${feature}"
+  printf '# Plan: t\nBranch: rad/%s\n' "$feature" > "$d/.agents/plans/${feature}.md"
+  printf '{"feature":"%s","type":"plan-drafted","actor":"x","role":"developer","ts":"2026-06-12T13:42:41.192Z"}\n' \
+    "$feature" > "$d/.agents/state/${feature}/events.jsonl"
+
+  local code
+  set +e
+  ( cd "$d" && bash "$SCRIPT" "rad/${feature}" main ) >"$out_file" 2>&1
+  code=$?
+  set -e
+  [[ "$code" -eq 1 ]] || fail "(f) unapproved plan should FAIL with exit 1 (got $code)"
+  if grep -qF "fingerprint mismatch" "$out_file"; then
+    fail "(f) unapproved plan must not report a fingerprint mismatch"
+  fi
+  echo "✓ (f) #162: unapproved plan exits 1 without fingerprint-mismatch wording"
+}
+
 t_doc_approved_no_event
 t_event_present_doc_stale
 t_missing_log_fails_closed
 t_branch_tip_resolution
+t_fingerprint_mismatch_message
+t_unapproved_message_unchanged
 echo "ALL PASS"

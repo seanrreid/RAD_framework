@@ -39,7 +39,9 @@
  *   appends exactly one as the LAST event of every run that stopped after
  *   `deliver-started` (never on success, never on a pre-start gate stop). Its
  *   `data` is `{ class: 'needs-decision' | 'failed', reason, decision[, wave,
- *   action, outcome] }` (see harness/stops.js). It establishes NO phase (absent
+ *   action, outcome, detail] }` (see harness/stops.js). `detail?` is the spine's
+ *   free-text stop reason (e.g. why approval changed, #161), present only when
+ *   the terminal carried a non-empty one. It establishes NO phase (absent
  *   from PHASE_BY_TYPE), so a later re-run may append after it.
  *   `wave-started` is the fourth AUDIT-ONLY event (#119): the deliver spine
  *   appends `{ wave, attempt[, model] }` BEFORE running a wave's agent, so a

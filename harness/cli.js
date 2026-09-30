@@ -891,6 +891,13 @@ function classifyTerminal(result) {
   }
 }
 
+/** ` detail="…"` for a stop carrying a free-text reason (#161), embedded
+ * double quotes escaped; '' when the stop has none. */
+function stopDetailField(result) {
+  if (typeof result.reason !== 'string' || result.reason === '') return '';
+  return ` detail="${result.reason.replace(/"/g, '\\"')}"`;
+}
+
 /** Write the machine-greppable failure line and return the stop's exit code. */
 function reportStop({ result, feature, worktree, root }) {
   const stop = classifyTerminal(result);
@@ -903,6 +910,7 @@ function reportStop({ result, feature, worktree, root }) {
     (result.budget !== undefined ? ` budget=${result.budget}` : '') +
     (worktree ? ` worktree=${root}` : '') +
     ` class=${stop.class} decision="${stop.decision}"` +
+    stopDetailField(result) +
     '\n',
   );
   return stop.class === STOP_CLASSES.NEEDS_DECISION ? NEEDS_DECISION_EXIT_CODE : FAILED_EXIT_CODE;

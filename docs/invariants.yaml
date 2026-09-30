@@ -18,6 +18,7 @@ invariants:
       - { file: scripts/deliver-gate-hook.mjs, symbol: "function block", note: "PreToolUse hook blocks an unapproved /rad-deliver (exit 2)" }
       - { file: .claude/settings.json, symbol: "deliver-gate-hook.mjs", note: "hook registration" }
       - { file: scripts/check-role.sh, symbol: "VALID_ROLES=" }
+      - { file: scripts/detect-deliver-pr.sh, symbol: "readonly EXIT_NOT_DELIVER=3", note: "CI: deliver PRs detected by plan Branch: header, not branch prefix (#154)" }
     display_only:
       - { note: "the plan doc's Status: approved header is a mirror written by /rad-approve, never read as the gate" }
       - { file: scripts/rad-label.sh, note: "rad:* status labels on the issue/PR are a board mirror; branch tips stay canonical" }
@@ -28,8 +29,8 @@ invariants:
         note: "requires --evidence; the named approver must be the architect (check-role.sh); proxy provenance is recorded in the approved event"
       - id: custom-branch-prefix
         surface: "RAD_BRANCH_PREFIX other than rad/"
-        guarded: "no"
-        note: "the CI deliver-integrity job is gated on startsWith(github.head_ref, 'rad/') in .github/workflows/ci.yml, so a custom prefix skips the approval-integrity CI check entirely; local gates still apply. Follow-up issue."
+        guarded: "yes"
+        note: "CI detects deliver PRs by plan content (scripts/detect-deliver-pr.sh), independent of the branch prefix (#154)"
 
   - id: approval-invalidated-by-plan-change
     claim: "A deliver run stops when the approved plan has changed since approval, rather than executing an unapproved revision."
@@ -74,11 +75,12 @@ invariants:
       - { file: harness/spine.js, symbol: "SCOPE_FAIL_OUTCOME" }
       - { file: harness/matrix.yaml, symbol: "fail-scope:" }
       - { file: harness/cli.js, symbol: "SCRIPT_ARGS", note: "maps the spine's check-scope call to its real argv" }
+      - { file: scripts/detect-deliver-pr.sh, symbol: "readonly EXIT_NOT_DELIVER=3", note: "CI: the scope check runs on every deliver PR regardless of branch prefix (#154)" }
     bypasses:
       - id: custom-branch-prefix
         surface: "RAD_BRANCH_PREFIX other than rad/"
-        guarded: "no"
-        note: "the CI deliver-integrity job is gated on startsWith(github.head_ref, 'rad/') in .github/workflows/ci.yml, so a custom prefix skips the scope CI check; the in-deliver wave scope check still runs. Follow-up issue."
+        guarded: "yes"
+        note: "CI detects deliver PRs by plan content (scripts/detect-deliver-pr.sh), independent of the branch prefix (#154)"
 
   - id: events-append-only
     claim: "Event logs are only ever appended to; no change may remove or modify an existing event line."

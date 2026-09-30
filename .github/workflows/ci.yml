@@ -124,12 +124,12 @@ jobs:
 
   # Deliver PRs only — approval integrity at the PR head (ancestry +
   # fingerprint + gate + authenticity, with an advisory-only ownership check).
-  # Ordinary PRs: the job-level `if` skips non-rad/ branches entirely (skipped
-  # reads as success), and the detect step below emits an explicit skip notice
-  # for rad/ branches that carry no plan file.
+  # Detection is content-based (#154): scripts/detect-deliver-pr.sh matches the
+  # PR head ref against each plan's `Branch:` header, so any RAD_BRANCH_PREFIX
+  # is covered. Ordinary PRs (exit 3) get an explicit skip notice; an ambiguous
+  # match or bad input fails the job closed.
   deliver-integrity:
     runs-on: ubuntu-latest
-    if: startsWith(github.head_ref, 'rad/')
     steps:
       # fetch-depth: 0 — ancestry (merge-base --is-ancestor) and the
       # origin/<work-branch> events-log resolution need full history; a
@@ -138,16 +138,28 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Detect deliver PR (rad/ branch + matching plan file)
+      - name: Detect deliver PR (plan whose Branch matches the head ref)
         id: detect
         run: |
-          feature="${GITHUB_HEAD_REF#rad/}"
-          if [ -f ".agents/plans/${feature}.md" ]; then
-            echo "deliver PR detected: plan .agents/plans/${feature}.md exists for branch ${GITHUB_HEAD_REF}"
-          else
-            echo "notice: branch ${GITHUB_HEAD_REF} has no plan file .agents/plans/${feature}.md — not a deliver PR; skipping approval-integrity check"
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          fi
+          set +e
+          feature="$(scripts/detect-deliver-pr.sh "$GITHUB_HEAD_REF" 2>"$RUNNER_TEMP/detect.err")"
+          code=$?
+          set -e
+          case "$code" in
+            0)
+              echo "deliver PR detected: plan .agents/plans/${feature}.md declares Branch: ${GITHUB_HEAD_REF}"
+              echo "feature=${feature}" >> "$GITHUB_OUTPUT"
+              echo "skip=false" >> "$GITHUB_OUTPUT"
+              ;;
+            3)
+              echo "notice: no plan declares Branch: ${GITHUB_HEAD_REF} — not a deliver PR; skipping approval-integrity and scope checks"
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "::error::detect-deliver-pr.sh exited ${code}: $(tr '\n' ' ' < "$RUNNER_TEMP/detect.err")"
+              exit 1
+              ;;
+          esac
       - name: Check approval integrity
         if: steps.detect.outputs.skip != 'true'
         # The re-emit loop below is output plumbing, not check logic: it
@@ -167,7 +179,7 @@ jobs:
         # the job and blocks merge. The work branch is passed origin-prefixed
         # because the PR checkout is a detached merge ref — the bare branch
         # name would not resolve and the script's diff would come up empty.
-        run: scripts/check-scope.sh ".agents/plans/${GITHUB_HEAD_REF#rad/}.md" "origin/${{ github.head_ref }}" "${{ github.base_ref }}"
+        run: scripts/check-scope.sh ".agents/plans/${{ steps.detect.outputs.feature }}.md" "origin/${{ github.head_ref }}" "${{ github.base_ref }}"
 
   # All PRs touching .agents/plans/** — plan lint (ADVISORY, never gates merge).
   # continue-on-error keeps the job green on lint failure; findings surface as

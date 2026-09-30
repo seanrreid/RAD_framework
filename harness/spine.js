@@ -51,7 +51,8 @@ const STOP_CONTEXT_KEYS = ['wave', 'action', 'outcome'];
 /**
  * The ONE exit for every post-`deliver-started` terminal (#77): append a single
  * audit-only `deliver-stopped` event classifying the stop, then return `result`
- * unchanged. classifyStop throws on an unknown shape; that throw is NOT caught —
+ * unchanged (a non-empty free-text `result.reason` is carried as `detail`).
+ * classifyStop throws on an unknown shape; that throw is NOT caught —
  * an unclassifiable terminal is a harness bug and must surface, not be bucketed.
  * Classification runs before the append, so a throw appends nothing.
  */
@@ -61,6 +62,9 @@ function stopRun(result, { state, feature, now }) {
   for (const key of STOP_CONTEXT_KEYS) {
     if (result[key] !== undefined && result[key] !== null) context[key] = result[key];
   }
+  // The spine's free-text reason (#161) — omitted, never undefined, when absent,
+  // so stops without one append byte-identical data.
+  if (typeof result.reason === 'string' && result.reason !== '') context.detail = result.reason;
   state.append({
     feature,
     type: 'deliver-stopped',

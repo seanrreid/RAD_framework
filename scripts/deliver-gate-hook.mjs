@@ -22,6 +22,19 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
+// check-plan-approved.sh's stderr marker for an approved-then-edited plan. Only
+// this cause is surfaced verbatim; every other refusal keeps the generic reason.
+const FINGERPRINT_MISMATCH_MARKER = 'fingerprint mismatch';
+
+// Last non-empty line of a failed gate run's stderr (then stdout), or ''.
+function lastOutputLine(err) {
+  for (const stream of [err?.stderr, err?.stdout]) {
+    const lines = String(stream ?? '').split('\n').map((l) => l.trim()).filter(Boolean);
+    if (lines.length > 0) return lines[lines.length - 1];
+  }
+  return '';
+}
+
 // Block helper: write a reason to stderr and deny (exit 2).
 function block(reason) {
   process.stderr.write(`${reason}\n`);
@@ -108,10 +121,15 @@ try {
   try {
     execFileSync(gateScript, [`rad/${slug}`], {
       cwd: repoRoot,
-      stdio: 'ignore',
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
-  } catch {
+  } catch (err) {
     // Non-zero exit (not approved) OR spawn failure (script missing) → block.
+    // An approved-then-edited plan names its real cause (#162).
+    const reason = lastOutputLine(err);
+    if (reason.includes(FINGERPRINT_MISMATCH_MARKER)) {
+      block(`deliver blocked: ${reason}`);
+    }
     block(
       `deliver blocked: no approved event for ${slug} — run /rad-approve first`
     );

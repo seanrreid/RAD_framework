@@ -139,6 +139,9 @@ defineCases([
     act: (fx) => deliverWithSelfApproval(fx),
     assert: (fx, result) => {
       assertSelfApprovalRefused(result);
+      const stop = result.events.filter((e) => e.type === 'deliver-stopped').at(-1);
+      assert.ok(String(stop?.data?.detail ?? '').includes('recorded during this run'),
+        `deliver-stopped detail lacks the run-scoped reason: ${JSON.stringify(stop)}`);
       const started = result.events.filter((e) => e.type === 'wave-started').map((e) => e.data?.wave);
       assert.ok(!started.includes(2), `wave 2 started after a mid-run approval: ${types(result.events)}`);
     },
@@ -214,8 +217,8 @@ function assertSelfApprovalRefused(result) {
   assert.equal(result.status, NEEDS_DECISION_EXIT, `rad deliver exit ${result.status}: ${result.stderr}`);
   const stop = result.events.filter((e) => e.type === 'deliver-stopped').at(-1);
   assert.equal(stop?.data?.reason, 'approval-changed', `deliver-stopped: ${JSON.stringify(stop)}`);
-  // The run-scoped reason text is not persisted (classifyStop keeps only the
-  // stop class), so the kept evidence identifies the cause; the mutation proves it.
+  // The kept evidence (the mid-run approved event) identifies the cause; the
+  // mutation proves it. The run-scoped reason text is asserted per case via data.detail.
   const runStart = result.events.findLastIndex((e) => e.type === 'deliver-started');
   assert.ok(result.events.slice(runStart + 1).some((e) => e.type === 'approved'),
     `no mid-run approved event kept as evidence: ${types(result.events)}`);

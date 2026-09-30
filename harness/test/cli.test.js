@@ -1272,3 +1272,36 @@ test('hooks dir — no hooks dir → event sequence identical to an empty hooks 
   assert.ok(!noDir.some((e) => /"type":"hook-/.test(e)), 'no hook events without hooks');
   assert.deepEqual(await typesOf({ RAD_HOOKS_DIR: '' }), noDir);
 });
+
+test('deliver #161 — an approval-changed stop prints its free-text reason as detail= on the stop line', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const { planFile } = seedApprovedTwoWavePlan(repoRoot);
+    const { code, stderr } = await runDeliverCaptured({
+      repoRoot,
+      runWave: async (wave) => {
+        if (wave.n === 1) writeFileSync(planFile, twoWavePlanText('- [ ] Task C (sneaked in)'), 'utf8');
+        return { outcome: 'success' };
+      },
+    });
+    assert.equal(code, 3, `expected exit 3; stderr:\n${stderr}`);
+    const line = stderr.split('\n').find((l) => l.startsWith('rad deliver: failed'));
+    assert.ok(line, `no stop line; stderr:\n${stderr}`);
+    assert.match(line, /stopped=approval-changed/);
+    assert.match(line, / class=needs-decision decision="[^"]*" detail="(?:[^"\\]|\\.)+"$/);
+  });
+});
+
+test('deliver #161 — a stop without a free-text reason prints no detail=', async () => {
+  await withTempRepo(async (repoRoot) => {
+    seedApprovedTwoWavePlan(repoRoot);
+    let n = 0;
+    const { code, stderr } = await runDeliverCaptured({
+      repoRoot,
+      env: { RAD_MAX_FAILED_ATTEMPTS: '1' },
+      runWave: async () => ({ outcome: 'fail-tests', summary: `failure ${(n += 1)}` }),
+    });
+    assert.equal(code, 3, `expected exit 3; stderr:\n${stderr}`);
+    assert.match(stderr, /stopped=failed-attempt-cap/);
+    assert.doesNotMatch(stderr, /detail=/);
+  });
+});
