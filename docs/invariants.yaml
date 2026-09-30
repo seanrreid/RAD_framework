@@ -167,11 +167,12 @@ invariants:
         note: "a malformed value exits 2; a large value only delays fail-timeout"
 
   - id: adapter-env-allow-listed
-    claim: "The command agent adapter spawns RAD_AGENT_CMD with only the allow-listed environment variables, so no exported credential reaches it."
+    claim: "The command agent adapter spawns RAD_AGENT_CMD (deliver waves) and RAD_REVIEW_AGENT_CMD / RAD_AGENT_CMD (the rad review lane) with only the allow-listed environment variables, so no exported credential reaches either child."
     authority: "the ENV_ALLOW_LIST constant in harness/adapters/agent/command.js"
     evals: [harness/evals/delivery.eval.js]
     enforced_by:
       - { file: harness/adapters/agent/command.js, symbol: "ENV_ALLOW_LIST" }
+      - { file: harness/adapters/agent/command.js, symbol: "export async function runCommandPrompt", note: "review lane runs through the same allow-listed spawn" }
     bypasses:
       - id: preflight-off
         surface: "RAD_AGENT_PREFLIGHT=off"
