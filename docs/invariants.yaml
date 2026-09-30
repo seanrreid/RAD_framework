@@ -92,11 +92,12 @@ invariants:
     bypasses: []
 
   - id: self-protected-paths-flagged
-    claim: "Any plan path touching RAD's own machinery (harness/, scripts/, .claude/, .agents/state/, gates/matrix YAML) is always flagged for architect review, regardless of RAD_HIGH_RISK_PATTERNS."
+    claim: "Any plan path touching RAD's own machinery (harness/, scripts/, .claude/, .agents/state/, .rad/, gates/matrix YAML) is always flagged for architect review, regardless of RAD_HIGH_RISK_PATTERNS."
     authority: "the RAD_SELF_PROTECTED_PATTERN literal in scripts/lib/plan-paths.sh"
     evals: [harness/evals/repo.eval.js]
     enforced_by:
       - { file: scripts/lib/plan-paths.sh, symbol: "readonly RAD_SELF_PROTECTED_PATTERN" }
+      - { file: scripts/lib/plan-paths.sh, symbol: "(^|/)matrix\\.ya?ml$|^\\.rad/'", note: ".rad/ (the RAD config, #87) is part of the self-protected set" }
       - { file: scripts/lib/plan-paths.sh, symbol: "path_is_self_protected" }
       - { file: scripts/lint-plan.sh, symbol: "path_is_self_protected" }
     bypasses:
@@ -104,6 +105,21 @@ invariants:
         surface: "self-protected path findings are advisory"
         guarded: "no"
         note: "by design: lint-plan.sh warns for architect review; a self-protected finding is not an approval blocker"
+
+  - id: rad-config-is-data
+    claim: "RAD's roles, platform, default branch and agent scope map are read only from .rad/config.yml (never from CLAUDE.md prose), and that file is self-protected"
+    authority: ".rad/config.yml"
+    evals: [harness/evals/approval.eval.js]
+    enforced_by:
+      - { file: harness/config.js, symbol: "export const CONFIG_PATH = '.rad/config.yml'", note: "the single config location every reader resolves" }
+      - { file: scripts/check-role.sh, symbol: "config get \"$ROLE_KEY\"", note: "role checks read roles.<key> via rad config get; no CLAUDE.md fallback" }
+      - { file: scripts/get-default-branch.sh, symbol: "config get default_branch", note: "default branch read via rad config get" }
+      - { file: scripts/lib/plan-paths.sh, symbol: "|^\\.rad/'", note: ".rad/config.yml is self-protected" }
+    bypasses:
+      - id: legacy-file-path-root-arg
+        surface: "scripts accept a pre-#87 file-path argument (e.g. CLAUDE.md) as the repo root"
+        guarded: "yes"
+        note: "only the file's directory is used; data is still read from .rad/config.yml, never from the named file"
 
   - id: worktree-teardown-guarded
     claim: "Worktree teardown refuses to remove any directory that lacks the .rad-worktree.json marker."

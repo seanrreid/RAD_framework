@@ -21,10 +21,12 @@ const STRIPPED_ENV = /^(RAD_|GIT_)/;
 // `bitbucket.org` resolves to bitbucket → open_manual (plain `git push` only).
 const ORIGIN_DIR = join('bitbucket.org', 'origin.git');
 
-const claudeMdText = (email) => [
-  '# Eval fixture', '', '### Git Platform', '', '```',
-  'platform: manual', 'default_branch: main', '```', '',
-  '### Role Assignments', '', '```', `architect:  ${email}`, 'developers: []', '```', '',
+// RAD config is data in .rad/config.yml (#87) — the scripts never read CLAUDE.md
+// prose for roles/platform/branch, so the fixture's CLAUDE.md carries no config.
+const CLAUDE_MD_TEXT = '# Eval fixture\n';
+const radConfigText = (email) => [
+  'version: 1', 'platform: manual', 'default_branch: main', 'roles:',
+  `  architect: [${email}]`, '  developers: []', '  designers: []', 'agent_scope_map: []', '',
 ].join('\n');
 
 export const defaultPlan = (feature, instruction = '') => [
@@ -107,7 +109,7 @@ function initRepo(root, base, email) {
  * `instruction` is appended to the task's What line so it reaches the agent prompt.
  */
 export function createFixture({ feature = 'demo', plan, withOrigin = true, approve = true, adversary = 'noop',
-  claudeMd, agentCmd, instruction = '' } = {}) {
+  radConfig, agentCmd, instruction = '' } = {}) {
   const base = mkdtempSync(join(tmpdir(), 'rad-eval-'));
   const root = join(base, 'repo');
   const agentDir = join(base, 'agent');
@@ -143,7 +145,8 @@ export function createFixture({ feature = 'demo', plan, withOrigin = true, appro
     initRepo(root, base, ARCHITECT_EMAIL);
     mkdirSync(agentDir, { recursive: true });
     writeFileSync(join(agentDir, 'adversary.mjs'), ADVERSARY_SRC);
-    fx.writeFile('CLAUDE.md', claudeMd ?? claudeMdText(ARCHITECT_EMAIL));
+    fx.writeFile('CLAUDE.md', CLAUDE_MD_TEXT);
+    fx.writeFile(join('.rad', 'config.yml'), radConfig ?? radConfigText(ARCHITECT_EMAIL));
     fx.writeFile('tests/feature.test.txt', 'present\n');
     fx.writeFile(join('.agents', 'plans', `${feature}.md`), plan ?? defaultPlan(feature, instruction));
     mustGit(root, 'add', '-A');
