@@ -1,7 +1,10 @@
 # Plan: Run-Scoped Approval Freeze
 Created: 2026-09-30
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-09-30T12:45:51.603Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/run-scoped-approval-freeze
 Adopted-From: https://github.com/seanrreid/RAD_framework/issues/158
 Issue-Title: A wave agent can self-approve plan edits mid-run (rad approve inside a deliver run)
