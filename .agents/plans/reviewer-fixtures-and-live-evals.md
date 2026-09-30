@@ -1,7 +1,7 @@
 # Plan: Reviewer Fixtures + Live-Eval Lane
 Created: 2026-09-30
 Author: architect
-Status: approved
+Status: in-progress
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-09-30T13:27:48.832Z
 Recorded-By: sean@torchcodelab.com
