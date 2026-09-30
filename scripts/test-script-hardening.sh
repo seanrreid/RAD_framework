@@ -9,10 +9,29 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Physical path (pwd -P): cli.js runs main() only when argv[1] equals its
+# realpath, and macOS mktemp dirs live under the /var -> /private/var symlink.
 TMP="$(mktemp -d)"
+TMP="$(cd "$TMP" && pwd -P)"
 trap 'rm -rf "$TMP"' EXIT
 
 fail() { echo "✗ $1"; exit 1; }
+
+# copy_harness <dest-root> — the config reader (harness/ minus node_modules/test).
+copy_harness() {
+  local p
+  mkdir -p "$1/harness"
+  for p in "$HERE/../harness/"*; do
+    case "$(basename "$p")" in node_modules|test) ;; *) cp -R "$p" "$1/harness/" ;; esac
+  done
+}
+
+# write_config <dest-root> <architect-identity> — a minimal .rad/config.yml.
+write_config() {
+  mkdir -p "$1/.rad"
+  printf 'version: 1\nplatform: manual\ndefault_branch: main\nroles:\n  architect:\n    - "%s"\n' "$2" \
+    > "$1/.rad/config.yml"
+}
 
 # ── #3: rad-status.sh lists logs newest-first, space-safe, runs clean ──────────
 # Pre-fix: find|xargs mis-sorted/space-broke and a grep -c||echo quirk made
@@ -23,7 +42,9 @@ t3() {
   # only the logs (Recent Executions) path — the plans path is covered elsewhere.
   mkdir -p "$d/scripts" "$d/.agents/logs" "$d/.agents/plans" "$d/.claude/agents"
   cp "$HERE/rad-status.sh" "$HERE/get-default-branch.sh" "$HERE/detect-platform.sh" "$d/scripts/"
-  printf '**Name:** t\ndefault_branch: main\n' > "$d/CLAUDE.md"
+  printf '**Name:** t\n' > "$d/CLAUDE.md"
+  copy_harness "$d"
+  write_config "$d" "arch@example.com"
   printf '| 1 | 1 | t | ✓ complete | a | d |\n'                > "$d/.agents/logs/older-2026-05-26.md"
   printf '| 1 | 1 | t | ✓ complete | a | d |\n✗ failed x\n'    > "$d/.agents/logs/newer feature-2026-05-28.md"
   : > "$d/.agents/logs/README.md"
@@ -101,15 +122,22 @@ EOF
   printf '%s\n' "$out" | grep -q  "does not exist: ---"   && fail "#4: separator row leaked as a file path" || true
 
   # check-role: a configured architect resolves (exit 0); a non-configured name denied (exit 1).
-  # The fixture includes the unfilled "[your GitHub...]" placeholder line so the
-  # `grep -v "^\[your GitHub"` filter (split in fix #4) is regression-tested: the
-  # placeholder must NOT be treated as a configured architect.
-  local md="$TMP/cm.md"
-  printf 'architect:  alice\narchitect:  [your GitHub/GitLab username]\ndevelopers: []\n' > "$md"
-  bash "$HERE/check-role.sh" architect "$md" "alice"  >/dev/null 2>&1 || fail "#4: configured architect not matched"
-  bash "$HERE/check-role.sh" architect "$md" "mallory" >/dev/null 2>&1 && fail "#4: non-architect wrongly matched" || true
-  bash "$HERE/check-role.sh" architect "$md" "[your GitHub/GitLab username]" >/dev/null 2>&1 \
-    && fail "#4: placeholder line wrongly matched as an architect" || true
+  # The unfilled "[your GitHub...]" placeholder must never count as a configured
+  # architect: as an identity it is denied, and a config that still lists it is
+  # invalid, so check-role fails closed (exit 2) even for a real architect.
+  local root="$TMP/cm" ph="[your GitHub/GitLab username]" code
+  copy_harness "$root"
+  write_config "$root" "alice"
+  bash "$HERE/check-role.sh" architect "$root" "alice"  >/dev/null 2>&1 || fail "#4: configured architect not matched"
+  bash "$HERE/check-role.sh" architect "$root" "mallory" >/dev/null 2>&1 && fail "#4: non-architect wrongly matched" || true
+  bash "$HERE/check-role.sh" architect "$root" "$ph" >/dev/null 2>&1 \
+    && fail "#4: placeholder identity wrongly matched as an architect" || true
+  local ph_root="$TMP/cm-ph"
+  copy_harness "$ph_root"
+  write_config "$ph_root" "$ph"
+  code=0
+  bash "$HERE/check-role.sh" architect "$ph_root" "$ph" >/dev/null 2>&1 || code=$?
+  [[ "$code" -eq 2 ]] || fail "#4: placeholder architect config should fail closed (exit 2), got $code"
   echo "✓ #4: table-pipe grep filters intact; check-role resolves + filters placeholder"
 }
 

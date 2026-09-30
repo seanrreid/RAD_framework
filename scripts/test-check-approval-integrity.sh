@@ -3,16 +3,21 @@
 # Regression tests for check-approval-integrity.sh: ancestry, fingerprint,
 # gate, authenticity, override, ownership + high-risk-pattern advisories, and
 # merged-history cases.
-# Self-contained (no external harness): builds a temp git-repo fixture and runs
-# the REAL script (from this repo's scripts/) with the fixture as cwd, so the
-# harness CLI resolves from the real repo. Runs under bash 3.2+ (set -u safe).
+# Self-contained (no external harness): builds a temp git-repo fixture plus a
+# temp RAD checkout (copies of this repo's scripts/ + harness/, and a fixture
+# .rad/config.yml naming the architect) and runs that checkout's script with the
+# fixture as cwd — the script reads roles.architect from its OWN checkout's
+# config, never this repo's. Runs under bash 3.2+ (set -u safe).
 #
 # Usage: scripts/test-check-approval-integrity.sh   (exit 0 = all assertions pass)
 
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Physical path (pwd -P): cli.js runs main() only when argv[1] equals its
+# realpath, and macOS mktemp dirs live under the /var -> /private/var symlink.
 TMP="$(mktemp -d)"
+TMP="$(cd "$TMP" && pwd -P)"
 trap 'rm -rf "$TMP"' EXIT
 
 fail() { echo "✗ $1"; exit 1; }
@@ -20,23 +25,31 @@ fail() { echo "✗ $1"; exit 1; }
 ARCH_EMAIL="arch@example.com"
 EVIL_EMAIL="mallory@evil.com"
 
+# ── Build a temp RAD checkout (scripts + harness + .rad/config.yml) ─────────────
+# check-approval-integrity.sh reads roles.architect via its own checkout's
+# harness/cli.js, so the fixture architect must live in THAT checkout's config.
+RAD="$TMP/rad"
+mkdir -p "$RAD/harness" "$RAD/.rad"
+cp -R "$HERE" "$RAD/scripts"
+for p in "$HERE/../harness/"*; do
+  case "$(basename "$p")" in node_modules|test) ;; *) cp -R "$p" "$RAD/harness/" ;; esac
+done
+cat > "$RAD/.rad/config.yml" <<EOF
+version: 1
+platform: manual
+default_branch: main
+roles:
+  architect:
+    - ${ARCH_EMAIL}
+  developers: []
+  designers: []
+EOF
+
 # ── Build a temp git-repo fixture ──────────────────────────────────────────────
-# main holds CLAUDE.md (Role Assignments) + identical plan docs for every case
-# feature. Each case cuts its own rad/<feature> branch and commits its own
-# event log with a controlled author.
+# main holds identical plan docs for every case feature. Each case cuts its own
+# rad/<feature> branch and commits its own event log with a controlled author.
 REPO="$TMP/repo"
 mkdir -p "$REPO/.agents/plans"
-
-cat > "$REPO/CLAUDE.md" <<EOF
-**Name:** t
-default_branch: main
-
-### Role Assignments
-
-architect:  ${ARCH_EMAIL}
-developers: []
-designers:  []
-EOF
 
 PLAN_BODY='# Plan: t
 Status: approved
@@ -86,7 +99,7 @@ run_check() {
   # Captures exit code without tripping set -e; output goes to $TMP/out.
   local branch="$1" code
   set +e
-  ( cd "$REPO" && bash "$HERE/check-approval-integrity.sh" "$branch" main ) \
+  ( cd "$REPO" && bash "$RAD/scripts/check-approval-integrity.sh" "$branch" main ) \
     > "$TMP/out" 2>&1
   code=$?
   set -e
@@ -140,7 +153,7 @@ echo "✓ case 4: non-architect approval author fails (exit 1)"
 # ── Case 5: RAD_ARCHITECT_OVERRIDE accepts the case-4 author → 0 ───────────────
 set +e
 ( cd "$REPO" && RAD_ARCHITECT_OVERRIDE="$EVIL_EMAIL" \
-    bash "$HERE/check-approval-integrity.sh" rad/f4 main ) > "$TMP/out" 2>&1
+    bash "$RAD/scripts/check-approval-integrity.sh" rad/f4 main ) > "$TMP/out" 2>&1
 code=$?
 set -e
 [[ "$code" -eq 0 ]] || { cat "$TMP/out"; fail "case 5: RAD_ARCHITECT_OVERRIDE should exit 0 (got $code)"; }

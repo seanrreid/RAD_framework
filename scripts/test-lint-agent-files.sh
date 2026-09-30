@@ -1,16 +1,21 @@
 #!/usr/bin/env bash
 # test-lint-agent-files.sh
 # Regression tests for lint-agent-files.sh: frontmatter fields, context-tool
-# rules, roles-less utility exemption, and Agent Scope Map sync. Self-contained:
-# builds synthetic CLAUDE.md + agents-dir fixtures in a temp dir (no git needed)
-# and runs the REAL script against them. Runs under bash 3.2+ (set -u safe).
+# rules, roles-less utility exemption, and agent_scope_map sync. Self-contained:
+# builds synthetic repo-root fixtures in a temp dir (no git needed) — each a
+# .rad/config.yml, a copy of harness/ (minus node_modules/test; the config
+# reader), and an agents dir — and runs the REAL script against them.
+# Runs under bash 3.2+ (set -u safe).
 #
 # Usage: scripts/test-lint-agent-files.sh   (exit 0 = all assertions pass)
 
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Physical path (pwd -P): cli.js runs main() only when argv[1] equals its
+# realpath, and macOS mktemp dirs live under the /var -> /private/var symlink.
 TMP="$(mktemp -d)"
+TMP="$(cd "$TMP" && pwd -P)"
 trap 'rm -rf "$TMP"' EXIT
 
 fail() { echo "✗ $1"; exit 1; }
@@ -19,19 +24,24 @@ fail() { echo "✗ $1"; exit 1; }
 # with roles + scope-map rows), a roles-less utility agent, and a roles-less
 # agent whose tools LOOK like a context tool (exercises the exemption).
 build_fixture() {
-  local dir="$1"
-  mkdir -p "$dir/agents"
+  local dir="$1" p
+  mkdir -p "$dir/agents" "$dir/harness" "$dir/.rad"
+  for p in "$HERE/../harness/"*; do
+    case "$(basename "$p")" in node_modules|test) ;; *) cp -R "$p" "$dir/harness/" ;; esac
+  done
 
-  cat > "$dir/CLAUDE.md" <<'EOF'
-# Project Context
-
-### Agent Scope Map
-
-| Agent | Type | Reads | Roles |
-|-------|------|-------|-------|
-| planner-orchestrator | role-orchestrator | nothing | architect |
-| code-mapper | context-tool | src/** | architect |
-| quoted-mapper | context-tool | lib/** | architect |
+  # One flow-style row per line so cases can add/drop a row with a line edit.
+  cat > "$dir/.rad/config.yml" <<'EOF'
+version: 1
+platform: manual
+default_branch: main
+roles:
+  architect:
+    - arch@example.com
+agent_scope_map:
+  - {agent: planner-orchestrator, type: role-orchestrator, reads: nothing, roles: [architect]}
+  - {agent: code-mapper, type: context-tool, reads: "src/**", roles: [architect]}
+  - {agent: quoted-mapper, type: context-tool, reads: "lib/**", roles: [architect]}
 EOF
 
   # Quoted-scalar description (the shape /rad-design generates) — the prefix
@@ -101,7 +111,7 @@ run_lint() {
   # run_lint <fixture-dir> — runs the REAL lint against the fixture; echoes code.
   local dir="$1" code
   set +e
-  bash "$HERE/lint-agent-files.sh" "$dir/CLAUDE.md" "$dir/agents" > "$TMP/out" 2>&1
+  bash "$HERE/lint-agent-files.sh" "$dir" "$dir/agents" > "$TMP/out" 2>&1
   code=$?
   set -e
   echo "$code"
@@ -154,7 +164,8 @@ echo "✓ case 5: context tool with bad description prefix fails (exit 1)"
 
 # ── Case 6: scope-map row with no matching agent file fails ────────────────────
 build_fixture "$TMP/extrarow"
-printf '| ghost-mapper | context-tool | nothing | architect |\n' >> "$TMP/extrarow/CLAUDE.md"
+printf '  - {agent: ghost-mapper, type: context-tool, reads: nothing, roles: [architect]}\n' \
+  >> "$TMP/extrarow/.rad/config.yml"
 code=$(run_lint "$TMP/extrarow")
 [[ "$code" -eq 1 ]] || fail "case 6: extra scope-map row should exit 1 (got $code)"
 grep -q "ghost-mapper' has no matching" "$TMP/out" || fail "case 6: expected extra-row reason"
@@ -162,11 +173,11 @@ echo "✓ case 6: scope-map row without an agent file fails (exit 1)"
 
 # ── Case 7: roles-declaring agent file with no scope-map row fails ─────────────
 build_fixture "$TMP/norow"
-grep -v '| code-mapper |' "$TMP/norow/CLAUDE.md" > "$TMP/norow/CLAUDE.md.new"
-mv "$TMP/norow/CLAUDE.md.new" "$TMP/norow/CLAUDE.md"
+grep -v 'agent: code-mapper,' "$TMP/norow/.rad/config.yml" > "$TMP/norow/config.yml.new"
+mv "$TMP/norow/config.yml.new" "$TMP/norow/.rad/config.yml"
 code=$(run_lint "$TMP/norow")
 [[ "$code" -eq 1 ]] || fail "case 7: roles agent without a row should exit 1 (got $code)"
-grep -q "no Agent Scope Map row" "$TMP/out" || fail "case 7: expected missing-row reason"
+grep -q "declares roles: but has no row in .rad/config.yml agent_scope_map" "$TMP/out" || fail "case 7: expected missing-row reason"
 echo "✓ case 7: agent file with roles but no scope-map row fails (exit 1)"
 
 # ── Case 8: roles-less utility agents are exempt ───────────────────────────────
@@ -179,5 +190,12 @@ build_fixture "$TMP/exempt"
 code=$(run_lint "$TMP/exempt")
 [[ "$code" -eq 0 ]] || { cat "$TMP/out"; fail "case 8: roles-less utility agents must be exempt (got $code)"; }
 echo "✓ case 8: roles-less utility agents are exempt (exit 0)"
+
+# ── Case 9: missing .rad/config.yml fails closed ───────────────────────────────
+build_fixture "$TMP/noconfig"
+rm "$TMP/noconfig/.rad/config.yml"
+code=$(run_lint "$TMP/noconfig")
+[[ "$code" -eq 1 ]] || { cat "$TMP/out"; fail "case 9: missing config should exit 1 (got $code)"; }
+echo "✓ case 9: missing .rad/config.yml fails closed (exit 1)"
 
 echo "ALL PASS"

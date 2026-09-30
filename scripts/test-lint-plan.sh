@@ -29,7 +29,10 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Physical path (pwd -P): cli.js runs main() only when argv[1] equals its
+# realpath, and macOS mktemp dirs live under the /var -> /private/var symlink.
 TMP="$(mktemp -d)"
+TMP="$(cd "$TMP" && pwd -P)"
 trap 'rm -rf "$TMP"' EXIT
 
 fail() { echo "✗ $1"; exit 1; }
@@ -245,6 +248,16 @@ t_self_protected_advisory() {
     [[ "$LINT_CODE" -eq 0 ]] || fail "AC#2: docs-only plan exited $LINT_CODE (expected 0)"
   ) || exit 1
   echo "✓ AC#2g: docs-only plan emits no self-protected advisory"
+
+  # (e) The RAD config file (.rad/config.yml) is RAD machinery → advisory fires.
+  local plan3="$TMP/rad-config.md"
+  write_plan "$plan3" "| .rad/config.yml | 1-2 | x |" ".rad/config.yml:1-10"
+  ( unset RAD_HIGH_RISK_PATTERNS; run_lint "$plan3"
+    printf '%s\n' "$LINT_OUT" | grep -q "self-protected path (RAD machinery — always requires architect review): .rad/config.yml" \
+      || fail "AC#2: .rad/config.yml plan did not emit the self-protected advisory"
+    [[ "$LINT_CODE" -eq 0 ]] || fail "AC#2: .rad/config.yml plan exited $LINT_CODE (expected 0)"
+  ) || exit 1
+  echo "✓ AC#2h: .rad/config.yml emits the self-protected advisory"
 }
 
 # ── Git-backed premise-freshness fixtures ──────────────────────────────────────
@@ -261,14 +274,21 @@ run_lint_in_repo() {
   set -e
 }
 
-# copy_scripts <repo> — drop lint-plan.sh, get-default-branch.sh, and the lib
-# into a fixture repo so the freshness check runs against that repo's origin.
+# copy_scripts <repo> — drop lint-plan.sh, get-default-branch.sh, the lib,
+# harness/ (minus node_modules/test; the config reader), and a .rad/config.yml
+# declaring default_branch: main into a fixture repo so the freshness check runs
+# against that repo's origin.
 copy_scripts() {
-  local repo="$1"
-  mkdir -p "$repo/scripts/lib"
+  local repo="$1" p
+  mkdir -p "$repo/scripts/lib" "$repo/harness" "$repo/.rad"
   cp "$HERE/lint-plan.sh" "$HERE/get-default-branch.sh" "$repo/scripts/"
   cp "$HERE/lib/plan-paths.sh" "$repo/scripts/lib/"
-  printf '**Name:** t\ndefault_branch: main\n' > "$repo/CLAUDE.md"
+  for p in "$HERE/../harness/"*; do
+    case "$(basename "$p")" in node_modules|test) ;; *) cp -R "$p" "$repo/harness/" ;; esac
+  done
+  printf '**Name:** t\n' > "$repo/CLAUDE.md"
+  printf 'version: 1\nplatform: manual\ndefault_branch: main\nroles:\n  architect:\n    - arch@example.com\n' \
+    > "$repo/.rad/config.yml"
 }
 
 # GREPO: baseline pushed to a bare origin, so origin/main resolves and carries

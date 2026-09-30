@@ -5,8 +5,9 @@
 # branch-tip-preferred log collection, malformed log, unsafe-name skip warning,
 # and usage errors.
 # Hermetic: builds a temp git repo with a local bare origin and copies the
-# script plus the harness modules it loads (replay.js → matrix.js, gates.js →
-# vendor/js-yaml.mjs) into it. Runs under bash 3.2+ (set -u safe).
+# script, get-default-branch.sh, and harness/ (minus node_modules/test — the
+# replay modules plus cli.js, which serves `rad config get`) into it, with a
+# fixture .rad/config.yml at its root. Runs under bash 3.2+ (set -u safe).
 #
 # Usage: scripts/test-check-matrix-replay.sh   (exit 0 = all assertions pass)
 
@@ -14,7 +15,10 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SRC_ROOT="$(cd "$HERE/.." && pwd)"
+# Physical path (pwd -P): cli.js runs main() only when argv[1] equals its
+# realpath, and macOS mktemp dirs live under the /var -> /private/var symlink.
 TMP="$(mktemp -d)"
+TMP="$(cd "$TMP" && pwd -P)"
 trap 'rm -rf "$TMP"' EXIT
 unset RAD_BRANCH_PREFIX
 
@@ -23,12 +27,19 @@ pass() { echo "✓ $1"; }
 
 GREPO="$TMP/repo"
 ORIGIN="$TMP/origin.git"
-mkdir -p "$GREPO/scripts" "$GREPO/harness"
+mkdir -p "$GREPO/scripts" "$GREPO/harness" "$GREPO/.rad"
 cp "$SRC_ROOT/scripts/check-matrix-replay.sh" "$SRC_ROOT/scripts/get-default-branch.sh" "$GREPO/scripts/"
-cp "$SRC_ROOT/harness/replay.js" "$SRC_ROOT/harness/matrix.js" "$SRC_ROOT/harness/gates.js" \
-   "$SRC_ROOT/harness/matrix.yaml" "$SRC_ROOT/harness/gates.yaml" "$GREPO/harness/"
-cp -R "$SRC_ROOT/harness/vendor" "$GREPO/harness/vendor"
-printf 'default_branch: main\n' > "$GREPO/CLAUDE.md"
+for p in "$SRC_ROOT/harness/"*; do
+  case "$(basename "$p")" in node_modules|test) ;; *) cp -R "$p" "$GREPO/harness/" ;; esac
+done
+cat > "$GREPO/.rad/config.yml" <<'EOF'
+version: 1
+platform: manual
+default_branch: main
+roles:
+  architect:
+    - arch@example.com
+EOF
 
 g() { git -C "$GREPO" -c user.email=t@t.t -c user.name=t -c commit.gpgsign=false "$@"; }
 

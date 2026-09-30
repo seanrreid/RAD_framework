@@ -21,11 +21,31 @@ fail() { echo "✗ $1"; exit 1; }
 # Deterministic git regardless of the operator's global config.
 g() { git -c user.name=t -c user.email=t@t -c commit.gpgsign=false "$@"; }
 
-# Copies the script under test plus its helpers into a fixture repo.
+# rad-status.sh finds harness/cli.js beside its own scripts dir. Copied, not
+# symlinked: cli.js only runs as main when argv[1] is its real path. node_modules
+# (large, resolved via realpath) and the test suite are linked/skipped.
+install_harness() {
+  local src="$HERE/../harness" entry
+  mkdir -p "$1/harness"
+  for entry in "$src"/*; do
+    case "$(basename "$entry")" in
+      node_modules|test) ;;
+      *) cp -R "$entry" "$1/harness/" ;;
+    esac
+  done
+  [[ -d "$src/node_modules" ]] && ln -s "$src/node_modules" "$1/harness/node_modules"
+  return 0
+}
+
+# Copies the script under test plus its helpers, harness/ (the config reader),
+# and a .rad/config.yml declaring default_branch: main into a fixture repo.
 install_scripts() {
-  mkdir -p "$1/scripts" "$1/.claude/agents"
+  mkdir -p "$1/scripts" "$1/.claude/agents" "$1/.rad"
   cp "$HERE/rad-status.sh" "$HERE/get-default-branch.sh" "$HERE/detect-platform.sh" "$1/scripts/"
-  printf '**Name:** t\ndefault_branch: main\n' > "$1/CLAUDE.md"
+  printf '**Name:** t\n' > "$1/CLAUDE.md"
+  printf 'version: 1\nplatform: manual\ndefault_branch: main\nroles:\n  architect:\n    - arch@example.com\n' \
+    > "$1/.rad/config.yml"
+  install_harness "$1"
 }
 
 write_doc() {
@@ -232,21 +252,6 @@ push_feature() {
   g push -q origin "rad/$1"
 }
 
-# rad-status.sh finds harness/cli.js beside its own scripts dir. Copied, not
-# symlinked: cli.js only runs as main when argv[1] is its real path. node_modules
-# (large, resolved via realpath) and the test suite are linked/skipped.
-install_harness() {
-  local src="$HERE/../harness" entry
-  mkdir -p "$1/harness"
-  for entry in "$src"/*; do
-    case "$(basename "$entry")" in
-      node_modules|test) ;;
-      *) cp -R "$entry" "$1/harness/" ;;
-    esac
-  done
-  [[ -d "$src/node_modules" ]] && ln -s "$src/node_modules" "$1/harness/node_modules"
-  return 0
-}
 
 # Prints the Dormant Runs section body (header excluded).
 dormant_section() {
@@ -263,7 +268,6 @@ DORM_ORIGIN="$TMP/dormant-origin.git"
 git init -q --bare "$DORM_ORIGIN"
 git init -q "$DORM"
 install_scripts "$DORM"
-install_harness "$DORM"
 (
   cd "$DORM"
   g symbolic-ref HEAD refs/heads/main

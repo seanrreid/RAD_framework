@@ -11,7 +11,10 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Physical path (pwd -P): cli.js runs main() only when argv[1] equals its
+# realpath, and macOS mktemp dirs live under the /var -> /private/var symlink.
 TMP="$(mktemp -d)"
+TMP="$(cd "$TMP" && pwd -P)"
 trap 'rm -rf "$TMP"' EXIT
 
 fail() { echo "✗ $1"; exit 1; }
@@ -29,13 +32,19 @@ PASS_FRAGMENT="✓ Scope check passed"
 GHOST_BRANCH="rad/never-created"
 
 # ── Build a temp git-repo fixture ──────────────────────────────────────────────
-# A repo with COPIES of the real scripts, a CLAUDE.md declaring default_branch:
-# main, and a plan declaring one in-scope file. main holds the baseline; each
+# A repo with COPIES of the real scripts and harness/ (minus node_modules/test —
+# the config reader get-default-branch.sh uses), a .rad/config.yml declaring
+# default_branch: main, and a plan declaring one in-scope file. main holds the baseline; each
 # assertion uses its own work branch cut from main.
 REPO="$TMP/repo"
-mkdir -p "$REPO/scripts" "$REPO/.agents/plans" "$REPO/.agents/logs" "$REPO/src"
+mkdir -p "$REPO/scripts" "$REPO/harness" "$REPO/.rad" "$REPO/.agents/plans" "$REPO/.agents/logs" "$REPO/src"
 cp "$HERE/check-scope.sh" "$HERE/get-default-branch.sh" "$REPO/scripts/"
-printf '**Name:** t\ndefault_branch: main\n' > "$REPO/CLAUDE.md"
+for p in "$HERE/../harness/"*; do
+  case "$(basename "$p")" in node_modules|test) ;; *) cp -R "$p" "$REPO/harness/" ;; esac
+done
+printf '**Name:** t\n' > "$REPO/CLAUDE.md"
+printf 'version: 1\nplatform: manual\ndefault_branch: main\nroles:\n  architect:\n    - arch@example.com\n' \
+  > "$REPO/.rad/config.yml"
 
 cat > "$REPO/.agents/plans/feature.md" <<'EOF'
 # Plan: t
