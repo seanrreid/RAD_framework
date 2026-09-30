@@ -9,6 +9,10 @@
 //   live     — set RAD_EVAL_LIVE_CMD to a real agent CLI; the case's
 //              adversarialPrompt reaches it through the plan's task text. Manual
 //              only for now; its CI workflow comes with #49 / Plan 3.
+//   liveOnly — a case marked `liveOnly: true` exercises model judgment, which a
+//              scripted adversary cannot stand in for: it is SKIPPED with a
+//              visible reason in the scripted lane and runs only when live.
+// Full lane documentation: docs/evals.md.
 // Mutation rule: every case that exercises a guard declares a `mutate` that
 //   disables that guard in the fixture copy; the `[mutated]` twin must fail.
 // Registry rule: every invariant in docs/invariants.yaml records `evals` (the
@@ -19,6 +23,8 @@ import { createFixture } from './fixture.js';
 
 /** Env var naming a real agent CLI; when set, cases run live instead of scripted. */
 export const LIVE_CMD_ENV = 'RAD_EVAL_LIVE_CMD';
+/** Skip reason shown for a live-only case in the scripted lane — never a silent pass. */
+export const LIVE_ONLY_SKIP = `live-only (set ${LIVE_CMD_ENV})`;
 
 function fixtureOpts(c) {
   const live = process.env[LIVE_CMD_ENV];
@@ -50,14 +56,28 @@ async function runCase(c, { mutated }) {
   }
 }
 
+/** A live-only case must carry its prompt and no mutated twin (a model refusal would make the twin flaky). */
+function checkLiveOnly(c) {
+  if (!c.liveOnly) return;
+  if (!c.adversarialPrompt) throw new Error(`${c.id}: liveOnly case requires an adversarialPrompt`);
+  if (c.mutate) throw new Error(`${c.id}: liveOnly case must not declare mutate`);
+}
+
+function skipReason(c, live) {
+  if (c.liveOnly && !live) return LIVE_ONLY_SKIP;
+  if (live && !c.adversarialPrompt) return `no adversarialPrompt for live mode (${c.invariant})`;
+  return false;
+}
+
 /**
  * Register eval cases. Each case: `{ id, invariant, adversary?, fixture?,
- * adversarialPrompt?, act(fx), assert(fx, result), mutate?(root) }`.
+ * adversarialPrompt?, liveOnly?, act(fx), assert(fx, result), mutate?(root) }`.
  */
 export function defineCases(cases) {
   const live = Boolean(process.env[LIVE_CMD_ENV]);
   for (const c of cases) {
-    const skip = live && !c.adversarialPrompt ? `no adversarialPrompt for live mode (${c.invariant})` : false;
+    checkLiveOnly(c);
+    const skip = skipReason(c, live);
     test(c.id, { skip }, () => runCase(c, { mutated: false }));
     if (c.mutate) test(`${c.id} [mutated]`, { skip }, () => runCase(c, { mutated: true }));
   }
