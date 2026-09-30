@@ -750,9 +750,10 @@ test('deliverCommand — sdk selection requires ANTHROPIC_API_KEY', async () => 
     const feature = 'sel-sdk';
     writeApprovedPlan(repoRoot, feature);
 
-    const saved = { key: process.env.ANTHROPIC_API_KEY, agent: process.env.RAD_AGENT };
+    const saved = { key: process.env.ANTHROPIC_API_KEY, agent: process.env.RAD_AGENT, wt: process.env.RAD_WORKTREE };
     delete process.env.ANTHROPIC_API_KEY;
     process.env.RAD_AGENT = 'sdk';
+    process.env.RAD_WORKTREE = '0'; // opt out of the worktree default: main-checkout run
     let stderr = '';
     const orig = process.stderr.write.bind(process.stderr);
     process.stderr.write = (c, ...r) => { stderr += c; return orig(c, ...r); };
@@ -763,6 +764,7 @@ test('deliverCommand — sdk selection requires ANTHROPIC_API_KEY', async () => 
       process.stderr.write = orig;
       if (saved.key !== undefined) process.env.ANTHROPIC_API_KEY = saved.key;
       if (saved.agent !== undefined) process.env.RAD_AGENT = saved.agent; else delete process.env.RAD_AGENT;
+      if (saved.wt !== undefined) process.env.RAD_WORKTREE = saved.wt; else delete process.env.RAD_WORKTREE;
     }
     assert.equal(code, 1);
     assert.ok(stderr.includes('ANTHROPIC_API_KEY'));
@@ -778,9 +780,11 @@ test('deliverCommand — command selection requires RAD_AGENT_CMD, not the key',
       key: process.env.ANTHROPIC_API_KEY,
       agent: process.env.RAD_AGENT,
       cmd: process.env.RAD_AGENT_CMD,
+      wt: process.env.RAD_WORKTREE,
     };
     delete process.env.ANTHROPIC_API_KEY;
     process.env.RAD_AGENT = 'command';
+    process.env.RAD_WORKTREE = '0'; // opt out of the worktree default: main-checkout run
     delete process.env.RAD_AGENT_CMD;
     let stderr = '';
     const orig = process.stderr.write.bind(process.stderr);
@@ -793,6 +797,7 @@ test('deliverCommand — command selection requires RAD_AGENT_CMD, not the key',
       if (saved.key !== undefined) process.env.ANTHROPIC_API_KEY = saved.key;
       if (saved.agent !== undefined) process.env.RAD_AGENT = saved.agent; else delete process.env.RAD_AGENT;
       if (saved.cmd !== undefined) process.env.RAD_AGENT_CMD = saved.cmd;
+      if (saved.wt !== undefined) process.env.RAD_WORKTREE = saved.wt; else delete process.env.RAD_WORKTREE;
     }
     assert.equal(code, 1);
     assert.ok(stderr.includes('RAD_AGENT_CMD'));
@@ -849,6 +854,7 @@ function loggingAgent(dir, log, { probeExit, waveExit }) {
 async function runDeliver(env, argv, ctx) {
   const saved = Object.fromEntries(PREFLIGHT_ENV_KEYS.map((k) => [k, process.env[k]]));
   for (const k of PREFLIGHT_ENV_KEYS) delete process.env[k];
+  process.env.RAD_WORKTREE = '0'; // worktree is the default; opt out unless `env` sets it
   Object.assign(process.env, env);
   let stderr = '';
   const orig = process.stderr.write.bind(process.stderr);

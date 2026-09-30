@@ -11,6 +11,21 @@ import { deliverCommand } from '../cli.js';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CLI = join(HERE, '..', 'cli.js');
 
+/**
+ * Run `fn` with RAD_WORKTREE='0' (the only opt-out of the worktree default) so
+ * these direct deliverCommand calls stay on the main checkout; restores env after.
+ */
+async function withMainCheckout(fn) {
+  const saved = process.env.RAD_WORKTREE;
+  process.env.RAD_WORKTREE = '0';
+  try {
+    return await fn();
+  } finally {
+    if (saved !== undefined) process.env.RAD_WORKTREE = saved;
+    else delete process.env.RAD_WORKTREE;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Fixture helpers — copied verbatim from cli.test.js
 // ---------------------------------------------------------------------------
@@ -122,7 +137,7 @@ test('AC#3 — sdk path with missing ANTHROPIC_API_KEY exits 1 and stderr contai
 
     let code;
     try {
-      code = await deliverCommand([feature], { repoRoot, sh: mockSh });
+      code = await withMainCheckout(() => deliverCommand([feature], { repoRoot, sh: mockSh }));
     } finally {
       process.stderr.write = origWrite;
       if (savedKey !== undefined) process.env.ANTHROPIC_API_KEY = savedKey;
@@ -167,7 +182,7 @@ test('AC#4 — command path requires RAD_AGENT_CMD, never ANTHROPIC_API_KEY', as
 
     let code;
     try {
-      code = await deliverCommand([feature], { repoRoot, sh: mockSh });
+      code = await withMainCheckout(() => deliverCommand([feature], { repoRoot, sh: mockSh }));
     } finally {
       process.stderr.write = origWrite;
       if (savedKey !== undefined) process.env.ANTHROPIC_API_KEY = savedKey;
@@ -210,7 +225,7 @@ test('AC#4 — pending-review plan fails gate and runWave is never called', asyn
 
     let code;
     try {
-      code = await deliverCommand([feature], { repoRoot, sh: mockSh, runWave: spyRunWave });
+      code = await withMainCheckout(() => deliverCommand([feature], { repoRoot, sh: mockSh, runWave: spyRunWave }));
     } finally {
       if (saved !== undefined) {
         process.env.ANTHROPIC_API_KEY = saved;

@@ -130,7 +130,9 @@ export function createFixture({ feature = 'demo', plan, withOrigin = true, appro
     },
     deliver: (args = [], env = {}) => {
       const res = fx.run('node', [cli, 'deliver', feature, ...args], {
-        RAD_AGENT: 'command', RAD_AGENT_PREFLIGHT: 'off',
+        // Worktree isolation is the default; evals run on the main checkout
+        // unless the caller passes RAD_WORKTREE (even '' — to test the default).
+        RAD_AGENT: 'command', RAD_AGENT_PREFLIGHT: 'off', RAD_WORKTREE: '0',
         RAD_AGENT_CMD: agentCmd ?? `node ${join(agentDir, 'adversary.mjs')} ${adversary} ${feature}`, ...env,
       });
       return { ...res, events: fx.events() };

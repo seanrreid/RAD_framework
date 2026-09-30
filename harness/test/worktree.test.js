@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 import { makeWorktreeLifecycle } from '../adapters/worktree.js';
-import { deliverCommand } from '../cli.js';
+import { deliverCommand, worktreeEnabled } from '../cli.js';
 
 const SCRIPT = 'scripts/worktree-lifecycle.sh';
 
@@ -166,14 +166,33 @@ function writeApprovedPlan(root, feature) {
  * which lifecycle subcommands fired, which `git show` reads happened, and what
  * cwd the spine ran scripts under.
  *
- * @param {{ worktreePath?: string, branchEvents?: string|null }} opts
+ * @param {{ worktreePath?: string, branchEvents?: string|null, mainHead?: string,
+ *   mainStatus?: string, worktreeList?: string, defaultBranch?: string }} opts
  *   branchEvents: stdout for `git show` (null → the log is absent at the ref)
+ *   mainHead / mainStatus / worktreeList: the main checkout's `git rev-parse
+ *   --abbrev-ref HEAD`, `git status --porcelain`, and `git worktree list --porcelain`
+ *   defaultBranch: stdout of get-default-branch.sh
  */
-function makeDeliverSh({ worktreePath = '/nonexistent', branchEvents = APPROVED_EVENTS_JSONL } = {}) {
+function makeDeliverSh({
+  worktreePath = '/nonexistent', branchEvents = APPROVED_EVENTS_JSONL,
+  mainHead = 'main', mainStatus = '', worktreeList = '', defaultBranch = '',
+} = {}) {
   const lifecycle = []; // { cmd, args, cwd }
   const gitShows = []; // { args, cwd }
+  const gitCalls = []; // { args, cwd } — main-checkout inspection + checkout
   const spineCwds = []; // cwd of each other script call
+  const gitReplies = {
+    'rev-parse': mainHead, status: mainStatus, worktree: worktreeList, checkout: '',
+  };
   const sh = (file, args, opts) => {
+    if (file === 'git' && Object.hasOwn(gitReplies, args[0])) {
+      gitCalls.push({ args, cwd: opts?.cwd });
+      return { status: 0, stdout: `${gitReplies[args[0]]}\n`, stderr: '' };
+    }
+    if (typeof file === 'string' && file.endsWith('get-default-branch.sh')) {
+      spineCwds.push(opts?.cwd);
+      return { status: 0, stdout: defaultBranch, stderr: '' };
+    }
     if (typeof file === 'string' && file.endsWith('worktree-lifecycle.sh')) {
       lifecycle.push({ cmd: args[0], args, cwd: opts?.cwd });
       // `create` must return the resolved path on the last stdout line.
@@ -195,16 +214,20 @@ function makeDeliverSh({ worktreePath = '/nonexistent', branchEvents = APPROVED_
   };
   sh.lifecycle = lifecycle;
   sh.gitShows = gitShows;
+  sh.gitCalls = gitCalls;
   sh.spineCwds = spineCwds;
   return sh;
 }
 
-/** Run deliverCommand with RAD_WORKTREE forced on/off, restoring env after. */
+/**
+ * Run deliverCommand with RAD_WORKTREE forced on ('1') / off ('0' — the only
+ * opt-out; unset is ON), or left UNSET when `worktree` is undefined. Restores env after.
+ */
 async function runDeliver({ worktree, repoRoot, sh, runWave, env = {} }) {
   const names = ['RAD_WORKTREE', 'RAD_AGENT', 'ANTHROPIC_API_KEY', 'RAD_BRANCH_PREFIX'];
   const saved = Object.fromEntries(names.map((n) => [n, process.env[n]]));
-  if (worktree) process.env.RAD_WORKTREE = '1';
-  else delete process.env.RAD_WORKTREE;
+  if (worktree === undefined) delete process.env.RAD_WORKTREE;
+  else process.env.RAD_WORKTREE = worktree ? '1' : '0';
   // Injected runWave skips adapter construction, so no credentials are needed.
   delete process.env.RAD_AGENT;
   delete process.env.ANTHROPIC_API_KEY;
@@ -366,5 +389,154 @@ test('deliver: #113 — plan doc missing in the worktree → exit 1 and the work
 
     assert.equal(code, 1);
     assert.deepEqual(sh.lifecycle.map((c) => c.cmd), ['create', 'preserve']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// WORKTREE BY DEFAULT + CHECKED-OUT RESOLUTION
+//
+// Isolation is ON unless RAD_WORKTREE is exactly '0'. Before create, the main
+// checkout holding the work branch is switched to the default branch when clean,
+// refused (exit 2, nothing touched) when dirty; a branch held by another
+// worktree is refused (exit 2). A preserved worktree prints a cleanup command.
+// ---------------------------------------------------------------------------
+
+/** Run deliver capturing stderr; the plan + approval live in the fake worktree. */
+async function runCaptured(opts) {
+  const orig = process.stderr.write.bind(process.stderr);
+  let stderr = '';
+  process.stderr.write = (c) => { stderr += c; return true; };
+  try {
+    return { code: await runDeliver(opts), stderr };
+  } finally {
+    process.stderr.write = orig;
+  }
+}
+
+test('worktreeEnabled: only exactly "0" opts out', () => {
+  assert.equal(worktreeEnabled({}), true, 'unset → ON');
+  assert.equal(worktreeEnabled({ RAD_WORKTREE: '' }), true, 'empty → ON');
+  assert.equal(worktreeEnabled({ RAD_WORKTREE: '1' }), true);
+  assert.equal(worktreeEnabled({ RAD_WORKTREE: 'false' }), true, 'any other value → ON');
+  assert.equal(worktreeEnabled({ RAD_WORKTREE: ' 0' }), true, 'not exactly "0" → ON');
+  assert.equal(worktreeEnabled({ RAD_WORKTREE: '0' }), false);
+});
+
+test('deliver: RAD_WORKTREE unset → isolated (worktree created, spine rooted there)', async () => {
+  await withTempDirs(async (repoRoot, worktreeDir) => {
+    writeApprovedPlan(worktreeDir, FEATURE);
+    const sh = makeDeliverSh({ worktreePath: worktreeDir });
+
+    const code = await runDeliver({ worktree: undefined, repoRoot, sh, runWave: async () => ({ outcome: 'success' }) });
+
+    assert.equal(code, 0);
+    assert.deepEqual(sh.lifecycle.map((c) => c.cmd), ['create', 'remove']);
+    assert.ok(sh.spineCwds.every((cwd) => cwd === worktreeDir), JSON.stringify(sh.spineCwds));
+  });
+});
+
+test('deliver: RAD_WORKTREE="" → isolated (empty is not the opt-out)', async () => {
+  await withTempDirs(async (repoRoot, worktreeDir) => {
+    writeApprovedPlan(worktreeDir, FEATURE);
+    const sh = makeDeliverSh({ worktreePath: worktreeDir });
+
+    const code = await runDeliver({
+      worktree: undefined, repoRoot, sh, runWave: async () => ({ outcome: 'success' }), env: { RAD_WORKTREE: '' },
+    });
+
+    assert.equal(code, 0);
+    assert.ok(sh.lifecycle.some((c) => c.cmd === 'create'), 'empty RAD_WORKTREE must still isolate');
+  });
+});
+
+test('deliver: RAD_WORKTREE="0" → unisolated (no lifecycle, no main-checkout inspection)', async () => {
+  await withTempDirs(async (repoRoot) => {
+    writeApprovedPlan(repoRoot, FEATURE);
+    const sh = makeDeliverSh();
+
+    const code = await runDeliver({ worktree: false, repoRoot, sh, runWave: async () => ({ outcome: 'success' }) });
+
+    assert.equal(code, 0);
+    assert.equal(sh.lifecycle.length, 0);
+    assert.equal(sh.gitCalls.length, 0, 'opt-out must not inspect or switch the main checkout');
+  });
+});
+
+test('deliver: main checkout on the work branch + clean → checkout <default>, then create', async () => {
+  await withTempDirs(async (repoRoot, worktreeDir) => {
+    writeApprovedPlan(worktreeDir, FEATURE);
+    const sh = makeDeliverSh({ worktreePath: worktreeDir, mainHead: `rad/${FEATURE}`, defaultBranch: 'main' });
+
+    const { code, stderr } = await runCaptured({
+      worktree: undefined, repoRoot, sh, runWave: async () => ({ outcome: 'success' }),
+    });
+
+    assert.equal(code, 0);
+    const checkout = sh.gitCalls.find((c) => c.args[0] === 'checkout');
+    assert.deepEqual(checkout, { args: ['checkout', 'main'], cwd: repoRoot });
+    assert.equal(sh.lifecycle[0].cmd, 'create', 'create runs after the switch');
+    assert.ok(stderr.includes(
+      `rad deliver: switched the main checkout from rad/${FEATURE} to main so the worktree can use rad/${FEATURE}`,
+    ), stderr);
+  });
+});
+
+test('deliver: main checkout on the work branch + dirty → exit 2, no events, no checkout, no create', async () => {
+  await withTempDirs(async (repoRoot, worktreeDir) => {
+    writeApprovedPlan(worktreeDir, FEATURE);
+    const eventsBefore = readFileSync(join(worktreeDir, EVENTS_LOG_REL), 'utf8');
+    const sh = makeDeliverSh({
+      worktreePath: worktreeDir, mainHead: `rad/${FEATURE}`, mainStatus: ' M harness/cli.js', defaultBranch: 'main',
+    });
+    let called = false;
+
+    const { code, stderr } = await runCaptured({
+      worktree: undefined, repoRoot, sh, runWave: async () => { called = true; return { outcome: 'success' }; },
+    });
+
+    assert.equal(code, 2);
+    assert.ok(!sh.gitCalls.some((c) => c.args[0] === 'checkout'), 'a dirty tree must never be switched');
+    assert.equal(sh.lifecycle.length, 0, 'no worktree may be created');
+    assert.equal(called, false);
+    assert.equal(readFileSync(join(worktreeDir, EVENTS_LOG_REL), 'utf8'), eventsBefore, 'no event appended');
+    assert.ok(!existsSync(join(repoRoot, '.agents')), 'nothing written under repoRoot');
+    assert.ok(stderr.includes('Commit or stash your changes'), stderr);
+    assert.ok(stderr.includes('git checkout main'), stderr);
+  });
+});
+
+test('deliver: work branch checked out in another worktree → exit 2 with a git worktree list pointer', async () => {
+  await withTempDirs(async (repoRoot, worktreeDir) => {
+    writeApprovedPlan(worktreeDir, FEATURE);
+    const worktreeList = [
+      `worktree ${repoRoot}`, 'HEAD abc', 'branch refs/heads/main', '',
+      'worktree /elsewhere/wt', 'HEAD def', `branch refs/heads/rad/${FEATURE}`, '',
+    ].join('\n');
+    const sh = makeDeliverSh({ worktreePath: worktreeDir, worktreeList });
+
+    const { code, stderr } = await runCaptured({
+      worktree: undefined, repoRoot, sh, runWave: async () => ({ outcome: 'success' }),
+    });
+
+    assert.equal(code, 2);
+    assert.equal(sh.lifecycle.length, 0, 'no worktree may be created');
+    assert.ok(stderr.includes('git worktree list'), stderr);
+    assert.ok(stderr.includes('/elsewhere/wt'), stderr);
+  });
+});
+
+test('deliver: a preserved worktree prints its path and the lifecycle remove command', async () => {
+  await withTempDirs(async (repoRoot, worktreeDir) => {
+    writeApprovedPlan(worktreeDir, FEATURE);
+    const sh = makeDeliverSh({ worktreePath: worktreeDir });
+
+    const { code, stderr } = await runCaptured({
+      worktree: undefined, repoRoot, sh, runWave: async () => ({ outcome: 'fail-tests', summary: 'same failure' }),
+    });
+
+    assert.equal(code, 1);
+    assert.ok(sh.lifecycle.some((c) => c.cmd === 'preserve'));
+    assert.ok(stderr.includes(`rad deliver: worktree preserved at ${worktreeDir}`), stderr);
+    assert.ok(stderr.includes(`scripts/worktree-lifecycle.sh remove ${FEATURE} ${worktreeDir}`), stderr);
   });
 });
