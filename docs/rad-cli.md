@@ -383,25 +383,31 @@ Both are *opt-in*: absent, the spine behaves exactly as before.
   file/command outputs — do not paste entire files or long logs") so each wave
   agent keeps its own context lean.
 
-#### Worktree isolation (optional)
+#### Worktree isolation (default)
 
-`RAD_WORKTREE` opts a deliver run into git-worktree isolation. It is **OFF by
-default and fully backward-compatible**: unset or empty, `rad deliver` behaves
-exactly as before — it runs in the main checkout, constructs no worktree port,
-and binds every `check-*.sh` / `open-pr.sh` to the repo root. Any non-empty value
-turns it ON.
+**Breaking default (#61):** `rad deliver` now isolates every run into a git
+worktree. Opt out with `RAD_WORKTREE=0` — the only value that turns it off.
+Unset, empty, or any other value keeps isolation ON, so a typo cannot silently
+disable it. With `RAD_WORKTREE=0`, `rad deliver` behaves as before: it runs in the
+main checkout, constructs no worktree port, and binds every `check-*.sh` /
+`open-pr.sh` to the repo root.
 
-- **`RAD_WORKTREE`** — any non-empty value enables isolation; unset/empty = OFF.
+- **`RAD_WORKTREE`** — exactly `0` opts out; unset/empty/anything else = isolated.
 - **`RAD_WORKTREE_DIR`** — optional base directory for the isolated tree. When
   set, the worktree lands at `$RAD_WORKTREE_DIR/<feature>`; otherwise it defaults
   to `../<repo-basename>-rad-worktrees/<feature>` (a sibling of the main checkout).
 
 | variable | values | default | effect |
 | --- | --- | --- | --- |
-| `RAD_WORKTREE` | any non-empty value | — (OFF) | isolate the deliver run into a git worktree |
+| `RAD_WORKTREE` | `0` to opt out | — (ON) | isolate the deliver run into a git worktree |
 | `RAD_WORKTREE_DIR` | a directory path | sibling `../<repo>-rad-worktrees/<feature>` | base dir for the isolated tree |
 
-**Lifecycle.** When ON, the run moves through a **create → active →
+This applies to the `rad deliver` CLI only. The `/rad-deliver` skill path is
+unchanged — it runs wave sub-agents in the checkout it is invoked from. Both the
+`RAD_WORKTREE=0` opt-out and the skill path are recorded as unguarded bypasses of
+the `deliver-runs-isolated` registry invariant.
+
+**Lifecycle.** The run moves through a **create → active →
 complete/preserve** lifecycle:
 
 1. **create** — `git worktree add` checks out the work branch into the isolated
@@ -438,15 +444,29 @@ branch, delivers under isolation:
    is left unmodified. A setup failure after create (e.g. no plan doc on the
    branch, failed preflight) preserves the worktree.
 
-**v1 constraint.** Git cannot check out a branch that is already checked out
-elsewhere, so **keep the main checkout on the default branch** (the work branch
-must be checked out nowhere else) when you enable `RAD_WORKTREE`. If it is checked
-out, `git worktree add` fails and `rad deliver` exits 1 with a clear `worktree
-create failed` message rather than detaching or relocating the branch.
+**Work branch checked out in the main checkout.** Git cannot check out a branch
+that is already checked out elsewhere, so before creating the worktree
+`rad deliver` resolves where the work branch is checked out:
+
+- **main checkout, clean** — `rad deliver` switches the main checkout to the
+  default branch, prints a notice, and continues.
+- **main checkout, dirty** — exit 2 with the exact commands to run (commit or
+  stash your changes, then `git checkout <default>`). Nothing is stashed or
+  discarded for you.
+- **another worktree** — exit 2; find it with `git worktree list`.
+
+If `git worktree add` itself fails, the run fails (exit 1, `worktree create
+failed`) — it never falls back to the main checkout. A preserved tree (failure or
+stop) prints its path and the cleanup command:
 
 ```bash
-RAD_WORKTREE=1 node harness/cli.js deliver my-feature
-RAD_WORKTREE=1 RAD_WORKTREE_DIR=/tmp/rad-trees node harness/cli.js deliver my-feature
+scripts/worktree-lifecycle.sh remove <feature> <dir>
+```
+
+```bash
+node harness/cli.js deliver my-feature                                # isolated (default)
+RAD_WORKTREE_DIR=/tmp/rad-trees node harness/cli.js deliver my-feature
+RAD_WORKTREE=0 node harness/cli.js deliver my-feature                 # opt out: main checkout
 ```
 
 ---

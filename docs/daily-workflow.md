@@ -54,6 +54,13 @@ Point it at your PRD, a GitHub/GitLab issue, or paste a spec inline.
 It asks a few RAD-specific clarifying questions — team roles, platform,
 domain sensitivity — and writes `.agents/research/[slug].md`.
 
+Before writing the artifact it tries to **refute** the request — is it already
+done, out of scope, missing context, or covered by another plan? The artifact
+records the verdict as a `Disposition:` (`actionable` | `not-actionable` |
+`insufficient-context` | `superseded`) plus `Disposition-Evidence:` (a citation,
+the missing items, or the covering plan). An uncited or missing disposition is
+treated as `actionable`.
+
 ### Step 3: Design
 
 ```
@@ -102,6 +109,15 @@ This will:
 No PR is opened. Then wait. Do not run `/rad-deliver` until the architect runs
 `/rad-approve`, which records approval on the branch tip.
 
+**Disposition check.** When a research artifact exists for the feature,
+`/rad-plan` first runs `scripts/check-disposition.sh` on it. The check is
+fail-open — a missing, unknown, or uncited `Disposition:` counts as `actionable` —
+but a cited non-actionable disposition (`not-actionable`, `insufficient-context`,
+`superseded`) makes `/rad-plan` refuse. To plan anyway, re-run with
+`--override-disposition "<reason>"`; the reason is recorded as a
+`Disposition-Override:` line in the plan header, so the architect sees it at
+Gate 1. This adds no new gate.
+
 **Choosing a planning tier.** For small, single-wave, low-risk work outside RAD's
 own paths (`harness/`, `scripts/`, `.claude/`, `.agents/state/`), use
 `/rad-plan --light`: a quick scope check replaces the full research and the plan is
@@ -127,6 +143,8 @@ codebase, and generates a wave-structured plan — same format as `/rad-plan`.
 An `## Issue Gaps` section captures assumptions made where the issue was vague.
 
 The plan goes through `/rad-approve` before execution, same as any other plan.
+`/rad-adopt` runs the same disposition check as `/rad-plan` when a research
+artifact exists, with the same `--override-disposition "<reason>"` escape hatch.
 
 **What makes a good plan:**
 - File references are real (architect will check)
@@ -211,6 +229,14 @@ complete, it opens the single deliver PR (`rad:deliver` label) from
   still happen during repeated correction loops. If it does: start a new Claude
   Code session and re-run `/rad-deliver` with the same plan file — it resumes
   from the execution log.
+
+**Worktree isolation (CLI only).** The headless `rad deliver` CLI
+(`node harness/cli.js deliver <feature>`) isolates every run into a git worktree
+by default — opt out with `RAD_WORKTREE=0`. If the work branch is checked out in
+your main checkout and it is clean, the CLI switches it to the default branch and
+continues; if it is dirty, the CLI stops (exit 2) and tells you to commit or stash
+first. The `/rad-deliver` skill is unchanged: it runs in the checkout you invoke
+it from. See `docs/rad-cli.md` for the full lifecycle.
 
 ---
 

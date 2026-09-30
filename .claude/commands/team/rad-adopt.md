@@ -20,6 +20,10 @@ before the RAD framework was introduced.
 
 If empty, ask for the issue reference or description before proceeding.
 
+`--override-disposition "<reason>"` may accompany the input to proceed past a
+research artifact's cited non-actionable disposition (see Step 2b). The override
+and its reason are recorded in the plan header.
+
 ---
 
 ## Process
@@ -59,6 +63,30 @@ content directly and use that as the description.
 **If `$ARGUMENTS` is a free-form description:**
 
 Use the description as-is. Set `Adopted-From: [description]` in the plan header.
+
+### Step 2b: Check the research disposition
+
+Derive the feature slug the same way Step 6 does (kebab-case from the issue
+title or description). If a research artifact exists for this issue —
+`.agents/research/[feature-slug].md`, or one whose `Source:` is this issue URL —
+run:
+
+```bash
+scripts/check-disposition.sh .agents/research/[slug].md
+# with --override-disposition "<reason>" in $ARGUMENTS:
+scripts/check-disposition.sh .agents/research/[slug].md --override "<reason>"
+```
+
+- **Exit 1** — cited non-actionable disposition. Stop and show its output (the
+  disposition, the evidence, and the `--override-disposition "<reason>"` syntax).
+  Do not research and do not write a plan. In an unattended run this is a stop —
+  report and end, never wait for input.
+- **Exit 2** — usage error or unreadable artifact. Report the error and stop.
+- **Exit 0** — proceed. If the output begins `overridden:`, add
+  `Disposition-Override: [disposition] — [reason]` to the plan's header block
+  (after `Issue-Title:`).
+
+No research artifact → no check; continue to Step 3.
 
 ### Step 3: Summarize what the issue asks for
 

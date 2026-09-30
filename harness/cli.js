@@ -128,6 +128,8 @@ const USAGE_EXIT_CODE = 2;
 const NEEDS_DECISION_EXIT_CODE = 3;
 /** Exit code for a deliver stop showing the work is wrong (#77 `failed`). */
 const FAILED_EXIT_CODE = 1;
+/** The one RAD_WORKTREE value that opts OUT of worktree isolation (the default is ON). */
+const WORKTREE_OFF_VALUE = '0';
 
 /**
  * Hard ceiling on `rad deliver --resume --context <text>`. An over-long context
@@ -671,7 +673,7 @@ async function buildRunWave(agent, { model, root, planCtx }) {
 }
 
 /**
- * Main-checkout setup (RAD_WORKTREE unset): plan read → gate → agent — the
+ * Main-checkout setup (RAD_WORKTREE='0'): plan read → gate → agent — the
  * pre-isolation order, byte-for-byte. Everything is rooted at repoRoot.
  */
 async function setupMainRun({ ctx, feature, model, agentKind, repoRoot, sh }) {
@@ -692,15 +694,95 @@ async function setupMainRun({ ctx, feature, model, agentKind, repoRoot, sh }) {
 }
 
 /**
+ * Worktree isolation is the DEFAULT: ON unless RAD_WORKTREE is exactly '0'
+ * (unset, empty, or any other value → ON). The one read of the knob, shared by
+ * the setup switch and readResumeHistory so the gate and resume read one source.
+ */
+export function worktreeEnabled(env = process.env) {
+  return env.RAD_WORKTREE !== WORKTREE_OFF_VALUE;
+}
+
+/** Run a git command in `repoRoot` (main checkout or worktree); a non-zero exit throws (fail-closed). */
+function mainGit(sh, repoRoot, args) {
+  const res = sh('git', args, { cwd: repoRoot });
+  if (res.status !== 0) {
+    const detail = String(res.stderr || res.stdout || 'no output').trim();
+    throw new Error(`git ${args.join(' ')} exited ${res.status}: ${detail}`);
+  }
+  return String(res.stdout ?? '');
+}
+
+/** Paths of every worktree (per `git worktree list --porcelain`) that has `branch` checked out. */
+function worktreesOnBranch(porcelain, branch) {
+  const ref = `branch refs/heads/${branch}`;
+  return porcelain.split(/\n\s*\n/)
+    .map((block) => block.split('\n').map((l) => l.trim()))
+    .filter((lines) => lines.includes(ref))
+    .map((lines) => (lines.find((l) => l.startsWith('worktree ')) ?? '').slice('worktree '.length));
+}
+
+/**
+ * The main checkout holds the work branch. Clean → switch it to the default
+ * branch so `git worktree add` can use the branch. Dirty → refuse (exit 2) with
+ * the exact commands; nothing is stashed, discarded, or switched.
+ *
+ * @returns {{ code: number } | null}
+ */
+function releaseMainCheckout({ workBranch, repoRoot, sh }) {
+  const defaultBranch = readDefaultBranch({ sh, repoRoot, root: repoRoot });
+  if (defaultBranch === '' || defaultBranch === workBranch) {
+    process.stderr.write(
+      `rad deliver: the main checkout is on ${workBranch} and no other default branch resolves — ` +
+      'check out another branch in the main checkout, then re-run rad deliver\n',
+    );
+    return { code: USAGE_EXIT_CODE };
+  }
+  const dirty = mainGit(sh, repoRoot, ['status', '--porcelain', '--untracked-files=no']).trim();
+  if (dirty !== '') {
+    process.stderr.write(
+      `rad deliver: the main checkout is on ${workBranch} with uncommitted changes, so the worktree ` +
+      `cannot use it. Commit or stash your changes (git commit / git stash), then run:\n` +
+      `  git checkout ${defaultBranch}\n` +
+      'and re-run rad deliver. Nothing was changed.\n',
+    );
+    return { code: USAGE_EXIT_CODE };
+  }
+  mainGit(sh, repoRoot, ['checkout', defaultBranch]);
+  process.stderr.write(
+    `rad deliver: switched the main checkout from ${workBranch} to ${defaultBranch} ` +
+    `so the worktree can use ${workBranch}\n`,
+  );
+  return null;
+}
+
+/**
+ * Make the work branch available to `git worktree add` before create: resolve
+ * the main checkout holding it (releaseMainCheckout), or refuse (exit 2) when
+ * another worktree holds it. Never falls back to the main checkout.
+ *
+ * @returns {{ code: number } | null}
+ */
+function ensureBranchFree({ workBranch, repoRoot, sh }) {
+  const head = mainGit(sh, repoRoot, ['rev-parse', '--abbrev-ref', 'HEAD']).trim();
+  if (head === workBranch) return releaseMainCheckout({ workBranch, repoRoot, sh });
+  const holders = worktreesOnBranch(mainGit(sh, repoRoot, ['worktree', 'list', '--porcelain']), workBranch);
+  if (holders.length > 0) {
+    process.stderr.write(
+      `rad deliver: ${workBranch} is already checked out in another worktree (${holders.join(', ')}) — ` +
+      'see `git worktree list`; remove that worktree or check out another branch there, then re-run\n',
+    );
+    return { code: USAGE_EXIT_CODE };
+  }
+  return null;
+}
+
+/**
  * Gate on the work-branch tip, then create the worktree on that branch. Under
  * Lane B the plan and its approval events exist ONLY on the work branch, so the
  * gate reads the branch tip (never the main checkout) and fails BEFORE any
- * worktree is created.
- *
- * v1 constraint: `git worktree add` cannot check out a branch that is checked
- * out anywhere else. The operator must keep the work branch checked out nowhere
- * else — e.g. leave the main checkout on the default branch. v1 surfaces the
- * create failure rather than detaching/relocating.
+ * worktree is created. `git worktree add` cannot check out a branch held
+ * elsewhere, so ensureBranchFree resolves that first; a create failure is
+ * exit 1 and never falls back to the main checkout.
  *
  * @returns {{ root: string, worktree: object, workBranch: string } | { code: number }}
  */
@@ -718,6 +800,8 @@ function prepareWorktreeRoot({ feature, repoRoot, sh }) {
     now: () => new Date().toISOString(),
   });
   try {
+    const blocked = ensureBranchFree({ workBranch, repoRoot, sh });
+    if (blocked) return blocked;
     return { root: worktree.create(feature, workBranch), worktree, workBranch };
   } catch (err) {
     const safe = sanitizeErrorMessage(err?.message ?? String(err));
@@ -726,19 +810,69 @@ function prepareWorktreeRoot({ feature, repoRoot, sh }) {
   }
 }
 
+/** Tell the operator where a preserved worktree is and the command that removes it. */
+function writePreservedPointer(feature, root) {
+  process.stderr.write(
+    `rad deliver: worktree preserved at ${root}\n` +
+    `rad deliver: to remove it (from the main checkout): scripts/worktree-lifecycle.sh remove ${feature} ${root}\n`,
+  );
+}
+
 /** Preserve a worktree after a setup failure; a preserve error is reported, not hidden. */
 function preserveAfterSetupFailure(worktree, feature, root) {
   try {
     worktree.preserve(feature);
-    process.stderr.write(`rad deliver: worktree preserved at ${root}\n`);
+    writePreservedPointer(feature, root);
   } catch (err) {
     const safe = sanitizeErrorMessage(err?.message ?? String(err));
     process.stderr.write(`rad deliver: worktree preserve failed — ${safe}\n`);
   }
 }
 
+/** `git diff --cached --quiet` exit status meaning "staged changes exist". */
+const GIT_DIFF_HAS_CHANGES = 1;
+
 /**
- * Worktree setup (RAD_WORKTREE set): agent credentials → branch-tip gate →
+ * Commit the run-state the spine wrote inside the worktree so it persists on
+ * the work branch and the NON-forced lifecycle remove sees a clean tree.
+ * Commits only when something is staged. Any git failure throws.
+ */
+function commitRunEvents({ sh, root, feature }) {
+  mainGit(sh, root, ['add', '--', `.agents/state/${feature}/`]);
+  const staged = sh('git', ['diff', '--cached', '--quiet'], { cwd: root });
+  if (staged.status === 0) return;
+  if (staged.status !== GIT_DIFF_HAS_CHANGES) {
+    const detail = String(staged.stderr || staged.stdout || 'no output').trim();
+    throw new Error(`git diff --cached --quiet exited ${staged.status}: ${detail}`);
+  }
+  mainGit(sh, root, ['commit', '-m', `deliver(${feature}): record deliver run events`]);
+}
+
+/**
+ * Tear down on evidenced success (after committing the run events), else
+ * preserve. A commit failure preserves the worktree — never a forced remove.
+ * @returns {number|null} an exit code to return, or null to continue
+ */
+function finishWorktree({ worktree, completed, sh, root, feature }) {
+  if (!completed) {
+    worktree.preserve(feature);
+    writePreservedPointer(feature, root);
+    return null;
+  }
+  try {
+    commitRunEvents({ sh, root, feature });
+  } catch (err) {
+    const safe = sanitizeErrorMessage(err?.message ?? String(err));
+    process.stderr.write(`rad deliver: could not commit run events in the worktree — ${safe}\n`);
+    preserveAfterSetupFailure(worktree, feature, root);
+    return 1;
+  }
+  worktree.complete(feature);
+  return null;
+}
+
+/**
+ * Worktree setup (the default; RAD_WORKTREE not '0'): agent credentials → branch-tip gate →
  * worktree create → plan read, state store, and agent ALL rooted at the
  * worktree, so events are read and written on the work branch and the main
  * checkout is never modified. A failure after create preserves the worktree.
@@ -776,13 +910,13 @@ function resumeFlagRefusal({ resume, context }) {
 
 /**
  * Read the history --resume eligibility folds over — the SAME source the
- * approved gate reads: the branch-tip log in worktree mode (RAD_WORKTREE set,
+ * approved gate reads: the branch-tip log in worktree mode (worktreeEnabled(),
  * read before any worktree exists), else the feature's log via the state store.
  *
  * @returns {{ ok: true, history: Object[] } | { ok: false, reason: string }}
  */
 function readResumeHistory({ feature, repoRoot, sh }) {
-  if (isNonEmpty(process.env.RAD_WORKTREE)) {
+  if (worktreeEnabled()) {
     return readBranchTipHistory({ feature, branch: conventionWorkBranch(feature), repoRoot, sh });
   }
   try {
@@ -1097,15 +1231,15 @@ export async function deliverCommand(argv, ctx) {
   }
   const { resume } = eligibility;
 
-  // Optional worktree isolation. RAD_WORKTREE follows the env-knob convention:
-  // unset/empty = OFF (exact today's behavior — main checkout, no worktree port,
-  // everything rooted at repoRoot); any non-empty value = ON: the gate is read
+  // Worktree isolation is the DEFAULT (worktreeEnabled): RAD_WORKTREE exactly
+  // '0' = OFF (main checkout, no worktree port, everything rooted at repoRoot);
+  // unset, empty, or any other value = ON: the gate is read
   // from the work-branch tip, then plan, state store, agent, and every
   // check-*.sh / open-pr.sh run are rooted at an isolated git worktree on the
   // work branch. RAD_WORKTREE_DIR (optional base dir) is read by the lifecycle
   // script itself, so we just let it flow through the environment.
   const setupOpts = { ctx, feature, model, agentKind, repoRoot, sh };
-  const setup = isNonEmpty(process.env.RAD_WORKTREE)
+  const setup = worktreeEnabled()
     ? await setupWorktreeRun(setupOpts)
     : await setupMainRun(setupOpts);
   if (setup.code !== undefined) return setup.code;
@@ -1157,9 +1291,7 @@ export async function deliverCommand(argv, ctx) {
     // Unexpected spine throw: still preserve the worktree (so the operator can
     // inspect it) before rethrowing-as-exit. Cleanup is keyed off the returned
     // terminal object below for the normal path; this guards the abnormal one.
-    if (worktree) {
-      try { worktree.preserve(feature); } catch { /* preserve is best-effort here */ }
-    }
+    if (worktree) preserveAfterSetupFailure(worktree, feature, root);
     // Sanitize: a deep spine/SDK error could otherwise surface a credential.
     const safe = sanitizeErrorMessage(err?.message ?? String(err));
     process.stderr.write(`rad deliver: unexpected error — ${safe}\n`);
@@ -1171,11 +1303,8 @@ export async function deliverCommand(argv, ctx) {
   // Worktree cleanup: complete (tear down) only on EVIDENCED success, preserve
   // (keep for inspection) on any stop or an ok the log does not confirm.
   if (worktree) {
-    if (evidence.completed) {
-      worktree.complete(feature);
-    } else {
-      worktree.preserve(feature);
-    }
+    const cleanupCode = finishWorktree({ worktree, completed: evidence.completed, sh, root, feature });
+    if (cleanupCode !== null) return cleanupCode;
   }
 
   if (evidence.completed) {

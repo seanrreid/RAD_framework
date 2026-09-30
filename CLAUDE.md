@@ -248,28 +248,40 @@ instead of burning the attempt budget.
 
 ### Worktree Isolation
 
-OPTIONAL and backward-compatible — absent, deliver runs in the main checkout as before.
+ON by default (**breaking change**, #61) — `rad deliver` isolates every run into a git
+worktree. Opt out with `RAD_WORKTREE=0` (that exact value only).
 
 ```
-RAD_WORKTREE:     <any non-empty value>   # opt-in git-worktree isolation for a deliver run
+RAD_WORKTREE:     0                       # exactly `0` opts out; unset/empty/anything else = isolated
 RAD_WORKTREE_DIR: <directory path>        # optional base dir for the isolated tree
 ```
 
-When `RAD_WORKTREE` is set, `/rad-deliver` isolates the run into a git worktree on the
-work branch (create → active → complete-on-success / preserve-on-failure). A
-`.rad-worktree.json` marker guards teardown — the lifecycle refuses to remove an
-unmarked dir. v1 requires the work branch not already be checked out in the main tree.
+Only the literal `0` turns isolation off, so a typo cannot silently disable it. The
+`rad deliver` CLI isolates the run into a git worktree on the work branch (create →
+active → complete-on-success / preserve-on-failure). A `.rad-worktree.json` marker
+guards teardown — the lifecycle refuses to remove an unmarked dir. Worktree creation
+failure fails the run (exit 1); it never falls back to the main checkout. A preserved
+tree (failure or stop) prints its path and the cleanup command
+`scripts/worktree-lifecycle.sh remove <feature> <dir>`.
+
+If the work branch is checked out in the main checkout: **clean** → `rad deliver`
+switches it to the default branch (printing a notice) and continues; **dirty** → exit 2
+with the exact commands to run (commit or stash, then `git checkout <default>`) —
+nothing is stashed or discarded for you. If the branch is checked out in another
+worktree → exit 2 (see `git worktree list`).
 
 In worktree mode the approved gate, the plan doc, and the event log are all read from
 the **work branch**, not the main checkout: the gate is evaluated over the branch tip's
 log (`git show <branch>:.agents/state/<feature>/events.jsonl`) before any worktree is
 created (fail-closed if unapproved or absent), then the plan, state store, agent, and
 spine are rooted at the worktree — so events are written in the worktree (on the work
-branch) and the main tree is left unmodified. Keep the main checkout on the default
-branch; the work branch (`RAD_BRANCH_PREFIX` + feature, default `rad/<feature>`) must
-not be checked out there. This is what makes Lane B plans (plan + approval only on the
-work branch) deliverable under isolation.
-Unset/empty = OFF (today's behavior). See `docs/rad-cli.md` for the full lifecycle.
+branch) and the main tree is left unmodified. This is what makes Lane B plans (plan +
+approval only on the work branch) deliverable under isolation.
+
+The `/rad-deliver` **skill** path is unchanged: it runs wave sub-agents in the checkout
+it is invoked from. The `RAD_WORKTREE=0` opt-out and the skill path are recorded as
+unguarded bypasses of the `deliver-runs-isolated` invariant. See `docs/rad-cli.md` for
+the full lifecycle.
 
 ### Portable Sync
 

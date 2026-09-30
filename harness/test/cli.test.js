@@ -553,6 +553,9 @@ const okSh = () => ({ status: 0, stdout: '', stderr: '' });
 async function runDeliverCaptured({ repoRoot, runWave, sh = okSh, env = {}, args = [] }) {
   const saved = Object.fromEntries(DELIVER_ENV_KEYS.map((k) => [k, process.env[k]]));
   for (const k of DELIVER_ENV_KEYS) delete process.env[k];
+  // Worktree isolation is the default; these main-checkout tests opt out unless
+  // a test sets RAD_WORKTREE itself.
+  process.env.RAD_WORKTREE = '0';
   Object.assign(process.env, env);
   const originalErr = process.stderr.write.bind(process.stderr);
   let stderr = '';
