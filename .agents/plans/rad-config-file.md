@@ -1,7 +1,8 @@
 # Plan: RAD Config File + Readers (`.rad/config.yml`, hard cutover)
 Created: 2026-09-30
 Author: architect
-Status: in-progress
+Status: complete
+Completed-At: 2026-09-30T19:38:13Z
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-09-30T18:49:48.558Z
 Recorded-By: sean@torchcodelab.com
