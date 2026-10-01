@@ -21,7 +21,7 @@ import { fileURLToPath } from 'node:url';
 import { basename, dirname, join, resolve } from 'node:path';
 import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync, realpathSync } from 'node:fs';
 import process from 'node:process';
-import { spawnSync } from 'node:child_process';
+import { spawnSync, execFileSync } from 'node:child_process';
 
 import { createGitStateStore, defaultSh } from './adapters/git-state-store.js';
 import { evaluateGate } from './gates.js';
@@ -40,7 +40,7 @@ import { taskFilesFromPlanText, mergeTaskFiles } from './plan-tasks.js';
 import { gatherDigestInputs, buildDigest, renderDigest } from './digest.js';
 import { buildReviewPrompt, parseFindings } from './review.js';
 import {
-  CONFIG_PATH, loadConfig, getConfigValue, migrateFromClaudeMd, serializeConfig, validateConfig,
+  CONFIG_PATH, loadConfig, getConfigValue, migrateFromClaudeMd, serializeConfig, validateConfig, buildInitConfig,
 } from './config.js';
 
 /** Usage line for `rad deliver` (help, parse errors, and the command table). */
@@ -54,7 +54,8 @@ const DIGEST_USAGE = 'rad digest <feature> [--branch <ref>] [--base <ref>]';
 /** Usage line for `rad review`. */
 const REVIEW_USAGE = 'rad review <reviewer> [--base <ref>]';
 /** Usage line for `rad config`. */
-const CONFIG_USAGE = 'rad config get <key> | rad config validate | rad config migrate [--from <path>] [--force]';
+const CONFIG_USAGE = 'rad config get <key> | rad config validate | rad config migrate [--from <path>] [--force]'
+  + ' | rad config init [--architect <id>] [--platform <p>] [--default-branch <b>] [--force]';
 
 const SUBCOMMANDS = {
   approve: {
@@ -100,7 +101,7 @@ const SUBCOMMANDS = {
     run: (argv, ctx) => reviewCommand(argv, ctx),
   },
   config: {
-    summary: 'Read, validate, or migrate the RAD config file (.rad/config.yml).',
+    summary: 'Create, read, validate, or migrate the RAD config file (.rad/config.yml).',
     usage: CONFIG_USAGE,
     run: (argv, ctx) => configCommand(argv, ctx),
   },
@@ -2610,13 +2611,14 @@ async function ownerVerb(argv, ctx, which) {
 }
 
 // ---------------------------------------------------------------------------
-// rad config — read, validate, or migrate .rad/config.yml (#87)
+// rad config — init, read, validate, or migrate .rad/config.yml (#87)
 // ---------------------------------------------------------------------------
 
 /** Exit code for `rad config get` on a key the (valid) config does not carry. */
 const CONFIG_KEY_ABSENT_EXIT_CODE = 3;
 /** The operator-facing line for a repo with no config file yet. */
-const CONFIG_MISSING_MESSAGE = `rad: no ${CONFIG_PATH} — run 'rad config migrate'\n`;
+const CONFIG_MISSING_MESSAGE =
+  `rad: no ${CONFIG_PATH} — run 'rad config init' (new install) or 'rad config migrate' (from a pre-#87 CLAUDE.md)\n`;
 
 /** Print a config load failure (missing or invalid) to stderr; returns FAILED_EXIT_CODE. */
 function reportConfigLoadFailure(loaded) {
@@ -2715,20 +2717,102 @@ async function configMigrate(args, repoRoot) {
   return 0;
 }
 
+/** `rad config init` flags that take a value, mapped to their parsed option key. */
+const INIT_VALUE_FLAGS = Object.freeze({
+  '--architect': 'architect', '--platform': 'platform', '--default-branch': 'defaultBranch',
+});
+
+/** Parse `init [--architect <id>] [--platform <p>] [--default-branch <b>] [--force]`; throws on malformed argv. */
+function parseInitArgs(args) {
+  const out = { architect: undefined, platform: undefined, defaultBranch: undefined, force: false };
+  for (let i = 0; i < args.length; i += 1) {
+    const key = INIT_VALUE_FLAGS[args[i]];
+    if (args[i] === '--force') out.force = true;
+    else if (key) {
+      // An empty value is a value (validation rejects it); only a missing one is a usage error.
+      const value = args[i + 1];
+      if (value === undefined || value.startsWith('--')) throw new Error(`${args[i]} requires a value`);
+      out[key] = value;
+      i += 1;
+    } else throw new Error(`unknown argument '${args[i]}'`);
+  }
+  return out;
+}
+
+/**
+ * The installer's `git config user.email`, read in the repo root (argv form,
+ * never a shell string). Git failure or empty output means "no identity".
+ *
+ * @returns {{ email: string, reason?: string }}
+ */
+function initGitIdentity(repoRoot) {
+  try {
+    const email = execFileSync('git', ['config', 'user.email'], {
+      cwd: repoRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+    }).trim();
+    return email ? { email } : { email: '', reason: 'git config user.email is empty' };
+  } catch (err) {
+    const detail = (err.stderr ?? '').toString().trim() || `exit ${err.status ?? 'unknown'}`;
+    return { email: '', reason: `git config user.email is not set (${detail})` };
+  }
+}
+
+/** Resolve the architect identity: --architect wins, else git email; returns { architect } or { code }. */
+function resolveInitArchitect(opts, repoRoot) {
+  if (opts.architect !== undefined) return { architect: opts.architect };
+  const git = initGitIdentity(repoRoot);
+  if (git.email) return { architect: git.email };
+  process.stderr.write(`rad config init: no architect identity — ${git.reason}; pass --architect <id>\n`);
+  return { code: FAILED_EXIT_CODE };
+}
+
+async function configInit(args, repoRoot) {
+  let opts;
+  try {
+    opts = parseInitArgs(args);
+  } catch (err) {
+    return configUsage(`init: ${err.message}`);
+  }
+  const target = join(repoRoot, CONFIG_PATH);
+  if (existsSync(target) && !opts.force) {
+    process.stderr.write(`rad config init: ${target} already exists — pass --force to overwrite\n`);
+    return FAILED_EXIT_CODE;
+  }
+  const resolved = resolveInitArchitect(opts, repoRoot);
+  if (resolved.code !== undefined) return resolved.code;
+  const doc = buildInitConfig({ ...opts, architect: resolved.architect });
+  const errors = validateConfig(doc);
+  if (errors.length) {
+    process.stderr.write('rad config init: refusing to write an invalid config:\n');
+    for (const e of errors) process.stderr.write(`  - ${e}\n`);
+    return FAILED_EXIT_CODE;
+  }
+  mkdirSync(dirname(target), { recursive: true });
+  writeFileSync(target, serializeConfig(doc));
+  process.stdout.write(`rad config init: wrote ${CONFIG_PATH} (architect=${doc.roles.architect[0]}, `
+    + `platform=${doc.platform}, default_branch=${doc.default_branch})\n`);
+  return 0;
+}
+
 function configUsage(message) {
   process.stderr.write(`rad config: ${message}\nUsage: ${CONFIG_USAGE}\n`);
   return USAGE_EXIT_CODE;
 }
 
-const CONFIG_ACTIONS = { get: configGet, validate: configValidate, migrate: configMigrate };
+const CONFIG_ACTIONS = { get: configGet, validate: configValidate, migrate: configMigrate, init: configInit };
 
 /**
- * `config get <key> | validate | migrate [--from <path>] [--force]`.
+ * `config get <key> | validate | migrate [--from <path>] [--force]
+ *  | init [--architect <id>] [--platform <p>] [--default-branch <b>] [--force]`.
  *
  * get: prints the value (lists one item per line; scope-map rows as compact
  * JSON) — exit 0; absent key → 3; missing/invalid config → 1; bad argv → 2.
  * validate: exit 0 valid, 1 missing/invalid. migrate: writes .rad/config.yml
  * from CLAUDE.md (never edits it); refuses to overwrite without --force.
+ * init: writes a fresh validated config (architect = --architect, else the
+ * repo's git user.email; platform default manual, default_branch default main)
+ * — exit 0 written; 1 no identity / invalid value / exists without --force;
+ * 2 bad argv. Nothing is written on any failure.
  *
  * @param {string[]} argv - args after `config`
  * @param {{ repoRoot: string }} ctx
