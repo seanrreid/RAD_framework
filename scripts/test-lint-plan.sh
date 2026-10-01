@@ -21,6 +21,8 @@
 #   - consistency advisories: task citing no AC#, AC cited by no task (comma
 #     lists, whole-token ids), VAGUE_WORDS in ACs / task What:+Validate: (fenced
 #     and backtick spans skipped) — warnings only, exit code unchanged
+#   - multibyte dashes (en/em) beside a vague word: no awk crash, still flagged
+#   - freshness with a missing/invalid .rad/config.yml: one advisory with reason
 # Self-contained (no external harness): writes temp fixture plans, runs the real
 # lint-plan.sh, and asserts on output/exit code. Runs under bash 3.2+ (set -u safe).
 #
@@ -1052,6 +1054,64 @@ t_vague_wording_advisory() {
   echo "✓ CONS(f): vague word inside a code fence or backtick span ⇒ no warning"
 }
 
+# A multibyte dash directly beside a vague word crashed macOS awk (towc:
+# multibyte conversion failure, exit 2) under a UTF-8 locale. The dashes are
+# generated with printf so no literal en dash lands in a shell file.
+EN_DASH=$(printf '\342\200\223')
+EM_DASH=$(printf '\342\200\224')
+
+t_vague_wording_multibyte() {
+  local base="$GREPO/.agents/plans" what
+  what="What: make it robust${EN_DASH}ish"$'\n'"Validate: AC#1 ${EN_DASH} x${EN_DASH}seamless"
+  write_consistency_plan "$base/cons-endash.md" "1. One." "$(printf '#### Task 1.1: t\n%s' "$what")"
+  ( export LANG=en_US.UTF-8; tier_lint cons-endash.md
+    assert_out_lacks "MB(a)" "multibyte conversion failure"
+    assert_out_has "MB(a)" "vague wording 'robust' in Task 1.1 What"
+    assert_out_has "MB(a)" "vague wording 'seamless' in Task 1.1 Validate"
+    assert_code "MB(a)" 0 ) || exit 1
+  echo "✓ MB(a): en dash directly after / before a vague word ⇒ still flagged, exit 0"
+
+  what="What: make it fast${EM_DASH}done"$'\n'"Validate: AC#1 x${EM_DASH}robust"
+  write_consistency_plan "$base/cons-emdash.md" "1. One." "$(printf '#### Task 1.1: t\n%s' "$what")"
+  ( export LANG=en_US.UTF-8; tier_lint cons-emdash.md
+    assert_out_has "MB(b)" "vague wording 'fast' in Task 1.1 What"
+    assert_out_has "MB(b)" "vague wording 'robust' in Task 1.1 Validate"
+    assert_code "MB(b)" 0 ) || exit 1
+  echo "✓ MB(b): em dash beside a vague word ⇒ flagged as a word boundary, exit 0"
+}
+
+# BADREPO: GREPO's shape but its .rad/config.yml is unparseable, so
+# get-default-branch.sh exits 1 with a reason.
+BADREPO="$TMP/badcfg"
+setup_badconfig_fixture() {
+  mkdir -p "$BADREPO/src" "$BADREPO/.agents/plans"
+  copy_scripts "$BADREPO"
+  printf 'export const app=1\n' > "$BADREPO/src/app.js"
+  printf 'version: [\n' > "$BADREPO/.rad/config.yml"
+}
+
+assert_single_unresolved_advisory() {
+  local label="$1" reason="$2" n
+  assert_out_has "$label" "freshness not verified: default branch unresolved ("
+  assert_out_has "$label" "$reason"
+  n=$(printf '%s\n' "$FRESH_OUT" | grep -c "freshness not verified")
+  [[ "$n" -eq 1 ]] || fail "$label: freshness advisory appeared $n times (expected 1): $FRESH_OUT"
+  assert_out_lacks "$label" "stale premise"
+  assert_code "$label" 0
+}
+
+t_freshness_config_error() {
+  write_plan "$BADREPO/.agents/plans/badcfg.md" "| src/app.js | 1-2 | x |" "src/removed.js:9"
+  run_lint_in_repo "$BADREPO" ".agents/plans/badcfg.md"
+  ( assert_single_unresolved_advisory "FCE(a)" "cannot parse .rad/config.yml" ) || exit 1
+  echo "✓ FCE(a): invalid .rad/config.yml ⇒ one freshness advisory naming the reason, exit 0"
+
+  rm -f "$BADREPO/.rad/config.yml"
+  run_lint_in_repo "$BADREPO" ".agents/plans/badcfg.md"
+  ( assert_single_unresolved_advisory "FCE(b)" "no .rad/config.yml" ) || exit 1
+  echo "✓ FCE(b): missing .rad/config.yml ⇒ one freshness advisory naming the reason, exit 0"
+}
+
 t_consistency_edge_cases() {
   local base="$GREPO/.agents/plans"
   write_consistency_plan "$base/cons-noac.md" "" "$(cons_task 1.1 'x' 'AC#1 — x')"
@@ -1091,6 +1151,8 @@ t_freshness_present_and_absent
 t_freshness_created_exempt
 t_missing_scope_suppression
 t_freshness_unresolvable_ref
+setup_badconfig_fixture
+t_freshness_config_error
 t_blocker_markers
 t_blocker_high_risk
 t_waiver_warnings
@@ -1105,5 +1167,6 @@ t_tier_absent_identical
 t_empty_files_in_scope
 t_ac_citation_advisories
 t_vague_wording_advisory
+t_vague_wording_multibyte
 t_consistency_edge_cases
 echo "ALL PASS"
