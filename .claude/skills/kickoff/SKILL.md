@@ -16,8 +16,12 @@ surface what needs attention, and pick a focus. Keep the briefing under ~400 wor
 
 ### 1. Load project context
 
-Read `CLAUDE.md` — project description, stack, conventions, role assignments, and
-the Agent Scope Map. This is the contract for the session.
+Read `CLAUDE.md` — project description, stack, and conventions. This is the
+contract for the session. Read role assignments from `.rad/config.yml`:
+
+```bash
+node harness/cli.js config get roles.architect   # also roles.developers, roles.designers
+```
 
 ### 2. Check git state
 

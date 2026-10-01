@@ -646,7 +646,7 @@ the PR head, that the recorded approval is REAL, CURRENT, and AUTHENTIC:
   Legacy events with **no stored fingerprint warn but PASS** — a deliberate
   narrow fail-open mirroring `check-plan-approved.sh`.
 - **Authenticity** — the introducing commit's git author email must match the
-  architect identity parsed from CLAUDE.md Role Assignments.
+  architect identity in `.rad/config.yml` (`rad config get roles.architect`).
   `RAD_ARCHITECT_OVERRIDE` wins when set (see `.env.example`).
 - **Ownership** — advisory ONLY: a stale `owner-claimed` with no later
   `owner-released` prints an `advisory:` line. **Never affects the exit code**
@@ -707,18 +707,20 @@ architect's call). Two parts:
   Files without a `roles:` field are RAD-external utility agents — basic
   frontmatter is linted, but they are exempt from the context-tool rules and
   the scope-map bijection.
-- **Scope-map sync** — every `### Agent Scope Map` table row in CLAUDE.md must
-  have a matching agent file, and every agent file with `roles:` must have a
-  table row.
+- **Scope-map sync** — every `agent_scope_map` row in `.rad/config.yml` (read
+  via `rad config get agent_scope_map`) must have a matching agent file, and
+  every agent file with `roles:` must have a row.
 
-Defaults: `CLAUDE.md` and `.claude/agents`.
+Usage: `scripts/lint-agent-files.sh [repo-root] [agents-dir]`. Defaults: this
+script's checkout and `.claude/agents`.
 
 ```bash
 scripts/lint-agent-files.sh
 ```
 
 **Exit codes:** `0` = clean, `1` = one or more violations (each reported with
-file + reason), `2` = usage error (CLAUDE.md or agents dir not found).
+file + reason), `2` = usage error (RAD harness or agents dir not found). A missing or invalid
+`.rad/config.yml` fails closed with `1`.
 
 ---
 

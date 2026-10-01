@@ -56,7 +56,8 @@ You're reviewing:
 ### 1. Scope correctness
 Are all the files in "Files in Scope" within the contributor's agent boundaries?
 
-Check the Agent Scope Map in `CLAUDE.md`. If a developer is touching auth files
+Check the Agent Scope Map (`agent_scope_map` in `.rad/config.yml`, via
+`node harness/cli.js config get agent_scope_map`). If a developer is touching auth files
 and auth is `architect`-only, set the plan to `needs-revision` (or `rejected`).
 This is the most important check.
 

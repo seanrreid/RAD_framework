@@ -63,10 +63,16 @@ scripts/check-disposition.sh .agents/research/[feature-slug].md --override "<rea
 
 ### Step 1: Determine role and available agents
 
-Read `CLAUDE.md` to find:
+Read the role and scope config from `.rad/config.yml` (see `docs/configuration.md`):
+
+```bash
+node harness/cli.js config get roles.developers   # also roles.designers, roles.architect
+node harness/cli.js config get agent_scope_map    # one { agent, type, reads, roles } row per line
+```
+
+From that output, find:
 - The current user's role (developer or designer)
-- The Agent Scope Map
-- Which agents are available for this role
+- Which agents are available for this role (rows whose `roles` include it)
 
 Only call agents available to your role. If a feature requires an agent outside
 your role's scope, note it in the plan as a dependency requiring architect involvement.
@@ -83,7 +89,7 @@ summaries only — no raw file dumps. Cap each file summary at 15 lines.
 Stop after 10 searches total regardless of what remains.
 
 Feature: [feature description from $ARGUMENTS]
-Role scope: [agent scope for this role from CLAUDE.md Agent Scope Map]
+Role scope: [agent scope for this role from `node harness/cli.js config get agent_scope_map`]
 
 Research goals:
 1. Find the files most likely touched by this feature (entry points, components,
@@ -429,7 +435,7 @@ Run /rad-deliver .agents/plans/[feature-slug].md once approved.
 
 ## Rules
 
-- Only call agents available to your role (check Agent Scope Map in CLAUDE.md)
+- Only call agents available to your role (check `node harness/cli.js config get agent_scope_map`)
 - Do not read files directly — delegate all research to the Explore sub-agent
 - Do not write any code in this phase
 - Research is one sub-agent call — do not spawn multiple research agents

@@ -29,7 +29,7 @@ yes in standup) but doesn't run `/rad-approve` themselves, a team member may
 record that approval with:
 
 - `--on-behalf-of "<architect name>"` — who actually approved. Must resolve to a
-  configured architect in CLAUDE.md (validated, not just typed).
+  configured architect in `.rad/config.yml` (validated, not just typed).
 - `--evidence "<text or link>"` — **required** with `--on-behalf-of`. A quote,
   Slack permalink, or PR-comment URL showing the architect's approval. This is
   the audit-trail substitute for the architect running the command themselves.
@@ -74,14 +74,16 @@ the running user:
 # 2. Evidence is mandatory for proxy approval (reject whitespace-only values).
 [[ -z "${EVIDENCE//[[:space:]]/}" ]] && { echo "✗ --on-behalf-of requires --evidence (cite where the architect approved)."; exit 1; }
 
-# 3. The named approver must be a configured architect.
-scripts/check-role.sh architect CLAUDE.md "$ON_BEHALF_OF"
+# 3. The named approver must be a configured architect. The second argument is
+#    the repo root (`.`), which check-role.sh needs to reach the third
+#    (identity) position.
+scripts/check-role.sh architect . "$ON_BEHALF_OF"
 ```
 
 If the named approver is not a configured architect, stop:
 
 ```
-✗ "<name>" is not a configured architect in CLAUDE.md — cannot record their approval.
+✗ "<name>" is not a configured architect in .rad/config.yml — cannot record their approval.
 ```
 
 Note: the running user does **not** need the architect role in proxy mode — that's
@@ -380,7 +382,7 @@ Branch:      rad/[feature-name]
 
 ## Rules
 
-- Default mode is architect-only — only architects listed in CLAUDE.md Role Assignments may approve directly
+- Default mode is architect-only — only architects listed under `roles.architect` in `.rad/config.yml` may approve directly
 - Never approve a plan with unreviewed out-of-scope dependencies
 - Never approve a plan with Status: in-progress, complete, or approved
 - Commit only the plan file to the work branch — no other files
@@ -393,6 +395,6 @@ Branch:      rad/[feature-name]
 
 - `--on-behalf-of` records an approval the architect already gave **elsewhere** — it is not a way to self-approve or bypass the architect. The architect must actually have approved.
 - `--on-behalf-of` requires `--evidence`. No evidence → refuse.
-- The name passed to `--on-behalf-of` must resolve to a configured architect in CLAUDE.md. A non-architect name → refuse.
+- The name passed to `--on-behalf-of` must resolve to a configured architect in `.rad/config.yml`. A non-architect name → refuse.
 - Always record both `Approved-By` (the architect) and `Recorded-By` (whoever ran the command). Never collapse them — the split is the integrity of the gate.
 - Use proxy mode honestly: only when you can cite a real, specific approval (a quote, Slack permalink, or PR comment). Fabricating or paraphrasing an approval that didn't happen defeats the purpose of the gate.

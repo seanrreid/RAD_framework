@@ -65,7 +65,9 @@ then `/rad-design` to set up the agent architecture first.
 
 ### 4. Understand your boundaries
 
-Read `CLAUDE.md`, specifically the Agent Scope Map section. It shows:
+Read the Agent Scope Map — `agent_scope_map` in `.rad/config.yml`, printed by
+`node harness/cli.js config get agent_scope_map` (or rendered by `/rad-status`).
+It shows:
 - Which agents are available to your role
 - Which directories each agent can read
 - Which domains are architect-only

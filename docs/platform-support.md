@@ -170,7 +170,7 @@ If `tea` is not available, falls back to manual mode.
 
 ## Manual mode
 
-Set `platform: manual` in `CLAUDE.md` to always use manual mode, regardless
+Set `platform: manual` in `.rad/config.yml` to always use manual mode, regardless
 of what platform is detected.
 
 Manual mode:
@@ -190,16 +190,14 @@ Manual mode is useful for:
 
 ---
 
-## Configuring platform in CLAUDE.md
+## Configuring platform in .rad/config.yml
 
-```
-## RAD Configuration
-
-### Git Platform
-
+```yaml
 platform: github        # github | gitlab | bitbucket | forgejo | manual
 default_branch: main
 ```
+
+See `docs/configuration.md` for the full schema.
 
 Override auto-detection by setting `platform` explicitly. If not set,
 `scripts/detect-platform.sh` auto-detects from the git remote URL.

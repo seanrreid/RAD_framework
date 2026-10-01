@@ -30,10 +30,16 @@ and its reason are recorded in the plan header.
 
 ### Step 1: Determine role and available agents
 
-Read `CLAUDE.md` to find:
+Read the role and scope config from `.rad/config.yml` (see `docs/configuration.md`):
+
+```bash
+node harness/cli.js config get roles.developers   # also roles.designers, roles.architect
+node harness/cli.js config get agent_scope_map    # one { agent, type, reads, roles } row per line
+```
+
+From that output, find:
 - The current user's role (architect, developer, or designer)
-- The Agent Scope Map
-- Which agents are available for this role
+- Which agents are available for this role (rows whose `roles` include it)
 
 Only call agents available to your role. Flag out-of-scope dependencies in the
 plan rather than working around them.
@@ -281,7 +287,7 @@ The architect runs /rad-approve [feature-slug] to unblock execution.
 
 ## Rules
 
-- Only call agents available to your role (check Agent Scope Map in CLAUDE.md)
+- Only call agents available to your role (check `node harness/cli.js config get agent_scope_map`)
 - Do not read files directly — only through context tool orchestrators
 - Do not write any code in this phase
 - Cap research at 10 tool calls — split if more is needed
