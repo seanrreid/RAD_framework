@@ -1,7 +1,10 @@
 # Plan: Lean CLAUDE.md (#87 part 2b)
 Created: 2026-10-01
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-10-01T17:34:17.516Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/lean-claude-md
 Adopted-From: https://github.com/seanrreid/RAD_framework/issues/87
 Issue-Title: Move RAD configuration out of CLAUDE.md into a data file the harness reads
