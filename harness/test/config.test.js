@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { execFileSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -210,12 +211,13 @@ test('rad config get: scalar, list, scope rows, absent key, usage', async () => 
   assert.equal((await runConfig([], root)).code, 2);
 });
 
-test('rad config get/validate: missing file → exit 1 with the migrate hint', async () => {
+test('rad config get/validate: missing file → exit 1 with the init/migrate hint', async () => {
   const root = tempRoot();
   for (const argv of [['get', 'platform'], ['validate']]) {
     const r = await runConfig(argv, root);
     assert.equal(r.code, 1);
-    assert.match(r.stderr, /rad: no \.rad\/config\.yml — run 'rad config migrate'/);
+    assert.match(r.stderr,
+      /rad: no \.rad\/config\.yml — run 'rad config init' \(new install\) or 'rad config migrate' \(from a pre-#87 CLAUDE\.md\)/);
   }
 });
 
@@ -262,4 +264,109 @@ test('rad config migrate: --from, missing required key, placeholder, bad argv', 
   assert.equal((await runConfig(['migrate', '--from', join(root, 'nope.md')], root)).code, 1);
   assert.equal((await runConfig(['migrate', '--from'], root)).code, 2);
   assert.equal((await runConfig(['migrate', '--what'], root)).code, 2);
+});
+
+// --- rad config init (#87 part 2) -----------------------------------------
+
+/** A temp git repo whose repo-local user.email is `email` (never the developer's real one). */
+function gitRepoWithEmail(email) {
+  const root = tempRoot();
+  execFileSync('git', ['init', '-q'], { cwd: root });
+  execFileSync('git', ['config', 'user.email', email], { cwd: root });
+  return root;
+}
+
+/** Run with no global/system git identity: empty HOME, no global or system config. */
+async function withNoGitIdentity(fn) {
+  const keys = ['GIT_CONFIG_GLOBAL', 'GIT_CONFIG_NOSYSTEM', 'HOME', 'XDG_CONFIG_HOME'];
+  const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
+  Object.assign(process.env, {
+    GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', HOME: tempRoot(), XDG_CONFIG_HOME: tempRoot(),
+  });
+  try {
+    return await fn();
+  } finally {
+    for (const k of keys) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+  }
+}
+
+test('rad config init: flags write a valid config and print the summary line', async () => {
+  const root = tempRoot();
+  const r = await runConfig(['init', '--architect', 'lead@x.com', '--platform', 'gitlab', '--default-branch', 'trunk'], root);
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(r.stdout, 'rad config init: wrote .rad/config.yml (architect=lead@x.com, platform=gitlab, default_branch=trunk)\n');
+  const loaded = await loadConfig(root);
+  assert.equal(loaded.ok, true, JSON.stringify(loaded.errors));
+  assert.deepEqual(loaded.doc, {
+    version: 1, platform: 'gitlab', default_branch: 'trunk',
+    roles: { architect: ['lead@x.com'], developers: [], designers: [] }, agent_scope_map: [],
+  });
+  assert.equal((await runConfig(['validate'], root)).code, 0);
+});
+
+test('rad config init: architect defaults to the repo git user.email; platform/branch default manual/main', async () => {
+  const root = gitRepoWithEmail('git-arch@example.com');
+  const r = await runConfig(['init'], root);
+  assert.equal(r.code, 0, r.stderr);
+  assert.match(r.stdout, /architect=git-arch@example\.com, platform=manual, default_branch=main/);
+  assert.equal((await runConfig(['validate'], root)).code, 0);
+  assert.deepEqual((await runConfig(['get', 'roles.architect'], root)).stdout, 'git-arch@example.com\n');
+});
+
+test('rad config init: --architect overrides the git email', async () => {
+  const root = gitRepoWithEmail('git-arch@example.com');
+  const r = await runConfig(['init', '--architect', 'override@x.com'], root);
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal((await loadConfig(root)).doc.roles.architect[0], 'override@x.com');
+});
+
+test('rad config init: no identity → exit 1 naming --architect, nothing written', async () => {
+  const root = tempRoot();
+  const r = await withNoGitIdentity(() => runConfig(['init'], root));
+  assert.equal(r.code, 1);
+  assert.match(r.stderr, /no architect identity .*pass --architect <id>/);
+  assert.equal(existsSync(join(root, CONFIG_PATH)), false);
+});
+
+test('rad config init: invalid platform, placeholder and empty architect → exit 1, nothing written', async () => {
+  const cases = [
+    { argv: ['--architect', 'a@x.com', '--platform', 'bogus'], err: /platform/ },
+    { argv: ['--architect', '[your GitHub username]'], err: /template placeholder/ },
+    { argv: ['--architect', ''], err: /roles\.architect\[0\] must be a non-empty string/ },
+  ];
+  for (const { argv, err } of cases) {
+    const root = tempRoot();
+    const r = await runConfig(['init', ...argv], root);
+    assert.equal(r.code, 1, `${argv.join(' ')}: ${r.stderr}`);
+    assert.match(r.stderr, /refusing to write an invalid config/);
+    assert.match(r.stderr, err);
+    assert.equal(existsSync(join(root, CONFIG_PATH)), false, `nothing written for ${argv.join(' ')}`);
+  }
+});
+
+test('rad config init: refuses to overwrite without --force; --force overwrites', async () => {
+  const root = tempRoot();
+  writeConfig(root, serializeConfig(VALID));
+  const before = readFileSync(join(root, CONFIG_PATH), 'utf8');
+  const refused = await runConfig(['init', '--architect', 'new@x.com'], root);
+  assert.equal(refused.code, 1);
+  assert.match(refused.stderr, /already exists — pass --force/);
+  assert.equal(readFileSync(join(root, CONFIG_PATH), 'utf8'), before);
+  const forced = await runConfig(['init', '--architect', 'new@x.com', '--force'], root);
+  assert.equal(forced.code, 0, forced.stderr);
+  assert.equal((await loadConfig(root)).doc.roles.architect[0], 'new@x.com');
+  assert.equal((await runConfig(['validate'], root)).code, 0);
+});
+
+test('rad config init: unknown flag or a flag missing its value → exit 2 usage', async () => {
+  const root = tempRoot();
+  for (const argv of [['--what'], ['--architect'], ['--platform'], ['--default-branch'], ['--architect', '--force']]) {
+    const r = await runConfig(['init', ...argv], root);
+    assert.equal(r.code, 2, argv.join(' '));
+    assert.match(r.stderr, /Usage: .*rad config init/);
+  }
+  assert.equal(existsSync(join(root, CONFIG_PATH)), false);
 });

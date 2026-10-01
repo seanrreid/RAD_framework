@@ -49,7 +49,9 @@ bash /tmp/rad/install.sh --dir /path/to/your-project --yes
 
 ```
 your-project/
-├── CLAUDE.md                         ← scaffolded from template (fill in before use)
+├── CLAUDE.md                         ← scaffolded from template (project conventions)
+├── .rad/
+│   └── config.yml                    ← .rad/config.yml, written by `rad config init` (platform, roles, scope map)
 ├── .claude/
 │   └── commands/
 │       ├── architect/
@@ -175,10 +177,30 @@ and ask it to re-read before proceeding.
 
 ## Post-Install Setup
 
-### 1. Fill in CLAUDE.md
+### 1. Review `.rad/config.yml`, then fill in CLAUDE.md
 
-Open `CLAUDE.md` and complete every section. The RAD Configuration section
-is critical — it defines your platform, team roles, and branch conventions.
+`.rad/config.yml` is the single source for RAD's config data: `platform`,
+`default_branch`, `roles` (architect, developers, designers), and the
+`agent_scope_map`. On a fresh install, `install.sh` writes it with
+`rad config init` and prints the result for review:
+
+- `roles.architect` defaults to the installer's `git config user.email`. To use a
+  different identity, re-run with `./install.sh --architect <id>` (or run
+  `node harness/cli.js config init --architect <id> --force`).
+- `platform` defaults to `manual` and `default_branch` to `main`; edit the file
+  to change them.
+- Check the file at any time with:
+  ```bash
+  node harness/cli.js config validate
+  ```
+
+If the config could not be written (for example, no git identity and no
+`--architect`), `install.sh` finishes the rest of the install, then exits 1 and
+prints the exact `rad config init` command to run.
+
+Then open `CLAUDE.md` and complete every section. CLAUDE.md now holds your
+project conventions (stack, structure, commands, coding and testing standards);
+RAD's config data lives in `.rad/config.yml`, not CLAUDE.md.
 
 ### 2. Platform labels (usually automatic)
 
@@ -208,7 +230,7 @@ glab label create 'rad:deliver' --color '#0e8a16'
 
 ### 3. Set up branch protection (recommended)
 
-Protect your default branch (the one set as `default_branch:` in CLAUDE.md) so
+Protect your default branch (the one set as `default_branch:` in `.rad/config.yml`) so
 only designated architects can merge. This is what enforces the Gate 2 deliver
 PR review — not command access. Keeping the default branch protected is also why
 RAD routes the plan doc through the deliver PR rather than committing it directly.
@@ -223,7 +245,7 @@ gh api repos/:owner/:repo/branches/main/protection \
 ### 4. Commit the installed files
 
 ```bash
-git add .claude/ .agents/ scripts/ CLAUDE.md
+git add .claude/ .agents/ .rad/ scripts/ CLAUDE.md   # .rad/ holds .rad/config.yml
 git commit -m "chore: install RAD framework"
 git push
 ```
@@ -249,8 +271,11 @@ bash /tmp/rad/install.sh --dir /path/to/your-project --upgrade
 ```
 
 The upgrade overwrites `.claude/commands/`, `.claude/skills/`, and `scripts/`,
-and never touches `CLAUDE.md`, `.claude/agents/`, or `.agents/` content. It works
-whether or not the project was originally set up with the installer.
+and never touches `CLAUDE.md`, `.claude/agents/`, `.agents/` content, or an existing
+`.rad/config.yml`. If `.rad/config.yml` is missing, the upgrade runs
+`rad config migrate` to create it from the pre-#87 RAD Configuration block in
+CLAUDE.md (never with `--force`, never editing CLAUDE.md). It works whether or not
+the project was originally set up with the installer.
 
 See **[UPGRADE.md](UPGRADE.md)** for the full guide, including upgrading
 projects that didn't use the installer, a manual upgrade path, and how local
@@ -265,6 +290,7 @@ RAD has no daemon or global state. To remove it from a project:
 ```bash
 rm -rf .claude/commands/ .claude/skills/ scripts/
 rm -rf .agents/research/ .agents/architecture/ .agents/plans/ .agents/logs/ .agents/findings/
+rm -rf .rad/                          # removes .rad/config.yml
 rm CLAUDE.md
 git add -A
 git commit -m "chore: remove RAD framework"
@@ -290,6 +316,15 @@ to produce the agent files. See `docs/architect-guide.md`.
 The `scripts/detect-platform.sh` will fall back to manual mode. Install `gh`
 (GitHub) or `glab` (GitLab) and re-run. Manual mode is fully functional — it
 prints PR creation instructions instead of automating them.
+
+**Scripts fail with `rad: no .rad/config.yml`**
+RAD reads its platform, default branch, and roles only from `.rad/config.yml`.
+Create it with one of:
+```bash
+node harness/cli.js config init --architect <id>   # new install
+node harness/cli.js config migrate                 # from a pre-#87 CLAUDE.md
+```
+then run `node harness/cli.js config validate`.
 
 **Commands not appearing in Claude Code**
 Claude Code discovers commands from `.claude/commands/` in the project root.

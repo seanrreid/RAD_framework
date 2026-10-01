@@ -6,6 +6,12 @@
 #   - scripts/hooks/ (README + lifecycle dirs) ships
 #   - harness/cli.js loads and `rad gate` runs with NO node_modules present
 #     (proves the lazy SDK import / zero-npm property)
+#   - .rad/config.yml: fresh install runs `config init` (--architect, else the
+#     repo's git email; no identity -> files laid down, no config, exit 1);
+#     upgrade runs `config migrate` from an old CLAUDE.md block (placeholder
+#     architect -> exit 1) and never touches an existing config
+# Every installer run uses an isolated git identity (no global/system config,
+# empty HOME) so the developer's real git email never leaks into a result.
 # Self-contained: installs into a throwaway temp dir, asserts, always cleans up.
 #
 # Usage: scripts/test-install-harness.sh   (exit 0 = all assertions pass)
@@ -25,30 +31,93 @@ FAIL=0
 ok()   { echo "✓ $1"; PASS=$((PASS + 1)); }
 bad()  { echo "✗ $1"; FAIL=$((FAIL + 1)); }
 
+readonly FIXTURE_ARCHITECT="architect@example.com"
+readonly FIXTURE_EMAIL="repo-email@example.com"
+readonly MIGRATED_ARCHITECT="a@b.c"
+EMPTY_HOME="$TMP/empty-home"
+mkdir -p "$EMPTY_HOME"
+
+# Runs a command with no global/system git config and an empty HOME.
+isolated() {
+  HOME="$EMPTY_HOME" GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 "$@"
+}
+
+# run_install <target> <output-file> [install.sh args...] -> sets INSTALL_RC
+run_install() {
+  local target="$1" out="$2"
+  shift 2
+  INSTALL_RC=0
+  ( cd "$REPO_ROOT" && isolated bash install.sh --dir "$target" --yes "$@" ) >"$out" 2>&1 \
+    || INSTALL_RC=$?
+}
+
+# new_repo <name> -> echoes the path of a fresh git repo under $TMP
+new_repo() {
+  local dir="$TMP/$1"
+  mkdir -p "$dir"
+  isolated git init -q "$dir"
+  echo "$dir"
+}
+
+# Exit 0 when `config validate` passes in <target>.
+config_valid() { ( cd "$1" && isolated node harness/cli.js config validate >/dev/null 2>&1 ); }
+
+# Echoes the first roles.architect entry in <target>/.rad/config.yml.
+config_architect() { ( cd "$1" && isolated node harness/cli.js config get roles.architect 2>/dev/null ) | head -n 1; }
+
+assert_contains() { grep -qF -- "$2" "$1" && ok "$3" || bad "$3 (missing '$2' in $1)"; }
+
+# Minimal pre-#87 CLAUDE.md RAD Configuration block, with <architect> as architect.
+write_old_claude_md() {
+  cat >"$1/CLAUDE.md" <<MD
+# Project Context
+
+## RAD Configuration
+
+### Git Platform
+
+\`\`\`
+platform: github
+default_branch: main
+\`\`\`
+
+### Role Assignments
+
+\`\`\`
+architect:  $2
+developers: []
+designers:  []
+\`\`\`
+MD
+}
+
 assert_exists()     { [[ -e "$1" ]] && ok "$2" || bad "$2 (missing: $1)"; }
 assert_dir()        { [[ -d "$1" ]] && ok "$2" || bad "$2 (not a dir: $1)"; }
 assert_not_exists() { [[ ! -e "$1" ]] && ok "$2" || bad "$2 (should not exist: $1)"; }
 
 # ── 1. throwaway git repo as install target ─────────────────────────────────
-git init -q "$TMP"
+MAIN="$(new_repo main)"
 
-# ── 2. run the installer non-interactively, suppressing its stdout ──────────
-( cd "$REPO_ROOT" && bash install.sh --dir "$TMP" --yes >/dev/null )
+# ── 2. run the installer non-interactively (deterministic: --architect) ─────
+run_install "$MAIN" "$TMP/main.out" --architect "$FIXTURE_ARCHITECT"
+[[ "$INSTALL_RC" -eq 0 ]] && ok "installer exits 0 with --architect" \
+  || bad "installer exited $INSTALL_RC with --architect (see output below)"
+[[ "$INSTALL_RC" -eq 0 ]] || cat "$TMP/main.out"
 
 # ── 3a. harness source shipped; node_modules excluded ───────────────────────
-assert_exists "$TMP/harness/cli.js" "harness/cli.js shipped"
-assert_not_exists "$TMP/harness/node_modules" "harness/node_modules excluded (the ~250M dir)"
+assert_exists "$MAIN/harness/cli.js" "harness/cli.js shipped"
+assert_not_exists "$MAIN/harness/node_modules" "harness/node_modules excluded (the ~250M dir)"
 
 # ── 3b. vendored js-yaml bundle shipped ─────────────────────────────────────
-assert_exists "$TMP/harness/vendor/js-yaml.mjs" "vendored js-yaml bundle shipped"
+assert_exists "$MAIN/harness/vendor/js-yaml.mjs" "vendored js-yaml bundle shipped"
 
 # ── 3c. wave-lifecycle hooks shipped ────────────────────────────────────────
-assert_exists "$TMP/scripts/hooks/README.md" "scripts/hooks/README.md shipped"
-assert_dir "$TMP/scripts/hooks/on-error"  "scripts/hooks/on-error dir shipped"
-assert_dir "$TMP/scripts/hooks/post-wave" "scripts/hooks/post-wave dir shipped"
+assert_exists "$MAIN/scripts/hooks/README.md" "scripts/hooks/README.md shipped"
+assert_dir "$MAIN/scripts/hooks/on-error"  "scripts/hooks/on-error dir shipped"
+assert_dir "$MAIN/scripts/hooks/post-wave" "scripts/hooks/post-wave dir shipped"
 
 # ── 3d. cli.js loads with NO node_modules present (lazy SDK / zero-npm) ──────
-if node "$TMP/harness/cli.js" >/dev/null 2>&1; then
+if node "$MAIN/harness/cli.js" >/dev/null 2>&1; then
   ok "harness/cli.js loads with no node_modules present (lazy SDK import)"
 else
   bad "harness/cli.js failed to load without node_modules (exit $?)"
@@ -56,11 +125,101 @@ fi
 
 # ── 3e. `rad gate` over a synthetic approved event exits 0 (zero-npm gate) ───
 EVENT='{"feature":"x","type":"approved","actor":"a","role":"architect","ts":"2026-01-01T00:00:00Z","recordedBy":"a"}'
-if printf '%s\n' "$EVENT" | node "$TMP/harness/cli.js" gate x approved --stdin >/dev/null 2>&1; then
+if printf '%s\n' "$EVENT" | node "$MAIN/harness/cli.js" gate x approved --stdin >/dev/null 2>&1; then
   ok "rad gate x approved --stdin passes on a synthetic approved event"
 else
   bad "rad gate x approved --stdin failed (exit $?)"
 fi
+
+# ── 4a. fresh install with --architect -> valid config with that id ──────────
+assert_exists "$MAIN/.rad/config.yml" "fresh install wrote .rad/config.yml"
+config_valid "$MAIN" && ok "config validate exits 0 after fresh install" \
+  || bad "config validate failed after fresh install"
+[[ "$(config_architect "$MAIN")" == "$FIXTURE_ARCHITECT" ]] \
+  && ok "--architect recorded as roles.architect" \
+  || bad "roles.architect is '$(config_architect "$MAIN")', expected $FIXTURE_ARCHITECT"
+grep -q '^default_branch: main$' "$MAIN/.rad/config.yml" \
+  && ok "no origin remote -> default_branch main" \
+  || bad "default_branch is not main with no origin remote"
+
+# ── 4b. fresh install with only a repo-local git email -> that email ─────────
+EMAIL_T="$(new_repo email)"
+isolated git -C "$EMAIL_T" config user.email "$FIXTURE_EMAIL"
+run_install "$EMAIL_T" "$TMP/email.out"
+[[ "$INSTALL_RC" -eq 0 ]] && ok "installer exits 0 with a repo git email" \
+  || bad "installer exited $INSTALL_RC with a repo git email"
+[[ "$(config_architect "$EMAIL_T")" == "$FIXTURE_EMAIL" ]] \
+  && ok "git user.email recorded as roles.architect" \
+  || bad "roles.architect is '$(config_architect "$EMAIL_T")', expected $FIXTURE_EMAIL"
+
+# ── 4c. fresh install with no identity -> files laid down, no config, exit 1 ─
+NOID_T="$(new_repo noid)"
+run_install "$NOID_T" "$TMP/noid.out"
+[[ "$INSTALL_RC" -eq 1 ]] && ok "no identity -> installer exits 1" \
+  || bad "no identity -> installer exited $INSTALL_RC, expected 1"
+assert_exists "$NOID_T/harness/cli.js" "no identity -> harness/cli.js still laid down"
+assert_exists "$NOID_T/CLAUDE.md" "no identity -> CLAUDE.md still laid down"
+assert_not_exists "$NOID_T/.rad/config.yml" "no identity -> no .rad/config.yml"
+assert_contains "$TMP/noid.out" "node harness/cli.js config init --architect" \
+  "no identity -> output names the config init command"
+
+# ── 4d. upgrade with an old CLAUDE.md block and no config -> migrated ────────
+MIG_T="$(new_repo migrate)"
+write_old_claude_md "$MIG_T" "$MIGRATED_ARCHITECT"
+CLAUDE_BEFORE="$TMP/claude-before.md"
+cp "$MIG_T/CLAUDE.md" "$CLAUDE_BEFORE"
+run_install "$MIG_T" "$TMP/migrate.out" --upgrade
+[[ "$INSTALL_RC" -eq 0 ]] && ok "upgrade migrate -> installer exits 0" \
+  || { bad "upgrade migrate -> installer exited $INSTALL_RC"; cat "$TMP/migrate.out"; }
+config_valid "$MIG_T" && ok "migrated config validates" || bad "migrated config failed validate"
+[[ "$(config_architect "$MIG_T")" == "$MIGRATED_ARCHITECT" ]] \
+  && ok "migrated architect carried over" \
+  || bad "migrated roles.architect is '$(config_architect "$MIG_T")'"
+cmp -s "$CLAUDE_BEFORE" "$MIG_T/CLAUDE.md" && ok "upgrade never edits CLAUDE.md" \
+  || bad "upgrade modified CLAUDE.md"
+assert_contains "$TMP/migrate.out" "Remove the RAD Configuration block from CLAUDE.md" \
+  "upgrade migrate -> tells the operator to remove the old block"
+
+# ── 4e. upgrade with an existing config -> byte-for-byte unchanged ───────────
+KEEP_T="$(new_repo keep)"
+mkdir -p "$KEEP_T/.rad"
+cp "$MAIN/.rad/config.yml" "$KEEP_T/.rad/config.yml"
+CONFIG_BEFORE="$TMP/config-before.yml"
+cp "$KEEP_T/.rad/config.yml" "$CONFIG_BEFORE"
+write_old_claude_md "$KEEP_T" "$MIGRATED_ARCHITECT"
+run_install "$KEEP_T" "$TMP/keep.out" --upgrade
+[[ "$INSTALL_RC" -eq 0 ]] && ok "upgrade with config -> installer exits 0" \
+  || bad "upgrade with config -> installer exited $INSTALL_RC"
+cmp -s "$CONFIG_BEFORE" "$KEEP_T/.rad/config.yml" \
+  && ok "upgrade leaves an existing .rad/config.yml byte-for-byte unchanged" \
+  || bad "upgrade changed an existing .rad/config.yml"
+
+# ── 4f. upgrade with a placeholder architect -> no config, exit 1 ────────────
+PH_T="$(new_repo placeholder)"
+write_old_claude_md "$PH_T" "[name]"
+run_install "$PH_T" "$TMP/placeholder.out" --upgrade
+[[ "$INSTALL_RC" -eq 1 ]] && ok "placeholder architect -> installer exits 1" \
+  || bad "placeholder architect -> installer exited $INSTALL_RC, expected 1"
+assert_exists "$PH_T/harness/cli.js" "placeholder architect -> harness still laid down"
+assert_not_exists "$PH_T/.rad/config.yml" "placeholder architect -> no .rad/config.yml"
+assert_contains "$TMP/placeholder.out" "node harness/cli.js config migrate" \
+  "placeholder architect -> output names the config migrate command"
+
+# ── 4g. upgrade with no CLAUDE.md and no config -> exit 1, names init ────────
+BARE_T="$(new_repo bare)"
+run_install "$BARE_T" "$TMP/bare.out" --upgrade
+[[ "$INSTALL_RC" -eq 1 ]] && ok "upgrade without CLAUDE.md or config -> exits 1" \
+  || bad "upgrade without CLAUDE.md or config -> exited $INSTALL_RC, expected 1"
+assert_contains "$TMP/bare.out" "node harness/cli.js config init --architect" \
+  "upgrade without CLAUDE.md -> output names the config init command"
+
+# ── 4h. --architect with no value -> usage error ────────────────────────────
+USAGE_T="$(new_repo usage)"
+run_install "$USAGE_T" "$TMP/usage.out" --architect
+[[ "$INSTALL_RC" -eq 1 ]] && ok "--architect without a value -> usage error (exit 1)" \
+  || bad "--architect without a value -> exited $INSTALL_RC, expected 1"
+assert_contains "$TMP/usage.out" "--architect requires a value" "--architect usage error names the flag"
+assert_not_exists "$USAGE_T/harness" "--architect usage error installs nothing"
 
 # ── summary ─────────────────────────────────────────────────────────────────
 echo "─────────────────────────────────────────"

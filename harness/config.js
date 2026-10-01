@@ -302,3 +302,25 @@ export function serializeConfig(doc) {
   }
   return out.join('\n') + '\n';
 }
+
+/** Platform `rad config init` writes when none is given (never calls a host CLI). */
+export const INIT_DEFAULT_PLATFORM = 'manual';
+/** Default branch `rad config init` writes when none is given. */
+export const INIT_DEFAULT_BRANCH = 'main';
+
+/**
+ * Build a fresh config document for `rad config init`. Pure: it does not
+ * validate — the caller must run validateConfig before writing.
+ *
+ * @param {{ platform?: string, defaultBranch?: string, architect: string }} opts
+ * @returns {Object}
+ */
+export function buildInitConfig({ platform, defaultBranch, architect }) {
+  return {
+    version: CONFIG_VERSION,
+    platform: platform ?? INIT_DEFAULT_PLATFORM,
+    default_branch: defaultBranch ?? INIT_DEFAULT_BRANCH,
+    roles: { architect: [architect], developers: [], designers: [] },
+    agent_scope_map: [],
+  };
+}
