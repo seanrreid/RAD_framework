@@ -222,7 +222,8 @@ Cover:
 - What changes about their workflow (one `rad/[feature]` branch per feature,
   approval recorded on the branch tip, a single deliver PR to the default branch)
 - What doesn't change (the mental model, the phase discipline, the plan format)
-- Their specific boundaries (show the Agent Scope Map from CLAUDE.md)
+- Their specific boundaries (show the Agent Scope Map from `.rad/config.yml`,
+  via `node harness/cli.js config get agent_scope_map` or `/rad-status`)
 - The onboarding doc location (`docs/onboarding.md`)
 
 ### Step 2: Onboard one at a time

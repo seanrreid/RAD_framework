@@ -58,13 +58,13 @@ Reads the research artifact and writes an architecture draft to
 - The full agent hierarchy
 - Role assignments per agent
 - Scope and output contracts for every agent
-- The scope map ready for `CLAUDE.md`
+- The `agent_scope_map:` block ready for `.rad/config.yml`
 
 Review the draft inline. `/rad-design` presents the hierarchy and asks to
 **approve / edit / cancel** — one invocation, no separate re-run:
 - **approve** — flips `Status: draft → approved` and, in the same run, generates
-  all `.claude/agents/*.md` files in parallel and prints the Agent Scope Map block
-  to paste into `CLAUDE.md`.
+  all `.claude/agents/*.md` files in parallel and prints the `agent_scope_map:`
+  block to paste into `.rad/config.yml`.
 - **edit** — adjust role assignments, tighten scope boundaries, add constraints;
   the draft is revised and re-presented.
 - **cancel** — leave it as a draft and stop; re-run `/rad-design [slug]` later to
@@ -73,15 +73,23 @@ Review the draft inline. `/rad-design` presents the hierarchy and asks to
 No manual `Status` edit is required. (Editing `Status: approved` by hand still
 works — a pre-existing approved artifact generates directly on the next invocation.)
 
-### 3. Update CLAUDE.md
+### 3. Update .rad/config.yml
 
-Paste the Agent Scope Map block into the RAD Configuration section.
-Fill in the role assignments with your team members' usernames.
+Paste the `agent_scope_map:` block into `.rad/config.yml`, replacing the
+existing one. Fill in `roles:` (`architect`, `developers`, `designers`) with your
+team members' usernames. Then check it:
+
+```bash
+node harness/cli.js config validate
+scripts/lint-agent-files.sh
+```
+
+See `docs/configuration.md` for the full schema.
 
 ### 4. Commit and push
 
 ```bash
-git add .claude/agents/ .agents/research/ .agents/architecture/ CLAUDE.md
+git add .claude/agents/ .agents/research/ .agents/architecture/ .rad/config.yml
 git commit -m "chore: initialize RAD agent architecture"
 git push
 ```
@@ -90,7 +98,7 @@ The team can now clone and start planning.
 
 ### 5. Set up branch protection (recommended)
 
-Protect your default branch (the `default_branch:` value in `CLAUDE.md`) so
+Protect your default branch (the `default_branch:` value in `.rad/config.yml`) so
 only you can merge. This enforces the gatekeeper role at the git level, not
 just by convention. It also keeps contributors off the protected branch: under
 Lane B the plan doc and code only reach the default branch through the single

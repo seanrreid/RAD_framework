@@ -73,7 +73,7 @@ artifact to `.agents/research/`. No code, no branch — just understanding.
 ### Phase 2 — Architecture (architect, once per project)
 `/rad-design` consumes the research and produces the agent architecture:
 `.agents/architecture/[slug].md`, the `.claude/agents/` boundary files, and the
-**Agent Scope Map** in CLAUDE.md. Run once to draft, review, then re-run to
+**`agent_scope_map`** block for `.rad/config.yml`. Run once to draft, review, then re-run to
 generate. This defines which agents exist and what each is allowed to touch.
 
 ### Phase 3 — Plan (any team member)
@@ -167,11 +167,11 @@ rules. You can run any of them by hand.
 | Role | Can | Configured in |
 |---|---|---|
 | Anyone | `/rad-research` | — |
-| Developer / Designer | `/rad-plan`, `/rad-adopt`, `/rad-deliver`, `/rad-review` within their agent scope | CLAUDE.md → Role Assignments |
-| Architect | `/rad-design`, `/rad-approve`, and merging deliver PRs | CLAUDE.md → Role Assignments |
+| Developer / Designer | `/rad-plan`, `/rad-adopt`, `/rad-deliver`, `/rad-review` within their agent scope | `.rad/config.yml` → `roles` |
+| Architect | `/rad-design`, `/rad-approve`, and merging deliver PRs | `.rad/config.yml` → `roles.architect` |
 
-Role gating is enforced by `check-role.sh` against CLAUDE.md. If the Role
-Assignments are still placeholders, role-gated commands won't have a configured
+Role gating is enforced by `check-role.sh` against `.rad/config.yml` (see
+`docs/configuration.md`). If the `roles` entries are still placeholders, role-gated commands won't have a configured
 identity to match — fill them in before relying on the gate.
 
 ---

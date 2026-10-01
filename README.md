@@ -73,8 +73,9 @@ PR. The plan doc and the code reach the default branch together through that
 single reviewed PR, which keeps contributors off the protected default branch.
 There is no plan PR.
 
-The default branch is whatever you set as `default_branch:` in CLAUDE.md
-(resolved by `scripts/get-default-branch.sh`) — it is never hardcoded.
+The default branch is whatever you set as `default_branch:` in `.rad/config.yml`
+(resolved by `scripts/get-default-branch.sh`; see `docs/configuration.md`) — it
+is never hardcoded.
 
 ## Two Gates
 
