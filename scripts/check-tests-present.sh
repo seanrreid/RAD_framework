@@ -29,6 +29,11 @@ UNRESOLVABLE=()
 # FINAL separator, so a line ending in a bare separator stays unresolvable.
 
 FILE_SEPARATOR='— '
+# A single trailing " (...)" group after the path is an annotation, e.g.
+# "path/to/test.sh (Amendment 1)". Whitespace must precede it, so parentheses
+# inside a path are kept; a bare group with no path before it is unresolvable.
+ANNOTATED_PATH_RE='^(.*[^[:space:]])[[:space:]]+\([^()]*\)$'
+ANNOTATION_ONLY_RE='^\([^()]*\)$'
 
 while IFS= read -r line; do
   if [[ "$line" =~ —[[:space:]]+[^[:space:]]. ]]; then
@@ -36,8 +41,11 @@ while IFS= read -r line; do
     # Strip Markdown backticks (authors commonly wrap the path) and surrounding space.
     testfile="${testfile//\`/}"
     testfile=$(echo "$testfile" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+    if [[ "$testfile" =~ $ANNOTATED_PATH_RE ]]; then
+      testfile="${BASH_REMATCH[1]}"
+    fi
 
-    if [[ -z "$testfile" || "$testfile" == "[file]" ]]; then
+    if [[ -z "$testfile" || "$testfile" == "[file]" || "$testfile" =~ $ANNOTATION_ONLY_RE ]]; then
       UNRESOLVABLE+=("$line")
       continue
     fi
