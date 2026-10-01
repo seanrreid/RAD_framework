@@ -8,3 +8,5 @@ Executor role: architect
 
 | Step | Wave | Task | Status | Commit | Time |
 |------|------|------|--------|--------|------|
+| 1 | Wave 1 | CLAUDE.md pointer + docs/configuration.md | ⚠ done_with_concerns | 7b0c292 | 17:55Z |
+| 2 | Wave 1 | Advisory CLAUDE.md line-budget lint | ✓ complete | a33b36b | 17:55Z |
