@@ -9,11 +9,12 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly CONFIG_ERROR_EXIT=1
 
 # Parse args
 TITLE=""
 BODY=""
-BASE="$("$SCRIPT_DIR/get-default-branch.sh" 2>/dev/null || echo main)"
+BASE=""
 HEAD=""
 DRAFT="--draft"
 # Indexed array (bash 3.2 safe) — never a space-joined string, so no leading
@@ -39,6 +40,16 @@ done
 
 [[ -z "$TITLE" ]] && { echo "ERROR: --title is required"; exit 1; }
 [[ -z "$HEAD" ]]  && { echo "ERROR: --head is required";  exit 1; }
+
+# Resolved after argument parsing so an explicit --base skips the lookup. A
+# config error fails closed: the lookup's stderr reason passes through and no PR
+# is opened against a guessed `main`.
+if [[ -z "$BASE" ]]; then
+  BASE=$("$SCRIPT_DIR/get-default-branch.sh") || {
+    echo "ERROR: open-pr: cannot resolve the default branch (reason above); pass --base explicitly. No PR opened." >&2
+    exit "$CONFIG_ERROR_EXIT"
+  }
+fi
 
 PLATFORM=$("$SCRIPT_DIR/detect-platform.sh" --quiet)
 REMOTE_URL=$(git remote get-url origin 2>/dev/null || echo "")

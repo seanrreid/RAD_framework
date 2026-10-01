@@ -22,6 +22,26 @@ CURRENT_BRANCH=$(git branch --show-current 2>/dev/null || echo "unknown")
 PROJECT_NAME=$(grep "^\*\*Name:" CLAUDE.md 2>/dev/null | head -1 | sed 's/\*\*Name:\*\*[[:space:]]*//' || basename "$(pwd)")
 NOW=$(date -u "+%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date "+%Y-%m-%dT%H:%M:%SZ")
 
+# ── Default branch ────────────────────────────────────────────────────────────
+
+# A status board is advisory, not a gate: an unresolved default branch warns on
+# stderr with the lookup's reason and assumes main, never silently.
+readonly STATUS_FALLBACK_BRANCH="main"
+
+resolve_status_base() {
+  local err_file base reason
+  err_file=$(mktemp "${TMPDIR:-/tmp}/rad-status-base.XXXXXX")
+  if base=$("$SCRIPT_DIR/get-default-branch.sh" 2>"$err_file"); then
+    rm -f "$err_file"
+    echo "$base"
+    return 0
+  fi
+  reason=$(tr -s '[:space:]' ' ' < "$err_file" | sed 's/[[:space:]]*$//')
+  rm -f "$err_file"
+  echo "warning: default branch unresolved (${reason}), assuming ${STATUS_FALLBACK_BRANCH}" >&2
+  echo "$STATUS_FALLBACK_BRANCH"
+}
+
 # ── CLI availability ──────────────────────────────────────────────────────────
 
 cli_available() {
@@ -87,7 +107,7 @@ collect_plans() {
     done < <(git branch -r --list "origin/${PREFIX}*" 2>/dev/null | sed 's/^[[:space:]]*//')
 
     # 2. Merged: plan docs that have landed on the default branch.
-    base=$("$SCRIPT_DIR/get-default-branch.sh" 2>/dev/null || echo main)
+    base=$(resolve_status_base)
     while read -r path; do
       [[ -z "$path" ]] && continue
       feature=$(basename "$path" .md)
@@ -223,7 +243,7 @@ list_research_paths() {
 collect_research() {
   local base ref branch path
 
-  base=$("$SCRIPT_DIR/get-default-branch.sh" 2>/dev/null || echo main)
+  base=$(resolve_status_base)
   # One subshell (piped to sort) so SEEN_RESEARCH stays consistent across passes.
   {
     # 1. In-flight: research on each rad/ branch tip. A branch cut from the base
