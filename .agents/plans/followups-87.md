@@ -1,7 +1,10 @@
 # Plan: Follow-ups from #87
 Created: 2026-10-01
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-10-01T20:13:17.279Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/followups-87
 Adopted-From: https://github.com/seanrreid/RAD_framework/issues/174
 Issue-Title: Follow-ups from #87: fail-closed default-branch reads, lint-plan en-dash crash, tests-present annotation parsing, notices
