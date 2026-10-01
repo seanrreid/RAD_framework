@@ -31,10 +31,22 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 CLI="$REPO_ROOT/harness/cli.js"
 
+readonly CONFIG_ERROR_EXIT=1
+
 WORK_BRANCH="${1:-}"
-BASE_BRANCH="${2:-$("$SCRIPT_DIR/get-default-branch.sh" 2>/dev/null || echo main)}"
 
 [[ -z "$WORK_BRANCH" ]] && { echo "ERROR: work branch name required (e.g. rad/<feature>)"; exit 1; }
+
+# An explicit base skips the lookup. Otherwise a config error fails closed: the
+# lookup's own stderr reason passes through and no ref is compared against main.
+if [[ -n "${2:-}" ]]; then
+  BASE_BRANCH="$2"
+else
+  BASE_BRANCH=$("$SCRIPT_DIR/get-default-branch.sh") || {
+    echo "ERROR: check-plan-approved: cannot resolve the default branch (reason above); pass a base branch explicitly" >&2
+    exit "$CONFIG_ERROR_EXIT"
+  }
+fi
 
 # Strip any prefix (rad/, plan/, deliver/) to get the feature slug → event-log path.
 FEATURE="${WORK_BRANCH##*/}"

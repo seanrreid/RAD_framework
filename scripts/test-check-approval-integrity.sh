@@ -240,4 +240,40 @@ if grep -q "non-default high-risk pattern" "$TMP/out"; then
 fi
 echo "✓ case 11: only the gating approved event's highRiskPattern is reported"
 
+# ── Case 12 (AC#1): broken config + no base → exit 2, reason printed, no main ──
+# A copy of the temp RAD checkout with an unparseable .rad/config.yml. The run
+# must stop at the default-branch lookup: no event-log lookup, so no ref is
+# compared against main. (Absent-key → main is covered by
+# test-check-plan-approved.sh cases (l) and (o).)
+BROKEN_RAD="$TMP/rad-broken"
+cp -R "$RAD" "$BROKEN_RAD"
+printf 'version: [unterminated\n' > "$BROKEN_RAD/.rad/config.yml"
+set +e
+( cd "$REPO" && bash "$BROKEN_RAD/scripts/check-approval-integrity.sh" rad/f1 ) > "$TMP/out" 2>&1
+code=$?
+set -e
+[[ "$code" -eq 2 ]] || { cat "$TMP/out"; fail "case 12: broken config with no base should exit 2 (got $code)"; }
+grep -qF "cannot read default_branch from .rad/config.yml" "$TMP/out" \
+  || { cat "$TMP/out"; fail "case 12: the get-default-branch reason must be printed"; }
+grep -qF "cannot resolve the default branch" "$TMP/out" \
+  || { cat "$TMP/out"; fail "case 12: the gate must name the unresolved default branch"; }
+if grep -qF "origin/main" "$TMP/out" || grep -q "^PASS:" "$TMP/out"; then
+  cat "$TMP/out"; fail "case 12: no ref may be compared against main on a config error"
+fi
+echo "✓ case 12: broken config + no base fails closed (exit 2, reason printed, no main compare)"
+
+# ── Case 13 (AC#1): broken config + explicit base → lookup skipped ────────────
+# The architect comes from the override so the broken config is never read.
+git -C "$REPO" checkout -q rad/f1
+set +e
+( cd "$REPO" && RAD_ARCHITECT_OVERRIDE="$ARCH_EMAIL" \
+    bash "$BROKEN_RAD/scripts/check-approval-integrity.sh" rad/f1 main ) > "$TMP/out" 2>&1
+code=$?
+set -e
+[[ "$code" -eq "$CASE1_CODE" ]] || { cat "$TMP/out"; fail "case 13: explicit base must skip the lookup (got $code, want $CASE1_CODE)"; }
+if grep -qF "cannot resolve the default branch" "$TMP/out"; then
+  cat "$TMP/out"; fail "case 13: explicit base must not report a default-branch error"
+fi
+echo "✓ case 13: explicit base with a broken config skips the lookup"
+
 echo "ALL PASS"

@@ -15,13 +15,25 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+readonly CONFIG_ERROR_EXIT=2
+
 PLAN_FILE="${1:-}"
 DELIVER_BRANCH="${2:-}"
-BASE_BRANCH="${3:-$("$SCRIPT_DIR/get-default-branch.sh" 2>/dev/null || echo main)}"
 
 [[ -z "$PLAN_FILE" ]]      && { echo "ERROR: plan file required";    exit 2; }
 [[ -z "$DELIVER_BRANCH" ]] && { echo "ERROR: work branch required"; exit 2; }
 [[ ! -f "$PLAN_FILE" ]]    && { echo "ERROR: plan file not found: $PLAN_FILE"; exit 2; }
+
+# An explicit base skips the lookup. Otherwise a config error fails closed: the
+# lookup's own stderr reason passes through and no diff is taken against main.
+if [[ -n "${3:-}" ]]; then
+  BASE_BRANCH="$3"
+else
+  BASE_BRANCH=$("$SCRIPT_DIR/get-default-branch.sh") || {
+    echo "ERROR: check-scope: cannot resolve the default branch (reason above); pass a base branch explicitly" >&2
+    exit "$CONFIG_ERROR_EXIT"
+  }
+fi
 
 # ── Build declared scope set ──────────────────────────────────────────────────
 # Newline-delimited list rather than an associative array, so this runs on
