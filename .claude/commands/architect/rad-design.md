@@ -3,7 +3,8 @@ description: >
   ARCHITECT ONLY. Consume a research artifact and produce the project's agent
   architecture. Run after /rad-research: it designs the agent hierarchy, presents
   it for inline approval, and on approval generates the .claude/agents/ files and
-  the CLAUDE.md scope map — all in one invocation. No separate re-run required.
+  the agent_scope_map block for .rad/config.yml — all in one invocation. No
+  separate re-run required.
 ---
 
 # /rad-design
@@ -240,26 +241,30 @@ Body sections (use exactly these headings):
 
 Wait for all sub-agents to complete before proceeding.
 
-### Step 7: Generate the CLAUDE.md scope map
+### Step 7: Generate the agent_scope_map block
 
-Read the current `CLAUDE.md`. Find the `### Agent Scope Map` section.
+The scope map lives in `.rad/config.yml` under `agent_scope_map:` (see
+`docs/configuration.md`). Generate the replacement block from the architecture
+artifact's Scope Map table, one row per agent:
 
-Generate the replacement block from the architecture artifact's Scope Map table:
-
-```markdown
-### Agent Scope Map
-
-| Agent | Type | Reads | Roles |
-|-------|------|-------|-------|
-[one row per agent from the architecture artifact]
+```yaml
+agent_scope_map:
+  - agent: [agent-name]
+    type: [parent-orchestrator | role-orchestrator | context-tool | reviewer]
+    reads: [what it reads, or "nothing"]
+    roles: [architect]
+[one { agent, type, reads, roles } row per agent from the architecture artifact]
 ```
 
 Print the block and tell the architect:
 ```
-Paste this into CLAUDE.md under '### Agent Scope Map', replacing the existing table.
+Paste this into .rad/config.yml, replacing the existing agent_scope_map: block.
+Then run:
+  node harness/cli.js config validate
+  scripts/lint-agent-files.sh
 ```
 
-Do not write to CLAUDE.md directly — the architect pastes it in.
+Do not write to `.rad/config.yml` directly — the architect pastes it in.
 
 ### Step 8: Print installation summary
 
@@ -269,10 +274,11 @@ Agent files generated: [N]
 
 Next steps:
 
-1. Paste the Scope Map above into CLAUDE.md → ### Agent Scope Map
+1. Paste the agent_scope_map block above into .rad/config.yml, then run
+   node harness/cli.js config validate and scripts/lint-agent-files.sh
 
-2. Commit the generated files:
-   git add .claude/agents/ .agents/architecture/[slug].md
+2. Commit the generated files and the updated config:
+   git add .claude/agents/ .agents/architecture/[slug].md .rad/config.yml
    git commit -m "feat(agents): generate [project name] agent architecture"
 
 3. Distribute architect commands to architect machines only (do not commit):
@@ -288,7 +294,7 @@ Next steps:
 - If an approved architecture artifact already exists, skip straight to Generate — never re-run Design & Approve over it
 - Never enter Generate (Step 5+) until the architect has approved — either inline (the Step 4 approve prompt) or via a pre-existing `Status: approved` artifact. The inline approval is the review gate; do not bypass it
 - The inline approve/edit/cancel prompt is the ONLY place the command stops for the architect — never dead-end on "edit Status and re-run"
-- Never write to CLAUDE.md directly — print the scope map block for the architect to paste
+- Never write `.rad/config.yml` directly — print the `agent_scope_map:` block for the architect to paste
 - Once approved, resolve any remaining ambiguity from the architecture artifact — do not re-ask questions already settled in Design & Approve
 - Context tool files must have `model: claude-haiku-4-5-20251001`
 - Orchestrator files must have `model: claude-sonnet-4-6`

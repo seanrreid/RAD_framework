@@ -26,5 +26,7 @@ scripts/rad-status.sh
 The script outputs platform detection, all plan statuses, open PRs (if a
 platform CLI is available), recent execution logs, and agent inventory.
 
-After the script output, render the Agent Scope Map from `CLAUDE.md` so the
-team can see role boundaries at a glance.
+After the script output, render the Agent Scope Map from
+`node harness/cli.js config get agent_scope_map` (one JSON row per agent, read
+from `.rad/config.yml`) as an Agent / Type / Reads / Roles table so the team can
+see role boundaries at a glance.
