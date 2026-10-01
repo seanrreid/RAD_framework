@@ -8,3 +8,5 @@ Executor role: architect
 
 | Step | Wave | Task | Status | Commit | Time |
 |------|------|------|--------|--------|------|
+| 1 | Wave 1 | rad config init | ✓ complete | 318e654 | 13:37 |
+| 2 | Wave 1 | Docs — INSTALL.md + UPGRADE.md | ✓ complete | b3768be | 13:38 |
