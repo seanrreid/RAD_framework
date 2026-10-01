@@ -14,7 +14,8 @@
 #   .rad/config.yml.
 #
 # Output: the branch name on stdout.
-# Exit codes: 0 = branch printed; 1 = missing/invalid config or harness failure.
+# Exit codes: 0 = branch printed; 1 = missing/invalid config, harness failure,
+#   or a harness that exited 0 with no output.
 
 set -euo pipefail
 
@@ -53,8 +54,10 @@ if [[ "$rc" -ne 0 ]]; then
   exit 1
 fi
 
+# Exit 0 with no output means the CLI never answered (e.g. the #168 symlink
+# main-module guard) — an error, never an empty branch name or a silent `main`.
 if [[ -z "$branch" ]]; then
-  echo "$FALLBACK"
-else
-  echo "$branch"
+  echo "get-default-branch: rad config get default_branch exited 0 with no output — failing closed" >&2
+  exit 1
 fi
+echo "$branch"

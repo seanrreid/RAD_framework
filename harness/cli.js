@@ -19,7 +19,7 @@
 
 import { fileURLToPath } from 'node:url';
 import { basename, dirname, join, resolve } from 'node:path';
-import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync, realpathSync } from 'node:fs';
 import process from 'node:process';
 import { spawnSync } from 'node:child_process';
 
@@ -2741,8 +2741,33 @@ export async function configCommand(argv, ctx) {
   return run(args, ctx.repoRoot);
 }
 
+/**
+ * True when `invokedPath` (process.argv[1]) names this module. Both sides are
+ * compared by realpath: import.meta.url is always the real path, while argv[1]
+ * is the path as invoked — through a symlink a raw compare is false and main()
+ * silently never runs (#168, a fail-open gate bypass). If realpath throws (the
+ * invoked path does not exist) the raw strings are compared instead, which can
+ * only under-match, never run main() for a foreign path.
+ *
+ * @param {string | undefined} invokedPath - process.argv[1]
+ * @param {string} modulePath - fileURLToPath(import.meta.url)
+ * @returns {boolean}
+ */
+export function isMainModule(invokedPath, modulePath) {
+  if (!invokedPath) return false;
+  let invoked;
+  let self;
+  try {
+    invoked = realpathSync(invokedPath);
+    self = realpathSync(modulePath);
+  } catch {
+    return invokedPath === modulePath;
+  }
+  return invoked === self;
+}
+
 // Run only when invoked as a script (not when imported by a test).
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+if (isMainModule(process.argv[1], fileURLToPath(import.meta.url))) {
   main(process.argv.slice(2))
     .then((code) => process.exit(code))
     .catch((err) => {

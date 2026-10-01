@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, readFileSync, existsSync, mkdirSync, writeFileSync, chmodSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, existsSync, mkdirSync, writeFileSync, chmodSync, symlinkSync } from 'node:fs';
 import { basename, join, dirname, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 import {
   approveCommand, gateCommand, parsePlanCtx, deliverCommand, stopStatusCommand, forecastCommand, digestCommand,
-  resolveHooksDir, makeSpineScriptPort, SCRIPT_ARG_KEYS, reviewCommand, resolveAgent,
+  resolveHooksDir, makeSpineScriptPort, SCRIPT_ARG_KEYS, reviewCommand, resolveAgent, isMainModule,
 } from '../cli.js';
 import { buildReviewPrompt, reviewInstruction } from '../review.js';
 import { REVIEW_INSTRUCTION } from '../evals/reviewers/lib.js';
@@ -1693,4 +1693,85 @@ test('review AC#7 — two lanes: rad review runs B while deliver resolution stil
     assert.equal(existsSync(join(repoRoot, 'laneA.dump.json')), false);
     assert.equal(existsSync(join(repoRoot, 'laneB.dump.json')), true);
   });
+});
+
+// ---------------------------------------------------------------------------
+// #168 — main-module guard through a symlinked path
+//
+// import.meta.url is the real path; argv[1] is the path as invoked. A raw
+// compare made every verb a silent exit 0 through a symlink, so the approval
+// gate read as passed. The guard compares realpaths.
+// ---------------------------------------------------------------------------
+
+const REPO_ROOT = resolve(HERE, '..', '..');
+
+/** Run `node <symlink-to-repo>/harness/cli.js ...argv`; returns { status, stdout, stderr }. */
+function withSymlinkedCli(fn) {
+  const dir = mkdtempSync(join(tmpdir(), 'rad-cli-symlink-'));
+  const link = join(dir, 'link');
+  symlinkSync(REPO_ROOT, link, 'dir');
+  const run = (argv) => {
+    try {
+      const stdout = execFileSync(process.execPath, [join(link, 'harness', 'cli.js'), ...argv], {
+        encoding: 'utf8', cwd: link, stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      return { status: 0, stdout, stderr: '' };
+    } catch (err) {
+      return { status: err.status ?? 1, stdout: err.stdout ?? '', stderr: err.stderr ?? '' };
+    }
+  };
+  try {
+    return fn(run);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test('#168 AC#4 — symlinked gate on an unknown feature exits 1 with passed=false', () => {
+  withSymlinkedCli((run) => {
+    const { status, stdout } = run(['gate', 'no-such-feature-168', 'approved']);
+    assert.equal(status, 1, `symlinked gate must fail closed; got ${status}, stdout:\n${stdout}`);
+    assert.ok(stdout.includes('passed=false'), `stdout should report passed=false; got:\n${stdout}`);
+  });
+});
+
+test('#168 AC#4 — symlinked config validate runs and prints a verdict', () => {
+  const real = run168Real(['config', 'validate']);
+  withSymlinkedCli((run) => {
+    const { status, stdout, stderr } = run(['config', 'validate']);
+    assert.ok((stdout + stderr).trim().length > 0, 'symlinked config validate must print output, not exit silently');
+    assert.equal(status, real.status, 'symlinked exit code matches the real-path exit code');
+  });
+});
+
+/** Run the CLI through its real path from the repo root, for comparison. */
+function run168Real(argv) {
+  try {
+    execFileSync(process.execPath, [CLI, ...argv], { encoding: 'utf8', cwd: REPO_ROOT, stdio: ['ignore', 'pipe', 'pipe'] });
+    return { status: 0 };
+  } catch (err) {
+    return { status: err.status ?? 1 };
+  }
+}
+
+test('#168 — isMainModule: argv[1] undefined never runs main', () => {
+  assert.equal(isMainModule(undefined, CLI), false);
+  assert.equal(isMainModule('', CLI), false);
+});
+
+test('#168 — isMainModule: a symlinked invocation path matches the real module path', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'rad-ismain-'));
+  try {
+    const link = join(dir, 'cli-link.js');
+    symlinkSync(CLI, link);
+    assert.equal(isMainModule(link, CLI), true);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('#168 — isMainModule: nonexistent argv[1] falls back to the raw string compare', () => {
+  const ghost = join(tmpdir(), 'rad-no-such-dir-168', 'cli.js');
+  assert.equal(isMainModule(ghost, ghost), true, 'identical raw strings still match');
+  assert.equal(isMainModule(ghost, CLI), false, 'a foreign nonexistent path never matches');
 });
