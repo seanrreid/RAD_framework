@@ -1,7 +1,7 @@
 # Plan: RAD Config Init + Install/Upgrade (#87 part 2a)
 Created: 2026-10-01
 Author: architect
-Status: approved
+Status: in-progress
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-10-01T17:34:13.761Z
 Recorded-By: sean@torchcodelab.com
