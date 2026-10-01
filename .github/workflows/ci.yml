@@ -91,6 +91,13 @@ jobs:
       - uses: actions/checkout@v4
       - run: scripts/lint-agent-files.sh
 
+  # All PRs — CLAUDE.md line budget, ADVISORY (#87): warns over budget, fails only on a missing file.
+  claude-md-budget:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: scripts/lint-claude-md.sh
+
   # All PRs — shell-safety lint over scripts/ (fail-closed; baseline-gated warnings).
   shell-safety-lint:
     runs-on: ubuntu-latest
