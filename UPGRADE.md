@@ -14,7 +14,8 @@ installer.
 | `.claude/commands/` | **Overwritten** — all command files refreshed |
 | `.claude/skills/` | **Overwritten** — all RAD skills refreshed |
 | `scripts/` | **Overwritten** — all `*.sh` helpers refreshed |
-| `CLAUDE.md` | Never touched — your project configuration |
+| `CLAUDE.md` | Never touched — your project conventions |
+| `.rad/config.yml` | Never touched — your config data (platform, default branch, roles, scope map). Created by `rad config migrate` only when missing |
 | `.claude/agents/` | Never touched — your generated agent boundaries |
 | `.agents/` | Never touched — your research, architecture, plans, logs, findings |
 
@@ -76,8 +77,10 @@ git add .claude/commands/ .claude/skills/ scripts/
 git commit -m "chore: upgrade RAD framework to latest"
 ```
 
-Do **not** copy `CLAUDE.md`, `.claude/agents/`, or `.agents/` content — those
-belong to your project.
+Do **not** copy `CLAUDE.md`, `.rad/config.yml`, `.claude/agents/`, or `.agents/`
+content — those belong to your project. If the project has no `.rad/config.yml`
+yet, create it as described in
+[Upgrading to .rad/config.yml (#87)](#upgrading-to-radconfigyml-87).
 
 ---
 
@@ -121,7 +124,7 @@ branch.
 deliver PR being reviewed and merged.
 
 **Default branch is configurable.** Nothing hardcodes `main` anymore. Set
-`default_branch:` in CLAUDE.md; the framework resolves it via
+`default_branch:` in `.rad/config.yml`; the framework resolves it via
 `scripts/get-default-branch.sh`.
 
 **Proxy approval.** A non-architect can record an approval the architect gave
@@ -135,7 +138,7 @@ out-of-band:
 
 The upgrade installs three new helpers into `scripts/`:
 
-- `get-default-branch.sh` — resolves the default branch from CLAUDE.md
+- `get-default-branch.sh` — resolves the default branch from `.rad/config.yml`
 - `checkout-plan.sh` — checks out a plan's `rad/[feature]` branch
 - `rad-label.sh` — applies RAD labels to a PR
 
@@ -167,6 +170,55 @@ Drop the old `rad:plan` plan-PR label (unused in v2). Keep `rad:deliver`. Note
 that `rad:pending-review` is no longer a plan-PR label — it is now one of the
 `rad:<status>` board labels that `scripts/rad-label.sh` creates and manages
 automatically on first use. See INSTALL.md for the current label set.
+
+---
+
+## Upgrading to .rad/config.yml (#87)
+
+RAD's config data (`platform`, `default_branch`, `roles`, and the
+`agent_scope_map`) moved out of CLAUDE.md into `.rad/config.yml`. This is a
+**hard cutover**: the scripts and harness read only `.rad/config.yml`, and they
+error with `rad: no .rad/config.yml` when it is missing. They no longer read the
+RAD Configuration block in CLAUDE.md.
+
+### Automatic: `install.sh --upgrade`
+
+When `.rad/config.yml` is missing, `install.sh --upgrade` runs
+`rad config migrate`, which reads the pre-#87 RAD Configuration block in your
+CLAUDE.md and writes `.rad/config.yml`. It never passes `--force` (an existing
+config is left alone) and never edits CLAUDE.md. Review and commit the result:
+
+```bash
+node harness/cli.js config validate
+git add .rad/
+git commit -m "chore: add .rad/config.yml"
+```
+
+### Afterward: remove the old block from CLAUDE.md
+
+`rad config migrate` prints the line ranges of the config blocks it read. Once
+`.rad/config.yml` is committed, delete those blocks (Git Platform, Role
+Assignments, Agent Scope Map) from CLAUDE.md by hand. They are no longer read,
+so leaving them only invites drift.
+
+### Manual path
+
+Run the migration yourself from the project root:
+
+```bash
+node harness/cli.js config migrate [--from <path>]
+node harness/cli.js config validate
+```
+
+`--from` points at a CLAUDE.md other than `./CLAUDE.md`. The migration refuses
+to overwrite an existing `.rad/config.yml` unless you pass `--force`, and it
+fails (writing nothing) if a required key is missing or still a template
+placeholder. If you have no pre-#87 CLAUDE.md block to migrate from, create a
+fresh config instead:
+
+```bash
+node harness/cli.js config init --architect <id>
+```
 
 ---
 
