@@ -140,4 +140,12 @@ mkdir -p "$TMP/norepo"
 [[ "$(last_line)" == "manual" ]] || fail "outside repo: got [$(last_line)]"
 ok "outside a git repo → manual"
 
+# 10. No .rad/config.yml → the notice names both remedies: init (new install)
+#     and migrate (pre-#87 CLAUDE.md).
+repo=$(new_repo noconfig "git@github.com:o/r.git")
+run_detect "$repo"
+grep -qF "rad config init" "$TMP/err" || fail "no config: notice lacks 'rad config init': [$(cat "$TMP/err")]"
+grep -qF "rad config migrate" "$TMP/err" || fail "no config: notice lacks 'rad config migrate': [$(cat "$TMP/err")]"
+ok "no config → notice names rad config init and rad config migrate"
+
 echo "ALL PASS ($PASS cases)"
