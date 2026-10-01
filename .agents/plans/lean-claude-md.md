@@ -120,11 +120,12 @@ No mapper agents were used. The surface was mapped directly with greps:
 | docs/apply-to-existing.md | 220-230 | Scope map location |
 | docs/rad-cli.md | 644-652 | Authenticity identity source |
 | docs/rad-cli.md | 704-714 | Scope-map sync source |
+| harness/test/config.test.js | 186-197 | Amendment 1: the live-CLAUDE.md migrate test becomes a "CLAUDE.md carries no config" guard |
 
 ## Execution Notes
 
 ### Do Not Touch
-- `harness/` and `scripts/` other than the two new lint files
+- `harness/` and `scripts/` other than the two new lint files and (Amendment 1) the one test in `harness/test/config.test.js:186-197`
 - `.rad/config.yml`
 - `.claude/agents/`
 - INSTALL.md, UPGRADE.md
@@ -187,8 +188,18 @@ Validate: AC#6, AC#7:
 
 This is a docs-only task, so beyond the greps its surface is checked by review.
 
+#### Task 2.3: Live-CLAUDE.md migrate test becomes a no-config guard
+File: harness/test/config.test.js:186-197
+What: Amendment 1. The test "migrate: this repo's CLAUDE.md deep-equals the committed .rad/config.yml" parses config blocks out of the live CLAUDE.md, which AC#1 removes, so it fails after Wave 1. Replace it with "this repo's CLAUDE.md carries no config; .rad/config.yml is the source":
+- the committed `.rad/config.yml` loads `ok` and `roles.architect[0]` is `sean@torchcodelab.com` (kept from the old test);
+- `migrateFromClaudeMd` on the live CLAUDE.md reports every required key missing (`platform`, `default_branch`, `roles.architect`) and returns no blocks.
+
+The fixture-based migrate tests (around line 168) still cover the parser.
+Validate: AC#1, AC#7 (amendment 1): `npm test --prefix harness` is fully green. Edge case: the guard must fail if a `### Git Platform` or `### Role Assignments` block is put back into CLAUDE.md. Check this once by hand on a scratch copy.
+
 ## Tests to Write
 - [ ] CLAUDE.md line-budget lint cases — scripts/test-lint-claude-md.sh
+- [ ] CLAUDE.md carries no config guard — harness/test/config.test.js (Amendment 1)
 
 ## Non-Goals
 - Rewording the moved environment-variable reference. It is moved verbatim, and any cleanup is a separate change.
@@ -204,5 +215,6 @@ None.
 - **Self-protected paths:** `scripts/` and `.claude/` trigger advisory lint warnings by design.
 
 ## Issue Gaps
+- **AMENDMENT 1 (2026-10-01, after Wave 1).** `harness/test/config.test.js:187` ran `migrateFromClaudeMd` on the live CLAUDE.md and deep-equalled the result with `.rad/config.yml`. That is a #87a transition check that AC#1 makes impossible, and the full suite drops to 713/714. `harness/` was Do Not Touch, so the new Task 2.3 replaces it with the inverse guard: CLAUDE.md carries no config. The range `harness/test/config.test.js:186-197` is added.
 - **ASSUMPTION — doc-only knobs.** Branch Conventions and PR Labels have no reader, so they move to `docs/configuration.md` as prose, not into the config schema.
 - **ASSUMPTION — `.claude/agents/`.** Their mentions of CLAUDE.md are descriptions of historical feature agents. They're left alone; #171 revisits the agent surface.
