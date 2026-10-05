@@ -219,3 +219,22 @@ invariants:
     bypasses:
       - { id: offline-remote, surface: "unreachable or unconfigured origin", guarded: "no", note: "records push-check-unavailable and does not demote (offline delivery stays possible)" }
       - { id: non-origin-push, surface: "push to another remote or non-default branch", guarded: "no", note: "only origin/<default> is watched; the wave contract forbids pushing" }
+
+  - id: capabilities-enforced-or-refused
+    claim: "A wave's declared Capabilities are either enforced by the agent adapter or the deliver run is refused (exit 2) before any event is appended; a constrained wave is never silently over-granted, and an explicit capability request is never silently dropped."
+    authority: "harness/capabilities.js (CAPABILITY_CLASSES and resolveWaveCapabilities)"
+    evals: [harness/evals/delivery.eval.js]
+    enforced_by:
+      - { file: harness/capabilities.js, symbol: "export function resolveWaveCapabilities", note: "explicit requests denied by .rad/config.yml capabilities.deny refuse, never drop" }
+      - { file: harness/capabilities.js, symbol: "export function sdkAllowedTools", note: "an unmappable set fails closed, never widening to the default" }
+      - { file: harness/cli.js, symbol: "const refusal = commandRefusal(resolved.byWave);", note: "the command adapter cannot restrict tools, so a narrowed wave refuses" }
+      - { file: harness/adapters/agent/sdk.js, symbol: "allowedTools: [...allowedTools]", note: "the per-wave allow-list reaches the SDK query" }
+    bypasses:
+      - id: skill-path
+        surface: "the /rad-deliver skill path"
+        guarded: "no"
+        note: "runs Claude Code sub-agents with no capability restriction; only the harness deliver path enforces or refuses"
+      - id: shell-subsumes
+        surface: "a wave granted the shell class"
+        guarded: "no"
+        note: "shell lets an agent reach the network and write files; classes are tool-level, not a sandbox"

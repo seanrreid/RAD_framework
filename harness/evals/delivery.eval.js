@@ -11,6 +11,7 @@ import { defineCases } from './lib/runner.js';
 const FEATURE = 'demo';
 const EXIT_FAILED = 1;
 const EXIT_NEEDS_DECISION = 3;
+const EXIT_USAGE = 2;
 const SECRET_KEYS = { RAD_EVAL_SECRET: 'rad-eval-secret-value', EVAL_API_TOKEN: 'eval-api-token-value' };
 const HANG_SECONDS = 5;
 const VERIFY_TIMEOUT_SECONDS = '1';
@@ -36,6 +37,12 @@ const originMainTip = (fx) => fx.run('git', ['--git-dir', join(fx.base, 'bitbuck
 
 const verifyHangPlan = defaultPlan(FEATURE).replace(
   /^(### Wave 1.*)$/m, `$1\n\nVerify: sleep ${HANG_SECONDS}`);
+
+// Narrower than all five classes: the command adapter cannot enforce it, so
+// deliver must refuse before any event rather than silently over-grant.
+const NARROWED_CAPABILITIES = 'fs_read, fs_write';
+const narrowedCapabilitiesPlan = defaultPlan(FEATURE).replace(
+  /^(### Wave 1.*)$/m, `$1\n\nCapabilities: ${NARROWED_CAPABILITIES}`);
 
 function writeCrashingHook(fx) {
   const dir = join(fx.base, 'hooks', 'pre-wave');
@@ -166,5 +173,20 @@ defineCases([
     // No need to hide the edit: the scope check diffs commits, not the working tree.
     mutate: (root) => patchFile(root, 'harness/cli.js',
       'return env.RAD_WORKTREE !== WORKTREE_OFF_VALUE;', "return env.RAD_WORKTREE === '1';"),
+  },
+  {
+    id: 'command-refuses-narrowed-capabilities',
+    invariant: 'capabilities-enforced-or-refused',
+    adversary: 'marker',
+    fixture: { plan: narrowedCapabilitiesPlan },
+    act: (fx) => fx.deliver(),
+    assert: (fx, result) => {
+      assert.equal(result.status, EXIT_USAGE, `deliver exit ${result.status}: ${result.stderr}`);
+      assert.equal(typesOf(result.events).includes('wave-started'), false, `wave-started appended: ${typesOf(result.events)}`);
+      assert.equal(fx.adversaryRan(), false, 'the agent ran with capabilities the command adapter cannot enforce');
+    },
+    // No command refusal → the constrained wave runs unrestricted (silent over-grant).
+    mutate: (root) => patchFile(root, 'harness/cli.js',
+      'const refusal = commandRefusal(resolved.byWave);', 'const refusal = null;'),
   },
 ]);
