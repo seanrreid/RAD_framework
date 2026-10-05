@@ -11,6 +11,7 @@ structure, commands, scripts, and CLAUDE.md scaffolding — in one step.
 |------|----------|---------|
 | `git` | Yes | RAD requires a git repository |
 | `claude` CLI | Yes | Claude Code — [install here](https://claude.ai/code) |
+| `node` | Yes | Runs `harness/cli.js`, which lays down the framework files. The installer stops with a named error if it is missing |
 | `gh` or `glab` | Recommended | PR automation. RAD falls back to manual mode without one |
 
 ---
@@ -51,7 +52,8 @@ bash /tmp/rad/install.sh --dir /path/to/your-project --yes
 your-project/
 ├── CLAUDE.md                         ← scaffolded from template (project conventions)
 ├── .rad/
-│   └── config.yml                    ← .rad/config.yml, written by `rad config init` (platform, roles, scope map)
+│   ├── config.yml                    ← .rad/config.yml, written by `rad config init` (platform, roles, scope map)
+│   └── installed.json                ← install manifest: framework files + hashes (commit it)
 ├── .claude/
 │   └── commands/
 │       ├── architect/
@@ -75,6 +77,8 @@ your-project/
 │   ├── plans/                        ← /rad-plan output
 │   ├── logs/                         ← /rad-deliver execution logs
 │   └── findings/                     ← /rad-review findings log
+├── ai/                               ← guardrail pack (see below)
+├── harness/                          ← `rad` CLI (harness/cli.js)
 └── scripts/
     ├── detect-platform.sh
     ├── get-default-branch.sh
@@ -84,11 +88,22 @@ your-project/
     ├── check-plan-approved.sh
     ├── check-scope.sh
     ├── lint-plan.sh
-    └── rad-status.sh
+    ├── rad-status.sh
+    ├── lib/
+    │   └── plan-paths.sh             ← shared plan-path helpers (lint-plan, check-scope, …)
+    └── hooks/                        ← wave lifecycle hooks
 ```
 
 The installer also copies the RAD skills into `.claude/skills/` (`kickoff/` and
 `wrap/`, providing `/kickoff` and `/wrap`) alongside all `scripts/*.sh` helpers.
+
+Every framework file the installer lays down (`.claude/commands/`,
+`.claude/skills/`, `ai/`, `scripts/`, and `harness/` except
+`harness/node_modules/`) is recorded with its SHA-256 in `.rad/installed.json`.
+Commit the manifest with the rest of the install: upgrades use it to tell an
+unedited framework file (safe to update) from one you changed (kept). Check for
+drift at any time with `node harness/cli.js install-status`. See
+[UPGRADE.md](UPGRADE.md#how-upgrades-handle-local-edits).
 
 `.claude/agents/` is not populated at install time — the architecture process
 (`/rad-research` → `/rad-design`) generates those files for your specific project.
@@ -98,8 +113,9 @@ The installer also copies the RAD skills into `.claude/skills/` (`kickoff/` and
 ## Guardrail Pack
 
 RAD ships a guardrail pack in `ai/` that gives every wave sub-agent a consistent
-set of coding rules. The pack is treated as framework code — it is always overwritten
-on install and upgrade, the same as `.claude/commands/` and `scripts/`.
+set of coding rules. The pack is treated as framework code — it is refreshed on
+install and upgrade, the same as `.claude/commands/` and `scripts/`, and local
+edits to it are kept the same way.
 
 ### What the ai/ directory contains
 
@@ -124,6 +140,12 @@ when upstream updates are released.
 
 `ai/slop-register.md` is the one file in `ai/` you are meant to edit. It captures
 project-specific mistakes your agents repeat. Keep entries short and concrete.
+
+Your edits survive upgrades. Because the file differs from the version recorded
+in `.rad/installed.json`, `install.sh --upgrade` keeps your copy and stages the
+new framework version at `.rad/upgrade-pending/ai/slop-register.md` (the
+installer then exits 1 and points to `node harness/cli.js install-status`).
+Merge in anything new from the staged copy, then delete it.
 
 Examples by stack:
 
@@ -245,7 +267,7 @@ gh api repos/:owner/:repo/branches/main/protection \
 ### 4. Commit the installed files
 
 ```bash
-git add .claude/ .agents/ .rad/ scripts/ CLAUDE.md   # .rad/ holds .rad/config.yml
+git add .claude/ .agents/ .rad/ ai/ scripts/ harness/ CLAUDE.md   # .rad/ holds config.yml and installed.json
 git commit -m "chore: install RAD framework"
 git push
 ```
@@ -270,8 +292,12 @@ When a new version of RAD is available, re-run the installer with `--upgrade`:
 bash /tmp/rad/install.sh --dir /path/to/your-project --upgrade
 ```
 
-The upgrade overwrites `.claude/commands/`, `.claude/skills/`, and `scripts/`,
-and never touches `CLAUDE.md`, `.claude/agents/`, `.agents/` content, or an existing
+The upgrade refreshes the framework files (`.claude/commands/`,
+`.claude/skills/`, `ai/`, `scripts/`, `harness/`) and updates
+`.rad/installed.json`. A framework file you edited locally is kept, not
+overwritten: the new version is staged under `.rad/upgrade-pending/`, and the
+installer finishes, then exits 1 and points to `node harness/cli.js install-status`.
+It never touches `CLAUDE.md`, `.claude/agents/`, `.agents/` content, or an existing
 `.rad/config.yml`. If `.rad/config.yml` is missing, the upgrade runs
 `rad config migrate` to create it from the pre-#87 RAD Configuration block in
 CLAUDE.md (never with `--force`, never editing CLAUDE.md). It works whether or not

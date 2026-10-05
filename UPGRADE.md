@@ -1,9 +1,10 @@
 # Upgrading RAD
 
-RAD upgrades replace only the framework-owned files — commands, skills, and
-scripts — and never touch your project's configuration, agents, or work history. The
-same process works whether or not the project was originally set up with the
-installer.
+RAD upgrades refresh only the framework-owned files — commands, skills, the
+`ai/` guardrail pack, scripts, and the harness — and never touch your project's
+configuration, agents, or work history. Framework files you have edited locally
+are kept, not overwritten. The same process works whether or not the project was
+originally set up with the installer.
 
 ---
 
@@ -11,9 +12,14 @@ installer.
 
 | Path | On upgrade |
 |------|-----------|
-| `.claude/commands/` | **Overwritten** — all command files refreshed |
-| `.claude/skills/` | **Overwritten** — all RAD skills refreshed |
-| `scripts/` | **Overwritten** — all `*.sh` helpers refreshed |
+| `.claude/commands/` | **Refreshed** — unedited command files updated; locally edited ones kept |
+| `.claude/skills/` | **Refreshed** — unedited RAD skills updated; locally edited ones kept |
+| `ai/` | **Refreshed** — unedited guardrail files updated; locally edited ones (e.g. `slop-register.md`) kept |
+| `scripts/` | **Refreshed** — `*.sh` helpers, `scripts/lib/`, and `scripts/hooks/`; locally edited files kept |
+| `harness/` | **Refreshed** — everything except `harness/node_modules/`, which is never touched |
+| `.rad/installed.json` | **Written / updated** — the install manifest (see [How upgrades handle local edits](#how-upgrades-handle-local-edits)) |
+| `.rad/upgrade-pending/` | Written only when a local edit was kept — the new core version of each kept file |
+| `.rad/upgrade-backup/` | Written only on the first upgrade of a pre-manifest install — backups of overwritten files |
 | `CLAUDE.md` | Never touched — your project conventions |
 | `.rad/config.yml` | Never touched — your config data (platform, default branch, roles, scope map). Created by `rad config migrate` only when missing |
 | `.claude/agents/` | Never touched — your generated agent boundaries |
@@ -40,11 +46,25 @@ git clone https://github.com/seanrreid/RAD_framework /tmp/rad
 bash /tmp/rad/install.sh --dir /path/to/your-project --upgrade
 ```
 
-Then commit the refreshed files:
+`node` must be installed: the installer stops with a named error if it is
+missing.
+
+The installer prints one line per file it did not simply update (`keep:`,
+`deleted:`, `backup-write:`, `stale:`). If it **kept a locally edited framework
+file** or found one **deleted locally**, it still finishes every other step,
+then exits 1 and points you to:
+
+```bash
+node harness/cli.js install-status
+```
+
+Resolve those files as described in
+[How upgrades handle local edits](#how-upgrades-handle-local-edits), then commit
+the refreshed files together with the manifest:
 
 ```bash
 cd /path/to/your-project
-git add .claude/commands/ .claude/skills/ scripts/
+git add .claude/commands/ .claude/skills/ ai/ scripts/ harness/ .rad/installed.json
 git commit -m "chore: upgrade RAD framework to latest"
 ```
 
@@ -55,27 +75,34 @@ loaded.
 
 ## Upgrading a project that didn't use the installer
 
-You can still use the installer — and you should. `install.sh --upgrade`
-depends on no prior installer state, marker file, or manifest. It is a plain,
-idempotent copy: it creates the expected directory structure, copies commands
-and scripts over whatever is present, and leaves your data alone. A
-hand-assembled RAD project upgrades cleanly with the exact command above.
+You can still use the installer — and you should. `install.sh --upgrade` does
+not require a prior manifest: with no `.rad/installed.json`, it treats the run as
+the first upgrade of a pre-manifest install. Any framework file that differs
+from the new version is backed up to `.rad/upgrade-backup/<timestamp>/<path>`
+and then overwritten, and the manifest is written so later upgrades can detect
+local edits. It also creates the expected directory structure and leaves your
+data alone. A hand-assembled RAD project upgrades cleanly with the exact command
+above.
 
 ### Manual upgrade (no script)
 
-If you'd rather not run the installer, the upgrade is just two copies — the
-script does nothing more for the command/script files:
+If you'd rather not run the installer, run the same core step it runs. This
+lays down the framework files through the manifest, with the same kept-edit,
+staging, and backup behavior:
 
 ```bash
 cd /path/to/your-project
-cp -r /tmp/rad/.claude/commands/. .claude/commands/
-cp -r /tmp/rad/.claude/skills/. .claude/skills/
-cp /tmp/rad/scripts/*.sh scripts/
-chmod +x scripts/*.sh
+node /tmp/rad/harness/cli.js install-core --source /tmp/rad --target .
 
-git add .claude/commands/ .claude/skills/ scripts/
+git add .claude/commands/ .claude/skills/ ai/ scripts/ harness/ .rad/installed.json
 git commit -m "chore: upgrade RAD framework to latest"
 ```
+
+`install-core` exits 0 when every file was written, 1 when it kept a local edit
+or found a deleted file, and 2 (writing nothing) on bad arguments or a malformed
+`.rad/installed.json`. A plain `cp` of the framework files also works, but it
+overwrites local edits without a backup and leaves no manifest, so the next
+upgrade cannot tell your edits apart from old framework versions.
 
 Do **not** copy `CLAUDE.md`, `.rad/config.yml`, `.claude/agents/`, or `.agents/`
 content — those belong to your project. If the project has no `.rad/config.yml`
@@ -84,16 +111,72 @@ yet, create it as described in
 
 ---
 
-## A note on local edits
+## How upgrades handle local edits
 
-The upgrade replaces commands and scripts wholesale. If anyone has **locally
-edited** a RAD command or script inside the project, those edits are
-overwritten. Run `git diff` after upgrading to see exactly what changed and
-re-apply any customizations.
+Every install and upgrade writes `.rad/installed.json`, a manifest of the
+framework core files and the SHA-256 of the version RAD installed:
 
-For this reason, project-specific behavior belongs in `CLAUDE.md` or your
-generated agent files — not in the framework commands, which are designed to be
-replaceable on every upgrade.
+```json
+{
+  "version": 1,
+  "rad_version": "<source git sha, or \"unknown\">",
+  "installed_at": "2026-10-05T15:00:00.000Z",
+  "files": {
+    "scripts/lint-plan.sh": { "layer": "core", "sha256": "…" }
+  }
+}
+```
+
+Commit it with the rest of the install. The core set is `.claude/commands/**`,
+`.claude/skills/**`, `ai/**`, `scripts/*.sh`, `scripts/lib/**`,
+`scripts/hooks/**`, and `harness/**` except `harness/node_modules/**`
+(`.DS_Store` files are skipped). `CLAUDE.md`, `.claude/agents/`,
+`.claude/settings*.json`, `.agents/`, and `.rad/config.yml` are never in it.
+
+On upgrade, each core file is compared with the manifest:
+
+| Situation | What happens | Installer exit |
+|-----------|--------------|----------------|
+| File unchanged since the last install | Updated to the new version | 0 |
+| File **edited locally** | **Kept.** The new version is staged at `.rad/upgrade-pending/<path>`. The manifest keeps the old baseline, so the edit is still detected next time | 1 |
+| File **deleted locally** | Not restored; reported | 1 |
+| No manifest, or no manifest entry for the file (first upgrade of a pre-manifest install), and the file differs from the new version | Backed up to `.rad/upgrade-backup/<timestamp>/<path>`, then overwritten | 0 |
+| A symlink or directory where a framework file belongs | Never written through; treated as a local edit (kept, new version staged) | 1 |
+| File in the manifest but no longer part of RAD | Reported as `stale`, left in place, dropped from the manifest | 0 |
+
+Upgrade never deletes a `harness/node_modules/` the project installed itself.
+
+### Checking for drift
+
+```bash
+node harness/cli.js install-status [--target <dir>]
+```
+
+It is read-only. It prints `modified: <path>` for each framework file that
+differs from the manifest and `missing: <path>` for each one that is gone. Exit 0
+means clean; 1 means drift (or no `.rad/installed.json` yet); 2 means bad
+arguments or a malformed manifest.
+
+### Merging a kept edit
+
+Staged copies under `.rad/upgrade-pending/` are **not** cleared automatically.
+For each one: merge your local edit with the staged new version into the file at
+its normal path, then delete the staged copy. Do not commit
+`.rad/upgrade-pending/`.
+
+### A malformed manifest
+
+If `.rad/installed.json` cannot be parsed or has the wrong shape, the install
+stops before any framework file is written (`install-core` exits 2 and the
+installer exits non-zero). Fix the file, or delete it. Deleting it makes the next
+upgrade behave like a first upgrade: any differing framework file is backed up
+to `.rad/upgrade-backup/` and then overwritten.
+
+### Where customizations belong
+
+Project-specific behavior still belongs in `CLAUDE.md`, `ai/slop-register.md`,
+or your generated agent files rather than the framework commands. A kept edit to
+a command or script has to be merged by hand on every upgrade that changes it.
 
 ---
 
