@@ -1,7 +1,8 @@
 # Plan: Follow-ups from #87
 Created: 2026-10-01
 Author: architect
-Status: in-progress
+Status: complete
+Completed-At: 2026-10-05T15:37:50Z
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-10-05T15:27:27.477Z
 Recorded-By: sean@torchcodelab.com
