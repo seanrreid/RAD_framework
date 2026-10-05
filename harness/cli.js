@@ -54,6 +54,8 @@ const FORECAST_USAGE = 'rad forecast <plan>';
 const DIGEST_USAGE = 'rad digest <feature> [--branch <ref>] [--base <ref>]';
 /** Usage line for `rad review`. */
 const REVIEW_USAGE = 'rad review <reviewer> [--base <ref>]';
+/** Usage line for `rad capabilities`. */
+const CAPABILITIES_USAGE = 'rad capabilities <feature> [--plan <path>]';
 /** Usage line for `rad config`. */
 const CONFIG_USAGE = 'rad config get <key> | rad config validate | rad config migrate [--from <path>] [--force]'
   + ' | rad config init [--architect <id>] [--platform <p>] [--default-branch <b>] [--force]';
@@ -105,6 +107,11 @@ const SUBCOMMANDS = {
     summary: 'Create, read, validate, or migrate the RAD config file (.rad/config.yml).',
     usage: CONFIG_USAGE,
     run: (argv, ctx) => configCommand(argv, ctx),
+  },
+  capabilities: {
+    summary: "Show each wave's effective capability classes for a plan (read-only).",
+    usage: CAPABILITIES_USAGE,
+    run: (argv, ctx) => capabilitiesCommand(argv, ctx),
   },
   'owner-claim': {
     summary: 'Claim the single-writer lock on a feature (records who holds it).',
@@ -743,6 +750,29 @@ async function loadCapabilityDeny(root) {
 }
 
 /**
+ * Resolve every wave of a parsed plan against the project deny list under
+ * `root`. Shared by `rad deliver` and `rad capabilities` so both report the
+ * SAME text for a malformed Capabilities: line, an unreadable deny list, or a
+ * denied explicit request. Adapter-agnostic: adapter checks stay with deliver.
+ *
+ * @param {{ planCtx: object, root: string, planLabel: string }} opts - planLabel names the plan in messages
+ * @returns {Promise<{ ok: true, byWave: object } | { ok: false, error: string, configInvalid?: true }>}
+ */
+async function resolvePlanCapabilities({ planCtx, root, planLabel }) {
+  if (planCtx.capabilityErrors.length > 0) {
+    return { ok: false, error: `malformed Capabilities: line in ${planLabel}: ${planCtx.capabilityErrors.join('; ')}` };
+  }
+  const deny = await loadCapabilityDeny(root);
+  if (!deny.ok) return { ok: false, error: deny.error, configInvalid: true };
+  return resolveWaveCapabilities({
+    waves: planCtx.waveNumbers,
+    planCapabilities: planCtx.planCapabilities,
+    waveCapabilities: planCtx.waveCapabilities,
+    deny: deny.deny,
+  });
+}
+
+/**
  * Refusal for a constrained wave the sdk adapter cannot grant (e.g. mcp), or null.
  * @param {Record<number, string[]>} waveEffective
  */
@@ -763,16 +793,8 @@ function sdkCapabilityRefusal(waveEffective) {
  * @returns {Promise<string|null>}
  */
 async function capabilityRefusal({ planCtx, root, agent }) {
-  if (planCtx.capabilityErrors.length > 0) {
-    return `malformed Capabilities: line in .agents/plans/${planCtx.feature}.md: ${planCtx.capabilityErrors.join('; ')}`;
-  }
-  const deny = await loadCapabilityDeny(root);
-  if (!deny.ok) return deny.error;
-  const resolved = resolveWaveCapabilities({
-    waves: planCtx.waveNumbers,
-    planCapabilities: planCtx.planCapabilities,
-    waveCapabilities: planCtx.waveCapabilities,
-    deny: deny.deny,
+  const resolved = await resolvePlanCapabilities({
+    planCtx, root, planLabel: `.agents/plans/${planCtx.feature}.md`,
   });
   if (!resolved.ok) return resolved.error;
   const waveEffective = {};
@@ -2973,6 +2995,75 @@ export async function configCommand(argv, ctx) {
   const run = CONFIG_ACTIONS[action];
   if (!run) return configUsage(action === undefined ? 'an action is required' : `unknown action '${action}'`);
   return run(args, ctx.repoRoot);
+}
+
+/** Parse `<feature> [--plan <path>]`; throws on unknown flags, a valueless --plan, or extras. */
+function parseCapabilitiesArgs(argv) {
+  let feature;
+  let plan;
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === '--plan') {
+      const value = argv[++i];
+      if (!isNonEmpty(value) || value.startsWith('--')) throw new Error('--plan requires a <path>');
+      plan = value;
+    } else if (arg.startsWith('--')) {
+      throw new Error(`unknown option '${arg}'`);
+    } else if (feature === undefined) {
+      feature = arg;
+    } else {
+      throw new Error(`unexpected argument '${arg}'`);
+    }
+  }
+  if (!isNonEmpty(feature)) throw new Error('a <feature> is required');
+  return { feature, plan };
+}
+
+/** One output line: `wave N: <effective> (<source>)[; denied: <classes>]`. */
+function formatWaveCapabilities(wave, entry) {
+  const denied = entry.denied.length > 0 ? `; denied: ${entry.denied.join(', ')}` : '';
+  return `wave ${wave}: ${entry.effective.join(', ')} (${entry.source})${denied}\n`;
+}
+
+/**
+ * `capabilities <feature> [--plan <path>]` — read-only view of each wave's
+ * effective capability classes (#85). Reads .agents/plans/<feature>.md (or
+ * --plan, relative to the repo root) and the .rad/config.yml deny list, then
+ * resolves through the SAME helper deliver uses, so a refusal reads the same.
+ * Adapter-agnostic: the command-adapter refusal and the sdk tool mapping are
+ * deliver-time checks and are NOT applied here. Writes nothing, appends no event.
+ *
+ * Exit 0 printed; 1 missing plan or invalid config; 2 bad argv, a malformed
+ * Capabilities: line, or a denied explicit request.
+ *
+ * @param {string[]} argv - args after `capabilities`
+ * @param {{ repoRoot: string }} ctx
+ * @returns {Promise<number>}
+ */
+export async function capabilitiesCommand(argv, ctx) {
+  let args;
+  try {
+    args = parseCapabilitiesArgs(argv);
+  } catch (err) {
+    process.stderr.write(`rad capabilities: ${err.message}\nUsage: ${CAPABILITIES_USAGE}\n`);
+    return USAGE_EXIT_CODE;
+  }
+  const planLabel = args.plan ?? `.agents/plans/${args.feature}.md`;
+  const planFile = resolve(ctx.repoRoot, planLabel);
+  if (!existsSync(planFile)) {
+    process.stderr.write(`rad capabilities: no plan doc at ${planLabel}\n`);
+    return FAILED_EXIT_CODE;
+  }
+  const planCtx = parsePlanCtx(readFileSync(planFile, 'utf8'));
+  const resolved = await resolvePlanCapabilities({ planCtx, root: ctx.repoRoot, planLabel });
+  if (!resolved.ok) {
+    process.stderr.write(`rad capabilities: ${resolved.error}\n`);
+    return resolved.configInvalid ? FAILED_EXIT_CODE : USAGE_EXIT_CODE;
+  }
+  for (const [wave, entry] of Object.entries(resolved.byWave)) {
+    process.stdout.write(formatWaveCapabilities(wave, entry));
+  }
+  return 0;
 }
 
 /**
