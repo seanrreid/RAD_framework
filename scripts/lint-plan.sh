@@ -440,25 +440,48 @@ collect_missing_mockup_warnings
 # only; line numbers are never verified. Queries the locally-known ref — NO
 # implicit fetch. Fail-closed: an unresolvable base ref yields ONE advisory that
 # freshness could not be verified, and the per-path scan is skipped (no spam).
-FRESHNESS_BASE=$("$SCRIPT_DIR/get-default-branch.sh" 2>/dev/null || echo main)
-FRESHNESS_REF="origin/$FRESHNESS_BASE"
-while IFS= read -r path; do
-  [[ -z "$path" ]] && continue
-  freshness_rc=0
-  path_exists_on_ref "$path" "$FRESHNESS_REF" || freshness_rc=$?
-  case "$freshness_rc" in
-    1) WARNINGS+=("stale premise: $path not found on $FRESHNESS_REF — plan may be written against removed/renamed code") ;;
-    2) WARNINGS+=("freshness not verified: base ref $FRESHNESS_REF unresolvable"); break ;;
-  esac
-done < <(
-  {
-    plan_cited_anchors "$PLAN_FILE"
-    plan_task_files "$PLAN_FILE"
-    plan_files_in_scope "$PLAN_FILE"
-  } | grep -v '^$' | sort -u \
-    | grep -Fxv -f <(plan_created_paths "$PLAN_FILE") \
-    | grep -Fxv -f <(printf '%s' "$MISSING_IN_SCOPE")
-)
+# An unresolvable default branch (get-default-branch.sh exit 1: missing/invalid
+# .rad/config.yml) is never papered over with `main`: its reason rides the same
+# single not-verified advisory and the per-path scan is skipped.
+resolve_freshness_base() {
+  local err_file reason
+  err_file=$(mktemp "${TMPDIR:-/tmp}/lint-plan-base.XXXXXX")
+  if FRESHNESS_BASE=$("$SCRIPT_DIR/get-default-branch.sh" 2>"$err_file"); then
+    rm -f "$err_file"
+    return 0
+  fi
+  reason=$(tr -s '[:space:]' ' ' < "$err_file" | sed 's/[[:space:]]*$//')
+  rm -f "$err_file"
+  WARNINGS+=("freshness not verified: default branch unresolved (${reason})")
+  return 1
+}
+
+scan_freshness_paths() {
+  local path freshness_rc
+  FRESHNESS_REF="origin/$FRESHNESS_BASE"
+  while IFS= read -r path; do
+    [[ -z "$path" ]] && continue
+    freshness_rc=0
+    path_exists_on_ref "$path" "$FRESHNESS_REF" || freshness_rc=$?
+    case "$freshness_rc" in
+      1) WARNINGS+=("stale premise: $path not found on $FRESHNESS_REF — plan may be written against removed/renamed code") ;;
+      2) WARNINGS+=("freshness not verified: base ref $FRESHNESS_REF unresolvable"); break ;;
+    esac
+  done < <(
+    {
+      plan_cited_anchors "$PLAN_FILE"
+      plan_task_files "$PLAN_FILE"
+      plan_files_in_scope "$PLAN_FILE"
+    } | grep -v '^$' | sort -u \
+      | grep -Fxv -f <(plan_created_paths "$PLAN_FILE") \
+      | grep -Fxv -f <(printf '%s' "$MISSING_IN_SCOPE")
+  )
+}
+
+FRESHNESS_BASE=""
+if resolve_freshness_base; then
+  scan_freshness_paths
+fi
 
 # ── Vague wording (advisory) ──────────────────────────────────────────────────
 # One warning per (location, word) for a VAGUE_WORDS hit in a numbered AC item
@@ -468,7 +491,10 @@ done < <(
 # (letters, digits, `_` and `-` are word characters).
 plan_vague_wording_findings() {
   local IFS='|'
-  awk -v q="'" -v words="${VAGUE_WORDS[*]}" '
+  # LC_ALL=C: macOS awk aborts (towc: multibyte conversion failure) on a
+  # multibyte char such as an en dash beside a match under a UTF-8 locale.
+  # VAGUE_WORDS and the word-char class are ASCII, so byte matching is exact.
+  LC_ALL=C awk -v q="'" -v words="${VAGUE_WORDS[*]}" '
     BEGIN { nw = split(words, W, "|") }
     function wordch(c) { return c != "" && c ~ /[a-z0-9_-]/ }
     function scan(line, loc,   s, i, w, p, off, rest) {

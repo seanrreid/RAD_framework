@@ -317,4 +317,25 @@ case "$ERR" in *"no-log"*) fail "D6: a tip without an event log must be skipped 
 echo "✓ D5: corrupt event log warns naming the feature and the run exits 0"
 echo "✓ D6: plan tip with no event log is skipped silently"
 
+# ── C1 (followups-87 AC#3): unresolved default branch warns at both call sites ─
+# The status board is advisory: with an unparseable .rad/config.yml it warns on
+# stderr with the lookup's reason (once per call site: plans + research), assumes
+# main, and still exits 0 with the merged plan rendered from origin/main.
+CFG_WARNING="warning: default branch unresolved ("
+CFG_REASON="cannot read default_branch from .rad/config.yml"
+printf 'version: [unterminated\n' > "$TMP/work/.rad/config.yml"
+(cd "$TMP/work" && bash scripts/rad-status.sh >"$TMP/cfg.out" 2>"$TMP/cfg.err") \
+  || fail "C1: rad-status.sh must exit 0 on an unresolved default branch: $(cat "$TMP/cfg.err")"
+warn_count=$(grep -cF "$CFG_WARNING" "$TMP/cfg.err" || true)
+[[ "$warn_count" -eq 2 ]] || fail "C1: expected the warning at both call sites (2), got $warn_count: $(cat "$TMP/cfg.err")"
+grep -F "$CFG_WARNING" "$TMP/cfg.err" | grep -vF "$CFG_REASON" \
+  && fail "C1: every warning must carry the lookup's reason: $(cat "$TMP/cfg.err")"
+grep -F "$CFG_WARNING" "$TMP/cfg.err" | grep -v '), assuming main$' \
+  && fail "C1: every warning must carry the reason and 'assuming main': $(cat "$TMP/cfg.err")"
+grep -qF "$CFG_WARNING" "$TMP/cfg.out" && fail "C1: the warning must go to stderr, not stdout"
+plan_row_count "$(plans_section "$(cat "$TMP/cfg.out")")" has-plan | grep -qx 1 \
+  || fail "C1: merged plan must still render from origin/main: $(cat "$TMP/cfg.out")"
+(cd "$TMP/work" && g checkout -q -- .rad/config.yml)
+echo "✓ C1: unresolved default branch warns with its reason at both call sites, assumes main, exits 0"
+
 echo "PASS: rad-status research visibility + dormant runs"

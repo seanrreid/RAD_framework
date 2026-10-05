@@ -208,4 +208,28 @@ assert_out_has "$UNRESOLVED_RANGE_FRAGMENT" "AC#4d"
 assert_out_has "$GHOST_BRANCH" "AC#4d"
 echo "✓ AC#4d: unresolvable diff range exits 2 and logs the reason"
 
+# ── Default-branch config error (followups-87 AC#1) ───────────────────────────
+# The fixture's own .rad/config.yml (read by its copied get-default-branch.sh) is
+# made unparseable in the working tree only; check-scope diffs committed refs.
+# (Absent-key → main is covered by test-check-plan-approved.sh cases (l) and (o).)
+git -C "$REPO" checkout -q main
+printf 'version: [unterminated\n' > "$REPO/.rad/config.yml"
+
+set +e
+( cd "$REPO" && bash scripts/check-scope.sh "$PLAN" "rad/findings" ) > "$OUT_FILE" 2>&1
+code=$?
+set -e
+[[ "$code" -eq 2 ]] || { cat "$OUT_FILE"; fail "CFG-a: broken config with no base should exit 2 (got $code)"; }
+assert_out_has "cannot read default_branch from .rad/config.yml" "CFG-a"
+assert_out_has "cannot resolve the default branch" "CFG-a"
+assert_out_lacks "main..." "CFG-a"
+assert_out_lacks "$PASS_FRAGMENT" "CFG-a"
+echo "✓ CFG-a: broken config + no base fails closed (exit 2, reason printed, no main diff)"
+
+code=$(run_scope_capture "$PLAN" "rad/findings")
+[[ "$code" -eq 0 ]] || { cat "$OUT_FILE"; fail "CFG-b: explicit base must skip the lookup (got $code)"; }
+assert_out_lacks "cannot resolve the default branch" "CFG-b"
+echo "✓ CFG-b: explicit base with a broken config skips the lookup (exit 0)"
+git -C "$REPO" checkout -q -- .rad/config.yml
+
 echo "ALL PASS"

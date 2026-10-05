@@ -47,13 +47,25 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 CLI="$REPO_ROOT/harness/cli.js"
 readonly CONFIG_KEY_ABSENT_EXIT=3
 
+readonly CONFIG_ERROR_EXIT=2
+
 WORK_BRANCH="${1:-}"
-BASE_BRANCH="${2:-$("$SCRIPT_DIR/get-default-branch.sh" 2>/dev/null || echo main)}"
 
 [[ -z "$WORK_BRANCH" ]] && {
   echo "Usage: check-approval-integrity.sh <work-branch> [base-branch]"
   exit 2
 }
+
+# An explicit base skips the lookup. Otherwise a config error fails closed: the
+# lookup's own stderr reason passes through and no ref is compared against main.
+if [[ -n "${2:-}" ]]; then
+  BASE_BRANCH="$2"
+else
+  BASE_BRANCH=$("$SCRIPT_DIR/get-default-branch.sh") || {
+    echo "ERROR: check-approval-integrity: cannot resolve the default branch (reason above); pass a base branch explicitly" >&2
+    exit "$CONFIG_ERROR_EXIT"
+  }
+fi
 
 # Strip any prefix (rad/, or a custom RAD_BRANCH_PREFIX) to get the feature slug
 # → event-log + plan paths. Same derivation as check-plan-approved.sh.

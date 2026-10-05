@@ -155,4 +155,42 @@ guard_stale_reference() {
 
 guard_stale_reference
 
+# A7 (followups-87 AC#5): a single trailing " (...)" annotation is stripped
+# after the backtick strip and before the existence test.
+A7_MISSING="scripts/does-not-exist-a7.sh"
+A7_MIDNAME="$TMP/mid (v2) name.sh"
+: > "$A7_MIDNAME"
+printf '## Tests to Write\n- [ ] x — %s (Amendment 1)\n' "$HERE/get-default-branch.sh" > "$TMP/ann-present.md"
+printf '## Tests to Write\n- [ ] x — `%s` (Amendment 1)\n' "$A7_MISSING"               > "$TMP/ann-missing.md"
+printf '## Tests to Write\n- [ ] x — %s\n' "$A7_MIDNAME"                                > "$TMP/ann-midname.md"
+printf '## Tests to Write\n- [ ] x — %s ()\n' "$HERE/get-default-branch.sh"             > "$TMP/ann-empty.md"
+printf '## Tests to Write\n- [ ] x — (Amendment 1)\n'                                   > "$TMP/ann-only.md"
+
+code=$(run_check "$TMP/ann-present.md")
+[[ "$code" -eq 0 ]] || fail "A7a: annotated existing path should resolve and exit 0 (got $code)"
+echo "✓ A7a: annotated existing path resolves to the path → exit 0"
+
+code=$(run_check "$TMP/ann-missing.md")
+[[ "$code" -eq 1 ]] || fail "A7b: annotated missing path should exit 1 (got $code)"
+out=$(bash "$SCRIPT" "$TMP/ann-missing.md" 2>&1 || true)  # exit 1 asserted just above
+printf '%s\n' "$out" | grep -qx "  ✗ $A7_MISSING" \
+  || fail "A7b: missing name should be exactly '$A7_MISSING' (annotation stripped), got: [$out]"
+echo "✓ A7b: annotated missing path still reported missing, without the annotation → exit 1"
+
+code=$(run_check "$TMP/ann-midname.md")
+[[ "$code" -eq 0 ]] || fail "A7c: a path with mid-name parentheses must be unchanged and found (got $code)"
+echo "✓ A7c: parentheses mid-name with no trailing annotation → path unchanged, exit 0"
+
+code=$(run_check "$TMP/ann-empty.md")
+[[ "$code" -eq 0 ]] || fail "A7d: an empty '()' annotation should be stripped and the path found (got $code)"
+echo "✓ A7d: empty '()' annotation stripped → exit 0"
+
+code=$(run_check "$TMP/ann-only.md")
+[[ "$code" -eq 0 ]] || fail "A7e: an annotation with no path should be unresolvable, exit 0 (got $code)"
+out=$(bash "$SCRIPT" "$TMP/ann-only.md" 2>/dev/null)  # exit 0 asserted above
+printf '%s\n' "$out" | grep -q "No file path found" \
+  || fail "A7e: an annotation with no path must be reported unresolvable, got: [$out]"
+printf '%s\n' "$out" | grep -q "✗" && fail "A7e: an annotation with no path must not be reported as a missing file"
+echo "✓ A7e: annotation with nothing before it → unresolvable (never an empty path)"
+
 echo "ALL PASS"

@@ -55,7 +55,7 @@ Records an architect approval:
 The `/rad-approve` prose command calls this after the architect confirms.
 
 **Authority:**
-- Direct: the running `git user.email` must be a configured architect in `CLAUDE.md`
+- Direct: the running `git user.email` must be a configured architect in `.rad/config.yml` (`roles.architect`)
 - Proxy: `--on-behalf-of <name>` records an out-of-band approval; `--evidence` is
   required and captured in the event log
 

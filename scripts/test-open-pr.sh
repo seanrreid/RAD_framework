@@ -185,4 +185,41 @@ run_link "Closes #12"
 grep -qF "HTTP 502 bad gateway" "$TMP/err" || fail "link: view failure reason not surfaced: $(cat "$TMP/err")"
 echo "✓ GitHub link: gh pr view failure → warning with reason, exit 0"
 
+# 12 (followups-87 AC#2). Default-branch config error → exit 1 with the reason,
+# no gh/glab call. A copied scripts/ tree with a stub harness/cli.js that fails
+# `config get default_branch` (exit 1 + reason) and reports every other key absent
+# (exit 3), so detect-platform.sh still falls back to the origin URL (GitHub).
+CFG_ROOT="$TMP/cfg-root"
+CFG_REASON="stub: .rad/config.yml is invalid"
+mkdir -p "$CFG_ROOT/scripts" "$CFG_ROOT/harness"
+cp "$HERE/open-pr.sh" "$HERE/get-default-branch.sh" "$HERE/detect-platform.sh" "$CFG_ROOT/scripts/"
+cat > "$CFG_ROOT/harness/cli.js" <<EOF
+if (process.argv[4] === 'default_branch') { process.stderr.write('$CFG_REASON\n'); process.exit(1); }
+process.exit(3);
+EOF
+run_cfg_openpr() {
+  rm -f "$TMP/gh.argv" "$TMP/glab.argv"
+  set +e
+  PATH="$TMP:$PATH" bash "$CFG_ROOT/scripts/open-pr.sh" "$@" >"$TMP/out" 2>"$TMP/err"
+  RC=$?
+  set -e
+}
+make_stubs "git@github.com:o/r.git"
+run_cfg_openpr --title t --body b --head rad/x --no-draft
+[ "$RC" -eq 1 ] || fail "config error: expected exit 1, got $RC: $(cat "$TMP/err")"
+grep -qF "$CFG_REASON" "$TMP/err" || fail "config error: lookup reason not surfaced: $(cat "$TMP/err")"
+grep -qF "cannot resolve the default branch" "$TMP/err" || fail "config error: missing open-pr reason: $(cat "$TMP/err")"
+[ -f "$TMP/gh.argv" ] && fail "config error: gh was called: $(cat "$TMP/gh.argv")" || true
+[ -f "$TMP/glab.argv" ] && fail "config error: glab was called" || true
+echo "✓ config error: exit 1 with the reason, no PR opened"
+
+# 13. Explicit --base with a broken config → lookup skipped, PR opened on that base.
+make_stubs "git@github.com:o/r.git"
+run_cfg_openpr --title t --body b --head rad/x --no-draft --base develop
+[ "$RC" -eq 0 ] || fail "explicit --base: expected exit 0, got $RC: $(cat "$TMP/err")"
+require_called "$TMP/gh.argv" "gh"
+[ "$(arg_after "$TMP/gh.argv" "--base")" = "develop" ] || fail "explicit --base: base wrong: [$(arg_after "$TMP/gh.argv" "--base")]"
+grep -qF "cannot resolve the default branch" "$TMP/err" && fail "explicit --base: lookup error reported" || true
+echo "✓ explicit --base with a broken config: lookup skipped, PR opened on develop"
+
 echo "ALL PASS"

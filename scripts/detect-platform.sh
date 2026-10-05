@@ -45,7 +45,7 @@ read_config_platform() {
     return 0
   fi
   if [[ ! -f "$CONFIG_FILE" ]]; then
-    echo "notice: no .rad/config.yml — detecting platform from the origin URL (run 'rad config migrate')" >&2
+    echo "notice: no .rad/config.yml — detecting platform from the origin URL (run 'rad config init' for a new install or 'rad config migrate' from a pre-#87 CLAUDE.md)" >&2
     CONFIG_STATE="absent"
     return 0
   fi

@@ -311,6 +311,88 @@ t_default_branch_absent_key_falls_back() {
   echo "✓ (l) get-default-branch: absent key → main; declared branch printed"
 }
 
+# ── Default-branch config error (AC#1): fail closed, never compare against main ─
+# The fixture's approved event lives ONLY on origin/main (the merged ref), so a
+# run that silently fell back to `main` would PASS. A copied RAD root (real
+# scripts + harness, no node_modules) carries an unparseable .rad/config.yml.
+BROKEN_ROOT="$TMP/broken-root"
+ABSENT_ROOT="$TMP/absent-key-root"
+MERGED_ONLY_DIR="$TMP/merged-only"
+MERGED_FEATURE="merged-only"
+CONFIG_REASON="cannot read default_branch from .rad/config.yml"
+GATE_REASON="cannot resolve the default branch"
+
+make_broken_root() {
+  mkdir -p "$BROKEN_ROOT/scripts" "$BROKEN_ROOT/harness" "$BROKEN_ROOT/.rad"
+  cp "$SCRIPT" "$HERE/get-default-branch.sh" "$HERE/git-sync.sh" "$BROKEN_ROOT/scripts/"
+  local p
+  for p in "$REPO_ROOT/harness/"*; do
+    case "$(basename "$p")" in node_modules|test) ;; *) cp -R "$p" "$BROKEN_ROOT/harness/" ;; esac
+  done
+  printf 'version: [unterminated\n' > "$BROKEN_ROOT/.rad/config.yml"
+}
+
+# A stub CLI that answers `config get` with exit 3 (key absent) and the gate verb
+# with a passing verdict, so the run reaches the gate only if base resolved.
+make_absent_key_root() {
+  mkdir -p "$ABSENT_ROOT/scripts" "$ABSENT_ROOT/harness"
+  cp "$SCRIPT" "$HERE/get-default-branch.sh" "$HERE/git-sync.sh" "$ABSENT_ROOT/scripts/"
+  printf '%s\n' \
+    'if (process.argv[2] === "config") process.exit(3);' \
+    'process.stdout.write("rad gate: feature=x gate=approved passed=true\n");' > "$ABSENT_ROOT/harness/cli.js"
+}
+
+make_merged_only_fixture() {
+  local d="$MERGED_ONLY_DIR"
+  mkdir -p "$d/.agents/state/${MERGED_FEATURE}"
+  printf '%s\n' "${APPROVED_EVENT/FEAT/$MERGED_FEATURE}" > "$d/.agents/state/${MERGED_FEATURE}/events.jsonl"
+  git -C "$d" init -q
+  git -C "$d" -c user.email=t@t.t -c user.name=t add -A
+  git -C "$d" -c user.email=t@t.t -c user.name=t commit -q -m "merged approval"
+  git -C "$d" update-ref refs/remotes/origin/main HEAD
+  rm -f "$d/.agents/state/${MERGED_FEATURE}/events.jsonl"
+}
+
+# run_root_check ROOT OUT_FILE [BASE] → echoes the exit code (stdout+stderr to OUT_FILE).
+run_root_check() {
+  local root="$1" out="$2" code
+  shift 2
+  set +e
+  ( cd "$MERGED_ONLY_DIR" && bash "$root/scripts/check-plan-approved.sh" "rad/${MERGED_FEATURE}" "$@" ) >"$out" 2>&1
+  code=$?
+  set -e
+  echo "$code"
+}
+
+t_config_error_fails_closed() {
+  local out="$TMP/cfg-err.out" code
+  code=$(run_root_check "$BROKEN_ROOT" "$out")
+  [[ "$code" -eq 1 ]] || { cat "$out"; fail "(m) broken config with no base must exit 1 (got $code)"; }
+  grep -qF "$CONFIG_REASON" "$out" || { cat "$out"; fail "(m) the get-default-branch reason must be printed"; }
+  grep -qF "$GATE_REASON" "$out" || { cat "$out"; fail "(m) the gate must name the unresolved default branch"; }
+  if grep -qF "origin/main" "$out"; then
+    cat "$out"; fail "(m) no ref may be compared against main on a config error"
+  fi
+  echo "✓ (m) AC#1: broken config + no base fails closed (exit 1, reason printed, no main compare)"
+}
+
+t_config_error_explicit_base_skips_lookup() {
+  local out="$TMP/cfg-explicit.out" code
+  code=$(run_root_check "$BROKEN_ROOT" "$out" main)
+  [[ "$code" -eq 0 ]] || { cat "$out"; fail "(n) explicit base must skip the lookup and pass (got $code)"; }
+  if grep -qF "$GATE_REASON" "$out"; then
+    cat "$out"; fail "(n) explicit base must not report a default-branch error"
+  fi
+  echo "✓ (n) AC#1: explicit base with a broken config skips the lookup (exit 0)"
+}
+
+t_absent_key_resolves_main() {
+  local out="$TMP/absent-key.out" code
+  code=$(run_root_check "$ABSENT_ROOT" "$out")
+  [[ "$code" -eq 0 ]] || { cat "$out"; fail "(o) absent default_branch key must resolve to main and pass (got $code)"; }
+  echo "✓ (o) AC#1: absent default_branch key still resolves to main (merged ref found)"
+}
+
 t_doc_approved_no_event
 t_event_present_doc_stale
 t_missing_log_fails_closed
@@ -324,4 +406,10 @@ t_stub_passed_true_passes
 t_stub_nonzero_passes_through
 t_default_branch_empty_output_errors
 t_default_branch_absent_key_falls_back
+make_broken_root
+make_absent_key_root
+make_merged_only_fixture
+t_config_error_fails_closed
+t_config_error_explicit_base_skips_lookup
+t_absent_key_resolves_main
 echo "ALL PASS"
