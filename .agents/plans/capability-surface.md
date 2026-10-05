@@ -1,7 +1,10 @@
 # Plan: Capability Classes, Approval Surface and Docs (#85 part 2)
 Created: 2026-10-05
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-10-05T15:56:48.965Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/capability-surface
 Adopted-From: https://github.com/seanrreid/RAD_framework/issues/85
 Issue-Title: Capability classes alongside path scope: declare fs/shell/net/mcp per wave, deny-wins across config layers
