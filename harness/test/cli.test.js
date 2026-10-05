@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import {
   approveCommand, gateCommand, parsePlanCtx, deliverCommand, stopStatusCommand, forecastCommand, digestCommand,
   resolveHooksDir, makeSpineScriptPort, SCRIPT_ARG_KEYS, reviewCommand, resolveAgent, isMainModule,
-  capabilitiesCommand,
+  capabilitiesCommand, installCoreCommand, installStatusCommand,
 } from '../cli.js';
 import { buildReviewPrompt, reviewInstruction } from '../review.js';
 import { REVIEW_INSTRUCTION } from '../evals/reviewers/lib.js';
@@ -2045,5 +2045,142 @@ test('capabilities AC#1 — --plan <path> reads that file instead of the feature
     const res = await runCapabilities(repoRoot, [DELIVER_FEATURE, '--plan', 'elsewhere/p.md']);
     assert.equal(res.code, 0, res.stderr);
     assert.match(res.stdout, /^wave 1: mcp \(wave\)$/m);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// rad install-core / install-status — #71 part 1 (AC#4, AC#5). Each test builds
+// a fixture RAD source (marked by harness/cli.js) and an empty target in one
+// temp dir; `now` is injected so the backup stamp is deterministic.
+// ---------------------------------------------------------------------------
+
+const INSTALL_NOW = new Date('2026-10-05T01:02:03.004Z');
+
+/** Fixture source + target; `fn` gets { source, target }. */
+async function withInstallRoots(fn) {
+  await withTempRepo(async (dir) => {
+    const source = join(dir, 'source');
+    const target = join(dir, 'target');
+    for (const [rel, body] of [['harness/cli.js', '// cli\n'], ['ai/guardrails.md', 'g\n'], ['scripts/lib/plan-paths.sh', '#!/bin/sh\n']]) {
+      mkdirSync(dirname(join(source, rel)), { recursive: true });
+      writeFileSync(join(source, rel), body);
+    }
+    mkdirSync(target);
+    await fn({ source, target });
+  });
+}
+
+function runInstallCore(argv, repoRoot = '/nonexistent-default-target') {
+  return captureStdio(() => installCoreCommand(argv, { repoRoot, now: INSTALL_NOW }));
+}
+
+function runInstallStatus(argv, repoRoot = '/nonexistent-default-target') {
+  return captureStdio(() => installStatusCommand(argv, { repoRoot }));
+}
+
+test('install-core AC#4 — fresh install → exit 0, summary line, manifest written', async () => {
+  await withInstallRoots(async ({ source, target }) => {
+    const res = await runInstallCore(['--source', source, '--target', target]);
+    assert.equal(res.code, 0, res.stderr);
+    assert.equal(res.stdout, 'rad install-core: write 3, keep 0, deleted 0, backup-write 0, stale 0\n');
+    assert.equal(readFileSync(join(target, 'scripts/lib/plan-paths.sh'), 'utf8'), '#!/bin/sh\n');
+    const manifest = JSON.parse(readFileSync(join(target, '.rad/installed.json'), 'utf8'));
+    assert.equal(manifest.rad_version, 'unknown', 'a non-git source records unknown');
+    assert.equal(manifest.installed_at, INSTALL_NOW.toISOString());
+  });
+});
+
+test('install-core AC#4 — --target defaults to the CLI repo root', async () => {
+  await withInstallRoots(async ({ source, target }) => {
+    const res = await runInstallCore(['--source', source], target);
+    assert.equal(res.code, 0, res.stderr);
+    assert.ok(existsSync(join(target, '.rad/installed.json')));
+  });
+});
+
+test('install-core AC#4 — a kept local edit → exit 1 naming the staged copy; backup-write names the backup', async () => {
+  await withInstallRoots(async ({ source, target }) => {
+    await runInstallCore(['--source', source, '--target', target]);
+    writeFileSync(join(target, 'ai/guardrails.md'), 'my edit\n');
+    writeFileSync(join(source, 'ai/guardrails.md'), 'g v2\n');
+    rmSync(join(target, '.rad/installed.json'));
+    writeFileSync(join(target, '.rad/installed.json'), JSON.stringify({ version: 1, files: {
+      'ai/guardrails.md': { layer: 'core', sha256: 'f'.repeat(64) } } }));
+    writeFileSync(join(target, 'harness/cli.js'), '// local\n');
+    const res = await runInstallCore(['--source', source, '--target', target]);
+    assert.equal(res.code, 1);
+    assert.match(res.stdout, /^rad install-core: write 1, keep 1, deleted 0, backup-write 1, stale 0$/m);
+    assert.match(res.stdout, /^keep: ai\/guardrails\.md \(.*\.rad\/upgrade-pending\/ai\/guardrails\.md\)$/m);
+    assert.match(res.stdout, /^backup-write: harness\/cli\.js \(.*\.rad\/upgrade-backup\/2026-10-05T01-02-03-004Z\/harness\/cli\.js\)$/m);
+    assert.equal(readFileSync(join(target, 'ai/guardrails.md'), 'utf8'), 'my edit\n');
+  });
+});
+
+test('install-core AC#4 — a locally deleted file → exit 1, reported, not restored', async () => {
+  await withInstallRoots(async ({ source, target }) => {
+    await runInstallCore(['--source', source, '--target', target]);
+    rmSync(join(target, 'ai/guardrails.md'));
+    const res = await runInstallCore(['--source', source, '--target', target]);
+    assert.equal(res.code, 1);
+    assert.match(res.stdout, /^deleted: ai\/guardrails\.md /m);
+    assert.ok(!existsSync(join(target, 'ai/guardrails.md')));
+  });
+});
+
+test('install-core AC#4 — bad argv or a non-RAD source → exit 2 with usage, nothing written', async () => {
+  await withInstallRoots(async ({ source, target }) => {
+    const cases = [[], ['--target', target], ['--source'], ['--source', source, '--nope', 'x'],
+      ['--source', source, 'extra'], ['--source', source, '--source', source], ['--source', target, '--target', target]];
+    for (const argv of cases) {
+      const res = await runInstallCore(argv, target);
+      assert.equal(res.code, 2, `argv ${JSON.stringify(argv)}`);
+      assert.match(res.stderr, /Usage: rad install-core/);
+    }
+    assert.ok(!existsSync(join(target, '.rad')), 'nothing written');
+  });
+});
+
+test('install-core AC#4 — a malformed existing manifest → exit 2, nothing written (never treated as absent)', async () => {
+  await withInstallRoots(async ({ source, target }) => {
+    mkdirSync(join(target, '.rad'));
+    writeFileSync(join(target, '.rad/installed.json'), '{ broken');
+    const res = await runInstallCore(['--source', source, '--target', target]);
+    assert.equal(res.code, 2);
+    assert.match(res.stderr, /installed\.json is not valid JSON.*nothing written/);
+    assert.ok(!existsSync(join(target, 'ai')), 'no core file copied');
+    assert.equal(readFileSync(join(target, '.rad/installed.json'), 'utf8'), '{ broken');
+  });
+});
+
+test('install-status AC#5 — clean → 0; modified → 1; missing → 1', async () => {
+  await withInstallRoots(async ({ source, target }) => {
+    await runInstallCore(['--source', source, '--target', target]);
+    const clean = await runInstallStatus(['--target', target]);
+    assert.equal(clean.code, 0, clean.stderr);
+    assert.equal(clean.stdout, '');
+    writeFileSync(join(target, 'ai/guardrails.md'), 'edit\n');
+    const modified = await runInstallStatus([], target);
+    assert.equal(modified.code, 1);
+    assert.equal(modified.stdout, 'modified: ai/guardrails.md\n');
+    rmSync(join(target, 'harness/cli.js'));
+    const missing = await runInstallStatus(['--target', target]);
+    assert.equal(missing.code, 1);
+    assert.match(missing.stdout, /^missing: harness\/cli\.js$/m);
+  });
+});
+
+test('install-status AC#5 — no manifest → 1 with the upgrade hint; malformed → 2; bad argv → 2', async () => {
+  await withInstallRoots(async ({ target }) => {
+    const none = await runInstallStatus(['--target', target]);
+    assert.equal(none.code, 1);
+    assert.match(none.stderr, /no \.rad\/installed\.json — run install\.sh --upgrade/);
+    mkdirSync(join(target, '.rad'));
+    writeFileSync(join(target, '.rad/installed.json'), JSON.stringify({ version: 1, files: [] }));
+    assert.equal((await runInstallStatus(['--target', target])).code, 2);
+    for (const argv of [['--target'], ['--source', target], ['extra']]) {
+      const res = await runInstallStatus(argv, target);
+      assert.equal(res.code, 2, `argv ${JSON.stringify(argv)}`);
+      assert.match(res.stderr, /Usage: rad install-status/);
+    }
   });
 });
