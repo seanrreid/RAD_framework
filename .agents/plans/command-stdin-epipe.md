@@ -1,7 +1,10 @@
 # Plan: Command Adapter Survives an Agent That Skips stdin (#177)
 Created: 2026-10-05
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-10-05T18:20:12.175Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/command-stdin-epipe
 Adopted-From: https://github.com/seanrreid/RAD_framework/issues/177
 Issue-Title: command adapter crashes with uncaught EPIPE when the agent CLI exits without reading stdin
