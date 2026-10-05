@@ -1,7 +1,8 @@
 # Plan: Command Adapter Survives an Agent That Skips stdin (#177)
 Created: 2026-10-05
 Author: architect
-Status: in-progress
+Status: complete
+Completed-At: 2026-10-05T18:36:20Z
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-10-05T18:20:12.175Z
 Recorded-By: sean@torchcodelab.com
