@@ -1,9 +1,9 @@
 # Plan: Follow-ups from #87
 Created: 2026-10-01
 Author: architect
-Status: in-progress
+Status: approved
 Approved-By: sean@torchcodelab.com
-Approved-At: 2026-10-01T20:13:17.279Z
+Approved-At: 2026-10-05T15:27:27.477Z
 Recorded-By: sean@torchcodelab.com
 Branch: rad/followups-87
 Adopted-From: https://github.com/seanrreid/RAD_framework/issues/174
