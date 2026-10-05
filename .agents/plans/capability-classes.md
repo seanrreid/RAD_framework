@@ -1,7 +1,8 @@
 # Plan: Capability Classes, Enforced per Wave (#85 part 1)
 Created: 2026-10-05
 Author: architect
-Status: in-progress
+Status: complete
+Completed-At: 2026-10-05T16:20:17Z
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-10-05T15:56:45.241Z
 Recorded-By: sean@torchcodelab.com
