@@ -1,7 +1,8 @@
 # Plan: Capability Classes, Approval Surface and Docs (#85 part 2)
 Created: 2026-10-05
 Author: architect
-Status: in-progress
+Status: complete
+Completed-At: 2026-10-05T17:50:35Z
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-10-05T17:32:20.333Z
 Recorded-By: sean@torchcodelab.com
