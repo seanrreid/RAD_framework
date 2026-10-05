@@ -1,7 +1,10 @@
 # Plan: Install Manifest and Non-Destructive Upgrade (#71 part 1)
 Created: 2026-10-05
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-10-05T19:15:02.772Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/install-manifest
 Adopted-From: https://github.com/seanrreid/RAD_framework/issues/71
 Issue-Title: Layered packaging model for portable RAD distribution: core → presets → project overrides (spec-kit bundles analog)
