@@ -23,6 +23,8 @@
 #     and backtick spans skipped) — warnings only, exit code unchanged
 #   - multibyte dashes (en/em) beside a vague word: no awk crash, still flagged
 #   - freshness with a missing/invalid .rad/config.yml: one advisory with reason
+#   - capability request advisory (#85): net/mcp on a Capabilities: line warns
+#     once per (scope, class); default-only lines and prose stay quiet
 # Self-contained (no external harness): writes temp fixture plans, runs the real
 # lint-plan.sh, and asserts on output/exit code. Runs under bash 3.2+ (set -u safe).
 #
@@ -1137,6 +1139,55 @@ t_consistency_edge_cases() {
   echo "✓ CONS(h): only the new consistency warnings ⇒ exit status unchanged (0)"
 }
 
+# ── Capability request advisory (#85 part 2, AC#2) ───────────────────────────
+CAP_PREFIX="capability request (beyond the default — architect review)"
+
+# Insert line $3 after the first line of plan $1 matching ERE $2.
+insert_after() {
+  local plan="$1" pattern="$2" add="$3"
+  awk -v pat="$pattern" -v add="$add" '{ print } !done && $0 ~ pat { print add; done = 1 }' "$plan" > "$plan.tmp"
+  mv "$plan.tmp" "$plan"
+}
+
+t_capability_advisory() {
+  # (a) Plan-level net → one warning naming `plan`; warnings never change exit 0.
+  local plan="$TMP/cap-plan-net.md"
+  write_plan "$plan" "| $REAL_PATH | 1-2 | x |" "$REAL_PATH:1-10"
+  insert_after "$plan" '^Branch:' 'Capabilities: fs_read, NET, net'
+  ( unset RAD_HIGH_RISK_PATTERNS; run_lint "$plan"
+    [[ $(printf '%s\n' "$LINT_OUT" | grep -cF "$CAP_PREFIX: plan requests net") -eq 1 ]] \
+      || fail "CAP(a): plan-level net did not warn exactly once: $LINT_OUT"
+    [[ "$LINT_CODE" -eq 0 ]] || fail "CAP(a): exited $LINT_CODE (expected 0)"
+  ) || exit 1
+  echo "✓ CAP(a): plan-level net ⇒ one warning naming plan, exit 0"
+
+  # (b) mcp on a wave (heading carries an em dash) → warning naming `wave 2`.
+  local plan2="$TMP/cap-wave-mcp.md"
+  write_plan "$plan2" "| $REAL_PATH | 1-2 | x |" "$REAL_PATH:1-10" 2
+  insert_after "$plan2" '^### Wave 2' 'Capabilities: fs_read,mcp'
+  ( unset RAD_HIGH_RISK_PATTERNS; run_lint "$plan2"
+    printf '%s\n' "$LINT_OUT" | grep -qF "$CAP_PREFIX: wave 2 requests mcp" \
+      || fail "CAP(b): wave mcp did not warn naming wave 2: $LINT_OUT"
+    if printf '%s\n' "$LINT_OUT" | grep -qF "wave 1 requests"; then fail "CAP(b): wave 1 warned"; fi
+    [[ "$LINT_CODE" -eq 0 ]] || fail "CAP(b): exited $LINT_CODE (expected 0)"
+  ) || exit 1
+  echo "✓ CAP(b): mcp on a wave ⇒ warning naming wave N, exit 0"
+
+  # (c) Default-only line, and (d) net in prose / outside any scope → nothing.
+  local plan3="$TMP/cap-quiet.md"
+  write_plan "$plan3" "| $REAL_PATH | 1-2 | x |" "$REAL_PATH:1-10" 1 false \
+    $'Needs net access and an mcp server.\nCapabilities: net'
+  insert_after "$plan3" '^### Wave 1' 'Capabilities: fs_read, fs_write, shell'
+  insert_after "$plan3" '^## Context' 'The internet (net) and mcp are prose here.'
+  ( unset RAD_HIGH_RISK_PATTERNS; run_lint "$plan3"
+    if printf '%s\n' "$LINT_OUT" | grep -qF "capability request"; then
+      fail "CAP(c/d): default-only line or prose warned: $LINT_OUT"
+    fi
+    [[ "$LINT_CODE" -eq 0 ]] || fail "CAP(c/d): exited $LINT_CODE (expected 0)"
+  ) || exit 1
+  echo "✓ CAP(c/d): default-only line and net/mcp in prose ⇒ no capability warning"
+}
+
 t_missing_task_file
 t_multi_file_task_line
 t_budget_bare_number
@@ -1169,4 +1220,5 @@ t_ac_citation_advisories
 t_vague_wording_advisory
 t_vague_wording_multibyte
 t_consistency_edge_cases
+t_capability_advisory
 echo "ALL PASS"

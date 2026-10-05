@@ -9,11 +9,40 @@
  * onward (the document body). Same body → same hash regardless of header churn;
  * any change to a body section → a different hash.
  *
+ * Exception: header `Capabilities:` lines set the plan's default capabilities,
+ * so they are normative and are folded into the hashed text under
+ * HEADER_CAPABILITIES_MARKER. Approval never rewrites them, so the hash stays
+ * non-circular. A plan with no header `Capabilities:` line must hash
+ * byte-identically to the body-only scheme, or every existing approval breaks.
+ *
  * Built-in crypto only — no external deps. Reuses the createHash('sha256')
  * normalize→stringify→digest pattern from harness/fingerprint.js.
  */
 
 import { createHash } from 'node:crypto';
+
+const BODY_HEADING_PREFIX = '## ';
+const HEADER_CAPABILITIES_PATTERN = /^Capabilities:/;
+// Fold separator: changing it re-hashes every plan that has a header Capabilities line.
+const HEADER_CAPABILITIES_MARKER = '\n<!-- rad:header-capabilities -->\n';
+
+/** Index of the first body heading, or -1 when the plan has none. */
+function bodyStart(lines) {
+  return lines.findIndex((line) => line.startsWith(BODY_HEADING_PREFIX));
+}
+
+/**
+ * The header block's `Capabilities:` lines (before the first `## `, or the whole
+ * doc when there is none), trimmed, in document order.
+ *
+ * @param {string[]} lines
+ * @returns {string[]}
+ */
+function headerCapabilityLines(lines) {
+  const start = bodyStart(lines);
+  const header = start === -1 ? lines : lines.slice(0, start);
+  return header.map((line) => line.trim()).filter((line) => HEADER_CAPABILITIES_PATTERN.test(line));
+}
 
 /**
  * Extract the stable normative body: everything from the first top-level `## `
@@ -26,7 +55,7 @@ import { createHash } from 'node:crypto';
  */
 function normalizeBody(planText) {
   const lines = String(planText ?? '').split('\n');
-  const start = lines.findIndex((line) => line.startsWith('## '));
+  const start = bodyStart(lines);
   if (start === -1) return '';
 
   const body = lines.slice(start).map((line) => line.replace(/[ \t]+$/, ''));
@@ -48,13 +77,18 @@ function normalizeBody(planText) {
  *
  * The mutable header block is excluded by construction (see module header), so
  * editing only a header line (e.g. `Status:`) yields the SAME hash, while
- * editing any body section yields a DIFFERENT hash.
+ * editing any body section or a header `Capabilities:` line yields a DIFFERENT hash.
  *
  * @param {string} planText - full plan document text
  * @returns {{ hash: string }} 64-char SHA-256 hex digest of the normalized body
  */
 export function planFingerprint(planText) {
-  const body = normalizeBody(planText);
-  const hash = createHash('sha256').update(body).digest('hex');
+  const text = String(planText ?? '');
+  const capabilities = headerCapabilityLines(text.split('\n'));
+  const body = normalizeBody(text);
+  const hashed = capabilities.length === 0
+    ? body
+    : `${body}${HEADER_CAPABILITIES_MARKER}${capabilities.join('\n')}`;
+  const hash = createHash('sha256').update(hashed).digest('hex');
   return { hash };
 }

@@ -46,6 +46,24 @@ function editPlanBody(fx) {
   assert.equal(res.status, 0, `plan edit commit failed: ${res.stderr}`);
 }
 
+// Header (default) capabilities: the approved set is narrower than the widened
+// one, and the widened set grants all five classes so the command adapter's
+// narrowed-plan refusal cannot fire before the approval check.
+const APPROVED_HEADER_CAPABILITIES = 'Capabilities: fs_read, fs_write, shell, net';
+const WIDENED_HEADER_CAPABILITIES = 'Capabilities: fs_read, fs_write, shell, net, mcp';
+const headerCapabilitiesPlan = (feature) =>
+  defaultPlan(feature).replace(/^(Branch: .*)$/m, `$1\n${APPROVED_HEADER_CAPABILITIES}`);
+
+/** Widen the plan-header Capabilities line (above the first `## `) and commit on the work branch. */
+function widenHeaderCapabilities(fx) {
+  const rel = join('.agents', 'plans', `${fx.feature}.md`);
+  const text = readFileSync(join(fx.root, rel), 'utf8');
+  assert.ok(text.includes(APPROVED_HEADER_CAPABILITIES), 'fixture plan lacks the header Capabilities line');
+  fx.writeFile(rel, text.replace(APPROVED_HEADER_CAPABILITIES, WIDENED_HEADER_CAPABILITIES));
+  const res = fx.git('commit', '-q', '-am', 'widen header capabilities after approval');
+  assert.equal(res.status, 0, `header edit commit failed: ${res.stderr}`);
+}
+
 defineCases([
   {
     id: 'deliver-without-approval',
@@ -135,6 +153,34 @@ defineCases([
     },
     mutate: (root) => patch(root, join('scripts', 'check-plan-approved.sh'),
       'if [[ -n "$STORED_FP" ]]; then', 'if false; then'),
+  },
+  {
+    // Widening the plan-header Capabilities line after approval invalidates it
+    // at both deliver entry points. Approval runs inside act (after any mutate)
+    // so the [mutated] twin's body-only hash is used for BOTH the stored and the
+    // current fingerprint, and the widened plan slips through.
+    id: 'widen-capabilities-after-approval',
+    invariant: 'approval-invalidated-by-plan-change',
+    fixture: { approve: false, plan: headerCapabilitiesPlan('demo') },
+    act: (fx) => {
+      const approved = fx.approve();
+      assert.equal(approved.status, 0, `approve failed (${approved.status}): ${approved.stderr}`);
+      widenHeaderCapabilities(fx);
+      return { hook: runDeliverHook(fx), cli: fx.deliver() };
+    },
+    assert: (fx, { hook, cli }) => {
+      assert.equal(hook.status, HOOK_BLOCK_EXIT, `hook allowed widened capabilities (exit ${hook.status})`);
+      assert.equal(cli.status, NEEDS_DECISION_EXIT, `rad deliver exit ${cli.status}: ${cli.stderr}`);
+      const stop = cli.events.find((e) => e.type === 'deliver-stopped');
+      assert.equal(stop?.data?.reason, 'approval-changed', `deliver-stopped: ${JSON.stringify(stop)}`);
+      assert.equal(fx.adversaryRan(), false, 'the agent ran');
+    },
+    // Drop the header-line fold: hashing reverts to body-only.
+    mutate: (root) => {
+      const module = join('harness', 'plan-fingerprint.js');
+      patch(root, module, 'const hashed = capabilities.length === 0', 'const hashed = true');
+      assumeUnchanged(root, module);
+    },
   },
   {
     id: 'plan-edit-mid-run',

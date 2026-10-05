@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import {
   approveCommand, gateCommand, parsePlanCtx, deliverCommand, stopStatusCommand, forecastCommand, digestCommand,
   resolveHooksDir, makeSpineScriptPort, SCRIPT_ARG_KEYS, reviewCommand, resolveAgent, isMainModule,
+  capabilitiesCommand,
 } from '../cli.js';
 import { buildReviewPrompt, reviewInstruction } from '../review.js';
 import { REVIEW_INSTRUCTION } from '../evals/reviewers/lib.js';
@@ -1941,5 +1942,108 @@ test('deliver capabilities — sdk adapter + an mcp wave → exit 2 before any S
     const logFile = seedApprovedPlanText(repoRoot, capabilityPlanText({ wave1: 'fs_read, mcp' }));
     const res = await withProcessEnv(FAKE_SDK_ENV, () => runDeliverCaptured({ repoRoot }));
     assertRefusedBeforeEvents(res, logFile, [/Wave 1/, /mcp/, /sdk adapter/]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// rad capabilities — read-only per-wave view (#85 part 2, AC#1). Refusals use
+// the SAME text as rad deliver; nothing is written.
+// ---------------------------------------------------------------------------
+
+/** Write `text` as the feature's plan doc (no event log); returns the plan path. */
+function writeCapabilityPlan(repoRoot, text, rel = join('.agents', 'plans', `${DELIVER_FEATURE}.md`)) {
+  const planFile = join(repoRoot, rel);
+  mkdirSync(dirname(planFile), { recursive: true });
+  writeFileSync(planFile, text, 'utf8');
+  return planFile;
+}
+
+function runCapabilities(repoRoot, argv = [DELIVER_FEATURE]) {
+  return captureStdio(() => capabilitiesCommand(argv, { repoRoot }));
+}
+
+test('capabilities AC#1 — undeclared plan: every wave is the default set, source default', async () => {
+  await withTempRepo(async (repoRoot) => {
+    writeCapabilityPlan(repoRoot, capabilityPlanText());
+    const res = await runCapabilities(repoRoot);
+    assert.equal(res.code, 0, res.stderr);
+    assert.equal(res.stdout, 'wave 1: fs_read, fs_write, shell (default)\nwave 2: fs_read, fs_write, shell (default)\n');
+    assert.ok(!existsSync(join(repoRoot, '.agents', 'state')), 'nothing written');
+  });
+});
+
+test('capabilities AC#1 — a plan line and a wave override report plan vs wave source', async () => {
+  await withTempRepo(async (repoRoot) => {
+    writeCapabilityPlan(repoRoot, capabilityPlanText({ header: 'fs_read, shell', wave2: 'fs_read, net' }));
+    const res = await runCapabilities(repoRoot);
+    assert.equal(res.code, 0, res.stderr);
+    assert.equal(res.stdout, 'wave 1: fs_read, shell (plan)\nwave 2: fs_read, net (wave)\n');
+  });
+});
+
+test('capabilities AC#1 — deny narrows the implicit default and is reported as denied', async () => {
+  await withTempRepo(async (repoRoot) => {
+    writeCapabilityPlan(repoRoot, capabilityPlanText());
+    writeDenyConfig(repoRoot, ['shell']);
+    const res = await runCapabilities(repoRoot);
+    assert.equal(res.code, 0, res.stderr);
+    assert.match(res.stdout, /^wave 1: fs_read, fs_write \(default\); denied: shell$/m);
+  });
+});
+
+test('capabilities AC#1 — a denied explicit request → exit 2 with the same text rad deliver gives', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const text = capabilityPlanText({ wave1: 'fs_read, net' });
+    const logFile = seedApprovedPlanText(repoRoot, text);
+    writeDenyConfig(repoRoot, ['net']);
+    const res = await runCapabilities(repoRoot);
+    assert.equal(res.code, 2);
+    assert.equal(res.stdout, '');
+    const deliver = await runDeliverCaptured({ repoRoot, runWave: injectedOk });
+    assertRefusedBeforeEvents(deliver, logFile, [/Wave 1/]);
+    const reason = (stderr, verb) => stderr.trim().slice(`rad ${verb}: `.length);
+    assert.equal(reason(res.stderr, 'capabilities'), reason(deliver.stderr, 'deliver'));
+  });
+});
+
+test('capabilities AC#1 — a malformed Capabilities: line → exit 2 naming the wave', async () => {
+  await withTempRepo(async (repoRoot) => {
+    writeCapabilityPlan(repoRoot, capabilityPlanText({ wave2: 'fs_read, telepathy' }));
+    const res = await runCapabilities(repoRoot);
+    assert.equal(res.code, 2);
+    assert.match(res.stderr, /malformed Capabilities: line in \.agents\/plans\/.*wave 2: .*telepathy/);
+  });
+});
+
+test('capabilities AC#1 — missing plan → exit 1; invalid config → exit 1 listing errors', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const missing = await runCapabilities(repoRoot);
+    assert.equal(missing.code, 1);
+    assert.match(missing.stderr, /no plan doc at \.agents\/plans\//);
+    writeCapabilityPlan(repoRoot, capabilityPlanText());
+    mkdirSync(join(repoRoot, '.rad'), { recursive: true });
+    writeFileSync(join(repoRoot, '.rad', 'config.yml'), 'version: 1\n', 'utf8');
+    const invalid = await runCapabilities(repoRoot);
+    assert.equal(invalid.code, 1);
+    assert.match(invalid.stderr, /config\.yml is invalid/);
+  });
+});
+
+test('capabilities AC#1 — bad argv (extra arg, valueless --plan, missing feature, unknown flag) → exit 2', async () => {
+  await withTempRepo(async (repoRoot) => {
+    for (const argv of [[DELIVER_FEATURE, 'extra'], [DELIVER_FEATURE, '--plan'], [], [DELIVER_FEATURE, '--nope']]) {
+      const res = await runCapabilities(repoRoot, argv);
+      assert.equal(res.code, 2, `argv ${JSON.stringify(argv)}`);
+      assert.match(res.stderr, /Usage: rad capabilities/);
+    }
+  });
+});
+
+test('capabilities AC#1 — --plan <path> reads that file instead of the feature plan', async () => {
+  await withTempRepo(async (repoRoot) => {
+    writeCapabilityPlan(repoRoot, capabilityPlanText({ wave1: 'mcp' }), join('elsewhere', 'p.md'));
+    const res = await runCapabilities(repoRoot, [DELIVER_FEATURE, '--plan', 'elsewhere/p.md']);
+    assert.equal(res.code, 0, res.stderr);
+    assert.match(res.stdout, /^wave 1: mcp \(wave\)$/m);
   });
 });
