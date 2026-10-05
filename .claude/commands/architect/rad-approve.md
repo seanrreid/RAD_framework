@@ -428,7 +428,7 @@ Branch:      rad/[feature-name]
 - If the architect provides feedback, set Status to needs-revision, not approved
 - Do not delete the work branch — it carries the plan, approval, and (later) the code
 - The approval commit on the work-branch tip is the audit trail — set Approved-By and Approved-At
-- Approving a plan accepts its declared capabilities (`Capabilities:` lines). A wave-level line sits in the plan body, so it is locked by the plan fingerprint and changing it after approval requires re-approval. The plan-header line sits above the first `## ` heading, which the fingerprint excludes — confirm it on the branch tip you approve. The capabilities check itself is advisory and never blocks approval
+- Approving a plan accepts its declared capabilities (`Capabilities:` lines). Both lines, the plan-header default and any wave-level line, are locked by the plan fingerprint, so changing either after approval requires re-approval. The capabilities check itself is advisory and never blocks approval
 
 ### Proxy approval (`--on-behalf-of`)
 

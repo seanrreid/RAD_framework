@@ -44,6 +44,7 @@ invariants:
       - { file: harness/cli.js, symbol: "makeApprovalIntact" }
       - { file: harness/spine.js, symbol: "Approval re-check fires before EVERY wave", note: "the re-check runs before the first wave too, not only between waves" }
       - { file: scripts/check-plan-approved.sh, symbol: "STORED_FP", note: "the deliver-gate path compares the frozen fingerprint" }
+      - { file: harness/plan-fingerprint.js, symbol: "HEADER_CAPABILITIES_MARKER", note: "the plan-header Capabilities line is folded into the fingerprint, so widening it after approval invalidates the approval" }
       - { file: harness/spine.js, symbol: "export function approvedDuringRun", note: "an approved event recorded during the run stops it — re-approval happens between runs (#158)" }
     bypasses:
       - id: mid-run-self-approval
