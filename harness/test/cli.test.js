@@ -1925,7 +1925,10 @@ async function runDeliverStderrOnly({ repoRoot, env }) {
 test('deliver capabilities — command adapter + no declarations runs as today (no capabilities key)', async () => {
   await withTempRepo(async (repoRoot) => {
     const logFile = seedApprovedPlanText(repoRoot, capabilityPlanText());
-    const { code, stderr } = await runDeliverStderrOnly({ repoRoot, env: COMMAND_AGENT_ENV });
+    // `{prompt}` puts the prompt in argv, so nothing is written to a child stdin
+    // that `true` never reads (on Linux that write races into an uncaught EPIPE).
+    const env = { ...COMMAND_AGENT_ENV, RAD_AGENT_CMD: 'true {prompt}' };
+    const { code, stderr } = await runDeliverStderrOnly({ repoRoot, env });
     assert.notEqual(code, 2, `setup must not refuse; stderr:\n${stderr}`);
     const started = readLog(logFile).filter((e) => e.type === 'wave-started');
     assert.ok(started.length > 0, 'the run reached the agent');
