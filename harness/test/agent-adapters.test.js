@@ -1176,3 +1176,46 @@ test('sdk adapter — capabilities: an mcp wave fails closed without calling que
   assert.equal(result.status, 'failed');
   assert.match(result.tasks[0].error, /mcp/);
 });
+
+// ===========================================================================
+// stdin EPIPE — an agent that exits without reading its prompt (#177)
+// ===========================================================================
+
+/** Larger than any OS pipe buffer (64 KiB macOS/Linux), so the write cannot
+ * complete before the child exits and EPIPE is guaranteed. */
+const OVERSIZED_PROMPT = 'x'.repeat(2 * 1024 * 1024);
+
+test('runCommandPrompt — exit 0 without reading a >1 MiB stdin prompt resolves ok (EPIPE is not fatal)', async () => {
+  await withTempDir(async (dir) => {
+    const result = await runCommandPrompt({ cmd: 'true', prompt: OVERSIZED_PROMPT, repoRoot: dir });
+    assert.deepEqual(result, { ok: true, stdout: '' });
+  });
+});
+
+test('runCommandPrompt — exit 1 without reading a >1 MiB stdin prompt resolves not-ok with the real exit code', async () => {
+  await withTempDir(async (dir) => {
+    const result = await runCommandPrompt({ cmd: 'false', prompt: OVERSIZED_PROMPT, repoRoot: dir });
+    assert.equal(result.ok, false);
+    assert.match(result.error, /code 1/);
+    assert.doesNotMatch(result.error, /EPIPE|stdin/);
+  });
+});
+
+test('runCommandPrompt — {prompt} placeholder writes nothing to stdin, so an early exit is unaffected', async () => {
+  await withTempDir(async (dir) => {
+    const result = await runCommandPrompt({ cmd: 'false {prompt}', prompt: 'small', repoRoot: dir });
+    assert.equal(result.ok, false);
+    assert.match(result.error, /code 1/);
+  });
+});
+
+test('command adapter — an agent exiting 1 without reading a >1 MiB prompt is a failed attempt, not a crash', async () => {
+  await withTempDir(async (dir) => {
+    const runWave = createCommandAdapter({ cmd: 'false', repoRoot: dir });
+    const planCtx = { ...PLAN_CTX, acceptanceCriteria: [OVERSIZED_PROMPT] };
+    const result = await runWave(WAVE, planCtx);
+    assert.equal(result.status, 'failed');
+    assert.equal(result.outcome, 'fail-protocol', 'no WAVE_RESULT block: startup-failure classification');
+    assert.match(result.tasks[0].error, /code 1/);
+  });
+});
