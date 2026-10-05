@@ -37,6 +37,7 @@ import {
   deliverCompleted, latestStop, dormantStop, fileDeficitSignals, forecastForPaths, DEFICITS,
 } from './events.js';
 import { taskFilesFromPlanText, mergeTaskFiles } from './plan-tasks.js';
+import { parseCapabilityLine, resolveWaveCapabilities, sdkAllowedTools, commandRefusal } from './capabilities.js';
 import { gatherDigestInputs, buildDigest, renderDigest } from './digest.js';
 import { buildReviewPrompt, parseFindings } from './review.js';
 import {
@@ -477,11 +478,76 @@ function parseWaveVerify(text) {
   return waveVerify;
 }
 
+/** A `### Wave N` heading; N is the wave number. */
+const WAVE_HEADING_PATTERN = /^###\s+Wave\s+(\d+)\b/;
+/** A `Capabilities:` line. The value may be empty so an empty declaration is reported, never ignored. */
+const CAPABILITIES_LINE_PATTERN = /^Capabilities:(.*)$/;
+/** Scope of a Capabilities: line before the first `##` heading: the plan default. */
+const PLAN_HEADER_SCOPE = 'header';
+
+/** Record one `Capabilities:` line into `out` under `scope` (PLAN_HEADER_SCOPE or a wave number). */
+function recordCapabilityLine(out, scope, value) {
+  const where = scope === PLAN_HEADER_SCOPE ? 'plan header' : `wave ${scope}`;
+  const parsed = parseCapabilityLine(value);
+  if (!parsed.ok) {
+    out.capabilityErrors.push(`${where}: ${parsed.error}`);
+    return;
+  }
+  const declared = scope === PLAN_HEADER_SCOPE
+    ? out.planCapabilities !== undefined
+    : Object.hasOwn(out.waveCapabilities, scope);
+  if (declared) {
+    out.capabilityErrors.push(`${where}: Capabilities: is declared more than once`);
+  } else if (scope === PLAN_HEADER_SCOPE) {
+    out.planCapabilities = parsed.classes;
+  } else {
+    out.waveCapabilities[scope] = parsed.classes;
+  }
+}
+
+/**
+ * Parse `Capabilities:` declarations (#85) from the plan doc.
+ *
+ * A line in the plan header (before the first `##`/`###` heading) is the plan
+ * default; a line inside a `### Wave N` block is that wave's request and
+ * REPLACES the default. Wave-block scoping mirrors parseWaveModels: a non-Wave
+ * `##`/`###` heading ends the block, `####` task subheadings stay inside it.
+ * Lines anywhere else are ignored. Malformed or duplicate lines are collected
+ * in `capabilityErrors` (each naming "plan header" or "wave N") so deliver can
+ * refuse before any event; they are never silently dropped.
+ *
+ * @param {string} text - full plan doc text
+ * @returns {{ planCapabilities: string[]|undefined, waveCapabilities: Record<number, string[]>,
+ *   capabilityErrors: string[], waveNumbers: number[] }}
+ */
+function parseCapabilities(text) {
+  const out = { planCapabilities: undefined, waveCapabilities: {}, capabilityErrors: [], waveNumbers: [] };
+  let scope = PLAN_HEADER_SCOPE;
+  for (const raw of text.split('\n')) {
+    const line = raw.trim();
+    const heading = WAVE_HEADING_PATTERN.exec(line);
+    if (heading) {
+      scope = Number(heading[1]);
+      if (!out.waveNumbers.includes(scope)) out.waveNumbers.push(scope);
+      continue;
+    }
+    if (/^#{2,3}\s/.test(line)) {
+      scope = undefined;
+      continue;
+    }
+    const m = CAPABILITIES_LINE_PATTERN.exec(line);
+    if (m && scope !== undefined) recordCapabilityLine(out, scope, m[1]);
+  }
+  return out;
+}
+
 /**
  * Parse a plan doc text to extract the planCtx fields needed by runWave.
  *
  * @param {string} text - full plan doc text
- * @returns {{ branch: string, acceptanceCriteria: string[], waveModels: Record<number, string>, waveVerify: Record<number, string>, executionNotes: { doNotTouch: string[], keyFiles: string[], reminders: string[] } }}
+ * @returns {{ branch: string, acceptanceCriteria: string[], waveModels: Record<number, string>, waveVerify: Record<number, string>,
+ *   planCapabilities: string[]|undefined, waveCapabilities: Record<number, string[]>, capabilityErrors: string[],
+ *   waveNumbers: number[], executionNotes: { doNotTouch: string[], keyFiles: string[], reminders: string[] } }}
  */
 export function parsePlanCtx(text) {
   // Branch: extract from `Branch: rad/feature` header line
@@ -524,6 +590,7 @@ export function parsePlanCtx(text) {
     acceptanceCriteria: acLines,
     waveModels: parseWaveModels(text),
     waveVerify: parseWaveVerify(text),
+    ...parseCapabilities(text),
     executionNotes: { doNotTouch, keyFiles, reminders },
   };
 }
@@ -662,6 +729,82 @@ export function resolveAgent(ctx, agentKind) {
 }
 
 /**
+ * The project deny list from .rad/config.yml under `root`. deliver has never
+ * required the config, so a MISSING file means no deny list; an INVALID one is
+ * a refusal (fail closed: a deny list that cannot be read is not an empty one).
+ *
+ * @returns {Promise<{ ok: true, deny: string[] } | { ok: false, error: string }>}
+ */
+async function loadCapabilityDeny(root) {
+  const loaded = await loadConfig(root);
+  if (loaded.ok) return { ok: true, deny: loaded.doc.capabilities?.deny ?? [] };
+  if (loaded.missing) return { ok: true, deny: [] };
+  return { ok: false, error: `${CONFIG_PATH} is invalid, so capabilities.deny cannot be read: ${loaded.errors.join('; ')}` };
+}
+
+/**
+ * Refusal for a constrained wave the sdk adapter cannot grant (e.g. mcp), or null.
+ * @param {Record<number, string[]>} waveEffective
+ */
+function sdkCapabilityRefusal(waveEffective) {
+  for (const [wave, effective] of Object.entries(waveEffective)) {
+    const mapped = sdkAllowedTools(effective);
+    if (!mapped.ok) return `Wave ${wave} cannot run on the sdk adapter (effective: [${effective.join(', ')}]): ${mapped.error}`;
+  }
+  return null;
+}
+
+/**
+ * Resolve every wave's effective capabilities (#85) and check the selected
+ * adapter can honour them. On success sets planCtx.waveEffective (wave number
+ * -> effective classes, constrained waves only) and returns null; otherwise
+ * returns the refusal reason. An injected runWave skips only the adapter check.
+ *
+ * @returns {Promise<string|null>}
+ */
+async function capabilityRefusal({ planCtx, root, agent }) {
+  if (planCtx.capabilityErrors.length > 0) {
+    return `malformed Capabilities: line in .agents/plans/${planCtx.feature}.md: ${planCtx.capabilityErrors.join('; ')}`;
+  }
+  const deny = await loadCapabilityDeny(root);
+  if (!deny.ok) return deny.error;
+  const resolved = resolveWaveCapabilities({
+    waves: planCtx.waveNumbers,
+    planCapabilities: planCtx.planCapabilities,
+    waveCapabilities: planCtx.waveCapabilities,
+    deny: deny.deny,
+  });
+  if (!resolved.ok) return resolved.error;
+  const waveEffective = {};
+  for (const [wave, entry] of Object.entries(resolved.byWave)) {
+    if (entry.constrained) waveEffective[wave] = entry.effective;
+  }
+  if (agent.kind === 'command') {
+    const refusal = commandRefusal(resolved.byWave);
+    if (refusal) return refusal;
+  }
+  if (agent.kind === 'sdk') {
+    const refusal = sdkCapabilityRefusal(waveEffective);
+    if (refusal) return refusal;
+  }
+  planCtx.waveEffective = waveEffective;
+  return null;
+}
+
+/**
+ * Capability check for deliver setup: writes the refusal and returns the usage
+ * exit code (before any event is appended), or null to continue.
+ *
+ * @returns {Promise<{ code: number } | null>}
+ */
+async function checkCapabilities(opts) {
+  const refusal = await capabilityRefusal(opts);
+  if (refusal === null) return null;
+  process.stderr.write(`rad deliver: ${refusal}\n`);
+  return { code: USAGE_EXIT_CODE };
+}
+
+/**
  * Construct the runWave for a resolved agent, rooted at `root` (the main
  * checkout, or the worktree in isolation mode). Runs the command-path preflight.
  *
@@ -707,6 +850,8 @@ async function setupMainRun({ ctx, feature, model, agentKind, repoRoot, sh }) {
   }
   const agent = resolveAgent(ctx, agentKind);
   if (agent.code !== undefined) return agent;
+  const refused = await checkCapabilities({ planCtx, root: repoRoot, agent });
+  if (refused) return refused;
   const built = await buildRunWave(agent, { model, root: repoRoot, planCtx });
   if (built.code !== undefined) return built;
   return { root: repoRoot, planCtx, state, runWave: built.runWave, worktree: null };
@@ -903,7 +1048,9 @@ async function setupWorktreeRun({ ctx, feature, model, agentKind, repoRoot, sh }
   if (prepared.code !== undefined) return prepared;
   const { root, worktree, workBranch } = prepared;
   const planCtx = loadPlanCtx(root, feature);
-  const built = planCtx ? await buildRunWave(agent, { model, root, planCtx }) : { code: 1 };
+  // A capability refusal after create preserves the worktree, like a preflight failure.
+  const refused = planCtx ? await checkCapabilities({ planCtx, root, agent }) : { code: 1 };
+  const built = refused ?? await buildRunWave(agent, { model, root, planCtx });
   if (built.code !== undefined) {
     preserveAfterSetupFailure(worktree, feature, root);
     return built;
@@ -1301,6 +1448,9 @@ export async function deliverCommand(argv, ctx) {
       // Per-wave `Model:` ids (parseWaveModels — the sole Model: parser), recorded
       // on each wave-started. Empty for a plan that declares none.
       waveModels: planCtx.waveModels,
+      // Effective capability classes of constrained waves only, recorded on each
+      // wave-started. Empty for an undeclared plan with no deny list.
+      waveCapabilities: planCtx.waveEffective,
       approvalIntact: makeApprovalIntact({ root, state, feature }),
       maxFailedAttempts: failedCap.cap,
       // Only a --resume run passes the key; otherwise the call is today's.

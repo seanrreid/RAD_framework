@@ -1133,3 +1133,46 @@ test('runCommandPrompt — prompt goes on stdin by default, into argv with a {pr
     assert.deepEqual(JSON.parse(viaArgv.stdout), { stdin: '', argv: ['hello-reviewer'] });
   });
 });
+
+// ===========================================================================
+// Per-wave capability classes (#85) — SDK allowedTools (AC#5)
+// ===========================================================================
+
+const SDK_TEST_KEY = 'sk-ant-fake-key-value-1234567890';
+
+/** Run wave 1 through the sdk adapter with `planCtx`; return the options handed to query. */
+async function sdkOptionsFor(planCtx) {
+  const captured = {};
+  const runWave = createRunWave({ apiKey: SDK_TEST_KEY, query: fakeQuery(GOOD_RESULT, captured) });
+  const result = await runWave({ ...WAVE, n: 1 }, planCtx);
+  assert.equal(result.outcome, 'success');
+  return captured.opts;
+}
+
+test('sdk adapter — capabilities: an unconstrained wave gets exactly DEFAULT_SDK_TOOLS (today\'s literal)', async () => {
+  const absent = await sdkOptionsFor(PLAN_CTX);
+  assert.deepEqual(absent.allowedTools, ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep']);
+  // A waveEffective map that names other waves only leaves wave 1 unconstrained.
+  const otherWave = await sdkOptionsFor({ ...PLAN_CTX, waveEffective: { 2: ['fs_read'] } });
+  assert.deepEqual(otherWave.allowedTools, ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep']);
+});
+
+test('sdk adapter — capabilities: an fs-only wave gets no Bash and no web tools', async () => {
+  const opts = await sdkOptionsFor({ ...PLAN_CTX, waveEffective: { 1: ['fs_read', 'fs_write'] } });
+  assert.deepEqual(opts.allowedTools, ['Read', 'Glob', 'Grep', 'Write', 'Edit']);
+  assert.ok(!opts.allowedTools.includes('Bash'), 'shell not granted');
+});
+
+test('sdk adapter — capabilities: a net wave gets WebFetch and WebSearch', async () => {
+  const opts = await sdkOptionsFor({ ...PLAN_CTX, waveEffective: { 1: ['fs_read', 'net'] } });
+  assert.deepEqual(opts.allowedTools, ['Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch']);
+});
+
+test('sdk adapter — capabilities: an mcp wave fails closed without calling query (never widens to the default)', async () => {
+  let called = false;
+  const runWave = createRunWave({ apiKey: SDK_TEST_KEY, query: () => { called = true; throw new Error('unreachable'); } });
+  const result = await runWave({ ...WAVE, n: 1 }, { ...PLAN_CTX, waveEffective: { 1: ['fs_read', 'mcp'] } });
+  assert.equal(called, false, 'query never invoked');
+  assert.equal(result.status, 'failed');
+  assert.match(result.tasks[0].error, /mcp/);
+});

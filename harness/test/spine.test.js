@@ -2321,3 +2321,40 @@ test('(detail-c) AC#7 stops without a free-text reason append no `detail` key', 
   const budgetStop = assertOneTrailingStop(budget.state, { reason: 'token-budget' });
   assert.ok(!Object.hasOwn(budgetStop.data, 'detail'), 'token-budget carries no detail');
 });
+
+// ── capability-classes (#85): waveCapabilities → wave-started.capabilities ──
+
+test('(capcls-a) AC#7 a constrained wave records its effective classes on every wave-started, including the retry', async () => {
+  let i = 0;
+  const { state, result } = await runOneWave({
+    runWave: async () => (i++ === 0 ? { outcome: 'fail-tests', summary: 'first' } : { outcome: 'success' }),
+    waveCapabilities: { 1: ['fs_read', 'net'] },
+  });
+  assert.deepEqual(result, { ok: true, waves: 1 });
+  const started = state.appended.filter((e) => e.type === 'wave-started');
+  assert.deepEqual(started.map((e) => e.data), [
+    { wave: 1, attempt: 1, capabilities: ['fs_read', 'net'] },
+    { wave: 1, attempt: 2, capabilities: ['fs_read', 'net'] },
+  ]);
+});
+
+test('(capcls-b) AC#7 an unconstrained wave (absent from waveCapabilities) records no capabilities key', async () => {
+  const { state } = await runOneWave({
+    plan: twoWaves,
+    runWave: async () => ({ outcome: 'success' }),
+    waveCapabilities: { 2: ['fs_read'] },
+    waveModels: { 2: 'claude-haiku-4-5' },
+  });
+  const [w1, w2] = state.appended.filter((e) => e.type === 'wave-started');
+  assert.ok(!('capabilities' in w1.data), 'key absent, not undefined');
+  assert.deepEqual(w2.data, { wave: 2, attempt: 1, model: 'claude-haiku-4-5', capabilities: ['fs_read'] });
+});
+
+test('(capcls-c) AC#7 waveCapabilities {} vs omitted → byte-identical event sequences', async () => {
+  const runWith = async (extra) =>
+    (await runOneWave({ plan: twoWaves, runWave: async () => ({ outcome: 'success' }), ...extra })).state.appended;
+  const omitted = await runWith({});
+  const empty = await runWith({ waveCapabilities: {} });
+  assert.equal(JSON.stringify(empty), JSON.stringify(omitted));
+  assert.ok(omitted.filter((e) => e.type === 'wave-started').every((e) => !('capabilities' in e.data)));
+});

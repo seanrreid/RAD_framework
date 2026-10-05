@@ -39,6 +39,7 @@ import {
   withTimeout,
   normalizeUsage,
 } from './contract.js';
+import { DEFAULT_SDK_TOOLS, sdkAllowedTools } from '../../capabilities.js';
 
 /** Env keys forwarded to the SDK subprocess. The API key is added separately. */
 const ENV_ALLOW_LIST = ['PATH', 'HOME', 'LANG', 'LC_ALL', 'TMPDIR', 'TERM'];
@@ -51,6 +52,21 @@ function buildSdkEnv(apiKey) {
   }
   env.ANTHROPIC_API_KEY = apiKey;
   return env;
+}
+
+/**
+ * The SDK allowedTools for one wave. A wave absent from planCtx.waveEffective
+ * (keyed by NUMBER, constrained waves only) is unconstrained and gets exactly
+ * DEFAULT_SDK_TOOLS, today's literal. A constrained wave gets the mapped set;
+ * an unmappable set (e.g. mcp) fails closed, never widening to the default.
+ *
+ * @returns {{ ok: true, tools: string[] } | { ok: false, error: string }}
+ */
+function waveAllowedTools(planCtx, waveId) {
+  const effective = planCtx?.waveEffective?.[Number(waveId)];
+  if (effective === undefined) return { ok: true, tools: [...DEFAULT_SDK_TOOLS] };
+  const mapped = sdkAllowedTools(effective);
+  return mapped.ok ? mapped : { ok: false, error: `wave ${waveId} capabilities: ${mapped.error}` };
 }
 
 /** Max transient retries before producing a terminal outcome. */
@@ -96,9 +112,10 @@ export function createRunWave({
    * thrown error carries the (sanitized) summary.
    *
    * @param {string} prompt
+   * @param {{ model?: string, allowedTools: string[] }} runOpts - this wave's model and tool allow-list
    * @returns {Promise<{ text: string }>}
    */
-  async function runQueryOnce(prompt, effectiveModel) {
+  async function runQueryOnce(prompt, { model: effectiveModel, allowedTools }) {
     const abortController = new AbortController();
     let fullText = '';
     let usage;
@@ -113,7 +130,7 @@ export function createRunWave({
           maxTurns,
           abortController,
           tools: { type: 'preset', preset: 'claude_code' },
-          allowedTools: ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep'],
+          allowedTools: [...allowedTools],
           permissionMode: 'acceptEdits',
           persistSession: false,
         },
@@ -168,15 +185,15 @@ export function createRunWave({
    *
    * @param {string} prompt
    * @param {string|number} waveId
-   * @param {string} [effectiveModel] - model id for this wave (per-wave override)
+   * @param {{ model?: string, allowedTools: string[] }} runOpts - per-wave model override and tool allow-list
    */
-  async function runWithRetry(prompt, waveId, effectiveModel) {
+  async function runWithRetry(prompt, waveId, runOpts) {
     let attempt = 0;
     // attempt 0 is the initial call; up to MAX_TRANSIENT_RETRIES retries follow.
     // eslint-disable-next-line no-constant-condition
     while (true) {
       try {
-        const once = await runQueryOnce(prompt, effectiveModel);
+        const once = await runQueryOnce(prompt, runOpts);
         return { text: once.text, usage: once.usage };
       } catch (err) {
         const bucket = classifyError(err);
@@ -222,7 +239,11 @@ export function createRunWave({
     // construction-time (deliver default) model when this wave declares none.
     const effectiveModel = planCtx?.waveModels?.[Number(waveId)] ?? model;
 
-    const first = await runWithRetry(prompt, waveId, effectiveModel);
+    const tools = waveAllowedTools(planCtx, waveId);
+    if (!tools.ok) return toWaveResult(syntheticFailure(waveId, tools.error));
+    const runOpts = { model: effectiveModel, allowedTools: tools.tools };
+
+    const first = await runWithRetry(prompt, waveId, runOpts);
     if (first.terminal) return first.terminal;
 
     let block = extractWaveResultBlock(first.text);
@@ -235,7 +256,7 @@ export function createRunWave({
       'Re-run the wave and end your response with exactly one WAVE_RESULT ... ' +
       'END_WAVE_RESULT block, and nothing after it.';
 
-    const second = await runWithRetry(reprompt, waveId, effectiveModel);
+    const second = await runWithRetry(reprompt, waveId, runOpts);
     if (second.terminal) return second.terminal;
 
     block = extractWaveResultBlock(second.text);

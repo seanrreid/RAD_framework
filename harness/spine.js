@@ -417,16 +417,21 @@ function declaredModel(value) {
  * when one is declared — the plan's `Model:` map (`waveModels`, keyed by wave
  * number) wins over a descriptor-level `wave.model` — so the key is absent
  * otherwise. An empty-string or non-string value counts as undeclared.
+ * `capabilities` (the wave's effective classes) is spread only for a wave
+ * present in `waveCapabilities` (constrained waves only), so an unconstrained
+ * wave's event is byte-identical to before capabilities existed.
  */
-function appendWaveStarted({ state, feature, now, wave, attempt, waveModels }) {
+function appendWaveStarted({ state, feature, now, wave, attempt, waveModels, waveCapabilities }) {
   const declared = declaredModel(waveModels[wave.n]) ?? declaredModel(wave.model);
   const model = declared ? { model: declared } : {};
+  const effective = waveCapabilities[wave.n];
+  const capabilities = Array.isArray(effective) ? { capabilities: [...effective] } : {};
   state.append({
     feature,
     type: 'wave-started',
     actor: 'harness',
     ts: now(),
-    data: { wave: wave.n, attempt, ...model },
+    data: { wave: wave.n, attempt, ...model, ...capabilities },
   });
 }
 
@@ -519,6 +524,13 @@ function convergeOrphans({ history, wave, matrix, state, feature, now, runHooks 
  *   `model` on each `wave-started`. A wave ABSENT from the map (or mapped to an
  *   empty/non-string value) records no `model` key — so a plan declaring no
  *   `Model:` anywhere produces the event sequence it did before this existed.
+ * @param {Record<number, string[]>} [args.waveCapabilities] - optional per-wave
+ *   EFFECTIVE capability classes, keyed by wave number, for capability-constrained
+ *   waves only (resolved by cli.js from the plan's `Capabilities:` lines and the
+ *   project deny list). Recorded as `capabilities` on each `wave-started`. A wave
+ *   ABSENT from the map records no `capabilities` key, so a plan with no
+ *   declaration and no deny list produces the event sequence it did before this
+ *   existed. Recording only: enforcement is the agent adapter's job.
  * @param {(point: string, ctx: Object) => { ran: Array, veto: (Object|null), failures: Array }} [args.runHooks]
  *   wave-lifecycle hook runner (from createHookRunner). OBSERVE-ONLY in this wave:
  *   fired at six lifecycle points, its observations/failures are recorded as
@@ -561,6 +573,7 @@ export async function deliverSpine({
   tokenBudget = null,
   waveVerify = {},
   waveModels = {},
+  waveCapabilities = {},
   runHooks = NOOP_HOOKS,
   hookPreflight = NOOP_PREFLIGHT,
   approvalIntact = ALWAYS_INTACT,
@@ -725,7 +738,7 @@ export async function deliverSpine({
         );
       }
 
-      appendWaveStarted({ state, feature, now, wave, attempt, waveModels });
+      appendWaveStarted({ state, feature, now, wave, attempt, waveModels, waveCapabilities });
 
       // ADDITIVE second argument: attempt context. A runWave that ignores it is
       // unchanged; one that reads it can make attempt N+1 differ from attempt N.
