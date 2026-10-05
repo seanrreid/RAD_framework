@@ -82,13 +82,14 @@ Research was done directly by the orchestrator: grep of the `get-default-branch.
 | scripts/detect-platform.sh | 46-50 | Notice text (AC#6) |
 | scripts/test-detect-platform.sh | 120-143 | Notice assertion (AC#6) |
 | docs/rad-cli.md | 56-60 | Pointer (AC#6) |
+| harness/evals/approval.eval.js | 296-310 | Amendment 1: `runGateScript` passes an explicit base branch |
 
 ## Execution Notes
 
 ### Do Not Touch
 - `scripts/get-default-branch.sh`
 - `scripts/draft-insights-plan.sh`
-- `harness/`
+- `harness/` (except, under Amendment 1, `runGateScript` in `harness/evals/approval.eval.js`)
 - `.rad/config.yml`, CLAUDE.md
 
 ### Key Files
@@ -153,6 +154,20 @@ Validate: AC#6:
 - `test-detect-platform.sh` asserts that the no-config notice names `rad config init`, and passes under both shells;
 - `grep -n "configured architect in .CLAUDE" docs/rad-cli.md` finds nothing.
 
+### Wave 3 — sequential
+Amendment 1: Task 1.1's fail-closed base lookup makes an eval's mutated twin refuse for the wrong reason.
+
+#### Task 3.1: Gate eval passes an explicit base branch
+File: harness/evals/approval.eval.js:296-310
+What: `gate-hook-via-symlinked-checkout [mutated]` now fails ("assertion still passed with the guard removed").
+- **Why:** the twin restores the old string-compare guard in `cli.js`. Run through the symlink, `get-default-branch.sh` then gets a silent, empty `config get`, so it exits 1. Task 1.1 makes `check-plan-approved.sh` refuse on that error, before the gate it is meant to test ever runs. That is a correct refusal, but it is a third defence the twin doesn't revert, so the eval no longer isolates the guard plus the `passed=true` check.
+- **Fix:** `runGateScript` passes the base branch explicitly (`check-plan-approved.sh rad/<feature> main`), which skips the lookup the same way any caller with an explicit base does. Add a one-line constraint comment saying why. The base-lookup failure keeps its own coverage in `scripts/test-check-plan-approved.sh`.
+
+Validate: AC#1 (amendment 1).
+- `node --test harness/evals/approval.eval.js` passes in full, including `gate-hook-via-symlinked-checkout [mutated]`.
+- `node --test harness/evals/*.eval.js` has no failures.
+- Edge case: the un-mutated case must still refuse the unapproved plan through the symlink.
+
 ## Tests to Write
 - [ ] Gate config-error cases — scripts/test-check-plan-approved.sh
 - [ ] Gate config-error cases — scripts/test-check-approval-integrity.sh
@@ -176,6 +191,7 @@ None.
 - **`LC_ALL=C` in the vague scan** could change how non-ASCII letters next to a vague word count for the word boundary. Under C, a multibyte byte is not `[a-z0-9_-]`, so it counts as a boundary. That matches the current intent.
 
 ## Issue Gaps
+- **AMENDMENT 1 (2026-10-05, after Wave 2).** The final checks found that `harness/evals/approval.eval.js` `gate-hook-via-symlinked-checkout [mutated]` fails. Task 1.1's fail-closed base lookup refuses before the gate when the reverted `cli.js` guard silently empties `get-default-branch.sh`'s output, so the twin can't reach the layers it tests. The new Task 3.1 has the eval pass an explicit base branch. The range `harness/evals/approval.eval.js:296-310` is added.
 - **ASSUMPTION: exit codes per gate.** Each gate reuses its existing error code (`check-plan-approved` 1; `check-approval-integrity` and `check-scope` 2, their usage/config code) rather than a new shared code.
 - **ASSUMPTION: `rad-status.sh` and `lint-plan.sh` freshness stay non-fatal.** They are display and advisory, so they warn and continue rather than fail.
 - **ASSUMPTION: `draft-insights-plan.sh:242` is left alone.** Its fallback is commented as the documented default and already doesn't discard stderr.
