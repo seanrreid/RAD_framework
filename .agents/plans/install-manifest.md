@@ -1,7 +1,7 @@
 # Plan: Install Manifest and Non-Destructive Upgrade (#71 part 1)
 Created: 2026-10-05
 Author: architect
-Status: approved
+Status: in-progress
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-10-05T19:15:02.772Z
 Recorded-By: sean@torchcodelab.com
