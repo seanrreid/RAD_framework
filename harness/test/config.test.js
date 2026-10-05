@@ -372,3 +372,72 @@ test('rad config init: unknown flag or a flag missing its value → exit 2 usage
   }
   assert.equal(existsSync(join(root, CONFIG_PATH)), false);
 });
+
+// --- capabilities.deny (#85) -------------------------------------------------
+
+const withCaps = (capabilities) => ({ ...clone(VALID), capabilities });
+
+test('capabilities.deny: empty list and known classes are valid', () => {
+  assert.deepEqual(validateConfig(withCaps({ deny: [] })), []);
+  assert.deepEqual(validateConfig(withCaps({ deny: ['net', 'mcp'] })), []);
+  assert.deepEqual(validateConfig(withCaps({})), [], 'deny is optional under capabilities');
+});
+
+test('capabilities.deny: unknown class is an error naming it', () => {
+  const errors = validateConfig(withCaps({ deny: ['net', 'network'] }));
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /capabilities\.deny\[1\] is not a capability class \(got "network"\)/);
+});
+
+test('capabilities.deny: a lone string normalizes to a list (same rule as roles); other non-lists are errors', () => {
+  assert.deepEqual(validateConfig(withCaps({ deny: 'net' })), []);
+  assert.match(validateConfig(withCaps({ deny: 'bogus' })).join('\n'), /capabilities\.deny\[0\]/);
+  for (const deny of [{ net: true }, 7, null]) {
+    assert.deepEqual(validateConfig(withCaps({ deny })), ['capabilities.deny must be a list'], JSON.stringify(deny));
+  }
+});
+
+test('capabilities: unknown key under capabilities is an error', () => {
+  assert.deepEqual(validateConfig(withCaps({ deny: [], allow: ['net'] })), ['unknown key capabilities.allow']);
+});
+
+test('capabilities: non-mapping is an error', () => {
+  for (const caps of [['net'], 'net', null, 3]) {
+    assert.deepEqual(validateConfig(withCaps(caps)), ['capabilities must be a mapping'], JSON.stringify(caps));
+  }
+});
+
+test('capabilities: serialize → loadConfig round-trips the deny list', async () => {
+  const doc = withCaps({ deny: ['net', 'mcp'] });
+  const text = serializeConfig(doc);
+  assert.match(text, /\ncapabilities:\n {2}deny: \[net, mcp\]\n$/);
+  const root = tempRoot();
+  writeConfig(root, text);
+  const loaded = await loadConfig(root);
+  assert.equal(loaded.ok, true, JSON.stringify(loaded.errors));
+  assert.deepEqual(loaded.doc.capabilities, { deny: ['net', 'mcp'] });
+  assert.equal(serializeConfig(loaded.doc), text);
+});
+
+test('capabilities: a lone-string deny loads as a list', async () => {
+  const root = tempRoot();
+  writeConfig(root, `${serializeConfig(VALID)}capabilities:\n  deny: net\n`);
+  const loaded = await loadConfig(root);
+  assert.equal(loaded.ok, true, JSON.stringify(loaded.errors));
+  assert.deepEqual(loaded.doc.capabilities.deny, ['net']);
+});
+
+test('capabilities: a config without the key serializes with no capabilities block', async () => {
+  const text = serializeConfig(VALID);
+  assert.doesNotMatch(text, /capabilities/);
+  assert.equal(serializeConfig({ ...clone(VALID), capabilities: undefined }), text);
+  const root = tempRoot();
+  writeConfig(root, text);
+  const loaded = await loadConfig(root);
+  assert.equal(Object.hasOwn(loaded.doc, 'capabilities'), false);
+});
+
+test('capabilities: the committed .rad/config.yml still validates', async () => {
+  const loaded = await loadConfig(REPO_ROOT);
+  assert.equal(loaded.ok, true, JSON.stringify(loaded.errors));
+});
