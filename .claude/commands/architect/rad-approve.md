@@ -141,6 +141,23 @@ unresolved clarification marker, or an un-waived `high-risk:<path>` finding. Exi
 is a usage or unreadable-plan error — stop and surface it. Do not stop on exit 1;
 carry the blockers and waivers into the Step 3 summary.
 
+Next to the blocker check, resolve each wave's capability classes — capture stdout
+and the exit code:
+
+```bash
+node harness/cli.js capabilities "$FEATURE"
+```
+
+This is the same read-only resolution `rad deliver` runs (plan and wave
+`Capabilities:` lines against `capabilities.deny` in `.rad/config.yml`), and it
+appends no event. Exit 0 prints one line per wave:
+`wave N: <classes> (<default|plan|wave>)`, plus `; denied: <classes>` when the deny
+list narrowed that wave. A non-zero exit (2 for a malformed `Capabilities:` line or
+a denied explicit request; 1 for a missing plan or an invalid `.rad/config.yml`)
+prints the reason on stderr. Do not stop on any exit code — this check is
+**advisory** and never blocks approval; carry the lines (or the error) into the
+Step 3 summary.
+
 ### Step 3: Display review summary
 
 Output the plan for architect review:
@@ -174,6 +191,11 @@ Blockers & Waivers
   Waivers:  [none | one line per applied waiver: high-risk:<path> — <justification>]
   [only if stdout had a high-risk-pattern line:]
   Recorded under a non-default high-risk pattern: <pattern>
+
+Capabilities
+  [default (fs_read, fs_write, shell) for every wave
+   | one line per wave from `rad capabilities`: wave N: <classes> (<source>)[; denied: <classes>]
+   | Capabilities: <message> — deliver will refuse this plan]
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
@@ -199,6 +221,22 @@ confirmation prompt:
   high-risk pattern: <pattern>` so you see the narrowing. Never list it as a waiver.
   Judge whether the narrowed pattern is acceptable: `rad approve` freezes it into
   the `approved` event as `highRiskPattern`, and CI surfaces it as an advisory.
+
+**Capabilities** — render this block from the Step 2 `rad capabilities` call,
+right after Blockers & Waivers:
+
+- **Every wave's source is `default` and nothing is denied** — collapse to the single
+  line `default (fs_read, fs_write, shell) for every wave`.
+- **Otherwise** — show each wave line exactly as printed. A `plan` or `wave` source
+  means the plan declares its own set; a `; denied:` suffix means the project deny
+  list narrowed that wave's implicit default.
+- **Non-zero exit** — render the stderr reason as a blocker-style line:
+  `Capabilities: <message> — deliver will refuse this plan`. This is **advisory
+  only**: it does NOT block approval, but `rad deliver` will refuse the plan
+  (exit 2, before any event) until the line or the deny list is fixed.
+- Requests for `net` or `mcp` (beyond the default) also appear as
+  `capability request` warnings in the Step 2 lint output — judge them here.
+  Approving the plan accepts its declared capabilities.
 
 After rendering the review summary, scan the plan's wave structure for slop-risk
 signals before presenting the confirmation prompt. This is a **read-only analysis**
@@ -390,6 +428,7 @@ Branch:      rad/[feature-name]
 - If the architect provides feedback, set Status to needs-revision, not approved
 - Do not delete the work branch — it carries the plan, approval, and (later) the code
 - The approval commit on the work-branch tip is the audit trail — set Approved-By and Approved-At
+- Approving a plan accepts its declared capabilities (`Capabilities:` lines). A wave-level line sits in the plan body, so it is locked by the plan fingerprint and changing it after approval requires re-approval. The plan-header line sits above the first `## ` heading, which the fingerprint excludes — confirm it on the branch tip you approve. The capabilities check itself is advisory and never blocks approval
 
 ### Proxy approval (`--on-behalf-of`)
 
