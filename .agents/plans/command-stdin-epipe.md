@@ -104,4 +104,4 @@ None.
 - **Self-protected path:** `harness/` triggers an advisory lint warning by design.
 
 ## Issue Gaps
-None. The issue states the defect, the evidence and the fix.
+- None. The issue states the defect, the evidence and the fix.
