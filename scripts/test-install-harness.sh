@@ -10,6 +10,10 @@
 #     repo's git email; no identity -> files laid down, no config, exit 1);
 #     upgrade runs `config migrate` from an old CLAUDE.md block (placeholder
 #     architect -> exit 1) and never touches an existing config
+#   - framework core goes through the install manifest (.rad/installed.json):
+#     scripts/lib ships, a local edit is kept + staged (exit 1), a pre-manifest
+#     upgrade backs up then overwrites, a malformed manifest stops the install,
+#     and a missing node is a named prerequisite error
 # Every installer run uses an isolated git identity (no global/system config,
 # empty HOME) so the developer's real git email never leaks into a result.
 # Self-contained: installs into a throwaway temp dir, asserts, always cleans up.
@@ -220,6 +224,95 @@ run_install "$USAGE_T" "$TMP/usage.out" --architect
   || bad "--architect without a value -> exited $INSTALL_RC, expected 1"
 assert_contains "$TMP/usage.out" "--architect requires a value" "--architect usage error names the flag"
 assert_not_exists "$USAGE_T/harness" "--architect usage error installs nothing"
+
+# ── 5f. fresh install writes the manifest and ships scripts/lib ──────────────
+assert_exists "$MAIN/.rad/installed.json" "fresh install wrote .rad/installed.json"
+assert_exists "$MAIN/scripts/lib/plan-paths.sh" "fresh install shipped scripts/lib/plan-paths.sh"
+
+# ── 5g. lint-plan.sh in the installed repo finds its sourced lib ─────────────
+printf '# Plan: fixture\n' >"$MAIN/fixture-plan.md"
+# The fixture plan is incomplete, so lint-plan.sh's own verdict is not asserted
+# (the rc is recorded for the failure message); only the lib-sourcing error is.
+LINT_RC=0
+( cd "$MAIN" && bash scripts/lint-plan.sh fixture-plan.md ) >"$TMP/lint-plan.out" 2>&1 || LINT_RC=$?
+if grep -q "No such file" "$TMP/lint-plan.out"; then
+  bad "lint-plan.sh in the installed repo cannot source its lib (exit $LINT_RC)"; cat "$TMP/lint-plan.out"
+else
+  ok "lint-plan.sh in the installed repo sources lib/plan-paths.sh"
+fi
+
+# upgrade_target <name> -> echoes a repo freshly installed with --architect, so
+# its upgrades carry an existing config and only install-core drives the exit.
+upgrade_target() {
+  local dir
+  dir="$(new_repo "$1")"
+  run_install "$dir" "$TMP/$1-fresh.out" --architect "$FIXTURE_ARCHITECT"
+  [[ "$INSTALL_RC" -eq 0 ]] || { echo "fixture install of $1 failed ($INSTALL_RC)" >&2; cat "$TMP/$1-fresh.out" >&2; }
+  echo "$dir"
+}
+
+# ── 5j. clean upgrade (no edits) exits 0 ────────────────────────────────────
+UPG_T="$(upgrade_target upgrade)"
+run_install "$UPG_T" "$TMP/upgrade-clean.out" --upgrade
+[[ "$INSTALL_RC" -eq 0 ]] && ok "clean upgrade -> installer exits 0" \
+  || { bad "clean upgrade -> installer exited $INSTALL_RC, expected 0"; cat "$TMP/upgrade-clean.out"; }
+
+# ── 5h. upgrade keeps a local edit, stages the update, exits 1 ──────────────
+readonly LOCAL_EDIT="# local edit kept by upgrade"
+echo "$LOCAL_EDIT" >>"$UPG_T/ai/slop-register.md"
+run_install "$UPG_T" "$TMP/upgrade-edit.out" --upgrade
+[[ "$INSTALL_RC" -eq 1 ]] && ok "upgrade with a local edit -> installer exits 1" \
+  || { bad "upgrade with a local edit -> installer exited $INSTALL_RC, expected 1"; cat "$TMP/upgrade-edit.out"; }
+grep -qF -- "$LOCAL_EDIT" "$UPG_T/ai/slop-register.md" && ok "upgrade kept the local edit" \
+  || bad "upgrade overwrote the local edit in ai/slop-register.md"
+assert_exists "$UPG_T/.rad/upgrade-pending/ai/slop-register.md" "upgrade staged the new version in .rad/upgrade-pending/"
+assert_contains "$TMP/upgrade-edit.out" "node harness/cli.js install-status" \
+  "kept-file exit names the install-status review command"
+STATUS_RC=0
+( cd "$UPG_T" && isolated node harness/cli.js install-status ) >"$TMP/status.out" 2>&1 || STATUS_RC=$?
+[[ "$STATUS_RC" -eq 1 ]] && ok "install-status exits 1 on drift" \
+  || bad "install-status exited $STATUS_RC on drift, expected 1"
+assert_contains "$TMP/status.out" "modified: ai/slop-register.md" "install-status reports the kept local edit"
+
+# ── 5i. first upgrade with no manifest backs up, then overwrites ────────────
+BK_T="$(upgrade_target backup)"
+rm "$BK_T/.rad/installed.json"
+echo "# pre-manifest local edit" >>"$BK_T/ai/guardrails.md"
+run_install "$BK_T" "$TMP/upgrade-backup.out" --upgrade
+[[ "$INSTALL_RC" -eq 0 ]] && ok "upgrade without a manifest -> installer exits 0" \
+  || { bad "upgrade without a manifest -> installer exited $INSTALL_RC, expected 0"; cat "$TMP/upgrade-backup.out"; }
+BACKUP_COPY="$(find "$BK_T/.rad/upgrade-backup" -path '*/ai/guardrails.md' 2>/dev/null | head -n 1)"
+[[ -n "$BACKUP_COPY" ]] && grep -qF "# pre-manifest local edit" "$BACKUP_COPY" \
+  && ok "no manifest -> the differing file was backed up under .rad/upgrade-backup/" \
+  || bad "no manifest -> no backup of ai/guardrails.md under .rad/upgrade-backup/"
+cmp -s "$REPO_ROOT/ai/guardrails.md" "$BK_T/ai/guardrails.md" \
+  && ok "no manifest -> the file was overwritten with the source version" \
+  || bad "no manifest -> ai/guardrails.md does not equal the source"
+
+# ── 5k. a malformed manifest stops the install, naming the problem ──────────
+MAL_T="$(upgrade_target malformed)"
+echo '{not json' >"$MAL_T/.rad/installed.json"
+run_install "$MAL_T" "$TMP/malformed.out" --upgrade
+[[ "$INSTALL_RC" -ne 0 ]] && ok "malformed manifest -> installer exits non-zero" \
+  || bad "malformed manifest -> installer exited 0"
+assert_contains "$TMP/malformed.out" ".rad/installed.json is not valid JSON" \
+  "malformed manifest -> output names the problem"
+
+# ── 5l. node missing -> named prerequisite error, nothing installed ─────────
+# PATH holds only the tools install.sh needs before check_prereqs stops it;
+# node is absent (on this host node and git share a bin dir, so a shim dir).
+NOBIN="$TMP/no-node-bin"
+mkdir -p "$NOBIN"
+for tool in git dirname sed awk; do ln -s "$(command -v "$tool")" "$NOBIN/$tool"; done
+NONODE_T="$(new_repo nonode)"
+BASH_BIN="$(command -v bash)"
+NONODE_RC=0
+( cd "$REPO_ROOT" && PATH="$NOBIN" isolated "$BASH_BIN" install.sh --dir "$NONODE_T" --yes ) \
+  >"$TMP/nonode.out" 2>&1 || NONODE_RC=$?
+[[ "$NONODE_RC" -ne 0 ]] && ok "node missing -> installer exits non-zero" \
+  || bad "node missing -> installer exited 0"
+assert_contains "$TMP/nonode.out" "node is required" "node missing -> error names node"
+assert_not_exists "$NONODE_T/harness" "node missing -> nothing installed"
 
 # ── summary ─────────────────────────────────────────────────────────────────
 echo "─────────────────────────────────────────"
