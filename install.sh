@@ -14,7 +14,12 @@
 # An existing .rad/config.yml is never touched. If the config cannot be created,
 # every other file is still installed and the installer exits 1.
 #
-# On upgrade, CLAUDE.md, .rad/, .claude/agents/, and .agents/ content are never overwritten.
+# On upgrade, CLAUDE.md, .rad/config.yml, .claude/agents/, and .agents/ content
+# are never overwritten. Framework files are installed through the manifest at
+# .rad/installed.json: a locally edited framework file is kept (its update is
+# staged under .rad/upgrade-pending/) and the installer exits 1; with no
+# manifest, a differing file is backed up under .rad/upgrade-backup/ first.
+# A malformed manifest stops the install before any framework file is written.
 
 set -euo pipefail
 
@@ -27,6 +32,9 @@ YES=false
 ARCHITECT=""
 PLATFORM="manual"
 CONFIG_FAILED=false
+# Set by install_core when install-core kept a locally edited file; main exits 1
+# after every other step has run.
+CORE_KEPT=false
 # Whether the target had its own CLAUDE.md before scaffold_claude_md ran: an
 # upgrade must migrate only from the user's file, never from the RAD template.
 CLAUDE_MD_PREEXISTED=false
@@ -76,6 +84,11 @@ check_prereqs() {
   command -v git >/dev/null 2>&1 \
     && success "git $(git --version | awk '{print $3}')" \
     || error "git is required but not installed"
+
+  # node runs harness/cli.js, which lays down every framework file.
+  command -v node >/dev/null 2>&1 \
+    && success "node $(node --version)" \
+    || error "node is required but not installed (install Node.js from https://nodejs.org)"
 
   if command -v claude >/dev/null 2>&1; then
     success "claude CLI found"
@@ -149,25 +162,6 @@ create_dirs() {
   success "Directory structure ready"
 }
 
-copy_commands() {
-  header "Installing commands"
-
-  cp -r "$RAD_DIR/.claude/commands/." "$TARGET_DIR/.claude/commands/"
-  success "Commands → .claude/commands/"
-  info "architect/ — rad-design, rad-approve, rad-epic-decompose"
-  info "team/      — rad-research, rad-plan, rad-adopt, rad-deliver, rad-review"
-  info "shared/    — rad-status, rad-insights"
-}
-
-copy_skills() {
-  header "Installing skills"
-
-  cp -r "$RAD_DIR/.claude/skills/." "$TARGET_DIR/.claude/skills/"
-  success "Skills → .claude/skills/"
-  info "kickoff   — /kickoff session-start ritual"
-  info "wrap      — /wrap session-end ritual"
-}
-
 # The rpi-design skill was retired (absorbed into /rad-research + /rad-design).
 # `cp -r` never deletes, so an upgrade must remove the stale copy explicitly.
 # Exact relative path only — never a glob.
@@ -184,25 +178,45 @@ remove_stale_skills() {
   fi
 }
 
-copy_ai_guardrails() {
-  header "Installing guardrail pack"
+# Exit codes of `harness/cli.js install-core` (see harness/install-manifest.js).
+readonly CORE_EXIT_WRITTEN=0
+readonly CORE_EXIT_KEPT=1
 
-  # ai/ is framework code — always overwrite on install and upgrade.
-  mkdir -p "$TARGET_DIR/ai/extensions"
-  cp -r "$RAD_DIR/ai/." "$TARGET_DIR/ai/"
-  success "Guardrail pack → ai/"
-  info "ai/guardrails.md     — baseline coding-agent rules"
-  info "ai/slop-register.md  — project-specific overrides (customize for your stack)"
-  info "ai/extensions/       — domain extensions: backend, database, frontend, security, testing"
-}
+# Installs the framework core (.claude/commands, .claude/skills, ai/, scripts,
+# scripts/lib, scripts/hooks, harness/ minus node_modules) through the install
+# manifest. Locally edited files are kept, never overwritten (exit 1 sets
+# CORE_KEPT so main exits 1 after every other step); any other non-zero exit
+# (bad argv, malformed .rad/installed.json) stops the install fail-closed.
+install_core() {
+  header "Installing framework core"
 
-copy_scripts() {
-  header "Installing scripts"
+  local out rc
+  if out=$(node "$RAD_DIR/harness/cli.js" install-core --source "$RAD_DIR" --target "$TARGET_DIR" 2>&1); then
+    rc=$CORE_EXIT_WRITTEN
+  else
+    rc=$?
+  fi
+  case "$rc" in
+    "$CORE_EXIT_WRITTEN")
+      printf '%s\n' "$out" | sed 's/^/    /'
+      success "Framework core installed (manifest: .rad/installed.json)" ;;
+    "$CORE_EXIT_KEPT")
+      printf '%s\n' "$out" | sed 's/^/    /'
+      CORE_KEPT=true
+      warn "Locally edited framework files were kept; their updates are staged under .rad/upgrade-pending/" ;;
+    *) error "install-core failed (exit $rc), no framework files installed: $out" ;;
+  esac
 
-  cp "$RAD_DIR/scripts/"*.sh "$TARGET_DIR/scripts/"
-  chmod +x "$TARGET_DIR/scripts/"*.sh
-  success "Scripts → scripts/"
-  info "includes get-default-branch.sh, checkout-plan.sh, rad-label.sh"
+  info "commands: architect/ rad-design, rad-approve, rad-epic-decompose"
+  info "          team/ rad-research, rad-plan, rad-adopt, rad-deliver, rad-review"
+  info "          shared/ rad-status, rad-insights"
+  info "skills:   kickoff (/kickoff session start), wrap (/wrap session end)"
+  info "ai/guardrails.md     - baseline coding-agent rules"
+  info "ai/slop-register.md  - project-specific overrides (customize for your stack)"
+  info "ai/extensions/       - domain extensions: backend, database, frontend, security, testing"
+  info "scripts/             - includes get-default-branch.sh, checkout-plan.sh, rad-label.sh, lib/"
+  info "harness/cli.js       - zero-npm rad CLI (vendored js-yaml, lazy SDK)"
+  info "scripts/hooks/       - pre/post-wave + on-outcome lifecycle hook dirs"
 }
 
 copy_agents_meta() {
@@ -224,24 +238,6 @@ copy_agents_meta() {
   fi
 
   success ".agents/ structure ready"
-}
-
-copy_harness() {
-  header "Installing harness"
-
-  # harness/ and scripts/hooks/ are framework code — always overwrite on install
-  # and upgrade. EXCLUDE harness/node_modules: it is recreated by `npm install`
-  # in the target and can be hundreds of MB.
-  mkdir -p "$TARGET_DIR/harness"
-  cp -r "$RAD_DIR/harness/." "$TARGET_DIR/harness/"
-  rm -rf "$TARGET_DIR/harness/node_modules"
-  success "Harness → harness/ (node_modules excluded)"
-
-  mkdir -p "$TARGET_DIR/scripts/hooks"
-  cp -r "$RAD_DIR/scripts/hooks/." "$TARGET_DIR/scripts/hooks/"
-  success "Wave-lifecycle hooks → scripts/hooks/"
-  info "harness/cli.js      — zero-npm rad CLI (vendored js-yaml, lazy SDK)"
-  info "scripts/hooks/       — pre/post-wave + on-outcome lifecycle hook dirs"
 }
 
 scaffold_claude_md() {
@@ -385,8 +381,9 @@ print_next_steps() {
   echo ""
 
   if [[ "$UPGRADE" == "true" ]]; then
-    echo "  Commands and scripts are up to date."
-    echo "  CLAUDE.md, .rad/, .claude/agents/, and .agents/ content were not changed."
+    echo "  Commands and scripts are up to date, except locally edited framework files:"
+    echo "  those were kept, with their updates staged under .rad/upgrade-pending/."
+    echo "  CLAUDE.md, .rad/config.yml, .claude/agents/, and .agents/ content were not changed."
     echo ""
     echo "  Run /rad-status in Claude Code to verify everything looks right."
     echo ""
@@ -429,19 +426,16 @@ main() {
   echo ""
   if [[ "$UPGRADE" == "true" ]]; then
     info "Upgrading RAD in: $TARGET_DIR"
-    info "User data (CLAUDE.md, .rad/, .claude/agents/, .agents/) will not be changed"
+    info "User data (CLAUDE.md, .rad/config.yml, .claude/agents/, .agents/) will not be changed"
+    info "Locally edited framework files are kept; updates are staged in .rad/upgrade-pending/"
   else
     info "Installing RAD into: $TARGET_DIR"
   fi
 
   create_dirs
-  copy_commands
-  copy_skills
+  install_core
   if [[ "$UPGRADE" == "true" ]]; then remove_stale_skills; fi
-  copy_ai_guardrails
-  copy_scripts
   copy_agents_meta
-  copy_harness
   if [[ -f "$TARGET_DIR/CLAUDE.md" ]]; then CLAUDE_MD_PREEXISTED=true; fi
   scaffold_claude_md
   detect_and_report_platform
@@ -451,6 +445,10 @@ main() {
 
   if [[ "$CONFIG_FAILED" == "true" ]]; then
     echo -e "  ${RED}✗${NC} Installed, but $RAD_CONFIG was not created — run the command above, then re-check with: node harness/cli.js config validate" >&2
+    exit 1
+  fi
+  if [[ "$CORE_KEPT" == "true" ]]; then
+    echo -e "  ${RED}✗${NC} Installed, but locally edited framework files were kept — review them with: node harness/cli.js install-status, and merge the staged copies under .rad/upgrade-pending/" >&2
     exit 1
   fi
 }

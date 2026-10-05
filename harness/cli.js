@@ -43,6 +43,9 @@ import { buildReviewPrompt, parseFindings } from './review.js';
 import {
   CONFIG_PATH, loadConfig, getConfigValue, migrateFromClaudeMd, serializeConfig, validateConfig, buildInitConfig,
 } from './config.js';
+import {
+  MANIFEST_PATH, PENDING_DIR, UNKNOWN_RAD_VERSION, readManifest, planInstall, applyInstall, installDrift,
+} from './install-manifest.js';
 
 /** Usage line for `rad deliver` (help, parse errors, and the command table). */
 const DELIVER_USAGE = 'rad deliver <feature> [--model <model-id>] [--resume --context <text>]';
@@ -56,6 +59,10 @@ const DIGEST_USAGE = 'rad digest <feature> [--branch <ref>] [--base <ref>]';
 const REVIEW_USAGE = 'rad review <reviewer> [--base <ref>]';
 /** Usage line for `rad capabilities`. */
 const CAPABILITIES_USAGE = 'rad capabilities <feature> [--plan <path>]';
+/** Usage line for `rad install-core`. */
+const INSTALL_CORE_USAGE = 'rad install-core --source <dir> [--target <dir>]';
+/** Usage line for `rad install-status`. */
+const INSTALL_STATUS_USAGE = 'rad install-status [--target <dir>]';
 /** Usage line for `rad config`. */
 const CONFIG_USAGE = 'rad config get <key> | rad config validate | rad config migrate [--from <path>] [--force]'
   + ' | rad config init [--architect <id>] [--platform <p>] [--default-branch <b>] [--force]';
@@ -112,6 +119,16 @@ const SUBCOMMANDS = {
     summary: "Show each wave's effective capability classes for a plan (read-only).",
     usage: CAPABILITIES_USAGE,
     run: (argv, ctx) => capabilitiesCommand(argv, ctx),
+  },
+  'install-core': {
+    summary: 'Install or upgrade RAD core files into a target, never overwriting local edits.',
+    usage: INSTALL_CORE_USAGE,
+    run: (argv, ctx) => installCoreCommand(argv, ctx),
+  },
+  'install-status': {
+    summary: 'Report core files that drifted from .rad/installed.json (read-only).',
+    usage: INSTALL_STATUS_USAGE,
+    run: (argv, ctx) => installStatusCommand(argv, ctx),
   },
   'owner-claim': {
     summary: 'Claim the single-writer lock on a feature (records who holds it).',
@@ -3064,6 +3081,144 @@ export async function capabilitiesCommand(argv, ctx) {
     process.stdout.write(formatWaveCapabilities(wave, entry));
   }
   return 0;
+}
+
+/** Action order for the install-core summary line. */
+const INSTALL_ACTIONS = ['write', 'keep', 'deleted', 'backup-write'];
+/** A source tree must carry this file to be a RAD source (guards a wrong --source). */
+const SOURCE_MARKER = 'harness/cli.js';
+
+/**
+ * Parse `--flag <value>` pairs for the install verbs. `allowed` lists the
+ * accepted flags; throws on an unknown flag, a valueless flag, a repeat, or a
+ * positional.
+ */
+function parseInstallFlags(argv, allowed) {
+  const out = {};
+  for (let i = 0; i < argv.length; i++) {
+    const flag = argv[i];
+    if (!allowed.includes(flag)) {
+      throw new Error(flag.startsWith('--') ? `unknown option '${flag}'` : `unexpected argument '${flag}'`);
+    }
+    const value = argv[++i];
+    if (!isNonEmpty(value) || value.startsWith('--')) throw new Error(`${flag} requires a <dir>`);
+    const key = flag.slice(2);
+    if (key in out) throw new Error(`${flag} given more than once`);
+    out[key] = value;
+  }
+  return out;
+}
+
+/** The source checkout's commit sha, or 'unknown' (a tarball or non-git source is valid; recorded, not fatal). */
+function sourceRadVersion(sourceRoot) {
+  try {
+    return execFileSync('git', ['-C', sourceRoot, 'rev-parse', 'HEAD'], {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim() || UNKNOWN_RAD_VERSION;
+  } catch {
+    return UNKNOWN_RAD_VERSION;
+  }
+}
+
+/** One stdout line per path that was not a plain write, naming where any copy went. */
+function installReportLines(plan, backupDir) {
+  const lines = [];
+  for (const { path, action } of plan.actions) {
+    if (action === 'keep') lines.push(`keep: ${path} (local edit kept; new version staged at ${PENDING_DIR}/${path})`);
+    if (action === 'deleted') lines.push(`deleted: ${path} (removed locally; not restored)`);
+    if (action === 'backup-write') lines.push(`backup-write: ${path} (previous copy at ${backupDir}/${path})`);
+  }
+  for (const path of plan.stale) lines.push(`stale: ${path} (no longer core; left in place, dropped from manifest)`);
+  return lines;
+}
+
+/** `rad install-core: write N, keep N, deleted N, backup-write N, stale N`. */
+function installSummaryLine(plan) {
+  const counts = INSTALL_ACTIONS.map((a) => `${a} ${plan.actions.filter((x) => x.action === a).length}`);
+  return `rad install-core: ${counts.join(', ')}, stale ${plan.stale.length}`;
+}
+
+/** Validate install-core argv; returns { sourceRoot, targetRoot } or an error string. */
+function resolveInstallCoreArgs(argv, repoRoot) {
+  let flags;
+  try {
+    flags = parseInstallFlags(argv, ['--source', '--target']);
+  } catch (err) {
+    return { error: err.message };
+  }
+  if (!flags.source) return { error: '--source <dir> is required' };
+  const sourceRoot = resolve(flags.source);
+  if (!existsSync(join(sourceRoot, SOURCE_MARKER))) return { error: `${flags.source} is not a RAD source (no ${SOURCE_MARKER})` };
+  return { sourceRoot, targetRoot: flags.target ? resolve(flags.target) : repoRoot };
+}
+
+/**
+ * `install-core --source <dir> [--target <dir>]` — install or upgrade the core
+ * file set (#71). Unmodified and absent files are written; a local edit is kept
+ * and the new version staged; a locally deleted file is not restored; an
+ * unbaselined differing file is backed up, then overwritten. Writes
+ * .rad/installed.json. Target defaults to the CLI's repo root.
+ *
+ * Exit 0 all written; 1 any keep or deleted; 2 bad argv, a non-RAD source, or a
+ * malformed existing manifest (nothing written: fail closed, never "absent").
+ *
+ * @param {string[]} argv - args after `install-core`
+ * @param {{ repoRoot: string, now?: Date }} ctx
+ * @returns {Promise<number>}
+ */
+export async function installCoreCommand(argv, ctx) {
+  const args = resolveInstallCoreArgs(argv, ctx.repoRoot);
+  if (args.error) {
+    process.stderr.write(`rad install-core: ${args.error}\nUsage: ${INSTALL_CORE_USAGE}\n`);
+    return USAGE_EXIT_CODE;
+  }
+  const read = readManifest(args.targetRoot);
+  if (!read.ok && !read.missing) {
+    process.stderr.write(`rad install-core: ${read.error}; nothing written\n`);
+    return USAGE_EXIT_CODE;
+  }
+  const plan = planInstall({ ...args, manifest: read.ok ? read.manifest : null });
+  const { backupDir } = applyInstall({
+    ...args, plan, now: ctx.now ?? new Date(), radVersion: sourceRadVersion(args.sourceRoot),
+  });
+  for (const line of [installSummaryLine(plan), ...installReportLines(plan, backupDir)]) {
+    process.stdout.write(`${line}\n`);
+  }
+  return plan.actions.some((a) => a.action === 'keep' || a.action === 'deleted') ? FAILED_EXIT_CODE : 0;
+}
+
+/**
+ * `install-status [--target <dir>]` — read-only drift report against
+ * .rad/installed.json. Prints `modified: <path>` / `missing: <path>`.
+ *
+ * Exit 0 clean; 1 drift or no manifest; 2 bad argv or a malformed manifest.
+ *
+ * @param {string[]} argv - args after `install-status`
+ * @param {{ repoRoot: string }} ctx
+ * @returns {Promise<number>}
+ */
+export async function installStatusCommand(argv, ctx) {
+  let flags;
+  try {
+    flags = parseInstallFlags(argv, ['--target']);
+  } catch (err) {
+    process.stderr.write(`rad install-status: ${err.message}\nUsage: ${INSTALL_STATUS_USAGE}\n`);
+    return USAGE_EXIT_CODE;
+  }
+  const targetRoot = flags.target ? resolve(flags.target) : ctx.repoRoot;
+  const read = readManifest(targetRoot);
+  if (read.missing) {
+    process.stderr.write(`rad install-status: no ${MANIFEST_PATH} — run install.sh --upgrade\n`);
+    return FAILED_EXIT_CODE;
+  }
+  if (!read.ok) {
+    process.stderr.write(`rad install-status: ${read.error}\n`);
+    return USAGE_EXIT_CODE;
+  }
+  const { modified, missing } = installDrift({ targetRoot, manifest: read.manifest });
+  for (const p of modified) process.stdout.write(`modified: ${p}\n`);
+  for (const p of missing) process.stdout.write(`missing: ${p}\n`);
+  return modified.length + missing.length > 0 ? FAILED_EXIT_CODE : 0;
 }
 
 /**
