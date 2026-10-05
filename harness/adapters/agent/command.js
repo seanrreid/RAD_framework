@@ -74,6 +74,14 @@ const PREFLIGHT_TIMEOUT_LABEL = 'agent preflight';
  */
 export const KILL_GRACE_MS = 5_000;
 
+/**
+ * stdin error code raised when the agent exits (or closes stdin) before
+ * reading the whole prompt. Expected, not fatal: the child's real exit code
+ * still arrives on 'close' and decides the attempt. Without a listener Node
+ * raises it as an uncaught exception that kills the orchestrator (#177).
+ */
+const STDIN_CLOSED_EARLY_CODE = 'EPIPE';
+
 /** Build the allow-listed env handed to the spawned child. */
 function buildChildEnv() {
   const env = {};
@@ -237,6 +245,16 @@ function spawnOnce(cmd, prompt, repoRoot, effectiveModel, { signal, killGraceMs 
     child.stderr.on('data', (d) => capture(d, (s) => { stderr += s; }));
     child.on('error', (err) => reject(err));
     child.on('close', (code) => resolve({ code, stdout, stderr, truncated }));
+
+    // Attach before writing: an agent that exits without reading stdin makes
+    // the write fail asynchronously. Only EPIPE is expected — 'close' settles
+    // the promise with the child's real exit. Anything else is a real fault.
+    child.stdin.on('error', (err) => {
+      if (err?.code === STDIN_CLOSED_EARLY_CODE) return;
+      reject(new Error(
+        `command adapter: writing the prompt to the agent's stdin failed: ${err?.code ?? err?.message ?? String(err)}`,
+      ));
+    });
 
     // Feed the prompt on stdin unless it was already substituted into argv.
     if (!usedPlaceholder) {
