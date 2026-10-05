@@ -130,6 +130,23 @@ success | fail-tests | fail-scope | fail-protocol | fail-timeout | no-changes | 
 
 An adapter must only ever emit a string from this set.
 
+### Capabilities
+
+Before any wave runs, `rad deliver` resolves every wave's capability classes
+(#85; see [`configuration.md`](./configuration.md#capabilities)) and hands the
+result to the adapter as `planCtx.waveEffective`: an object keyed by wave
+number whose value is that wave's effective class list (e.g. `{ 2: ['fs_read'] }`).
+It carries **constrained waves only**. A wave absent from it is unconstrained
+and the adapter runs it with its own default — for the `sdk` adapter, exactly
+today's `allowedTools`.
+
+**Refuse, never over-grant.** An adapter that cannot enforce a wave's set must
+cause a refusal **before launch** (exit 2, before any event is appended) — it
+must never run the wave with more than the effective set. The `command` adapter
+cannot narrow an agent CLI's tools, so deliver refuses any constrained wave
+narrower than all five classes on it; the `sdk` adapter maps classes to tools
+and refuses `mcp`, which it cannot grant.
+
 ---
 
 ## The wave prompt
@@ -361,6 +378,10 @@ Both shipped adapters follow the same skeleton; reuse the shared helpers in
    `sanitizeErrorMessage`, and hand your agent only an **allow-listed** env
    subset (`PATH`, `HOME`, locale/temp vars) — never spread the full
    `process.env`.
+7. **Honor capabilities:** either map each class in `planCtx.waveEffective` to
+   your agent's own tool controls, or add the adapter to the deliver-time
+   refusal path (as `command` is) so a constrained wave is refused before
+   launch — see [Capabilities](#capabilities).
 
 ### `command` vs `sdk`
 
