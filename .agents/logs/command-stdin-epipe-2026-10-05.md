@@ -8,3 +8,4 @@ Executor role: architect
 
 | Step | Wave | Task | Status | Commit | Time |
 |------|------|------|--------|--------|------|
+| 1 | Wave 1 | Handle stdin EPIPE in spawnOnce | ✓ complete | d3e2d05 | 14:28 |
