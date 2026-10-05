@@ -317,6 +317,47 @@ while IFS= read -r path; do
   fi
 done < <(plan_scope_paths "$PLAN_FILE")
 
+# ── Capability request advisory ───────────────────────────────────────────────
+# A `Capabilities:` line (#85) requesting a class beyond the default set (net,
+# mcp) is surfaced for architect review: one WARNING per (scope, class), never
+# an error and never a gate. Scope mirrors the harness parse (parseCapabilities
+# in harness/cli.js): a line before the first `##`/`###` heading is the plan
+# default; one inside a `### Wave N` block is that wave's; a non-Wave `##`/`###`
+# heading ends the block and `####` stays inside. Token match only: vocabulary
+# validation belongs to `rad capabilities` / `rad deliver`. Prose outside a
+# Capabilities: line never matches.
+CAPABILITY_REVIEW_CLASSES="net mcp"
+CAPABILITY_REVIEW_PREFIX="capability request (beyond the default — architect review)"
+
+# Print "<scope>|<class>" once per (scope, class) for each review-class token on a
+# Capabilities: line. LC_ALL=C: macOS awk aborts on multibyte chars (e.g. an em
+# dash in a wave heading) under a UTF-8 locale; the tokens are ASCII, so byte
+# matching is exact.
+plan_capability_requests() {
+  LC_ALL=C awk -v classes="$CAPABILITY_REVIEW_CLASSES" '
+    BEGIN { scope = "plan"; nc = split(classes, C, " ") }
+    {
+      line = $0
+      sub(/^[ \t]+/, "", line); sub(/[ \t\r]+$/, "", line)
+      if (line ~ /^###[ \t]+Wave[ \t]+[0-9]+/) {
+        match(line, /[0-9]+/); scope = "wave " substr(line, RSTART, RLENGTH); next
+      }
+      if (line ~ /^###?[ \t]/) { scope = ""; next }
+      if (scope == "" || line !~ /^Capabilities:/) next
+      n = split(tolower(substr(line, length("Capabilities:") + 1)), T, /[ \t,]+/)
+      for (i = 1; i <= n; i++)
+        for (j = 1; j <= nc; j++)
+          if (T[i] == C[j] && !((scope, C[j]) in seen)) { seen[scope, C[j]] = 1; print scope "|" C[j] }
+    }
+  ' "$PLAN_FILE"
+}
+
+CAPABILITY_REQUESTS=$(plan_capability_requests)
+while IFS='|' read -r cap_scope cap_class; do
+  [[ -z "$cap_scope" ]] && continue
+  WARNINGS+=("${CAPABILITY_REVIEW_PREFIX}: ${cap_scope} requests ${cap_class}")
+done <<< "$CAPABILITY_REQUESTS"
+
 # ── Rename convention advisory ────────────────────────────────────────────────
 # A rename declares BOTH paths as separate Files-in-Scope rows. check-scope.sh
 # builds its declared set from the File column alone and never reads the Change
