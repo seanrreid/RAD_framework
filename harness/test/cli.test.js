@@ -1775,3 +1775,171 @@ test('#168 — isMainModule: nonexistent argv[1] falls back to the raw string co
   assert.equal(isMainModule(ghost, ghost), true, 'identical raw strings still match');
   assert.equal(isMainModule(ghost, CLI), false, 'a foreign nonexistent path never matches');
 });
+
+// ---------------------------------------------------------------------------
+// rad deliver — per-wave capability classes (#85, AC#2/#5/#6). Every refusal
+// exits 2 before any event is appended.
+// ---------------------------------------------------------------------------
+
+/** A two-wave plan with optional `Capabilities:` lines in the header and each wave block. */
+function capabilityPlanText({ header, wave1, wave2 } = {}) {
+  const line = (value) => (value === undefined ? [] : [`Capabilities: ${value}`]);
+  return [
+    `# ${DELIVER_FEATURE}`, '', 'Status: approved', `Branch: rad/${DELIVER_FEATURE}`, ...line(header), '',
+    '## Waves', '',
+    '### Wave 1', ...line(wave1), '', '#### Task 1.1', '- [ ] Task A', '',
+    '### Wave 2', ...line(wave2), '', '- [ ] Task B', '',
+  ].join('\n');
+}
+
+/** Seed `text` as the approved plan (fingerprinted); returns the event-log path. */
+function seedApprovedPlanText(repoRoot, text) {
+  const planFile = join(repoRoot, '.agents', 'plans', `${DELIVER_FEATURE}.md`);
+  mkdirSync(dirname(planFile), { recursive: true });
+  writeFileSync(planFile, text, 'utf8');
+  const event = { ...approvedEvent(DELIVER_FEATURE), data: { fingerprint: planFingerprint(text).hash } };
+  return writeEventLog(repoRoot, DELIVER_FEATURE, [event]);
+}
+
+/** Write a valid .rad/config.yml carrying `capabilities.deny`. */
+function writeDenyConfig(repoRoot, deny) {
+  mkdirSync(join(repoRoot, '.rad'), { recursive: true });
+  writeFileSync(join(repoRoot, '.rad', 'config.yml'), [
+    'version: 1', 'platform: manual', 'default_branch: main',
+    'roles:', '  architect: [a@example.com]', '  developers: []', '  designers: []',
+    'capabilities:', `  deny: [${deny.join(', ')}]`, '',
+  ].join('\n'), 'utf8');
+}
+
+/** Real (non-injected) command adapter env: no preflight, a trivial command. */
+const COMMAND_AGENT_ENV = { RAD_AGENT: 'command', RAD_AGENT_CMD: 'true', RAD_AGENT_PREFLIGHT: 'off' };
+const FAKE_SDK_ENV = { RAD_AGENT: 'sdk', ANTHROPIC_API_KEY: 'sk-ant-fake-key-value-1234567890' };
+const injectedOk = async () => ({ outcome: 'success' });
+
+/** Assert a refusal: exit 2, stderr matching each pattern, and the event log untouched. */
+function assertRefusedBeforeEvents({ code, stderr }, logFile, patterns) {
+  assert.equal(code, 2, `expected exit 2; stderr:\n${stderr}`);
+  for (const p of patterns) assert.match(stderr, p);
+  assert.deepEqual(readLog(logFile).map((e) => e.type), ['approved'], 'no event appended');
+}
+
+test('parsePlanCtx — Capabilities: header is the plan default, a wave line replaces it, #### stays inside', () => {
+  const ctx = parsePlanCtx(capabilityPlanText({ header: 'fs_read, shell', wave2: 'FS_READ net' }));
+  assert.deepEqual(ctx.planCapabilities, ['fs_read', 'shell']);
+  assert.deepEqual(ctx.waveCapabilities, { 2: ['fs_read', 'net'] });
+  assert.deepEqual(ctx.capabilityErrors, []);
+  assert.deepEqual(ctx.waveNumbers, [1, 2]);
+  const none = parsePlanCtx(capabilityPlanText());
+  assert.equal(none.planCapabilities, undefined);
+  assert.deepEqual(none.waveCapabilities, {});
+});
+
+test('parsePlanCtx — Capabilities: malformed, empty and duplicate lines are errors naming their scope', () => {
+  const ctx = parsePlanCtx(capabilityPlanText({ header: '', wave1: 'fs_read, telepathy' }));
+  assert.equal(ctx.capabilityErrors.length, 2);
+  assert.match(ctx.capabilityErrors[0], /^plan header: .*empty/);
+  assert.match(ctx.capabilityErrors[1], /^wave 1: .*telepathy/);
+  const dup = parsePlanCtx(capabilityPlanText({ wave1: 'fs_read\nCapabilities: shell' }));
+  assert.match(dup.capabilityErrors[0], /^wave 1: .*more than once/);
+});
+
+test('deliver capabilities — a malformed wave line → exit 2 naming the wave, no events', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const logFile = seedApprovedPlanText(repoRoot, capabilityPlanText({ wave2: 'fs_read, telepathy' }));
+    const res = await runDeliverCaptured({ repoRoot, runWave: injectedOk });
+    assertRefusedBeforeEvents(res, logFile, [/malformed Capabilities: line/, /wave 2/, /telepathy/]);
+  });
+});
+
+test('deliver capabilities — a malformed plan-header line → exit 2 naming the plan header, no events', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const logFile = seedApprovedPlanText(repoRoot, capabilityPlanText({ header: 'everything' }));
+    const res = await runDeliverCaptured({ repoRoot, runWave: injectedOk });
+    assertRefusedBeforeEvents(res, logFile, [/plan header/, /everything/]);
+  });
+});
+
+test('deliver capabilities — an explicit request denied by .rad/config.yml → exit 2, no events', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const logFile = seedApprovedPlanText(repoRoot, capabilityPlanText({ wave1: 'fs_read, net' }));
+    writeDenyConfig(repoRoot, ['net']);
+    const res = await runDeliverCaptured({ repoRoot, runWave: injectedOk });
+    assertRefusedBeforeEvents(res, logFile, [/Wave 1/, /'net'/, /capabilities\.deny/]);
+  });
+});
+
+test('deliver capabilities — an invalid .rad/config.yml → exit 2 (a deny list that cannot be read is not empty)', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const logFile = seedApprovedPlanText(repoRoot, capabilityPlanText());
+    mkdirSync(join(repoRoot, '.rad'), { recursive: true });
+    writeFileSync(join(repoRoot, '.rad', 'config.yml'), 'version: 1\n', 'utf8');
+    const res = await runDeliverCaptured({ repoRoot, runWave: injectedOk });
+    assertRefusedBeforeEvents(res, logFile, [/config\.yml is invalid/]);
+  });
+});
+
+test('deliver capabilities — an injected runWave skips the adapter check and records effective classes', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const logFile = seedApprovedPlanText(repoRoot, capabilityPlanText({ wave1: 'fs_read, mcp' }));
+    const { code, stderr } = await runDeliverCaptured({ repoRoot, runWave: injectedOk });
+    assert.equal(code, 0, `expected exit 0; stderr:\n${stderr}`);
+    const started = readLog(logFile).filter((e) => e.type === 'wave-started');
+    assert.deepEqual(started.map((e) => e.data.capabilities), [['fs_read', 'mcp'], undefined]);
+  });
+});
+
+test('deliver capabilities — command adapter + a narrowed wave → exit 2 naming the wave and set, no events', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const logFile = seedApprovedPlanText(repoRoot, capabilityPlanText({ wave2: 'fs_read' }));
+    const res = await withProcessEnv(COMMAND_AGENT_ENV, () => runDeliverCaptured({ repoRoot }));
+    assertRefusedBeforeEvents(res, logFile, [/Wave 2/, /\[fs_read\]/, /RAD_AGENT=sdk/]);
+  });
+});
+
+test('deliver capabilities — command adapter + an all-default explicit declaration is refused (lacks net, mcp)', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const logFile = seedApprovedPlanText(repoRoot, capabilityPlanText({ header: 'fs_read, fs_write, shell' }));
+    const res = await withProcessEnv(COMMAND_AGENT_ENV, () => runDeliverCaptured({ repoRoot }));
+    assertRefusedBeforeEvents(res, logFile, [/Wave 1/, /\[fs_read, fs_write, shell\]/]);
+  });
+});
+
+/**
+ * Run deliverCommand capturing stderr ONLY. A real agent spawn yields the event
+ * loop; replacing process.stdout.write across that yield would swallow the
+ * node:test runner's own report stream, so stdout is left alone here.
+ */
+async function runDeliverStderrOnly({ repoRoot, env }) {
+  const originalErr = process.stderr.write.bind(process.stderr);
+  let stderr = '';
+  process.stderr.write = (chunk) => { stderr += chunk; return true; };
+  try {
+    const code = await withProcessEnv({ ...env, RAD_WORKTREE: '0' }, () =>
+      deliverCommand([DELIVER_FEATURE], { repoRoot, sh: okSh }));
+    return { code, stderr };
+  } finally {
+    process.stderr.write = originalErr;
+  }
+}
+
+test('deliver capabilities — command adapter + no declarations runs as today (no capabilities key)', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const logFile = seedApprovedPlanText(repoRoot, capabilityPlanText());
+    // `{prompt}` puts the prompt in argv, so nothing is written to a child stdin
+    // that `true` never reads (on Linux that write races into an uncaught EPIPE).
+    const env = { ...COMMAND_AGENT_ENV, RAD_AGENT_CMD: 'true {prompt}' };
+    const { code, stderr } = await runDeliverStderrOnly({ repoRoot, env });
+    assert.notEqual(code, 2, `setup must not refuse; stderr:\n${stderr}`);
+    const started = readLog(logFile).filter((e) => e.type === 'wave-started');
+    assert.ok(started.length > 0, 'the run reached the agent');
+    assert.ok(started.every((e) => !('capabilities' in e.data)));
+  });
+});
+
+test('deliver capabilities — sdk adapter + an mcp wave → exit 2 before any SDK call, no events', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const logFile = seedApprovedPlanText(repoRoot, capabilityPlanText({ wave1: 'fs_read, mcp' }));
+    const res = await withProcessEnv(FAKE_SDK_ENV, () => runDeliverCaptured({ repoRoot }));
+    assertRefusedBeforeEvents(res, logFile, [/Wave 1/, /mcp/, /sdk adapter/]);
+  });
+});

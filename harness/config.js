@@ -12,6 +12,7 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { CAPABILITY_CLASSES } from './capabilities.js';
 
 /** Repo-relative path of the config file. */
 export const CONFIG_PATH = '.rad/config.yml';
@@ -20,9 +21,11 @@ export const PLATFORMS = Object.freeze(['github', 'gitlab', 'bitbucket', 'forgej
 /** The only schema version this reader understands. */
 export const CONFIG_VERSION = 1;
 
-const TOP_LEVEL_KEYS = Object.freeze(['version', 'platform', 'default_branch', 'roles', 'agent_scope_map']);
+const TOP_LEVEL_KEYS = Object.freeze(['version', 'platform', 'default_branch', 'roles', 'agent_scope_map', 'capabilities']);
 const ROLE_KEYS = Object.freeze(['architect', 'developers', 'designers']);
 const SCOPE_ROW_KEYS = Object.freeze(['agent', 'type', 'reads', 'roles']);
+/** Keys allowed under `capabilities:` (the project-level deny list, #85). */
+const CAPABILITY_KEYS = Object.freeze(['deny']);
 /** A bracketed value (e.g. `[your GitHub username]`) is an unfilled template placeholder. */
 const PLACEHOLDER_PREFIX = '[';
 /** Required keys `migrateFromClaudeMd` must find, by dotted name. */
@@ -36,7 +39,10 @@ function toList(v) {
   return typeof v === 'string' ? [v] : v;
 }
 
-/** Return a copy of `doc` with role lists normalized (lone string → [string], absent optional → []). */
+/**
+ * Return a copy of `doc` with role lists normalized (lone string → [string], absent optional → []).
+ * `capabilities.deny` gets the same lone-string → [string] treatment; absent stays absent.
+ */
 export function normalizeConfig(doc) {
   if (!isPlainObject(doc)) return doc;
   const out = { ...doc };
@@ -50,6 +56,9 @@ export function normalizeConfig(doc) {
   if (Array.isArray(doc.agent_scope_map)) {
     out.agent_scope_map = doc.agent_scope_map.map((row) =>
       isPlainObject(row) ? { ...row, roles: toList(row.roles) } : row);
+  }
+  if (isPlainObject(doc.capabilities) && doc.capabilities.deny !== undefined) {
+    out.capabilities = { ...doc.capabilities, deny: toList(doc.capabilities.deny) };
   }
   return out;
 }
@@ -92,6 +101,21 @@ function scopeRowErrors(row, i) {
   return errors;
 }
 
+/** Errors for the optional `capabilities:` block. Fail-closed: unknown keys and classes are errors. */
+function capabilitiesErrors(caps) {
+  if (caps === undefined) return [];
+  if (!isPlainObject(caps)) return ['capabilities must be a mapping'];
+  const errors = Object.keys(caps).filter((k) => !CAPABILITY_KEYS.includes(k)).map((k) => `unknown key capabilities.${k}`);
+  if (caps.deny === undefined) return errors;
+  if (!Array.isArray(caps.deny)) return [...errors, 'capabilities.deny must be a list'];
+  caps.deny.forEach((c, i) => {
+    if (!CAPABILITY_CLASSES.includes(c)) {
+      errors.push(`capabilities.deny[${i}] is not a capability class (got ${JSON.stringify(c)}); expected one of ${CAPABILITY_CLASSES.join(' | ')}`);
+    }
+  });
+  return errors;
+}
+
 function scalarErrors(doc) {
   const errors = [];
   if (doc.version === undefined) errors.push('version is required');
@@ -116,7 +140,7 @@ export function validateConfig(doc) {
   if (!isPlainObject(doc)) return ['config must be a YAML mapping'];
   const norm = normalizeConfig(doc);
   const errors = Object.keys(norm).filter((k) => !TOP_LEVEL_KEYS.includes(k)).map((k) => `unknown top-level key '${k}'`);
-  errors.push(...scalarErrors(norm), ...rolesErrors(norm.roles));
+  errors.push(...scalarErrors(norm), ...rolesErrors(norm.roles), ...capabilitiesErrors(norm.capabilities));
   if (norm.agent_scope_map !== undefined) {
     if (!Array.isArray(norm.agent_scope_map)) errors.push('agent_scope_map must be a list');
     else norm.agent_scope_map.forEach((row, i) => errors.push(...scopeRowErrors(row, i)));
@@ -300,6 +324,8 @@ export function serializeConfig(doc) {
         `    reads: ${scalar(row.reads)}`, `    roles: ${flowList(row.roles)}`);
     }
   }
+  // Written only when present, so configs without it serialize byte-identically to before.
+  if (d.capabilities !== undefined) out.push('capabilities:', `  deny: ${flowList(d.capabilities.deny)}`);
   return out.join('\n') + '\n';
 }
 
