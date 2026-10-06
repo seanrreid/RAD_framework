@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 
 import {
   CONFIG_PATH, PLATFORMS, loadConfig, validateConfig, getConfigValue, migrateFromClaudeMd, serializeConfig,
+  settingsErrors, seedSettings, writeConfigAtomic,
 } from '../config.js';
 import { configCommand } from '../cli.js';
 
@@ -546,4 +547,90 @@ test('settings: rad config validate rejects a bad settings block, naming the key
   assert.equal(loaded.ok, false);
   assert.match(loaded.errors.join('\n'), /settings\.hooks_dir/);
   assert.match(loaded.errors.join('\n'), /unknown key settings\.nope/);
+});
+
+// ---------------------------------------------------------------------------
+// seedSettings / writeConfigAtomic (preset install, #71 part 2b)
+// ---------------------------------------------------------------------------
+
+/** The real default high-risk pattern: YAML metacharacters (|, [, ], :, ?, $) included. */
+const DEFAULT_HIGH_RISK = '(^|[/_.-])(o?auth(n|z|entication|enticate|orization|orize)?|payments?|billing|migrations?|secrets?|credentials?|tokens?)([/_.-]|[A-Z0-9]|$)';
+const BASE_TEXT = `# operator comment, kept byte-for-byte\n${serializeConfig(VALID)}# trailing note\n`;
+
+/** Seed, write and load back; asserts the original text is an exact prefix. */
+async function seedAndLoad(text, settings) {
+  const got = await seedSettings(text, settings);
+  assert.equal(got.ok, true, got.error);
+  assert.ok(got.text.startsWith(text), 'original text is an exact prefix');
+  const root = tempRoot();
+  writeConfigAtomic(root, got.text);
+  return { got, loaded: await loadConfig(root) };
+}
+
+test('settingsErrors — exported; undefined is valid, unknown keys and bad values are named', () => {
+  assert.deepEqual(settingsErrors(undefined), []);
+  assert.deepEqual(settingsErrors({ hooks_dir: 'h' }), []);
+  assert.deepEqual(settingsErrors({ nope: 1 }), ['unknown key settings.nope']);
+  assert.deepEqual(settingsErrors('x'), ['settings must be a mapping']);
+});
+
+test('seedSettings — no settings block: every key appended as a block; comments kept; loads back', async () => {
+  const settings = { hooks_dir: 'scripts/hooks', high_risk_patterns: 'auth' };
+  const { got, loaded } = await seedAndLoad(BASE_TEXT, settings);
+  assert.deepEqual([got.seeded, got.kept, got.unseeded], [['high_risk_patterns', 'hooks_dir'], [], []]);
+  assert.equal(got.text, `${BASE_TEXT}settings:\n  high_risk_patterns: auth\n  hooks_dir: scripts/hooks\n`);
+  assert.equal(loaded.ok, true, JSON.stringify(loaded.errors));
+  assert.deepEqual(loaded.doc.settings, settings);
+});
+
+test('seedSettings — config text without a trailing newline gets one before and after the block', async () => {
+  const text = serializeConfig(VALID).replace(/\n$/, '');
+  const { got, loaded } = await seedAndLoad(text, { hooks_dir: 'h' });
+  assert.equal(got.text, `${text}\nsettings:\n  hooks_dir: h\n`);
+  assert.equal(loaded.ok, true, JSON.stringify(loaded.errors));
+});
+
+test('seedSettings — the real default high-risk pattern round-trips through YAML', async () => {
+  const { got, loaded } = await seedAndLoad(BASE_TEXT, { high_risk_patterns: DEFAULT_HIGH_RISK });
+  assert.deepEqual(got.seeded, ['high_risk_patterns']);
+  assert.equal(loaded.ok, true, JSON.stringify(loaded.errors));
+  assert.equal(loaded.doc.settings.high_risk_patterns, DEFAULT_HIGH_RISK);
+});
+
+test('seedSettings — settings block present with the same key: kept, text unchanged', async () => {
+  const text = `${BASE_TEXT}settings:\n  hooks_dir: mine  # operator choice\n`;
+  const got = await seedSettings(text, { hooks_dir: 'theirs' });
+  assert.deepEqual(got, { ok: true, text, seeded: [], kept: ['hooks_dir'], unseeded: [] });
+});
+
+test('seedSettings — settings block present but missing the key: unseeded, text unchanged', async () => {
+  const text = `${BASE_TEXT}settings:\n  hooks_dir: mine\n`;
+  const got = await seedSettings(text, { hooks_dir: 'x', high_risk_patterns: 'auth' });
+  assert.deepEqual(got, { ok: true, text, seeded: [], kept: ['hooks_dir'], unseeded: ['high_risk_patterns'] });
+  const empty = `${BASE_TEXT}settings: {}\n`;
+  assert.deepEqual(await seedSettings(empty, { hooks_dir: 'x' }),
+    { ok: true, text: empty, seeded: [], kept: [], unseeded: ['hooks_dir'] });
+});
+
+test('seedSettings — nothing to seed (undefined or empty settings): text unchanged', async () => {
+  for (const settings of [undefined, {}]) {
+    assert.deepEqual(await seedSettings(BASE_TEXT, settings), { ok: true, text: BASE_TEXT, seeded: [], kept: [], unseeded: [] });
+  }
+});
+
+test('seedSettings — errors: invalid preset settings, unparseable or non-mapping config, invalid result', async () => {
+  assert.match((await seedSettings(BASE_TEXT, { nope: 'x' })).error, /preset settings are invalid: unknown key settings\.nope/);
+  assert.match((await seedSettings('version: [\n', { hooks_dir: 'h' })).error, /cannot parse \.rad\/config\.yml/);
+  assert.match((await seedSettings('- a\n', { hooks_dir: 'h' })).error, /not a YAML mapping/);
+  assert.match((await seedSettings('version: 1\n', { hooks_dir: 'h' })).error, /seeded config is invalid: .*platform is required/);
+  assert.match((await seedSettings(`${BASE_TEXT}settings: nope\n`, { hooks_dir: 'h' })).error, /settings must be a mapping/);
+  assert.match((await seedSettings(42, { hooks_dir: 'h' })).error, /config text must be a string/);
+});
+
+test('writeConfigAtomic — writes the exact text and leaves no temp file', () => {
+  const root = tempRoot();
+  writeConfigAtomic(root, 'a: 1\n');
+  writeConfigAtomic(root, BASE_TEXT);
+  assert.equal(readFileSync(join(root, CONFIG_PATH), 'utf8'), BASE_TEXT);
+  assert.equal(existsSync(join(root, `${CONFIG_PATH}.tmp`)), false);
 });

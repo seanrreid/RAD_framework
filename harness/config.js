@@ -10,8 +10,8 @@
  * eagerly loads it (same convention as adapters/git-state-store.js).
  */
 
-import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync } from 'node:fs';
+import { join, dirname } from 'node:path';
 import { CAPABILITY_CLASSES } from './capabilities.js';
 
 /** Repo-relative path of the config file. */
@@ -132,7 +132,7 @@ function settingValueErrors(key, value) {
 }
 
 /** Errors for the optional `settings:` block. Fail-closed: unknown keys and bad values are errors. */
-function settingsErrors(settings) {
+export function settingsErrors(settings) {
   if (settings === undefined) return [];
   if (!isPlainObject(settings)) return ['settings must be a mapping'];
   const errors = [];
@@ -390,4 +390,94 @@ export function buildInitConfig({ platform, defaultBranch, architect }) {
     roles: { architect: [architect], developers: [], designers: [] },
     agent_scope_map: [],
   };
+}
+
+// ---------------------------------------------------------------------------
+// Settings seeding (preset install, #71 part 2b)
+// ---------------------------------------------------------------------------
+
+/** Parse YAML text with the lazily imported vendored js-yaml. Throws on a parse error. */
+async function parseYaml(text) {
+  const { default: yaml } = await import('./vendor/js-yaml.mjs');
+  return yaml.load(text);
+}
+
+/** Preset settings keys in SETTINGS_KEYS order (the order settingsLines writes them). */
+const orderedKeys = (settings) => SETTINGS_KEYS.filter((k) => settings[k] !== undefined);
+
+/**
+ * Append a `settings:` block to config text that has none. Append-only: the
+ * original text is the exact prefix of the result, and the result must load
+ * to a valid config whose settings equal `settings`.
+ */
+async function appendSettingsBlock(configText, settings) {
+  const separator = configText === '' || configText.endsWith('\n') ? '' : '\n';
+  const text = `${configText}${separator}${settingsLines(settings).join('\n')}\n`;
+  if (!text.startsWith(configText)) return { ok: false, error: 'seeded text does not preserve the original config' };
+  let doc;
+  try {
+    doc = await parseYaml(text);
+  } catch (err) {
+    return { ok: false, error: `seeded config does not parse: ${err.message.split('\n')[0]}` };
+  }
+  const errors = validateConfig(doc);
+  if (errors.length) return { ok: false, error: `seeded config is invalid: ${errors.join('; ')}` };
+  const lost = orderedKeys(settings).find((k) => doc.settings[k] !== settings[k]);
+  if (lost) return { ok: false, error: `seeded settings.${lost} does not round-trip` };
+  return { ok: true, text };
+}
+
+/**
+ * Seed a preset's settings into `.rad/config.yml` text. Async only because
+ * js-yaml is imported lazily. Never throws; never rewrites existing text.
+ *
+ * - No `settings:` key in the config: every preset key is `seeded`, appended
+ *   as a new block at the end of the text (values quoted by scalar()).
+ * - A `settings:` key is present: the text is returned unchanged; preset keys
+ *   it already sets are `kept`, the others are `unseeded` (never merged in,
+ *   since that would rewrite the operator's block).
+ *
+ * The caller writes `text` (writeConfigAtomic) only when `seeded` is non-empty.
+ *
+ * @param {string} configText - the current config file contents
+ * @param {Object|undefined} settings - the preset's settings (validated with settingsErrors)
+ * @returns {Promise<{ ok: true, text: string, seeded: string[], kept: string[], unseeded: string[] }
+ *                   | { ok: false, error: string }>}
+ */
+export async function seedSettings(configText, settings) {
+  if (typeof configText !== 'string') return { ok: false, error: 'config text must be a string' };
+  const settingErrors = settingsErrors(settings);
+  if (settingErrors.length) return { ok: false, error: `preset settings are invalid: ${settingErrors.join('; ')}` };
+  const keys = orderedKeys(settings ?? {});
+  let doc;
+  try {
+    doc = await parseYaml(configText);
+  } catch (err) {
+    return { ok: false, error: `cannot parse ${CONFIG_PATH}: ${err.message.split('\n')[0]}` };
+  }
+  if (!isPlainObject(doc)) return { ok: false, error: `${CONFIG_PATH} is not a YAML mapping` };
+  if (keys.length === 0) return { ok: true, text: configText, seeded: [], kept: [], unseeded: [] };
+  if (doc.settings !== undefined) {
+    if (!isPlainObject(doc.settings)) return { ok: false, error: `${CONFIG_PATH}: settings must be a mapping` };
+    const kept = keys.filter((k) => Object.hasOwn(doc.settings, k));
+    return { ok: true, text: configText, seeded: [], kept, unseeded: keys.filter((k) => !kept.includes(k)) };
+  }
+  const appended = await appendSettingsBlock(configText, Object.fromEntries(keys.map((k) => [k, settings[k]])));
+  if (!appended.ok) return appended;
+  return { ok: true, text: appended.text, seeded: keys, kept: [], unseeded: [] };
+}
+
+/**
+ * Write `<root>/.rad/config.yml` atomically: a temp file in the same directory,
+ * then rename, so a crash never leaves half a config. Throws on any fs error.
+ *
+ * @param {string} root
+ * @param {string} text
+ */
+export function writeConfigAtomic(root, text) {
+  const file = join(root, CONFIG_PATH);
+  mkdirSync(dirname(file), { recursive: true });
+  const tmp = `${file}.tmp`;
+  writeFileSync(tmp, text, 'utf8');
+  renameSync(tmp, file);
 }
