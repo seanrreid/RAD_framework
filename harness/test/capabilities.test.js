@@ -178,3 +178,22 @@ test('commandRefusal: an implicit default narrowed by deny is refused too', () =
   const msg = commandRefusal(resolved({ waves: [1], deny: ['shell'] }));
   assert.match(msg, /Wave 1 .*\[fs_read, fs_write\]/);
 });
+
+test('commandRefusal: the default label is unchanged (command)', () => {
+  const byWave = resolved({ waves: [1], waveCapabilities: { 1: ['fs_read'] } });
+  assert.equal(commandRefusal(byWave), commandRefusal(byWave, 'command'));
+  assert.match(commandRefusal(byWave), /but the command adapter cannot narrow agent tools/);
+});
+
+test('commandRefusal: the acp label names the acp adapter', () => {
+  const msg = commandRefusal(resolved({ waves: [1, 2], waveCapabilities: { 2: ['fs_read'] } }), 'acp');
+  assert.match(msg, /^Wave 2 is capability-constrained \(effective: \[fs_read\]\) but the acp adapter cannot narrow/);
+  assert.doesNotMatch(msg, /command adapter/);
+});
+
+test('commandRefusal: an unconstrained wave is null for both labels', () => {
+  const byWave = resolved({ waves: [1, 2] });
+  assert.equal(commandRefusal(byWave), null);
+  assert.equal(commandRefusal(byWave, 'acp'), null);
+  assert.equal(commandRefusal({}, 'acp'), null);
+});
