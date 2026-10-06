@@ -240,3 +240,17 @@ invariants:
         surface: "a wave granted the shell class"
         guarded: "no"
         note: "shell lets an agent reach the network and write files; classes are tool-level, not a sandbox"
+
+  - id: preset-add-only
+    claim: "A preset never overwrites a path another layer owns, and every install-preset refusal happens before any write."
+    authority: "harness/install-manifest.js layer install + harness/preset.js PRESET_ROOTS"
+    not_evalable: "install-time CLI with no agent-reachable surface; covered by harness/test/cli.test.js and scripts/test-install-harness.sh"
+    enforced_by:
+      - { file: harness/install-manifest.js, symbol: "ships paths another layer owns", note: "the layer apply throws on a conflicting plan before touching the filesystem" }
+      - { file: harness/cli.js, symbol: "async function preparePresetInstall", note: "every refusal (invalid preset, no core, bad config, conflict, other preset) runs before any write" }
+      - { file: harness/preset.js, symbol: "export const PRESET_ROOTS", note: "preset files may only land under these roots" }
+    bypasses:
+      - id: symlinked-target-dir
+        surface: "a symlinked target directory (such as docs/)"
+        guarded: "no"
+        note: "written through, same as core; a symlink at the file path itself is never written through (kept as a local edit)"

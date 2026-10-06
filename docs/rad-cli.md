@@ -550,6 +550,81 @@ RAD_WORKTREE=0 node harness/cli.js deliver my-feature                 # opt out:
 
 ---
 
+## Install commands
+
+The installer (`install.sh`) drives these verbs; they can also be run by hand.
+All three work on `.rad/installed.json`, where each tracked file carries its
+layer (`core` or `preset`) and SHA-256. `--target` defaults to the CLI's repo
+root. See [INSTALL.md](../INSTALL.md#presets) and
+[UPGRADE.md](../UPGRADE.md#how-upgrades-handle-local-edits) for the full rules.
+
+### rad install-core
+
+```
+rad install-core --source <rad-clone> [--target <dir>]
+```
+
+Installs or upgrades the core framework files from a RAD checkout and writes
+`.rad/installed.json`. An unmodified or absent file is written; a locally edited
+file is kept and the new version staged under `.rad/upgrade-pending/`; a locally
+deleted file is not restored.
+
+**Exit codes:** `0` all written; `1` a file was kept or deleted; `2` nothing
+written: bad arguments, a `--source` that is not a RAD source, a malformed
+manifest, or a core path another layer owns.
+
+---
+
+### rad install-status
+
+```
+rad install-status [--target <dir>]
+```
+
+A read-only drift report. When a preset is recorded it prints
+`preset: <name> <version> (<source>)` first, then
+`modified: [<layer>] <path>` and `missing: [<layer>] <path>` lines.
+
+**Exit codes:** `0` clean; `1` drift, or no `.rad/installed.json`; `2` bad
+arguments or a malformed manifest.
+
+---
+
+### rad install-preset
+
+```
+rad install-preset (--source <dir> | --reapply) [--target <dir>]
+```
+
+Installs or updates a preset over an installed core. A preset is `preset.yml`
+(`name`, kebab-case; `version`, a string; optional `settings` with
+`high_risk_patterns` and/or `hooks_dir`) plus an optional `files/` tree that
+mirrors the target. Files may only go under `scripts/hooks/`, `ai/extensions/`,
+`.claude/agents/`, or `docs/`.
+
+- **Add-only.** A path another layer owns (such as core) is refused.
+- **Same keep-local-edits rules as core.** An edited preset file is kept (new
+  version staged), and a deleted one is reported `deleted` and not restored.
+- **Settings are seeded only when absent.** With no `settings:` block in
+  `.rad/config.yml`, the preset's settings are appended as one (`seeded:`). With
+  an existing block the config is untouched: keys it already sets are reported
+  `kept:`, missing ones `unseeded:` for the operator to add by hand.
+- The preset's name, version, and absolute source path are recorded in the
+  manifest. Only one preset per project: a different name is refused.
+- `--reapply` installs from the recorded source, picking up changes there. With
+  no preset recorded it prints `nothing to do` and exits 0. A recorded source
+  that is missing or not a directory exits 2, naming the path and the fix.
+
+Every refusal happens before anything is written.
+
+**Exit codes:** `0` all written and seeded; `1` a file was kept or deleted, or a
+setting was unseeded; `2` nothing written: bad arguments, an invalid preset,
+core not installed, a malformed manifest, a missing or invalid
+`.rad/config.yml`, a path another layer owns, a different preset already
+installed, or (`--reapply`) a missing recorded source.
+
+---
+
 ## Smoke testing rad deliver
 
 ### Step 1 — verify tests pass (no API call)

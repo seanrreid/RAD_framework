@@ -2574,3 +2574,79 @@ test('install-core AC#4 — a core upgrade after a preset keeps the preset metad
     for (const [rel] of PRESET_FILES) assert.deepEqual(after.files[rel], before.files[rel], rel);
   });
 });
+
+// ---------------------------------------------------------------------------
+// rad install-preset --reapply — preset-surface Wave 1 (AC#1). Re-installs from
+// the manifest's recorded preset.source, exactly as --source <recorded> would.
+// ---------------------------------------------------------------------------
+
+const REAPPLY_FIX_TEXT = 'pass --preset <dir> to install.sh, or rad install-preset --source <dir>';
+
+test('install-preset AC#1 — --reapply restores a deleted preset file from the recorded source (exit 0)', async () => {
+  await withPresetRoots(async ({ target, preset }) => {
+    await runInstallPreset(['--source', preset, '--target', target]);
+    // Drop the file AND its manifest entry: an unbaselined absent file is written. (A
+    // baselined one stays 'deleted', not restored, per the unchanged per-file rules.)
+    rmSync(join(target, 'docs/team.md'));
+    const manifest = readManifestJson(target);
+    delete manifest.files['docs/team.md'];
+    writeFileSync(join(target, '.rad/installed.json'), JSON.stringify(manifest, null, 2) + '\n');
+    const res = await runInstallPreset(['--reapply', '--target', target]);
+    assert.equal(res.code, 0, res.stderr);
+    assert.equal(readFileSync(join(target, 'docs/team.md'), 'utf8'), 'team\n');
+    assert.deepEqual(readManifestJson(target).preset, { name: PRESET_NAME, version: '1.0.0', source: preset });
+    assert.equal(readManifestJson(target).files['docs/team.md'].layer, 'preset');
+  });
+});
+
+test('install-preset AC#1 — --reapply output and exit equal --source <recorded>', async () => {
+  await withPresetRoots(async ({ target, preset }) => {
+    await runInstallPreset(['--source', preset, '--target', target]);
+    writeFileSync(join(preset, 'files/docs/team.md'), 'team v2\n');
+    const res = await runInstallPreset(['--reapply'], target);
+    assert.equal(res.code, 0, res.stderr);
+    assert.equal(res.stdout, 'rad install-preset: write 2, keep 0, deleted 0, backup-write 0, stale 0\nkept: hooks_dir\n');
+    assert.equal(readFileSync(join(target, 'docs/team.md'), 'utf8'), 'team v2\n');
+  });
+});
+
+test('install-preset AC#1 — --reapply with no preset recorded → exit 0, nothing to do, tree unchanged', async () => {
+  await withPresetRoots(async ({ target }) => {
+    const before = hashTree(target);
+    const res = await runInstallPreset(['--reapply', '--target', target]);
+    assert.equal(res.code, 0, res.stderr);
+    assert.equal(res.stdout, 'rad install-preset: no preset recorded; nothing to do\n');
+    assert.equal(res.stderr, '');
+    assert.equal(hashTree(target), before);
+  });
+});
+
+/** --reapply refusals: [label, setup({ target, preset }) → argv or undefined, stderr pattern]. */
+const REAPPLY_REFUSALS = [
+  ['recorded source missing', ({ preset }) => rmSync(preset, { recursive: true }),
+    (p) => new RegExp(`recorded preset source ${p} is missing or not a directory; ${REAPPLY_FIX_TEXT.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`)],
+  ['recorded source is a file', ({ preset }) => { rmSync(preset, { recursive: true }); writeFileSync(preset, 'x\n'); },
+    (p) => new RegExp(`recorded preset source ${p} is missing or not a directory`)],
+  ['no manifest', ({ target }) => rmSync(join(target, '.rad/installed.json')), () => /core is not installed.*run rad install-core first/],
+  ['malformed manifest', ({ target }) => writeFileSync(join(target, '.rad/installed.json'), '{ broken'), () => /installed\.json is not valid JSON/],
+  ['--reapply with --source', ({ target, preset }) => ['--reapply', '--source', preset, '--target', target],
+    () => /--source and --reapply are mutually exclusive\nUsage: rad install-preset \(--source <dir> \| --reapply\) \[--target <dir>\]/],
+  ['neither flag', ({ target }) => ['--target', target], () => /--source <dir> is required\nUsage: rad install-preset \(--source <dir> \| --reapply\)/],
+  ['--reapply twice', ({ target }) => ['--reapply', '--reapply', '--target', target], () => /--reapply given more than once/],
+];
+
+test('install-preset AC#1 — every --reapply refusal exits 2 with the target tree byte-identical', async () => {
+  for (const [label, setup, pattern] of REAPPLY_REFUSALS) {
+    await withPresetRoots(async (roots) => {
+      const first = await runInstallPreset(['--source', roots.preset, '--target', roots.target]);
+      assert.equal(first.code, 0, `${label}: ${first.stderr}`);
+      const argv = setup(roots) ?? ['--reapply', '--target', roots.target];
+      const before = hashTree(roots.target);
+      const res = await runInstallPreset(argv);
+      assert.equal(res.code, 2, `${label}: ${res.stderr}`);
+      assert.equal(res.stdout, '', label);
+      assert.match(res.stderr, pattern(roots.preset), label);
+      assert.equal(hashTree(roots.target), before, `${label}: nothing written`);
+    });
+  }
+});

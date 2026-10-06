@@ -87,6 +87,11 @@ exits 1 naming the reason, `scripts/check-approval-blockers.sh` exits 2, and
 `rad deliver` exits 2 before appending any event. Run `rad config settings` to
 see which source each value comes from.
 
+A preset (see [INSTALL.md](../INSTALL.md#presets)) can seed these keys, but only
+when absent: `rad install-preset` appends a `settings:` block only when the
+config has none. When a block already exists the config is left untouched and
+each preset key the block lacks is reported `unseeded` for you to add by hand.
+
 ### Platform
 
 `manual` mode: platform scripts print instructions instead of calling CLI tools.

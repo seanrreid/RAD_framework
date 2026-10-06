@@ -18,6 +18,7 @@ originally set up with the installer.
 | `scripts/` | **Refreshed** — `*.sh` helpers, `scripts/lib/`, and `scripts/hooks/`; locally edited files kept |
 | `harness/` | **Refreshed** — everything except `harness/node_modules/`, which is never touched |
 | `.rad/installed.json` | **Written / updated** — the install manifest (see [How upgrades handle local edits](#how-upgrades-handle-local-edits)) |
+| Preset files | **Re-applied** when a preset is recorded in `.rad/installed.json` — from its recorded source, same keep-local-edits rules as core (see [Presets on upgrade](#presets-on-upgrade)) |
 | `.rad/upgrade-pending/` | Written only when a local edit was kept — the new core version of each kept file |
 | `.rad/upgrade-backup/` | Written only on the first upgrade of a pre-manifest install — backups of overwritten files |
 | `CLAUDE.md` | Never touched — your project conventions |
@@ -28,6 +29,20 @@ originally set up with the installer.
 The upgrade also recreates any missing directories in the RAD structure, so a
 project that predates newer directories (e.g. `.agents/findings/`) is healed
 automatically.
+
+### Presets on upgrade
+
+`install.sh --upgrade` re-applies the recorded preset after the core upgrade
+(`node harness/cli.js install-preset --reapply`). It reads the preset's source
+directory from `.rad/installed.json` and picks up any changes there: new or
+changed preset files are written, a locally edited preset file is kept with the
+new version staged under `.rad/upgrade-pending/`, and a preset file you deleted
+is reported `deleted` and not restored. With no preset recorded, the step does
+nothing. If the recorded source directory is gone, the step fails naming the
+path and the fix (pass `--preset <dir>`); `--upgrade --preset <dir>` installs
+from the given directory instead. Settings are never re-seeded into an existing
+`settings:` block. A preset problem never undoes the core upgrade; the installer
+reports it at the end and exits 1.
 
 ---
 
@@ -152,10 +167,12 @@ Upgrade never deletes a `harness/node_modules/` the project installed itself.
 node harness/cli.js install-status [--target <dir>]
 ```
 
-It is read-only. It prints `modified: <path>` for each framework file that
-differs from the manifest and `missing: <path>` for each one that is gone. Exit 0
-means clean; 1 means drift (or no `.rad/installed.json` yet); 2 means bad
-arguments or a malformed manifest.
+It is read-only. When a preset is recorded it first prints
+`preset: <name> <version> (<source>)`. Then it prints
+`modified: [<layer>] <path>` for each tracked file that differs from the
+manifest and `missing: [<layer>] <path>` for each one that is gone, where
+`<layer>` is `core` or `preset`. Exit 0 means clean; 1 means drift (or no
+`.rad/installed.json` yet); 2 means bad arguments or a malformed manifest.
 
 ### Merging a kept edit
 
@@ -177,6 +194,11 @@ to `.rad/upgrade-backup/` and then overwritten.
 Project-specific behavior still belongs in `CLAUDE.md`, `ai/slop-register.md`,
 or your generated agent files rather than the framework commands. A kept edit to
 a command or script has to be merged by hand on every upgrade that changes it.
+
+Org- and client-wide defaults (shared hooks, guardrail extensions, agent files,
+docs, and settings) belong in a preset rather than in edits to core files: a
+preset is tracked separately, re-applied on every upgrade, and never conflicts
+with core. See [INSTALL.md](INSTALL.md#presets).
 
 ---
 

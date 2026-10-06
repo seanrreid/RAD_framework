@@ -1,7 +1,9 @@
 // Tests for harness/preset.js: the preset reader (#71 part 2b).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync, readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 
@@ -160,4 +162,65 @@ test('presetFilePath — absolute path under files/; unsafe paths throw', async 
       assert.throws(() => presetFilePath(dir, bad), /unsafe preset file path/);
     }
   });
+});
+
+// ---------------------------------------------------------------------------
+// presets/example — the shipped example preset (preset-surface Wave 1, AC#3).
+// ---------------------------------------------------------------------------
+
+const REPO_ROOT = fileURLToPath(new URL('../../', import.meta.url));
+const EXAMPLE_DIR = join(REPO_ROOT, 'presets', 'example');
+const EXAMPLE_HOOK = 'scripts/hooks/on-outcome/50-example-preset.sh';
+const EXAMPLE_EXTENSION = 'ai/extensions/example-preset.md';
+/** Git's index mode for an executable regular file. */
+const EXECUTABLE_GIT_MODE = '100755';
+
+/** The built-in default, read from its one source of truth (scripts/lib/plan-paths.sh). */
+function defaultHighRiskPattern() {
+  const text = readFileSync(join(REPO_ROOT, 'scripts/lib/plan-paths.sh'), 'utf8');
+  const match = text.match(/^readonly RAD_HIGH_RISK_DEFAULT_PATTERN='(.*)'$/m);
+  assert.ok(match, 'RAD_HIGH_RISK_DEFAULT_PATTERN not found in plan-paths.sh');
+  return match[1];
+}
+
+test('presets/example — readPreset is ok: name, both files, and high_risk_patterns', async () => {
+  const got = await readPreset(EXAMPLE_DIR);
+  assert.equal(got.ok, true, JSON.stringify(got.errors));
+  assert.equal(got.preset.name, 'example');
+  assert.equal(got.preset.version, '1');
+  assert.deepEqual(got.preset.files, [EXAMPLE_EXTENSION, EXAMPLE_HOOK]);
+  assert.deepEqual(Object.keys(got.preset.settings), ['high_risk_patterns']);
+});
+
+test('presets/example — high_risk_patterns extends the default, never narrows it', async () => {
+  const { preset } = await readPreset(EXAMPLE_DIR);
+  // The patterns are ERE (BSD grep -E), but every construct used here (groups,
+  // alternation, bracket classes, ^/$ anchors, ?) means the same in JS RegExp.
+  const example = new RegExp(preset.settings.high_risk_patterns);
+  const builtin = new RegExp(defaultHighRiskPattern());
+  assert.ok(preset.settings.high_risk_patterns.startsWith(`${defaultHighRiskPattern()}|`), 'default copied verbatim');
+  const defaultFlagged = ['src/auth/x.js', 'db/migrations/1.sql', 'payments.js', 'lib/billing/invoice.ts',
+    'config/secrets.yml', 'src/authService.js'];
+  for (const path of defaultFlagged) {
+    assert.ok(builtin.test(path), `default flags ${path}`);
+    assert.ok(example.test(path), `example still flags ${path}`);
+  }
+  for (const path of ['infra/main.tf', 'deploy/terraform/vpc.tf']) {
+    assert.ok(!builtin.test(path), `default does not flag ${path}`);
+    assert.ok(example.test(path), `example flags ${path}`);
+  }
+  for (const path of ['src/authority.js', 'docs/infrastructure.md']) {
+    assert.ok(!example.test(path), `example does not flag ${path}`);
+  }
+});
+
+test('presets/example — the hook is executable in git and exits 0 under /bin/bash', () => {
+  const rel = `presets/example/files/${EXAMPLE_HOOK}`;
+  const ls = spawnSync('git', ['-C', REPO_ROOT, 'ls-files', '-s', '--', rel], { encoding: 'utf8' });
+  assert.equal(ls.status, 0, ls.stderr);
+  assert.ok(ls.stdout.startsWith(`${EXECUTABLE_GIT_MODE} `), `git mode: ${ls.stdout}`);
+  const run = spawnSync('/bin/bash', [join(REPO_ROOT, rel), 'feat-x', '3', 'on-outcome', 'success'], { encoding: 'utf8' });
+  assert.equal(run.status, 0, run.stderr);
+  assert.equal(run.stdout, '');
+  assert.match(run.stderr, /feature=feat-x wave=3 outcome=success/);
 });
