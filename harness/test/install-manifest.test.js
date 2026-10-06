@@ -12,6 +12,7 @@ import {
   backupStamp, installDrift, isSafeRelPath, planLayerInstall, planPresetInstall, applyPresetInstall, presetFilesRoot,
   PRESET_NEEDS_CORE_ERROR,
 } from '../install-manifest.js';
+import { GENERATED_MARKER, hasGeneratedMarker } from '../generated-marker.js';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const NOW = new Date('2026-10-05T12:34:56.789Z');
@@ -106,8 +107,12 @@ test('listCoreFiles — real repo ships scripts/lib/plan-paths.sh and no user da
   assert.ok(files.includes('scripts/lib/plan-paths.sh'));
   assert.ok(files.includes('harness/cli.js'));
   assert.ok(!files.includes('CLAUDE.md'));
-  for (const prefix of ['.rad/', '.agents/', '.claude/agents/', 'harness/node_modules/']) {
-    assert.ok(!files.some((p) => p.startsWith(prefix)), `nothing under ${prefix}`);
+  assert.ok(!files.some((p) => p.startsWith('harness/node_modules/')), 'nothing under harness/node_modules/');
+  const SHIPPED_RAD = ['.rad/skills/', '.rad/agents/'];
+  assert.ok(!files.some((p) => p.startsWith('.rad/') && !SHIPPED_RAD.some((d) => p.startsWith(d))), 'only .rad sources ship');
+  for (const prefix of ['.agents/', '.claude/agents/', '.codex/agents/']) {
+    const unmarked = files.filter((p) => p.startsWith(prefix) && !hasGeneratedMarker(read(REPO_ROOT, p)));
+    assert.deepEqual(unmarked, [], `only marked files under ${prefix}`);
   }
   assert.ok(!files.some((p) => /^\.claude\/settings.*\.json$/.test(p)));
 });
@@ -560,5 +565,80 @@ test('readManifest — a malformed preset block is rejected', () => {
     }
     writeFileSync(join(target, MANIFEST_PATH), JSON.stringify({ ...base, preset: { name: 'a', version: '1', source: '/p' } }));
     assert.ok(readManifest(target).ok);
+  });
+});
+
+// Generated sources and marked outputs ship through core (#171 part 2, AC#4)
+
+/** A file carrying the generated marker in its markdown (frontmatter) position. */
+const markedMd = (name) => `---\nname: ${name}\n---\n<!-- ${GENERATED_MARKER} (source: .rad/agents/${name}.md) -->\n\nBody.\n`;
+/** A file carrying the generated marker in its first-line (TOML/YAML) position. */
+const markedHash = (name) => `# ${GENERATED_MARKER} (source: .rad/agents/${name}.md)\nname = "${name}"\n`;
+/** One marked output under each new root. */
+const MARKED_FIXTURE = {
+  '.claude/agents/quality-reviewer.md': markedMd('quality-reviewer'),
+  '.agents/skills/quality-review/SKILL.md': markedMd('quality-review'),
+  '.agents/skills/quality-review/agents/openai.yaml': markedHash('quality-review'),
+  '.codex/agents/quality-reviewer.toml': markedHash('quality-reviewer'),
+};
+/** The generator source trees. */
+const SOURCE_FIXTURE = {
+  '.rad/skills/quality-review/SKILL.md': 'source skill\n',
+  '.rad/skills/quality-review/codex.md': 'codex body\n',
+  '.rad/agents/quality-reviewer.md': 'source agent\n',
+};
+
+test('listCoreFiles — a marked file under each new root ships', () => {
+  withRoots(({ source }) => {
+    writeTree(source, MARKED_FIXTURE);
+    const files = listCoreFiles(source);
+    for (const p of Object.keys(MARKED_FIXTURE)) assert.ok(files.includes(p), `${p} ships`);
+  });
+});
+
+test('listCoreFiles — unmarked files under the new roots never ship (marker out of position too)', () => {
+  withRoots(({ source }) => {
+    writeTree(source, {
+      '.codex/agents/internal.toml': 'name = "internal"\n',
+      '.agents/skills/mine/SKILL.md': `Body mentions ${GENERATED_MARKER}\n`,
+      '.claude/agents/late.md': `---\nname: late\n---\n\n<!-- ${GENERATED_MARKER} -->\n`,
+    });
+    const files = listCoreFiles(source);
+    for (const p of ['.claude/agents/me.md', '.codex/agents/internal.toml', '.agents/skills/mine/SKILL.md',
+      '.claude/agents/late.md', '.agents/plans/p.md']) {
+      assert.ok(!files.includes(p), `${p} not shipped`);
+    }
+  });
+});
+
+test('listCoreFiles — .rad/skills and .rad/agents ship whole; .rad/config.yml and installed.json never do', () => {
+  withRoots(({ source }) => {
+    writeTree(source, { ...SOURCE_FIXTURE, [MANIFEST_PATH]: '{}\n', '.rad/upgrade-pending/x.md': 'x\n' });
+    const files = listCoreFiles(source);
+    for (const p of Object.keys(SOURCE_FIXTURE)) assert.ok(files.includes(p), `${p} ships`);
+    assert.deepEqual(files.filter((p) => p.startsWith('.rad/')), Object.keys(SOURCE_FIXTURE).sort());
+  });
+});
+
+test('listCoreFiles — a symlinked marked file or root is never followed', () => {
+  withRoots(({ source }) => {
+    writeTree(source, { 'outside/marked.md': markedMd('outside'), 'outside/dir/a.toml': markedHash('a') });
+    mkdirSync(join(source, '.codex'), { recursive: true });
+    symlinkSync(join(source, 'outside/marked.md'), join(source, '.claude/agents/linked.md'));
+    symlinkSync(join(source, 'outside/dir'), join(source, '.codex/agents'));
+    symlinkSync(join(source, 'outside/dir'), join(source, '.rad/agents'));
+    const files = listCoreFiles(source);
+    assert.ok(!files.includes('.claude/agents/linked.md'));
+    assert.ok(!files.some((p) => p.startsWith('.codex/') || p.startsWith('.rad/') || p.startsWith('outside/')));
+  });
+});
+
+test('listCoreFiles — core set unchanged when no sources or marked files exist; output sorted and deterministic', () => {
+  withRoots(({ source }) => {
+    assert.deepEqual(listCoreFiles(source), Object.keys(CORE_FIXTURE).sort());
+    writeTree(source, { ...SOURCE_FIXTURE, ...MARKED_FIXTURE });
+    const expected = [...Object.keys(CORE_FIXTURE), ...Object.keys(SOURCE_FIXTURE), ...Object.keys(MARKED_FIXTURE)].sort();
+    assert.deepEqual(listCoreFiles(source), expected);
+    assert.deepEqual(listCoreFiles(source), expected);
   });
 });
