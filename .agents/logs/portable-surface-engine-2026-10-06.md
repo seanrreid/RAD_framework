@@ -9,3 +9,4 @@ Executor role: architect
 | Step | Wave | Task | Status | Commit | Time |
 |------|------|------|--------|--------|------|
 | 1 | 1 | 1.1 Generator engine | complete | 2820aa0 | 18:26Z |
+| 2 | 1 | 1.2 Self-protected Codex paths | complete | 62f82e9 | 18:31Z |
