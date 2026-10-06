@@ -268,8 +268,11 @@ path_exists_on_ref() {
 # here. Each helper fails closed (non-zero + stderr) on a missing/unreadable plan
 # so a caller can never mistake "could not read" for "nothing found".
 
-# Built-in high-risk pattern, used when RAD_HIGH_RISK_PATTERNS is unset OR empty.
-# The ONLY copy: scripts/lint-plan.sh reads it through plan_high_risk_pattern.
+# Built-in high-risk pattern, used when RAD_HIGH_RISK_PATTERNS is unset OR empty
+# AND .rad/config.yml carries no settings.high_risk_patterns (or there is no
+# config file) — it is the config fallback too. The ONLY copy: scripts/lint-plan.sh
+# and check-approval-blockers.sh read it through plan_high_risk_pattern, and the
+# JS side reports it as `(built-in)`, never a copy.
 # Matches whole path segments, not substrings: a stem must start at the path start
 # or after a / _ . - separator, may carry an optional plural or auth suffix
 # (authn/authz/authentication/authorize…), and must be followed by a separator,
@@ -277,6 +280,16 @@ path_exists_on_ref() {
 # Substring matching (#143) flagged authority/authors/tokenizer as high-risk.
 # Must stay BSD grep -E (ERE) compatible — path_matches evaluates it.
 readonly RAD_HIGH_RISK_DEFAULT_PATTERN='(^|[/_.-])(o?auth(n|z|entication|enticate|orization|orize)?|payments?|billing|migrations?|secrets?|credentials?|tokens?)([/_.-]|[A-Z0-9]|$)'
+
+# The config key and the `rad config get` exit status for a key the (valid)
+# config does not carry — the same contract scripts/get-default-branch.sh reads.
+readonly RAD_HIGH_RISK_SETTING_KEY='settings.high_risk_patterns'
+readonly RAD_CONFIG_KEY_ABSENT_EXIT=3
+# The repo whose harness/cli.js (and so whose .rad/config.yml) this library
+# reads: two levels above scripts/lib. The CLI's own REPO_ROOT is harness/.., so
+# this is the root it reads the config from.
+RAD_PLAN_PATHS_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+readonly RAD_PLAN_PATHS_ROOT
 
 # Prefix of every high-risk finding id; the rest of the id is the scope path.
 readonly RAD_HIGH_RISK_FINDING_PREFIX='high-risk:'
@@ -358,21 +371,66 @@ plan_clarification_markers() {
   ' "$plan_file"
 }
 
+# plan_high_risk_config_pattern
+# Print settings.high_risk_patterns from .rad/config.yml (via `rad config get`),
+# or the built-in default when the key is absent (exit 3) or there is no config
+# file. "No config file" is detected HERE, by checking the file the CLI would
+# read: the CLI exits 1 for both a missing and an invalid config, so its exit
+# code cannot tell them apart. Any other failure — invalid config, another
+# non-zero exit, or exit 0 with no output — prints the reason on stderr and
+# returns 2: fail closed, never a silent default.
+plan_high_risk_config_pattern() {
+  local cli="$RAD_PLAN_PATHS_ROOT/harness/cli.js" err_file value rc=0
+  if [[ ! -f "$RAD_PLAN_PATHS_ROOT/.rad/config.yml" ]]; then
+    printf '%s' "$RAD_HIGH_RISK_DEFAULT_PATTERN"
+    return 0
+  fi
+  err_file=$(mktemp "${TMPDIR:-/tmp}/plan-paths.XXXXXX") \
+    || { echo "plan_high_risk_pattern: cannot create a temp file" >&2; return 2; }
+  value=$(node "$cli" config get "$RAD_HIGH_RISK_SETTING_KEY" 2>"$err_file") || rc=$?
+  if [[ "$rc" -eq "$RAD_CONFIG_KEY_ABSENT_EXIT" ]]; then
+    rm -f "$err_file"
+    printf '%s' "$RAD_HIGH_RISK_DEFAULT_PATTERN"
+    return 0
+  fi
+  if [[ "$rc" -ne 0 ]]; then
+    cat "$err_file" >&2
+    rm -f "$err_file"
+    echo "plan_high_risk_pattern: cannot read $RAD_HIGH_RISK_SETTING_KEY from .rad/config.yml (rad config get exit $rc)" >&2
+    return 2
+  fi
+  rm -f "$err_file"
+  if [[ -z "$value" ]]; then
+    echo "plan_high_risk_pattern: rad config get $RAD_HIGH_RISK_SETTING_KEY exited 0 with no output — failing closed" >&2
+    return 2
+  fi
+  printf '%s' "$value"
+}
+
 # plan_high_risk_pattern
 # Print the effective high-risk pattern: RAD_HIGH_RISK_PATTERNS when set and
-# non-empty, else the built-in default. The check can be NARROWED but never
-# disabled — `${var:-default}` treats empty as unset, matching lint-plan.sh.
+# non-empty (config not consulted); else settings.high_risk_patterns from
+# .rad/config.yml; else the built-in default. The check can be NARROWED but never
+# disabled — an empty env value is treated as unset. Returns 2 (reason on stderr)
+# when the config cannot be read; callers must fail closed, never match with an
+# empty pattern.
 plan_high_risk_pattern() {
-  printf '%s' "${RAD_HIGH_RISK_PATTERNS:-$RAD_HIGH_RISK_DEFAULT_PATTERN}"
+  if [[ -n "${RAD_HIGH_RISK_PATTERNS:-}" ]]; then
+    printf '%s' "$RAD_HIGH_RISK_PATTERNS"
+    return 0
+  fi
+  plan_high_risk_config_pattern
 }
 
 # plan_high_risk_pattern_is_default
 # Exit 0 iff the effective pattern (plan_high_risk_pattern) is exactly the
-# built-in default — RAD_HIGH_RISK_PATTERNS unset, empty, or set to the default
-# string verbatim; else exit 1. Compares the EFFECTIVE pattern, never the raw env,
-# so the empty-falls-back rule has one definition.
+# built-in default — from env, config, or the fallback; exit 1 when it differs;
+# exit 2 when the pattern cannot be resolved. Compares the EFFECTIVE pattern,
+# never the raw env, so the precedence rule has one definition.
 plan_high_risk_pattern_is_default() {
-  [[ "$(plan_high_risk_pattern)" == "$RAD_HIGH_RISK_DEFAULT_PATTERN" ]]
+  local pattern
+  pattern=$(plan_high_risk_pattern) || return 2
+  [[ "$pattern" == "$RAD_HIGH_RISK_DEFAULT_PATTERN" ]]
 }
 
 # plan_high_risk_findings <plan-file>
@@ -382,7 +440,7 @@ plan_high_risk_pattern_is_default() {
 plan_high_risk_findings() {
   local plan_file="$1" pattern paths path
   require_readable_plan plan_high_risk_findings "$plan_file" || return
-  pattern=$(plan_high_risk_pattern)
+  pattern=$(plan_high_risk_pattern) || return
   # Readability was checked above, so plan_scope_paths' only non-zero is the
   # benign pipefail from its `grep -v` filters when the plan declares no paths —
   # an empty path set, not an error.
@@ -587,7 +645,7 @@ plan_light_violations() {
   if [[ "$tasks" -gt "$RAD_LIGHT_MAX_TASKS" ]]; then
     printf '%s: %s tasks (max %s)\n' "$RAD_LIGHT_BLOCKER_PREFIX" "$tasks" "$RAD_LIGHT_MAX_TASKS"
   fi
-  pattern=$(plan_high_risk_pattern)
+  pattern=$(plan_high_risk_pattern) || return
   # Readability was checked above, so plan_scope_paths' only non-zero is the
   # benign pipefail from its `grep -v` filters when the plan declares no paths —
   # an empty path set, not an error (same contract as plan_high_risk_findings).

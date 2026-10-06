@@ -21,11 +21,17 @@ export const PLATFORMS = Object.freeze(['github', 'gitlab', 'bitbucket', 'forgej
 /** The only schema version this reader understands. */
 export const CONFIG_VERSION = 1;
 
-const TOP_LEVEL_KEYS = Object.freeze(['version', 'platform', 'default_branch', 'roles', 'agent_scope_map', 'capabilities']);
+const TOP_LEVEL_KEYS = Object.freeze(['version', 'platform', 'default_branch', 'roles', 'agent_scope_map', 'capabilities', 'settings']);
 const ROLE_KEYS = Object.freeze(['architect', 'developers', 'designers']);
 const SCOPE_ROW_KEYS = Object.freeze(['agent', 'type', 'reads', 'roles']);
 /** Keys allowed under `capabilities:` (the project-level deny list, #85). */
 const CAPABILITY_KEYS = Object.freeze(['deny']);
+/** Keys allowed under `settings:`, in the fixed order serializeConfig writes them. */
+export const SETTINGS_KEYS = Object.freeze(['high_risk_patterns', 'hooks_dir']);
+/** A hooks_dir that could be read as a flag or split a line (same rule as MALFORMED_HOOKS_DIR in cli.js). */
+const MALFORMED_HOOKS_DIR = /^-|[\r\n]/;
+/** high_risk_patterns is a single-line value: a line break would split it into two patterns. */
+const LINE_BREAK = /[\r\n]/;
 /** A bracketed value (e.g. `[your GitHub username]`) is an unfilled template placeholder. */
 const PLACEHOLDER_PREFIX = '[';
 /** Required keys `migrateFromClaudeMd` must find, by dotted name. */
@@ -116,6 +122,27 @@ function capabilitiesErrors(caps) {
   return errors;
 }
 
+/** Errors for one `settings.<key>` value (the key is already known to be allowed). */
+function settingValueErrors(key, value) {
+  const where = `settings.${key}`;
+  if (!isNonEmptyString(value)) return [`${where} must be a non-empty string`];
+  if (key === 'hooks_dir' && MALFORMED_HOOKS_DIR.test(value)) return [`${where} must not start with '-' or contain a line break`];
+  if (key === 'high_risk_patterns' && LINE_BREAK.test(value)) return [`${where} must not contain a line break`];
+  return [];
+}
+
+/** Errors for the optional `settings:` block. Fail-closed: unknown keys and bad values are errors. */
+function settingsErrors(settings) {
+  if (settings === undefined) return [];
+  if (!isPlainObject(settings)) return ['settings must be a mapping'];
+  const errors = [];
+  for (const [key, value] of Object.entries(settings)) {
+    if (!SETTINGS_KEYS.includes(key)) errors.push(`unknown key settings.${key}`);
+    else errors.push(...settingValueErrors(key, value));
+  }
+  return errors;
+}
+
 function scalarErrors(doc) {
   const errors = [];
   if (doc.version === undefined) errors.push('version is required');
@@ -140,7 +167,8 @@ export function validateConfig(doc) {
   if (!isPlainObject(doc)) return ['config must be a YAML mapping'];
   const norm = normalizeConfig(doc);
   const errors = Object.keys(norm).filter((k) => !TOP_LEVEL_KEYS.includes(k)).map((k) => `unknown top-level key '${k}'`);
-  errors.push(...scalarErrors(norm), ...rolesErrors(norm.roles), ...capabilitiesErrors(norm.capabilities));
+  errors.push(...scalarErrors(norm), ...rolesErrors(norm.roles), ...capabilitiesErrors(norm.capabilities),
+    ...settingsErrors(norm.settings));
   if (norm.agent_scope_map !== undefined) {
     if (!Array.isArray(norm.agent_scope_map)) errors.push('agent_scope_map must be a list');
     else norm.agent_scope_map.forEach((row, i) => errors.push(...scopeRowErrors(row, i)));
@@ -326,7 +354,20 @@ export function serializeConfig(doc) {
   }
   // Written only when present, so configs without it serialize byte-identically to before.
   if (d.capabilities !== undefined) out.push('capabilities:', `  deny: ${flowList(d.capabilities.deny)}`);
+  if (d.settings !== undefined) out.push(...settingsLines(d.settings));
   return out.join('\n') + '\n';
+}
+
+/**
+ * The `settings:` block, keys in SETTINGS_KEYS order, unset keys omitted. An
+ * empty mapping is written as `settings: {}` so load(serialize(doc)) is exact.
+ * Values go through scalar(), whose JSON double-quoting keeps regex
+ * metacharacters and quotes intact.
+ */
+function settingsLines(settings) {
+  const set = SETTINGS_KEYS.filter((k) => settings[k] !== undefined);
+  if (set.length === 0) return ['settings: {}'];
+  return ['settings:', ...set.map((k) => `  ${k}: ${scalar(settings[k])}`)];
 }
 
 /** Platform `rad config init` writes when none is given (never calls a host CLI). */

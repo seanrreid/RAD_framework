@@ -1092,21 +1092,25 @@ setup_badconfig_fixture() {
   printf 'version: [\n' > "$BADREPO/.rad/config.yml"
 }
 
+# assert_single_unresolved_advisory <label> <reason> [expected-exit, default 0]
 assert_single_unresolved_advisory() {
-  local label="$1" reason="$2" n
+  local label="$1" reason="$2" code="${3:-0}" n
   assert_out_has "$label" "freshness not verified: default branch unresolved ("
   assert_out_has "$label" "$reason"
   n=$(printf '%s\n' "$FRESH_OUT" | grep -c "freshness not verified")
   [[ "$n" -eq 1 ]] || fail "$label: freshness advisory appeared $n times (expected 1): $FRESH_OUT"
   assert_out_lacks "$label" "stale premise"
-  assert_code "$label" 0
+  assert_code "$label" "$code"
 }
 
 t_freshness_config_error() {
   write_plan "$BADREPO/.agents/plans/badcfg.md" "| src/app.js | 1-2 | x |" "src/removed.js:9"
   run_lint_in_repo "$BADREPO" ".agents/plans/badcfg.md"
-  ( assert_single_unresolved_advisory "FCE(a)" "cannot parse .rad/config.yml" ) || exit 1
-  echo "✓ FCE(a): invalid .rad/config.yml ⇒ one freshness advisory naming the reason, exit 0"
+  # An invalid config also leaves the high-risk pattern unresolvable, which fails
+  # the lint closed (preset-settings AC#2): exit 1, the advisory still reported.
+  ( assert_single_unresolved_advisory "FCE(a)" "cannot parse .rad/config.yml" 1
+    assert_out_has "FCE(a)" "cannot resolve the high-risk pattern" ) || exit 1
+  echo "✓ FCE(a): invalid .rad/config.yml ⇒ one freshness advisory naming the reason; high-risk scan fails closed, exit 1"
 
   rm -f "$BADREPO/.rad/config.yml"
   run_lint_in_repo "$BADREPO" ".agents/plans/badcfg.md"

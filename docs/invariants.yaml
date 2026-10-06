@@ -59,11 +59,12 @@ invariants:
     enforced_by:
       - { file: scripts/check-approval-blockers.sh, symbol: "EXIT_BLOCKED" }
       - { file: harness/cli.js, symbol: "checkApprovalBlockers" }
+      - { file: scripts/lib/plan-paths.sh, symbol: "plan_high_risk_pattern", note: "resolves the effective pattern env -> settings.high_risk_patterns -> default; an unreadable config fails closed (exit 2)" }
     bypasses:
       - id: high-risk-patterns-override
-        surface: "RAD_HIGH_RISK_PATTERNS override"
+        surface: "RAD_HIGH_RISK_PATTERNS or settings.high_risk_patterns override"
         guarded: "yes"
-        note: "empty falls back to the built-in default (can narrow, never disable); a non-default pattern is frozen into approved.data.highRiskPattern and CI prints an advisory"
+        note: "empty env falls back to the config key, then the built-in default, and an empty config value is rejected by validation (can narrow, never disable); a non-default pattern from either source is frozen into approved.data.highRiskPattern and CI prints an advisory"
       - id: waivers-section
         surface: "## Waivers section in the plan doc"
         guarded: "yes"
@@ -168,7 +169,7 @@ invariants:
       - { file: harness/cli.js, symbol: "createHookRunner(", note: "the real deliver run wires the hook runner into the spine" }
     bypasses:
       - id: empty-hooks-dir
-        surface: "RAD_HOOKS_DIR pointing at an empty directory"
+        surface: "RAD_HOOKS_DIR or settings.hooks_dir pointing at an empty directory"
         guarded: "no"
         note: "operator input; pointing at an empty dir removes all veto hooks"
 

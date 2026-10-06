@@ -279,20 +279,28 @@ done < "$PLAN_FILE"
 # Over the union of Files-in-Scope paths and task `File:` paths, warn (never
 # error) for any path matching a high-risk pattern, advising close architect
 # review. The pattern comes from plan_high_risk_pattern (lib/plan-paths.sh — the
-# one source shared with check-approval-blockers.sh): RAD_HIGH_RISK_PATTERNS
-# narrows it, and empty falls back to the default, so it is never disabled. Each
-# warning carries the finding id a `## Waivers` bullet must name.
-HIGH_RISK_PATTERN=$(plan_high_risk_pattern)
-
+# one source shared with check-approval-blockers.sh): RAD_HIGH_RISK_PATTERNS, else
+# settings.high_risk_patterns in .rad/config.yml, narrows it, and empty falls back
+# to the default, so it is never disabled. An unreadable config fails closed: an
+# ERROR (exit 1, the helper's reason on stderr) and the scan is skipped — never
+# run with an empty pattern. Each warning carries the finding id a `## Waivers`
+# bullet must name.
 HIGH_RISK_HIT=false
-# Union of Files-in-Scope and task File: paths (de-duped) via the shared helper.
-while IFS= read -r path; do
-  [[ -z "$path" ]] && continue
-  if path_matches "$path" "$HIGH_RISK_PATTERN"; then
-    WARNINGS+=("High-risk path in scope — flag for close architect review: $path (id: ${RAD_HIGH_RISK_FINDING_PREFIX}${path})")
-    HIGH_RISK_HIT=true
-  fi
-done < <(plan_scope_paths "$PLAN_FILE")
+HIGH_RISK_PATTERN_OK=true
+HIGH_RISK_PATTERN=$(plan_high_risk_pattern) || HIGH_RISK_PATTERN_OK=false
+
+if [[ "$HIGH_RISK_PATTERN_OK" == true ]]; then
+  # Union of Files-in-Scope and task File: paths (de-duped) via the shared helper.
+  while IFS= read -r path; do
+    [[ -z "$path" ]] && continue
+    if path_matches "$path" "$HIGH_RISK_PATTERN"; then
+      WARNINGS+=("High-risk path in scope — flag for close architect review: $path (id: ${RAD_HIGH_RISK_FINDING_PREFIX}${path})")
+      HIGH_RISK_HIT=true
+    fi
+  done < <(plan_scope_paths "$PLAN_FILE")
+else
+  ERRORS+=("cannot resolve the high-risk pattern (reason on stderr) — high-risk paths could not be checked")
+fi
 
 # ── Program Design section advisory ───────────────────────────────────────────
 # A "large" plan (>=3 waves, or at least one high-risk path in scope) is advised

@@ -723,4 +723,111 @@ is_default_rc=0
   || fail "plan_high_risk_pattern_is_default: default + trailing space is NOT the default, got $is_default_rc"
 echo "✓ plan_high_risk_pattern_is_default: unset / empty / exact default ⇒ 0; custom / near-miss ⇒ 1"
 
+# ── plan_high_risk_pattern: config-backed (preset-settings AC#2) ─────────────
+# The lib reads .rad/config.yml through the harness CLI two levels above it, so
+# each case runs a COPY of the lib inside a fixture tree (harness/ without
+# node_modules — config get needs only the vendored js-yaml — plus scripts/) with
+# its own .rad/config.yml. This repo's .rad/config.yml is never written. The
+# copied lib is sourced in a child bash: this shell already holds its readonly
+# constants.
+CFG="$TMP/cfg"
+mkdir -p "$CFG/.rad"
+tar -C "$HERE/.." --exclude=node_modules -cf - harness scripts/lib scripts/lint-plan.sh \
+  scripts/check-approval-blockers.sh scripts/get-default-branch.sh | tar -C "$CFG" -xf -
+CFG_CONFIG="$CFG/.rad/config.yml"
+CUSTOM_PATTERN='widget|readme'
+
+# cfg_call <lib> <fn> [args...] — run one helper from a fixture's copied lib.
+cfg_call() { bash -c '. "$1"; shift; "$@"' _ "$@"; }
+
+# write_cfg [settings-yaml-line] — a valid fixture config, optionally with settings.
+write_cfg() {
+  printf 'version: 1\nplatform: manual\ndefault_branch: main\nroles:\n  architect: [a@x]\n' > "$CFG_CONFIG"
+  if [[ -n "${1:-}" ]]; then printf 'settings:\n  %s\n' "$1" >> "$CFG_CONFIG"; fi
+}
+
+write_invalid_cfg() {
+  write_cfg
+  printf 'settings:\n  nope: x\n' >> "$CFG_CONFIG"
+}
+
+# Env set: config is NOT consulted — an invalid config still resolves.
+write_invalid_cfg
+out=$(RAD_HIGH_RISK_PATTERNS='env-only' cfg_call "$CFG/scripts/lib/plan-paths.sh" plan_high_risk_pattern) \
+  || fail "plan_high_risk_pattern: env set must not read the (invalid) config"
+[[ "$out" == "env-only" ]] || fail "plan_high_risk_pattern: env set must win, got [$out]"
+echo "✓ plan_high_risk_pattern: env set ⇒ env value, config never consulted"
+
+# Env empty + config key set ⇒ the config value.
+write_cfg "high_risk_patterns: '$CUSTOM_PATTERN'"
+out=$(RAD_HIGH_RISK_PATTERNS='' cfg_call "$CFG/scripts/lib/plan-paths.sh" plan_high_risk_pattern)
+[[ "$out" == "$CUSTOM_PATTERN" ]] || fail "plan_high_risk_pattern: config value expected, got [$out]"
+out=$(unset RAD_HIGH_RISK_PATTERNS; cfg_call "$CFG/scripts/lib/plan-paths.sh" plan_high_risk_findings "$RISK_PLAN")
+[[ "$out" == $'high-risk:docs/readme.md\nhigh-risk:lib/widget.js' ]] \
+  || fail "plan_high_risk_findings: config pattern must drive findings, got [$out]"
+is_default_rc=0
+(unset RAD_HIGH_RISK_PATTERNS; cfg_call "$CFG/scripts/lib/plan-paths.sh" plan_high_risk_pattern_is_default) \
+  || is_default_rc=$?
+[[ "$is_default_rc" -eq 1 ]] || fail "plan_high_risk_pattern_is_default: config custom must exit 1, got $is_default_rc"
+echo "✓ plan_high_risk_pattern: empty env + config key ⇒ config value (findings + _is_default follow it)"
+
+# Config pattern equal to the default ⇒ _is_default true.
+write_cfg "high_risk_patterns: '$RAD_HIGH_RISK_DEFAULT_PATTERN'"
+(unset RAD_HIGH_RISK_PATTERNS; cfg_call "$CFG/scripts/lib/plan-paths.sh" plan_high_risk_pattern_is_default) \
+  || fail "plan_high_risk_pattern_is_default: a config value equal to the default must exit 0"
+echo "✓ plan_high_risk_pattern_is_default: config value == default ⇒ 0"
+
+# Key absent from a valid config ⇒ default.
+write_cfg
+out=$(unset RAD_HIGH_RISK_PATTERNS; cfg_call "$CFG/scripts/lib/plan-paths.sh" plan_high_risk_pattern)
+[[ "$out" == "$RAD_HIGH_RISK_DEFAULT_PATTERN" ]] || fail "plan_high_risk_pattern: absent key must print the default, got [$out]"
+echo "✓ plan_high_risk_pattern: key absent (config get exit 3) ⇒ default"
+
+# Invalid config ⇒ the helper fails closed with the reason; both callers fail closed.
+write_invalid_cfg
+err_out="$TMP/hr-err.txt"
+rc=0
+(unset RAD_HIGH_RISK_PATTERNS; cfg_call "$CFG/scripts/lib/plan-paths.sh" plan_high_risk_pattern) >/dev/null 2>"$err_out" || rc=$?
+[[ "$rc" -ne 0 ]] || fail "plan_high_risk_pattern: invalid config must return non-zero"
+grep -q 'unknown key settings.nope' "$err_out" || fail "plan_high_risk_pattern: invalid-config reason missing from stderr"
+grep -q 'cannot read settings.high_risk_patterns' "$err_out" || fail "plan_high_risk_pattern: helper reason missing"
+for fn in plan_high_risk_pattern_is_default plan_high_risk_findings; do
+  rc=0
+  (unset RAD_HIGH_RISK_PATTERNS; cfg_call "$CFG/scripts/lib/plan-paths.sh" "$fn" "$RISK_PLAN") >/dev/null 2>&1 || rc=$?
+  [[ "$rc" -ne 0 ]] || fail "$fn: invalid config must propagate failure, got exit 0"
+done
+LIGHT_PLAN="$TMP/light.md"
+printf '# Plan: l\nTier: light\n\n#### Task 1.1: t\nFile: src/auth/x.js\n' > "$LIGHT_PLAN"
+rc=0
+(unset RAD_HIGH_RISK_PATTERNS; cfg_call "$CFG/scripts/lib/plan-paths.sh" plan_light_violations "$LIGHT_PLAN") >/dev/null 2>&1 || rc=$?
+[[ "$rc" -ne 0 ]] || fail "plan_light_violations: invalid config on a light plan must fail, got exit 0"
+rc=0
+lint_out=$(unset RAD_HIGH_RISK_PATTERNS; bash "$CFG/scripts/lint-plan.sh" "$RISK_PLAN" 2>&1) || rc=$?
+[[ "$rc" -eq 1 ]] || fail "lint-plan.sh: invalid config must exit 1, got $rc"
+printf '%s' "$lint_out" | grep -q 'unknown key settings.nope' || fail "lint-plan.sh: reason not named: [$lint_out]"
+printf '%s' "$lint_out" | grep -q 'cannot resolve the high-risk pattern' || fail "lint-plan.sh: failing-closed line missing"
+rc=0
+cab_err=$(unset RAD_HIGH_RISK_PATTERNS; bash "$CFG/scripts/check-approval-blockers.sh" "$RISK_PLAN" 2>&1 >/dev/null) || rc=$?
+[[ "$rc" -eq 2 ]] || fail "check-approval-blockers.sh: invalid config must exit 2, got $rc"
+printf '%s' "$cab_err" | grep -q 'unknown key settings.nope' || fail "check-approval-blockers.sh: reason not named: [$cab_err]"
+echo "✓ plan_high_risk_pattern: invalid config ⇒ non-zero + reason; helpers, lint-plan (1), check-approval-blockers (2) fail closed"
+
+# No config file ⇒ default, without calling the CLI; a CLI that exits 0 with no
+# output ⇒ fail closed. A stub cli.js proves both.
+STUB="$TMP/stub"
+mkdir -p "$STUB/scripts/lib" "$STUB/harness"
+cp "$HERE/lib/plan-paths.sh" "$STUB/scripts/lib/"
+printf 'process.exit(0);\n' > "$STUB/harness/cli.js"
+out=$(unset RAD_HIGH_RISK_PATTERNS; cfg_call "$STUB/scripts/lib/plan-paths.sh" plan_high_risk_pattern) \
+  || fail "plan_high_risk_pattern: no config file must not fail"
+[[ "$out" == "$RAD_HIGH_RISK_DEFAULT_PATTERN" ]] || fail "plan_high_risk_pattern: no config file must print the default, got [$out]"
+echo "✓ plan_high_risk_pattern: no .rad/config.yml ⇒ default (CLI not called)"
+mkdir -p "$STUB/.rad"
+printf 'version: 1\n' > "$STUB/.rad/config.yml"
+rc=0
+(unset RAD_HIGH_RISK_PATTERNS; cfg_call "$STUB/scripts/lib/plan-paths.sh" plan_high_risk_pattern) >/dev/null 2>"$err_out" || rc=$?
+[[ "$rc" -ne 0 ]] || fail "plan_high_risk_pattern: CLI exit 0 with no output must fail closed"
+grep -q 'exited 0 with no output' "$err_out" || fail "plan_high_risk_pattern: empty-output reason missing"
+echo "✓ plan_high_risk_pattern: CLI exit 0 with no output ⇒ non-zero (fail closed)"
+
 echo "ALL PASS"

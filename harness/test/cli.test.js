@@ -1,6 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, readFileSync, existsSync, mkdirSync, writeFileSync, chmodSync, symlinkSync } from 'node:fs';
+import {
+  mkdtempSync, rmSync, readFileSync, existsSync, mkdirSync, writeFileSync, chmodSync, symlinkSync, readdirSync,
+} from 'node:fs';
+import { createHash } from 'node:crypto';
 import { basename, join, dirname, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
@@ -9,11 +12,12 @@ import { fileURLToPath } from 'node:url';
 import {
   approveCommand, gateCommand, parsePlanCtx, deliverCommand, stopStatusCommand, forecastCommand, digestCommand,
   resolveHooksDir, makeSpineScriptPort, SCRIPT_ARG_KEYS, reviewCommand, resolveAgent, isMainModule,
-  capabilitiesCommand, installCoreCommand, installStatusCommand,
+  capabilitiesCommand, installCoreCommand, installStatusCommand, configCommand,
 } from '../cli.js';
 import { buildReviewPrompt, reviewInstruction } from '../review.js';
 import { REVIEW_INSTRUCTION } from '../evals/reviewers/lib.js';
 import { planFingerprint } from '../plan-fingerprint.js';
+import { buildInitConfig, serializeConfig } from '../config.js';
 import { createGitStateStore, defaultSh } from '../adapters/git-state-store.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -1218,7 +1222,7 @@ test('hooks dir — resolveHooksDir: default, relative, absolute, malformed', ()
   assert.deepEqual(resolveHooksDir({ RAD_HOOKS_DIR: 'ops/hooks' }, root), { ok: true, dir: resolve(root, 'ops/hooks') });
   assert.deepEqual(resolveHooksDir({ RAD_HOOKS_DIR: '/etc/rad-hooks' }, root), { ok: true, dir: '/etc/rad-hooks' });
   for (const raw of ['-rf', '--hooks', 'a\nb', 'a\rb']) {
-    assert.deepEqual(resolveHooksDir({ RAD_HOOKS_DIR: raw }, root), { ok: false, raw });
+    assert.deepEqual(resolveHooksDir({ RAD_HOOKS_DIR: raw }, root), { ok: false, raw, source: 'RAD_HOOKS_DIR' });
   }
 });
 
@@ -2161,11 +2165,11 @@ test('install-status AC#5 — clean → 0; modified → 1; missing → 1', async
     writeFileSync(join(target, 'ai/guardrails.md'), 'edit\n');
     const modified = await runInstallStatus([], target);
     assert.equal(modified.code, 1);
-    assert.equal(modified.stdout, 'modified: ai/guardrails.md\n');
+    assert.equal(modified.stdout, 'modified: [core] ai/guardrails.md\n');
     rmSync(join(target, 'harness/cli.js'));
     const missing = await runInstallStatus(['--target', target]);
     assert.equal(missing.code, 1);
-    assert.match(missing.stdout, /^missing: harness\/cli\.js$/m);
+    assert.match(missing.stdout, /^missing: \[core\] harness\/cli\.js$/m);
   });
 });
 
@@ -2182,5 +2186,208 @@ test('install-status AC#5 — no manifest → 1 with the upgrade hint; malformed
       assert.equal(res.code, 2, `argv ${JSON.stringify(argv)}`);
       assert.match(res.stderr, /Usage: rad install-status/);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// preset-settings Wave 2 — settings.hooks_dir (AC#3), `rad config settings`
+// (AC#4), install-core layer conflicts + install-status layer labels (AC#5).
+// ---------------------------------------------------------------------------
+
+/** Write a valid .rad/config.yml under `root`, with an optional settings block. */
+function writeSettingsConfig(root, settings) {
+  const doc = buildInitConfig({ architect: 'arch@example.com' });
+  if (settings) doc.settings = settings;
+  mkdirSync(join(root, '.rad'), { recursive: true });
+  writeFileSync(join(root, '.rad/config.yml'), serializeConfig(doc));
+}
+
+/** Write an invalid .rad/config.yml (unknown settings key) under `root`. */
+function writeInvalidConfig(root) {
+  mkdirSync(join(root, '.rad'), { recursive: true });
+  writeFileSync(join(root, '.rad/config.yml'),
+    'version: 1\nplatform: manual\ndefault_branch: main\nroles:\n  architect: [a@x]\nsettings:\n  nope: x\n');
+}
+
+test('hooks dir AC#3 — resolveHooksDir precedence: env > settings.hooks_dir > default', () => {
+  const root = '/work/root';
+  const settings = { hooks_dir: 'cfg/hooks' };
+  assert.deepEqual(resolveHooksDir({ RAD_HOOKS_DIR: 'env/hooks' }, root, settings), { ok: true, dir: resolve(root, 'env/hooks') });
+  assert.deepEqual(resolveHooksDir({ RAD_HOOKS_DIR: '' }, root, settings), { ok: true, dir: resolve(root, 'cfg/hooks') });
+  assert.deepEqual(resolveHooksDir({}, root, settings), { ok: true, dir: resolve(root, 'cfg/hooks') });
+  assert.deepEqual(resolveHooksDir({}, root, { hooks_dir: '/abs/hooks' }), { ok: true, dir: '/abs/hooks' });
+  assert.deepEqual(resolveHooksDir({}, root, {}), { ok: true, dir: join(root, 'scripts', 'hooks') });
+  assert.deepEqual(resolveHooksDir({}, root), { ok: true, dir: join(root, 'scripts', 'hooks') });
+});
+
+test('hooks dir AC#3 — a malformed settings.hooks_dir names the config source', () => {
+  const source = 'settings.hooks_dir in .rad/config.yml';
+  for (const raw of ['-x', 'a\nb', '', 7]) {
+    assert.deepEqual(resolveHooksDir({}, '/r', { hooks_dir: raw }), { ok: false, raw, source });
+  }
+  // A malformed env value is reported as the env source even when config is fine.
+  assert.deepEqual(resolveHooksDir({ RAD_HOOKS_DIR: '-x' }, '/r', { hooks_dir: 'ok' }),
+    { ok: false, raw: '-x', source: 'RAD_HOOKS_DIR' });
+});
+
+test('hooks dir AC#3 — settings.hooks_dir in config → deliver fires hooks from it (no env)', async () => {
+  await withTempRepo(async (repoRoot) => {
+    seedApprovedTwoWavePlan(repoRoot);
+    writeSettingsConfig(repoRoot, { hooks_dir: 'cfg-hooks' });
+    const hook = join(repoRoot, 'cfg-hooks', 'wave-complete', '10-observe.sh');
+    mkdirSync(dirname(hook), { recursive: true });
+    writeFileSync(hook, '#!/usr/bin/env bash\nexit 0\n', 'utf8');
+    chmodSync(hook, 0o755);
+    const rec = recordingSh();
+    const { code, stderr } = await runDeliverCaptured({
+      repoRoot, sh: rec.sh, runWave: async () => ({ outcome: 'success' }),
+    });
+    assert.equal(code, 0, `expected exit 0; stderr:\n${stderr}`);
+    assert.ok(rec.calls.some((c) => c.file === hook), 'the config-dir hook must fire');
+  });
+});
+
+test('hooks dir AC#3 — RAD_HOOKS_DIR wins over settings.hooks_dir in deliver', async () => {
+  await withTempRepo(async (repoRoot) => {
+    seedApprovedTwoWavePlan(repoRoot);
+    writeSettingsConfig(repoRoot, { hooks_dir: 'cfg-hooks' });
+    const hooks = ['cfg-hooks', 'env-hooks'].map((d) => join(repoRoot, d, 'wave-complete', '10-observe.sh'));
+    for (const hook of hooks) {
+      mkdirSync(dirname(hook), { recursive: true });
+      writeFileSync(hook, '#!/usr/bin/env bash\nexit 0\n', 'utf8');
+      chmodSync(hook, 0o755);
+    }
+    const rec = recordingSh();
+    const { code } = await runDeliverCaptured({
+      repoRoot, sh: rec.sh, env: { RAD_HOOKS_DIR: 'env-hooks' }, runWave: async () => ({ outcome: 'success' }),
+    });
+    assert.equal(code, 0);
+    assert.ok(!rec.calls.some((c) => c.file === hooks[0]), 'config hook must not fire');
+    assert.ok(rec.calls.some((c) => c.file === hooks[1]), 'env hook must fire');
+  });
+});
+
+test('hooks dir AC#3 — an invalid .rad/config.yml → deliver exits 2 before any event', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const { logFile } = seedApprovedTwoWavePlan(repoRoot);
+    writeInvalidConfig(repoRoot);
+    const before = readFileSync(logFile, 'utf8');
+    const { code, stderr } = await runDeliverCaptured({
+      repoRoot, sh: recordingSh().sh, runWave: async () => ({ outcome: 'success' }),
+    });
+    assert.equal(code, 2);
+    assert.match(stderr, /\.rad\/config\.yml is invalid/);
+    assert.match(stderr, /unknown key settings\.nope/);
+    assert.equal(readFileSync(logFile, 'utf8'), before);
+  });
+});
+
+/** Run `rad config settings ...` with an injected env. */
+function runConfigSettings(repoRoot, args = [], env = {}) {
+  return captureStdio(() => configCommand(['settings', ...args], { repoRoot, env }));
+}
+
+test('config settings AC#4 — no config file → every non-env setting is default', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const res = await runConfigSettings(repoRoot);
+    assert.equal(res.code, 0, res.stderr);
+    assert.equal(res.stdout, 'high_risk_patterns\tdefault\t(built-in)\nhooks_dir\tdefault\t(built-in)\n');
+  });
+});
+
+test('config settings AC#4 — config values, env override, empty env falls through', async () => {
+  await withTempRepo(async (repoRoot) => {
+    writeSettingsConfig(repoRoot, { high_risk_patterns: 'auth/', hooks_dir: 'ops/hooks' });
+    const cfg = await runConfigSettings(repoRoot, [], { RAD_HOOKS_DIR: '' });
+    assert.equal(cfg.code, 0, cfg.stderr);
+    assert.equal(cfg.stdout, 'high_risk_patterns\tconfig\tauth/\nhooks_dir\tconfig\tops/hooks\n');
+    const env = await runConfigSettings(repoRoot, [], { RAD_HIGH_RISK_PATTERNS: 'pay/' });
+    assert.equal(env.stdout, 'high_risk_patterns\tenv\tpay/\nhooks_dir\tconfig\tops/hooks\n');
+  });
+});
+
+test('config settings AC#4 — key absent from a valid config → default', async () => {
+  await withTempRepo(async (repoRoot) => {
+    writeSettingsConfig(repoRoot, { hooks_dir: 'ops/hooks' });
+    const res = await runConfigSettings(repoRoot, [], { RAD_HOOKS_DIR: 'x/y' });
+    assert.equal(res.stdout, 'high_risk_patterns\tdefault\t(built-in)\nhooks_dir\tenv\tx/y\n');
+  });
+});
+
+test('config settings AC#4 — invalid config → exit 2, nothing on stdout', async () => {
+  await withTempRepo(async (repoRoot) => {
+    writeInvalidConfig(repoRoot);
+    const res = await runConfigSettings(repoRoot);
+    assert.equal(res.code, 2);
+    assert.equal(res.stdout, '');
+    assert.match(res.stderr, /is invalid/);
+  });
+});
+
+test('config settings AC#4 — malformed RAD_HOOKS_DIR → exit 2, nothing on stdout', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const res = await runConfigSettings(repoRoot, [], { RAD_HOOKS_DIR: '-x' });
+    assert.equal(res.code, 2);
+    assert.equal(res.stdout, '');
+    assert.match(res.stderr, /RAD_HOOKS_DIR must be a directory path/);
+  });
+});
+
+test('config settings AC#4 — extra args → usage error exit 2', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const res = await runConfigSettings(repoRoot, ['hooks_dir']);
+    assert.equal(res.code, 2);
+    assert.equal(res.stdout, '');
+    assert.match(res.stderr, /Usage: rad config get <key> \| rad config validate \| rad config settings/);
+  });
+});
+
+/** sha256 of every file under `dir` (sorted relative paths), for byte-identity checks. */
+function hashTree(dir) {
+  const h = createHash('sha256');
+  const files = readdirSync(dir, { recursive: true, withFileTypes: true })
+    .filter((e) => e.isFile())
+    .map((e) => join(e.parentPath ?? e.path, e.name))
+    .sort();
+  for (const f of files) h.update(`${f}\0`).update(readFileSync(f)).update('\0');
+  return h.digest('hex');
+}
+
+/** Re-label one recorded manifest entry with `layer`, keeping its hash. */
+function relabelManifestEntry(target, path, layer) {
+  const file = join(target, '.rad/installed.json');
+  const manifest = JSON.parse(readFileSync(file, 'utf8'));
+  manifest.files[path].layer = layer;
+  writeFileSync(file, JSON.stringify(manifest));
+}
+
+test('install-core AC#5 — core ships a path another layer owns → exit 2, target byte-identical', async () => {
+  await withInstallRoots(async ({ source, target }) => {
+    await runInstallCore(['--source', source, '--target', target]);
+    relabelManifestEntry(target, 'ai/guardrails.md', 'preset');
+    writeFileSync(join(source, 'ai/guardrails.md'), 'g v2\n');
+    writeFileSync(join(source, 'harness/cli.js'), '// cli v2\n');
+    const before = hashTree(target);
+    const res = await runInstallCore(['--source', source, '--target', target]);
+    assert.equal(res.code, 2);
+    assert.equal(res.stdout, '');
+    assert.match(res.stderr,
+      /^rad install-core: ai\/guardrails\.md is owned by layer 'preset'; core will not take it over$/m);
+    assert.match(res.stderr, /nothing written/);
+    assert.equal(hashTree(target), before, 'no file, backup, or manifest written');
+    assert.ok(!existsSync(join(target, '.rad/upgrade-backup')));
+    assert.ok(!existsSync(join(target, '.rad/upgrade-pending')));
+  });
+});
+
+test('install-status AC#5 — each drifted path is labelled with its layer', async () => {
+  await withInstallRoots(async ({ source, target }) => {
+    await runInstallCore(['--source', source, '--target', target]);
+    relabelManifestEntry(target, 'ai/guardrails.md', 'preset');
+    writeFileSync(join(target, 'ai/guardrails.md'), 'edit\n');
+    rmSync(join(target, 'harness/cli.js'));
+    const res = await runInstallStatus(['--target', target]);
+    assert.equal(res.code, 1);
+    assert.equal(res.stdout, 'modified: [preset] ai/guardrails.md\nmissing: [core] harness/cli.js\n');
   });
 });

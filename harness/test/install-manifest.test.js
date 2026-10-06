@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 import {
-  MANIFEST_PATH, PENDING_DIR, BACKUP_DIR, listCoreFiles, hashFile, readManifest, planInstall, applyInstall,
+  MANIFEST_PATH, PENDING_DIR, BACKUP_DIR, PRESET_LAYER, listCoreFiles, hashFile, readManifest, planInstall, applyInstall,
   backupStamp, installDrift,
 } from '../install-manifest.js';
 
@@ -267,6 +267,128 @@ test('installDrift — reports modified and missing paths against the manifest',
     writeFileSync(join(target, 'ai/guardrails.md'), 'edit\n');
     unlinkSync(join(target, 'harness/cli.js'));
     assert.deepEqual(installDrift({ targetRoot: target, manifest: result.manifest }),
-      { modified: ['ai/guardrails.md'], missing: ['harness/cli.js'] });
+      { modified: [{ path: 'ai/guardrails.md', layer: 'core' }], missing: [{ path: 'harness/cli.js', layer: 'core' }] });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Layers (#71 part 2a): core is the only layer written; others are carried
+// ---------------------------------------------------------------------------
+
+/** Rewrite the target manifest after `mutate(files)` edits its entries. */
+function editManifest(target, mutate) {
+  const m = JSON.parse(read(target, MANIFEST_PATH));
+  mutate(m.files);
+  writeFileSync(join(target, MANIFEST_PATH), `${JSON.stringify(m, null, 2)}\n`);
+}
+
+/** Write a preset-owned file into the target and record it under `layer`. */
+function addLayered(target, path, layer = PRESET_LAYER) {
+  writeTree(target, { [path]: `${layer} content\n` });
+  editManifest(target, (files) => { files[path] = { layer, sha256: hashFile(join(target, path)) }; });
+}
+
+test('PRESET_LAYER — exported as "preset"', () => {
+  assert.equal(PRESET_LAYER, 'preset');
+});
+
+test('planInstall — first install (manifest null): no stale, no conflicts, nothing carried', () => {
+  withRoots(({ source, target }) => {
+    const plan = planInstall({ sourceRoot: source, targetRoot: target, manifest: null });
+    assert.deepEqual(plan.stale, []);
+    assert.deepEqual(plan.conflicts, []);
+    assert.deepEqual(plan.carried, {});
+  });
+});
+
+test('upgrade — preset entries are carried unchanged into the new manifest and never stale', () => {
+  withRoots(({ source, target }) => {
+    install(source, target);
+    addLayered(target, '.claude/agents/preset-agent.md');
+    const recorded = JSON.parse(read(target, MANIFEST_PATH)).files['.claude/agents/preset-agent.md'];
+    const { plan, result } = install(source, target);
+    assert.deepEqual(plan.stale, []);
+    assert.deepEqual(plan.conflicts, []);
+    assert.deepEqual(result.manifest.files['.claude/agents/preset-agent.md'], recorded);
+    assert.deepEqual(Object.keys(result.manifest.files), Object.keys(result.manifest.files).sort(), 'keys stay sorted');
+  });
+});
+
+test('upgrade — a manifest with only preset entries carries them and installs core fresh', () => {
+  withRoots(({ source, target }) => {
+    mkdirSync(join(target, '.rad'), { recursive: true });
+    writeFileSync(join(target, MANIFEST_PATH), JSON.stringify({ version: 1, rad_version: 'x', installed_at: 'y', files: {} }));
+    addLayered(target, 'presets/p.md');
+    const { plan, result } = install(source, target);
+    assert.deepEqual(plan.stale, []);
+    assert.ok(plan.actions.every((a) => a.action === 'write'));
+    assert.equal(result.manifest.files['presets/p.md'].layer, PRESET_LAYER);
+    for (const p of Object.keys(CORE_FIXTURE)) assert.equal(result.manifest.files[p].layer, 'core', p);
+  });
+});
+
+test('upgrade — a preset entry whose file was deleted is still carried; drift reports it missing as preset', () => {
+  withRoots(({ source, target }) => {
+    install(source, target);
+    addLayered(target, 'presets/gone.md');
+    unlinkSync(join(target, 'presets/gone.md'));
+    const { result } = install(source, target);
+    assert.equal(result.manifest.files['presets/gone.md'].layer, PRESET_LAYER);
+    assert.deepEqual(installDrift({ targetRoot: target, manifest: result.manifest }),
+      { modified: [], missing: [{ path: 'presets/gone.md', layer: PRESET_LAYER }] });
+  });
+});
+
+test('upgrade — an unknown layer string is non-core: carried, never stale', () => {
+  withRoots(({ source, target }) => {
+    install(source, target);
+    addLayered(target, 'custom/x.md', 'team-overlay');
+    const { plan, result } = install(source, target);
+    assert.deepEqual(plan.stale, []);
+    assert.equal(result.manifest.files['custom/x.md'].layer, 'team-overlay');
+  });
+});
+
+test('upgrade — a core entry core no longer ships is still stale alongside a carried preset', () => {
+  withRoots(({ source, target }) => {
+    install(source, target);
+    addLayered(target, 'presets/p.md');
+    unlinkSync(join(source, 'harness/test/x.test.js'));
+    const { plan, result } = install(source, target);
+    assert.deepEqual(plan.stale, ['harness/test/x.test.js']);
+    assert.ok(!('harness/test/x.test.js' in result.manifest.files));
+    assert.ok('presets/p.md' in result.manifest.files);
+  });
+});
+
+test('planInstall — a non-core path core now ships is a conflict; applyInstall refuses before writing', () => {
+  withRoots(({ source, target }) => {
+    install(source, target);
+    editManifest(target, (files) => { files['ai/guardrails.md'].layer = PRESET_LAYER; });
+    writeFileSync(join(target, 'ai/guardrails.md'), 'preset guardrails\n');
+    writeFileSync(join(source, 'ai/guardrails.md'), 'core v2\n');
+    const before = read(target, MANIFEST_PATH);
+    const read1 = readManifest(target);
+    const plan = planInstall({ sourceRoot: source, targetRoot: target, manifest: read1.manifest });
+    assert.deepEqual(plan.conflicts, ['ai/guardrails.md']);
+    assert.deepEqual(plan.stale, []);
+    assert.throws(() => applyInstall({ sourceRoot: source, targetRoot: target, plan, now: NOW, radVersion: RAD_VERSION }),
+      /refusing to install.*ai\/guardrails\.md/);
+    assert.equal(read(target, 'ai/guardrails.md'), 'preset guardrails\n', 'the preset file is untouched');
+    assert.equal(read(target, MANIFEST_PATH), before, 'the manifest is untouched');
+  });
+});
+
+test('installDrift — modified entries carry their layer, sorted by path across layers', () => {
+  withRoots(({ source, target }) => {
+    install(source, target);
+    addLayered(target, 'presets/p.md');
+    const { manifest } = readManifest(target);
+    writeFileSync(join(target, 'presets/p.md'), 'edited\n');
+    writeFileSync(join(target, 'ai/guardrails.md'), 'edited\n');
+    assert.deepEqual(installDrift({ targetRoot: target, manifest }), {
+      modified: [{ path: 'ai/guardrails.md', layer: 'core' }, { path: 'presets/p.md', layer: PRESET_LAYER }],
+      missing: [],
+    });
   });
 });

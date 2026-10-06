@@ -272,7 +272,7 @@ STATUS_RC=0
 ( cd "$UPG_T" && isolated node harness/cli.js install-status ) >"$TMP/status.out" 2>&1 || STATUS_RC=$?
 [[ "$STATUS_RC" -eq 1 ]] && ok "install-status exits 1 on drift" \
   || bad "install-status exited $STATUS_RC on drift, expected 1"
-assert_contains "$TMP/status.out" "modified: ai/slop-register.md" "install-status reports the kept local edit"
+assert_contains "$TMP/status.out" "modified: [core] ai/slop-register.md" "install-status reports the kept local edit"
 
 # ── 5i. first upgrade with no manifest backs up, then overwrites ────────────
 BK_T="$(upgrade_target backup)"
