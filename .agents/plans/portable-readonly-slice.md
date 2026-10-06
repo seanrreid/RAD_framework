@@ -37,6 +37,13 @@ Part 1 (#187) shipped the pieces the slice needs:
 - **Ship sources and outputs:** core installs `.rad/skills/` and `.rad/agents/` plus every generated output.
 - **Codex runs the reviewers as sub-agents:** the Codex `quality-review` and `accessibility-review` skills spawn the generated `.codex/agents/<reviewer>` sub-agent (`sandbox_mode: read-only`).
 
+**Amendment 1 (2026-10-06, during delivery, after Wave 1):** Task 1.2 hit an import cycle. `harness/generate.js` already imports `isSafeRelPath` from `harness/install-manifest.js`, so importing `hasGeneratedMarker` from `generate.js` into `install-manifest.js` would make each file import the other.
+- A new module, `harness/generated-marker.js`, now holds `GENERATED_MARKER` and `hasGeneratedMarker`.
+- `generate.js` imports both and re-exports them unchanged, so existing callers, tests and invariant anchors keep working.
+- `install-manifest.js` imports from the new module.
+- `generate.js`'s marker definitions move out (an exception to Do Not Touch, limited to that move).
+Task 1.1 (`claude: none`) is done and unaffected.
+
 ## Scope
 
 | In scope | Out of scope |
@@ -120,6 +127,8 @@ Line ranges are the context an executor must load. Generated outputs are written
 | harness/generate.js | 105-140 | `claude: none` target |
 | harness/generate.js | 305-320 | Skip the Claude emit for `none` |
 | harness/test/generate.test.js | 335-400 | `claude: none` cases (append) |
+| harness/generated-marker.js | 1-40 | New (amendment 1): `GENERATED_MARKER`, `hasGeneratedMarker` |
+| harness/generate.js | 25-60 | Import and re-export the marker from the new module (amendment 1) |
 | harness/install-manifest.js | 1-60 | Import marker helper; constants |
 | harness/install-manifest.js | 60-110 | `listCoreFiles` ships `.rad` sources and marked outputs |
 | harness/test/install-manifest.test.js | 560-640 | Shipping cases (append) |
@@ -153,7 +162,7 @@ Line ranges are the context an executor must load. Generated outputs are written
 - `.claude/commands/team/rad-review.md` (stays hand-written).
 - Every other `.claude/commands/**`, `.claude/skills/**` and `.claude/agents/*` file.
 - `CLAUDE.md`, `install.sh`, `scripts/deliver-gate-hook.mjs`, `.claude/settings.json`.
-- In `generate.js`, nothing beyond the `claude: none` change. If another defect turns up, stop and report `blocked_code`.
+- In `generate.js`, nothing beyond the `claude: none` change and the amendment 1 marker move. If another defect turns up, stop and report `blocked_code`.
 - `harness/cli.js`. `rad review` must work unchanged on the generated reviewer.
 
 ### Key Files
@@ -185,8 +194,8 @@ Validate: AC#3. Edge cases:
 Command: `npm test --prefix harness`.
 
 #### Task 1.2: Ship sources and marked outputs through core
-File: harness/install-manifest.js:1-60, harness/install-manifest.js:60-110, harness/test/install-manifest.test.js:560-640
-What: Implement the `install-manifest.js` part of AC#4.
+File: harness/generated-marker.js:1-40, harness/generate.js:25-60, harness/install-manifest.js:1-60, harness/install-manifest.js:60-110, harness/test/install-manifest.test.js:560-640
+What: Implement the `install-manifest.js` part of AC#4. Amendment 1: first move the marker into `harness/generated-marker.js` (re-exported from `generate.js`), so no two modules import each other.
 Validate: AC#4. Edge cases:
 - a marked file under each new root ships;
 - an unmarked file is not shipped;
