@@ -8,3 +8,5 @@ Executor role: architect
 
 | Step | Wave | Task | Status | Commit | Time |
 |------|------|------|--------|--------|------|
+| 1 | 1 | 1.1 Docs | complete | 60decfa | 16:43 |
+| 2 | 1 | 1.2 Scope-map text | complete | 6021e72 | 16:43 |
