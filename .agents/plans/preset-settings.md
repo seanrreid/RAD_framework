@@ -27,6 +27,11 @@ Decisions (2026-10-06, recorded on #71):
 - Preset files may only add paths that core does not own. A collision is refused.
 - When a preset seeds settings, it fills absent keys only (plan 2b). Project edits always win.
 
+**Amendment 1 (2026-10-06, during delivery, after Wave 2):** two existing shell tests encoded behaviour this plan deliberately changes, so they had to be updated:
+- `scripts/test-install-harness.sh` matched the old `modified: <path>` line. install-status now prints the layer, in the form `modified: [<layer>] <path>`, keeping the existing colon.
+- `scripts/test-lint-plan.sh` case `FCE(a)` expected `lint-plan.sh` to exit 0 on an invalid `.rad/config.yml`. Under AC#2 an invalid config makes the high-risk pattern unresolvable, so lint fails closed with exit 1. The freshness advisory is still reported.
+Both files are added to Files in Scope, and AC#5's status-line format is corrected to the colon form.
+
 ## Scope
 
 | In scope | Out of scope |
@@ -74,7 +79,7 @@ Decisions (2026-10-06, recorded on #71):
    - `buildManifest` carries over every non-core entry (`layer` ≠ `core`) unchanged.
    - Neither function may lose a preset entry.
    - If a path recorded under a non-core layer appears in the core set, `planInstall` returns it as `conflicts`. `rad install-core` then exits 2 naming each path and writes nothing: no file, no backup, no manifest.
-   - `rad install-status` labels each drifted path with its layer (`modified [preset] <path>`).
+   - `rad install-status` labels each drifted path with its layer (`modified: [preset] <path>`, amendment 1).
    - `CORE_LAYER` stays the only layer this module writes. A named `PRESET_LAYER = 'preset'` constant is exported for plan 2b.
 6. **Docs:**
    - `docs/configuration.md` documents the `settings:` block, the env → config → default precedence, and `rad config settings`. Its High-Risk Paths and Hooks sections each gain the config key.
@@ -116,6 +121,8 @@ One Explore agent (read-only) mapped the install manifest, the install-core/stat
 | harness/test/install-manifest.test.js | 260-360 | Layer-aware stale, carry-over, conflict tests (append) |
 | scripts/test-plan-paths.sh | 380-400 | Existing env cases stay; config-precedence cases |
 | scripts/test-plan-paths.sh | 720-800 | Config-backed pattern fixture cases (append) |
+| scripts/test-install-harness.sh | 270-280 | Amendment 1: expect the layer-labelled install-status line |
+| scripts/test-lint-plan.sh | 1085-1120 | Amendment 1: FCE(a) expects exit 1 (invalid config fails the high-risk scan closed) |
 | docs/configuration.md | 15-95 | `settings:` schema, `rad config settings` |
 | docs/configuration.md | 415-500 | High-Risk Paths and Hooks: config key and precedence |
 | .env.example | 55-75 | Note the config-key alternative |
