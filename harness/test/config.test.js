@@ -441,3 +441,109 @@ test('capabilities: the committed .rad/config.yml still validates', async () => 
   const loaded = await loadConfig(REPO_ROOT);
   assert.equal(loaded.ok, true, JSON.stringify(loaded.errors));
 });
+
+// ---------------------------------------------------------------------------
+// settings: block (#71 part 2a)
+// ---------------------------------------------------------------------------
+
+const withSettings = (settings) => ({ ...clone(VALID), settings });
+/** The real RAD_HIGH_RISK_DEFAULT_PATTERN value: full of regex metacharacters. */
+const DEFAULT_PATTERN = '(^|[/_.-])(o?auth(n|z|entication|enticate|orization|orize)?|payments?|billing|migrations?|secrets?|credentials?|tokens?)([/_.-]|[A-Z0-9]|$)';
+
+/** serialize → write → loadConfig; returns { text, loaded }. */
+async function roundTrip(doc) {
+  const text = serializeConfig(doc);
+  const root = tempRoot();
+  writeConfig(root, text);
+  return { text, loaded: await loadConfig(root) };
+}
+
+test('settings: both keys, either key alone, and an empty mapping are valid', () => {
+  assert.deepEqual(validateConfig(withSettings({ high_risk_patterns: DEFAULT_PATTERN, hooks_dir: 'scripts/hooks' })), []);
+  assert.deepEqual(validateConfig(withSettings({ hooks_dir: 'my hooks' })), []);
+  assert.deepEqual(validateConfig(withSettings({ high_risk_patterns: 'auth' })), []);
+  assert.deepEqual(validateConfig(withSettings({})), []);
+});
+
+test('settings: non-mapping is an error', () => {
+  for (const settings of [['a'], 'a', null, 3]) {
+    assert.deepEqual(validateConfig(withSettings(settings)), ['settings must be a mapping'], JSON.stringify(settings));
+  }
+});
+
+test('settings: unknown key is an error naming it', () => {
+  assert.deepEqual(validateConfig(withSettings({ hooks_dir: 'h', hook_dir: 'h' })), ['unknown key settings.hook_dir']);
+});
+
+test('settings: a non-string or empty value is an error naming the key', () => {
+  for (const value of ['', '   ', 7, true, null, ['a'], { a: 1 }]) {
+    for (const key of ['high_risk_patterns', 'hooks_dir']) {
+      assert.deepEqual(validateConfig(withSettings({ [key]: value })), [`settings.${key} must be a non-empty string`],
+        `${key}=${JSON.stringify(value)}`);
+    }
+  }
+});
+
+test('settings.hooks_dir: a leading dash or a line break is malformed', () => {
+  for (const hooks of ['-x', '--hooks', 'a\nb', 'a\rb']) {
+    const errors = validateConfig(withSettings({ hooks_dir: hooks }));
+    assert.equal(errors.length, 1, JSON.stringify(hooks));
+    assert.match(errors[0], /^settings\.hooks_dir must not start with '-' or contain a line break$/);
+  }
+  assert.deepEqual(validateConfig(withSettings({ hooks_dir: 'a-b/-c' })), [], 'a dash not in first position is fine');
+});
+
+test('settings.high_risk_patterns: a line break is an error', () => {
+  for (const pattern of ['auth\nbilling', 'auth\r']) {
+    assert.deepEqual(validateConfig(withSettings({ high_risk_patterns: pattern })),
+      ['settings.high_risk_patterns must not contain a line break'], JSON.stringify(pattern));
+  }
+});
+
+test('settings: absent → no settings block, byte-identical to before', async () => {
+  const text = serializeConfig(VALID);
+  assert.doesNotMatch(text, /settings/);
+  assert.equal(serializeConfig({ ...clone(VALID), settings: undefined }), text);
+  const { loaded } = await roundTrip(VALID);
+  assert.equal(Object.hasOwn(loaded.doc, 'settings'), false);
+});
+
+test('settings: the real default pattern round-trips losslessly through serialize → loadConfig', async () => {
+  const settings = { hooks_dir: '.rad/hooks', high_risk_patterns: DEFAULT_PATTERN };
+  const { text, loaded } = await roundTrip(withSettings(settings));
+  assert.match(text, /\nsettings:\n {2}high_risk_patterns: "[^\n]+"\n {2}hooks_dir: "\.rad\/hooks"\n$/, 'fixed key order, last block');
+  assert.equal(loaded.ok, true, JSON.stringify(loaded.errors));
+  assert.deepEqual(loaded.doc.settings, { high_risk_patterns: DEFAULT_PATTERN, hooks_dir: '.rad/hooks' });
+  assert.equal(serializeConfig(loaded.doc), text);
+});
+
+test('settings: patterns with quotes, backslashes and YAML indicators round-trip', async () => {
+  for (const pattern of [`it's "quoted"`, 'a\\.b\\d+', '#comment-like', ': colon', '- dash', '* star', 'true', '~']) {
+    const { loaded } = await roundTrip(withSettings({ high_risk_patterns: pattern }));
+    assert.equal(loaded.ok, true, `${pattern}: ${JSON.stringify(loaded.errors)}`);
+    assert.equal(loaded.doc.settings.high_risk_patterns, pattern);
+  }
+});
+
+test('settings: only set keys are written; capabilities precedes settings', async () => {
+  const doc = { ...withSettings({ hooks_dir: 'h' }), capabilities: { deny: ['net'] } };
+  const { text, loaded } = await roundTrip(doc);
+  assert.match(text, /\ncapabilities:\n {2}deny: \[net\]\nsettings:\n {2}hooks_dir: h\n$/);
+  assert.deepEqual(loaded.doc.settings, { hooks_dir: 'h' });
+});
+
+test('settings: an empty mapping serializes as `settings: {}` and loads back as {}', async () => {
+  const { text, loaded } = await roundTrip(withSettings({}));
+  assert.match(text, /\nsettings: \{\}\n$/);
+  assert.equal(loaded.ok, true, JSON.stringify(loaded.errors));
+  assert.deepEqual(loaded.doc.settings, {});
+});
+
+test('settings: rad config validate rejects a bad settings block, naming the key', async () => {
+  const root = tempRoot();
+  writeConfig(root, `${serializeConfig(VALID)}settings:\n  hooks_dir: "-x"\n  nope: y\n`);
+  const loaded = await loadConfig(root);
+  assert.equal(loaded.ok, false);
+  assert.match(loaded.errors.join('\n'), /settings\.hooks_dir/);
+  assert.match(loaded.errors.join('\n'), /unknown key settings\.nope/);
+});
