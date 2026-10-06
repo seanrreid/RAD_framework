@@ -41,7 +41,8 @@ import { parseCapabilityLine, resolveWaveCapabilities, sdkAllowedTools, commandR
 import { gatherDigestInputs, buildDigest, renderDigest } from './digest.js';
 import { buildReviewPrompt, parseFindings } from './review.js';
 import {
-  CONFIG_PATH, loadConfig, getConfigValue, migrateFromClaudeMd, serializeConfig, validateConfig, buildInitConfig,
+  CONFIG_PATH, SETTINGS_KEYS, loadConfig, getConfigValue, migrateFromClaudeMd, serializeConfig, validateConfig,
+  buildInitConfig,
 } from './config.js';
 import {
   MANIFEST_PATH, PENDING_DIR, UNKNOWN_RAD_VERSION, readManifest, planInstall, applyInstall, installDrift,
@@ -64,8 +65,8 @@ const INSTALL_CORE_USAGE = 'rad install-core --source <dir> [--target <dir>]';
 /** Usage line for `rad install-status`. */
 const INSTALL_STATUS_USAGE = 'rad install-status [--target <dir>]';
 /** Usage line for `rad config`. */
-const CONFIG_USAGE = 'rad config get <key> | rad config validate | rad config migrate [--from <path>] [--force]'
-  + ' | rad config init [--architect <id>] [--platform <p>] [--default-branch <b>] [--force]';
+const CONFIG_USAGE = 'rad config get <key> | rad config validate | rad config settings'
+  + ' | rad config migrate [--from <path>] [--force] | rad config init [--architect <id>] [--platform <p>] [--default-branch <b>] [--force]';
 
 const SUBCOMMANDS = {
   approve: {
@@ -197,6 +198,8 @@ const MAX_FAILED_ATTEMPTS_ENV = 'RAD_MAX_FAILED_ATTEMPTS';
 const HOOKS_DIR_ENV = 'RAD_HOOKS_DIR';
 const DEFAULT_HOOKS_SUBDIR = join('scripts', 'hooks');
 const MALFORMED_HOOKS_DIR = /^-|[\r\n]/;
+/** How a config-supplied hooks dir is named in operator-facing errors. */
+const HOOKS_DIR_SETTING_SOURCE = `settings.hooks_dir in ${CONFIG_PATH}`;
 /** Exit status reported for a hook that could not be spawned or died on a signal. */
 const HOOK_SPAWN_FAILURE_EXIT = 127;
 
@@ -1264,15 +1267,39 @@ function reportStop({ result, feature, worktree, root }) {
 }
 
 /**
- * Resolve the wave-lifecycle hooks dir from `env`, rooted at `root`.
+ * Resolve the wave-lifecycle hooks dir, rooted at `root`. Precedence: a
+ * non-empty `RAD_HOOKS_DIR` in `env`; else `settings.hooks_dir` (from
+ * .rad/config.yml); else `<root>/scripts/hooks`. A malformed value from either
+ * source is reported with the source that supplied it — never skipped.
  *
- * @returns {{ ok: true, dir: string } | { ok: false, raw: string }}
+ * @returns {{ ok: true, dir: string } | { ok: false, raw: unknown, source: string }}
  */
-export function resolveHooksDir(env, root) {
-  const raw = env[HOOKS_DIR_ENV];
-  if (!isNonEmpty(raw)) return { ok: true, dir: join(root, DEFAULT_HOOKS_SUBDIR) };
-  if (MALFORMED_HOOKS_DIR.test(raw)) return { ok: false, raw };
+export function resolveHooksDir(env, root, settings = {}) {
+  const fromEnv = env[HOOKS_DIR_ENV];
+  if (isNonEmpty(fromEnv)) return hooksDirFrom(fromEnv, HOOKS_DIR_ENV, root);
+  const fromConfig = settings?.hooks_dir;
+  if (fromConfig !== undefined) return hooksDirFrom(fromConfig, HOOKS_DIR_SETTING_SOURCE, root);
+  return { ok: true, dir: join(root, DEFAULT_HOOKS_SUBDIR) };
+}
+
+/** Validate one hooks-dir value from `source` and resolve it against `root`. */
+function hooksDirFrom(raw, source, root) {
+  if (!isNonEmpty(raw) || MALFORMED_HOOKS_DIR.test(raw)) return { ok: false, raw, source };
   return { ok: true, dir: resolve(root, raw) };
+}
+
+/**
+ * The `settings:` block deliver runs with, loaded once from `repoRoot`. A
+ * missing config file means no settings; an invalid one is an error (never
+ * treated as absent).
+ *
+ * @returns {Promise<{ ok: true, settings: Object } | { ok: false, errors: string[] }>}
+ */
+async function loadDeliverSettings(repoRoot) {
+  const loaded = await loadConfig(repoRoot);
+  if (loaded.missing) return { ok: true, settings: {} };
+  if (!loaded.ok) return { ok: false, errors: loaded.errors };
+  return { ok: true, settings: loaded.doc.settings ?? {} };
 }
 
 /**
@@ -1416,12 +1443,20 @@ export async function deliverCommand(argv, ctx) {
     return USAGE_EXIT_CODE;
   }
 
-  // Hooks dir: validated BEFORE setup so a malformed value exits 2 with no
-  // worktree created and no event appended.
-  const hooksCheck = resolveHooksDir(process.env, repoRoot);
+  // Settings + hooks dir: loaded and validated BEFORE setup so an invalid
+  // config or a malformed hooks dir exits 2 with no worktree created and no
+  // event appended. Config is read once, from repoRoot.
+  const settingsLoad = await loadDeliverSettings(repoRoot);
+  if (!settingsLoad.ok) {
+    process.stderr.write(`rad deliver: ${CONFIG_PATH} is invalid:\n`);
+    for (const e of settingsLoad.errors) process.stderr.write(`  - ${e}\n`);
+    return USAGE_EXIT_CODE;
+  }
+  const { settings } = settingsLoad;
+  const hooksCheck = resolveHooksDir(process.env, repoRoot, settings);
   if (!hooksCheck.ok) {
     process.stderr.write(
-      `rad deliver: ${HOOKS_DIR_ENV} must be a directory path (got ${JSON.stringify(hooksCheck.raw)})\n`,
+      `rad deliver: ${hooksCheck.source} must be a directory path (got ${JSON.stringify(hooksCheck.raw)})\n`,
     );
     return USAGE_EXIT_CODE;
   }
@@ -1461,7 +1496,7 @@ export async function deliverCommand(argv, ctx) {
   const workBranch = resolveWorkBranch(setup, planCtx, feature);
   const scriptCtx = makeScriptCtx({ sh, repoRoot, root, feature, branch: workBranch, state });
   const runHooks = makeRunHooks({
-    hookShell: ctx.sh ?? spawnHook, root, hooksDir: resolveHooksDir(process.env, root).dir, now,
+    hookShell: ctx.sh ?? spawnHook, root, hooksDir: resolveHooksDir(process.env, root, settings).dir, now,
   });
 
   let result;
@@ -2848,6 +2883,49 @@ async function configValidate(args, repoRoot) {
   return 0;
 }
 
+/** The env var that overrides each setting (counts only when non-empty). */
+const SETTING_ENV_VARS = Object.freeze({ high_risk_patterns: 'RAD_HIGH_RISK_PATTERNS', hooks_dir: HOOKS_DIR_ENV });
+/**
+ * The value column for a setting on its built-in default. The defaults live
+ * with their consumers (the shell high-risk pattern in plan-paths.sh) and are
+ * never copied here.
+ */
+const SETTING_DEFAULT_VALUE = '(built-in)';
+
+/** `{ source, value }` for one setting: env (non-empty) → config → default. */
+function resolveSetting(key, settings, env) {
+  const fromEnv = env[SETTING_ENV_VARS[key]];
+  if (isNonEmpty(fromEnv)) return { source: 'env', value: fromEnv };
+  if (settings[key] !== undefined) return { source: 'config', value: settings[key] };
+  return { source: 'default', value: SETTING_DEFAULT_VALUE };
+}
+
+/**
+ * `config settings` — one `<key>\t<source>\t<value>` line per setting, in
+ * SETTINGS_KEYS order. Exit 0 all resolved; 2 invalid config or a malformed
+ * RAD_HOOKS_DIR (nothing on stdout); 2 bad argv. A missing config file means
+ * every non-env setting is on its default.
+ */
+async function configSettings(args, repoRoot, env) {
+  if (args.length !== 0) return configUsage(`settings takes no arguments (got '${args[0]}')`);
+  const loaded = await loadConfig(repoRoot);
+  if (!loaded.ok && !loaded.missing) {
+    reportConfigLoadFailure(loaded);
+    return USAGE_EXIT_CODE;
+  }
+  const settings = loaded.ok ? loaded.doc.settings ?? {} : {};
+  const hooks = resolveHooksDir(env, repoRoot, settings);
+  if (!hooks.ok) {
+    process.stderr.write(`rad config: ${hooks.source} must be a directory path (got ${JSON.stringify(hooks.raw)})\n`);
+    return USAGE_EXIT_CODE;
+  }
+  for (const key of SETTINGS_KEYS) {
+    const { source, value } = resolveSetting(key, settings, env);
+    process.stdout.write(`${key}\t${source}\t${value}\n`);
+  }
+  return 0;
+}
+
 /** Parse `migrate [--from <path>] [--force]`; throws on malformed argv. */
 function parseMigrateArgs(args) {
   const out = { from: undefined, force: false };
@@ -2988,7 +3066,9 @@ function configUsage(message) {
   return USAGE_EXIT_CODE;
 }
 
-const CONFIG_ACTIONS = { get: configGet, validate: configValidate, migrate: configMigrate, init: configInit };
+const CONFIG_ACTIONS = {
+  get: configGet, validate: configValidate, settings: configSettings, migrate: configMigrate, init: configInit,
+};
 
 /**
  * `config get <key> | validate | migrate [--from <path>] [--force]
@@ -2996,7 +3076,9 @@ const CONFIG_ACTIONS = { get: configGet, validate: configValidate, migrate: conf
  *
  * get: prints the value (lists one item per line; scope-map rows as compact
  * JSON) — exit 0; absent key → 3; missing/invalid config → 1; bad argv → 2.
- * validate: exit 0 valid, 1 missing/invalid. migrate: writes .rad/config.yml
+ * validate: exit 0 valid, 1 missing/invalid. settings: `<key>\t<source>\t<value>`
+ * per setting (env | config | default) — exit 0; invalid config → 2, nothing on
+ * stdout; bad argv → 2. migrate: writes .rad/config.yml
  * from CLAUDE.md (never edits it); refuses to overwrite without --force.
  * init: writes a fresh validated config (architect = --architect, else the
  * repo's git user.email; platform default manual, default_branch default main)
@@ -3004,14 +3086,14 @@ const CONFIG_ACTIONS = { get: configGet, validate: configValidate, migrate: conf
  * 2 bad argv. Nothing is written on any failure.
  *
  * @param {string[]} argv - args after `config`
- * @param {{ repoRoot: string }} ctx
+ * @param {{ repoRoot: string, env?: Object }} ctx - env defaults to process.env
  * @returns {Promise<number>}
  */
 export async function configCommand(argv, ctx) {
   const [action, ...args] = argv;
   const run = CONFIG_ACTIONS[action];
   if (!run) return configUsage(action === undefined ? 'an action is required' : `unknown action '${action}'`);
-  return run(args, ctx.repoRoot);
+  return run(args, ctx.repoRoot, ctx.env ?? process.env);
 }
 
 /** Parse `<feature> [--plan <path>]`; throws on unknown flags, a valueless --plan, or extras. */
@@ -3152,6 +3234,17 @@ function resolveInstallCoreArgs(argv, repoRoot) {
   return { sourceRoot, targetRoot: flags.target ? resolve(flags.target) : repoRoot };
 }
 
+/** Refuse an install whose core set takes over paths another layer owns; nothing is written. */
+function reportInstallConflicts(plan) {
+  for (const path of plan.conflicts) {
+    process.stderr.write(
+      `rad install-core: ${path} is owned by layer '${plan.carried[path].layer}'; core will not take it over\n`,
+    );
+  }
+  process.stderr.write('rad install-core: nothing written\n');
+  return USAGE_EXIT_CODE;
+}
+
 /**
  * `install-core --source <dir> [--target <dir>]` — install or upgrade the core
  * file set (#71). Unmodified and absent files are written; a local edit is kept
@@ -3159,8 +3252,9 @@ function resolveInstallCoreArgs(argv, repoRoot) {
  * unbaselined differing file is backed up, then overwritten. Writes
  * .rad/installed.json. Target defaults to the CLI's repo root.
  *
- * Exit 0 all written; 1 any keep or deleted; 2 bad argv, a non-RAD source, or a
- * malformed existing manifest (nothing written: fail closed, never "absent").
+ * Exit 0 all written; 1 any keep or deleted; 2 bad argv, a non-RAD source, a
+ * malformed existing manifest, or a core path another layer owns (nothing
+ * written: fail closed, never "absent", never a take-over).
  *
  * @param {string[]} argv - args after `install-core`
  * @param {{ repoRoot: string, now?: Date }} ctx
@@ -3178,6 +3272,7 @@ export async function installCoreCommand(argv, ctx) {
     return USAGE_EXIT_CODE;
   }
   const plan = planInstall({ ...args, manifest: read.ok ? read.manifest : null });
+  if (plan.conflicts.length) return reportInstallConflicts(plan);
   const { backupDir } = applyInstall({
     ...args, plan, now: ctx.now ?? new Date(), radVersion: sourceRadVersion(args.sourceRoot),
   });
@@ -3189,7 +3284,7 @@ export async function installCoreCommand(argv, ctx) {
 
 /**
  * `install-status [--target <dir>]` — read-only drift report against
- * .rad/installed.json. Prints `modified: <path>` / `missing: <path>`.
+ * .rad/installed.json. Prints `modified: [<layer>] <path>` / `missing: [<layer>] <path>`.
  *
  * Exit 0 clean; 1 drift or no manifest; 2 bad argv or a malformed manifest.
  *
@@ -3216,8 +3311,8 @@ export async function installStatusCommand(argv, ctx) {
     return USAGE_EXIT_CODE;
   }
   const { modified, missing } = installDrift({ targetRoot, manifest: read.manifest });
-  for (const { path } of modified) process.stdout.write(`modified: ${path}\n`);
-  for (const { path } of missing) process.stdout.write(`missing: ${path}\n`);
+  for (const { path, layer } of modified) process.stdout.write(`modified: [${layer}] ${path}\n`);
+  for (const { path, layer } of missing) process.stdout.write(`missing: [${layer}] ${path}\n`);
   return modified.length + missing.length > 0 ? FAILED_EXIT_CODE : 0;
 }
 
