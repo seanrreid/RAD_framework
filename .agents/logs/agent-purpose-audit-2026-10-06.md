@@ -10,3 +10,4 @@ Executor role: architect
 |------|------|------|--------|--------|------|
 | 1 | 1 | 1.1 Audit the mappers | complete | a9d6693 | 16:58 |
 | 2 | 1 | 1.2 Audit the orchestrators | complete | 98ef8a9 | 16:58 |
+| 3 | 2 | 2.1 Audit doc | complete | 5ac261b | 17:05 |
