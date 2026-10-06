@@ -121,18 +121,21 @@ export function sdkAllowedTools(effective) {
 }
 
 /**
- * The command adapter cannot narrow an agent's tools, so it must refuse any
- * constrained wave whose effective set is narrower than the full vocabulary.
+ * The command and acp adapters cannot narrow an agent's tools, so they must
+ * refuse any constrained wave whose effective set is narrower than the full
+ * vocabulary. (ACP permission answers are defence in depth, not enforcement:
+ * an ACP agent may act without asking.)
  *
  * @param {Object<number, {constrained: boolean, effective: string[]}>} byWave
- * @returns {string | null} refusal message, or null when the command adapter may run
+ * @param {string} [adapter] - the adapter named in the refusal; 'command' keeps today's message
+ * @returns {string | null} refusal message, or null when the adapter may run
  */
-export function commandRefusal(byWave) {
+export function commandRefusal(byWave, adapter = 'command') {
   const waves = Object.keys(byWave ?? {}).map(Number).sort((a, b) => a - b);
   for (const wave of waves) {
     const { constrained, effective } = byWave[wave];
     if (!constrained || CAPABILITY_CLASSES.every((c) => effective.includes(c))) continue;
-    return `Wave ${wave} is capability-constrained (effective: [${effective.join(', ')}]) but the command adapter `
+    return `Wave ${wave} is capability-constrained (effective: [${effective.join(', ')}]) but the ${adapter} adapter `
       + 'cannot narrow agent tools; run with RAD_AGENT=sdk or remove the Capabilities declaration';
   }
   return null;

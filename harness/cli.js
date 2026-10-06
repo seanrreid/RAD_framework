@@ -30,6 +30,7 @@ import { makeWorktreeLifecycle } from './adapters/worktree.js';
 import { deliverSpine } from './spine.js';
 import { createHookRunner } from './hook-runner.js';
 import { createCommandAdapter, probeCommand, runCommandPrompt } from './adapters/agent/command.js';
+import { createAcpAdapter, probeAcp } from './adapters/agent/acp.js';
 import { sanitizeErrorMessage } from './adapters/agent/contract.js';
 import { loadMatrix } from './matrix.js';
 import { classifyStop, STOP_CLASSES } from './stops.js';
@@ -167,6 +168,13 @@ const SUBCOMMANDS = {
  * Unset, empty, or any other value runs it (fail-closed: a typo never disables).
  */
 const PREFLIGHT_OFF = 'off';
+/** Accepted RAD_AGENT values; the unknown-value message lists them in this order. */
+const AGENT_KINDS = ['command', 'sdk', 'acp'];
+
+/** The RAD_AGENT selection, trimmed; unset or blank selects 'command'. */
+function agentKindFromEnv() {
+  return isNonEmpty(process.env.RAD_AGENT) ? process.env.RAD_AGENT.trim() : 'command';
+}
 
 /**
  * Env var overriding the preflight probe deadline, in whole seconds. Unset or
@@ -369,11 +377,15 @@ function bestEffortSyncPush(repoRoot, workBranch, sh) {
  * the pre-existing parse errors keep their exit 1.
  *
  * @param {string[]} argv
- * @returns {{ feature?: string, model: string, resume: boolean, context?: string }}
+ * `modelExplicit` is true only when `--model` was given, so an adapter that
+ * cannot honour a model (acp) warns only when one was actually requested.
+ *
+ * @returns {{ feature?: string, model: string, modelExplicit: boolean, resume: boolean, context?: string }}
  */
 function parseDeliverArgs(argv) {
   let feature;
   let model = 'claude-opus-4-8';
+  let modelExplicit = false;
   let resume = false;
   let context;
 
@@ -383,6 +395,7 @@ function parseDeliverArgs(argv) {
       const val = argv[i + 1];
       if (val === undefined) throw new Error('--model requires a value');
       model = val;
+      modelExplicit = true;
       i += 1;
     } else if (arg === '--resume') {
       resume = true;
@@ -402,7 +415,7 @@ function parseDeliverArgs(argv) {
     }
   }
 
-  return { feature, model, resume, context };
+  return { feature, model, modelExplicit, resume, context };
 }
 
 /**
@@ -645,16 +658,32 @@ function preflightTimeoutFromEnv() {
 }
 
 /**
- * Run the command-path startup probe unless RAD_AGENT_PREFLIGHT is exactly
- * PREFLIGHT_OFF. On failure, writes the operator-facing reason to stderr. A
- * malformed RAD_AGENT_PREFLIGHT_TIMEOUT_SECONDS fails before the probe spawns.
+ * Per RAD_AGENT_CMD-backed adapter: its startup probe and the operator-facing
+ * failure prefix. The acp prefix names the handshake, since an acp probe can
+ * fail on a protocol mismatch, not only on missing credentials.
+ */
+const PREFLIGHT_PROBES = {
+  command: {
+    probe: probeCommand,
+    failure: 'RAD_AGENT_CMD failed to start under the adapter env ' +
+      '(it must authenticate without inherited env vars)',
+  },
+  acp: { probe: probeAcp, failure: 'RAD_AGENT_CMD failed the ACP handshake' },
+};
+
+/**
+ * Run the selected adapter's startup probe unless RAD_AGENT_PREFLIGHT is
+ * exactly PREFLIGHT_OFF. On failure, writes the operator-facing reason to
+ * stderr. A malformed RAD_AGENT_PREFLIGHT_TIMEOUT_SECONDS fails before the
+ * probe spawns.
  *
  * @param {string} cmd - the configured RAD_AGENT_CMD
  * @param {string} repoRoot
+ * @param {'command'|'acp'} [kind] - which adapter's probe to run
  * @returns {Promise<number|null>} null when the probe passed or was skipped,
  *   else the deliver exit code (1 probe failed, 2 malformed timeout)
  */
-async function preflightExitCode(cmd, repoRoot) {
+async function preflightExitCode(cmd, repoRoot, kind = 'command') {
   if (process.env.RAD_AGENT_PREFLIGHT === PREFLIGHT_OFF) return null;
   const timeout = preflightTimeoutFromEnv();
   if (!timeout.ok) {
@@ -663,12 +692,10 @@ async function preflightExitCode(cmd, repoRoot) {
     );
     return USAGE_EXIT_CODE;
   }
-  const probe = await probeCommand({ cmd, repoRoot, timeoutMs: timeout.timeoutMs });
-  if (probe.ok) return null;
-  process.stderr.write(
-    'rad deliver: RAD_AGENT_CMD failed to start under the adapter env ' +
-    `(it must authenticate without inherited env vars): ${probe.error}\n`,
-  );
+  const { probe, failure } = PREFLIGHT_PROBES[kind];
+  const result = await probe({ cmd, repoRoot, timeoutMs: timeout.timeoutMs });
+  if (result.ok) return null;
+  process.stderr.write(`rad deliver: ${failure}: ${result.error}\n`);
   return 1;
 }
 
@@ -740,7 +767,7 @@ function loadPlanCtx(root, feature) {
  * constructing anything. An injected ctx.runWave (tests) skips the check.
  *
  * @returns {{ injected: Function } | { kind: 'sdk', apiKey: string }
- *   | { kind: 'command', cmd: string } | { code: number }}
+ *   | { kind: 'command'|'acp', cmd: string } | { code: number }}
  */
 export function resolveAgent(ctx, agentKind) {
   if (ctx.runWave) return { injected: ctx.runWave };
@@ -754,14 +781,15 @@ export function resolveAgent(ctx, agentKind) {
     }
     return { kind: 'sdk', apiKey };
   }
-  // Command path (default): no ANTHROPIC_API_KEY required — credentials are
-  // the configured command's concern. RAD_AGENT_CMD is mandatory here.
+  // Command (default) and acp paths: no ANTHROPIC_API_KEY required, since
+  // credentials are the configured agent's concern. RAD_AGENT_CMD is mandatory.
+  const kind = agentKind === 'acp' ? 'acp' : 'command';
   const cmd = process.env.RAD_AGENT_CMD;
   if (!isNonEmpty(cmd)) {
-    process.stderr.write('rad deliver: RAD_AGENT_CMD is required when RAD_AGENT=command\n');
+    process.stderr.write(`rad deliver: RAD_AGENT_CMD is required when RAD_AGENT=${kind}\n`);
     return { code: 1 };
   }
-  return { kind: 'command', cmd };
+  return { kind, cmd };
 }
 
 /**
@@ -834,6 +862,12 @@ async function capabilityRefusal({ planCtx, root, agent }) {
     const refusal = commandRefusal(resolved.byWave);
     if (refusal) return refusal;
   }
+  if (agent.kind === 'acp') {
+    // ACP permission answers are defence in depth, not enforcement: an agent
+    // may act without asking, so a constrained wave is refused like command.
+    const refusal = commandRefusal(resolved.byWave, 'acp');
+    if (refusal) return refusal;
+  }
   if (agent.kind === 'sdk') {
     const refusal = sdkCapabilityRefusal(waveEffective);
     if (refusal) return refusal;
@@ -856,6 +890,26 @@ async function checkCapabilities(opts) {
 }
 
 /**
+ * Construct a RAD_AGENT_CMD-backed adapter (command or acp). acp ignores
+ * `model` and warns once per run itself (ACP v1 has no stable model selector).
+ * createAcpAdapter rejects a `{prompt}` placeholder at construction; that is
+ * an operator config error, reported as exit 1 before any event is appended.
+ *
+ * @returns {{ adapter: Function } | { code: number }}
+ */
+function buildCmdAdapter(agent, { model, root }) {
+  if (agent.kind !== 'acp') {
+    return { adapter: createCommandAdapter({ cmd: agent.cmd, repoRoot: root, model }) };
+  }
+  try {
+    return { adapter: createAcpAdapter({ cmd: agent.cmd, repoRoot: root, model }) };
+  } catch (err) {
+    process.stderr.write(`rad deliver: ${err.message}\n`);
+    return { code: 1 };
+  }
+}
+
+/**
  * Construct the runWave for a resolved agent, rooted at `root` (the main
  * checkout, or the worktree in isolation mode). Runs the command-path preflight.
  *
@@ -870,11 +924,13 @@ async function buildRunWave(agent, { model, root, planCtx }) {
     const { createRunWave } = await import('./adapters/agent/sdk.js');
     adapter = createRunWave({ apiKey: agent.apiKey, model, repoRoot: root });
   } else {
-    adapter = createCommandAdapter({ cmd: agent.cmd, repoRoot: root, model });
-    // Startup preflight: prove the agent CLI can authenticate under the
-    // allow-listed adapter env BEFORE any event append, so an env-dependent
-    // credential fails fast with a clear message instead of as a Wave-1 failure.
-    const preflightCode = await preflightExitCode(agent.cmd, root);
+    const built = buildCmdAdapter(agent, { model, root });
+    if (built.code !== undefined) return built;
+    adapter = built.adapter;
+    // Startup preflight: prove the agent CLI can authenticate (and, for acp,
+    // complete the handshake) under the allow-listed adapter env BEFORE any
+    // event append, so it fails fast instead of as a Wave-1 failure.
+    const preflightCode = await preflightExitCode(agent.cmd, root, agent.kind);
     if (preflightCode !== null) return { code: preflightCode };
   }
   // Bind planCtx so deliverSpine's runWave(wave, attemptCtx) call works. The
@@ -1424,7 +1480,10 @@ export async function deliverCommand(argv, ctx) {
     return err.exitCode ?? 1;
   }
 
-  const { feature, model } = parsed;
+  const { feature, modelExplicit } = parsed;
+  // acp honours no model (ACP v1 has no stable selector), so only an explicit
+  // --model reaches it, where createAcpAdapter turns it into its one warning.
+  const model = agentKindFromEnv() === 'acp' && !modelExplicit ? undefined : parsed.model;
 
   if (!isNonEmpty(feature)) {
     process.stderr.write('rad deliver: a feature name is required\n');
@@ -1433,12 +1492,13 @@ export async function deliverCommand(argv, ctx) {
   }
 
   // Adapter selection (ENV-driven, no config-file loader). RAD_AGENT picks the
-  // runner: 'command' (default, vendor-neutral CLI) or 'sdk' (Anthropic SDK).
+  // runner: 'command' (default, vendor-neutral CLI), 'sdk' (Anthropic SDK) or
+  // 'acp' (an Agent Client Protocol v1 agent spawned from RAD_AGENT_CMD).
   // Credential requirements differ per path and are validated in resolveAgent —
   // an injected ctx.runWave (tests) skips construction and the credential check.
-  const agentKind = isNonEmpty(process.env.RAD_AGENT) ? process.env.RAD_AGENT.trim() : 'command';
-  if (!ctx.runWave && agentKind !== 'command' && agentKind !== 'sdk') {
-    process.stderr.write(`rad deliver: unknown RAD_AGENT '${agentKind}' (expected 'command' or 'sdk')\n`);
+  const agentKind = agentKindFromEnv();
+  if (!ctx.runWave && !AGENT_KINDS.includes(agentKind)) {
+    process.stderr.write(`rad deliver: unknown RAD_AGENT '${agentKind}' (expected ${AGENT_KINDS.join(' | ')})\n`);
     return 1;
   }
 

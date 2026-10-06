@@ -83,7 +83,7 @@ export const KILL_GRACE_MS = 5_000;
 const STDIN_CLOSED_EARLY_CODE = 'EPIPE';
 
 /** Build the allow-listed env handed to the spawned child. */
-function buildChildEnv() {
+export function buildChildEnv() {
   const env = {};
   for (const key of ENV_ALLOW_LIST) {
     if (process.env[key] !== undefined) env[key] = process.env[key];
@@ -171,7 +171,7 @@ function terminalFailure(outcome, waveId, message) {
  * @param {string} [effectiveModel]
  * @returns {{ argv: string[], usedPlaceholder: boolean }}
  */
-function tokenizeCommand(cmd, prompt, effectiveModel) {
+export function tokenizeCommand(cmd, prompt, effectiveModel) {
   const parts = String(cmd).trim().split(/\s+/).filter(Boolean);
   let usedPlaceholder = false;
   const argv = parts.map((part) => {
