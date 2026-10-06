@@ -1,7 +1,8 @@
 # Plan: ACP Agent Adapter (#86 part 1)
 Created: 2026-10-06
 Author: architect
-Status: in-progress
+Status: complete
+Completed-At: 2026-10-06T17:07:18Z
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-10-06T16:39:07.202Z
 Recorded-By: sean@torchcodelab.com
