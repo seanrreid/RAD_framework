@@ -2650,3 +2650,171 @@ test('install-preset AC#1 — every --reapply refusal exits 2 with the target tr
     });
   }
 });
+
+// ---------------------------------------------------------------------------
+// rad deliver — RAD_AGENT=acp selection, preflight, refusal, model warning and
+// an end-to-end run through the fake ACP agent (acp-adapter AC#4). Main
+// checkout (RAD_WORKTREE=0) with the mock sh; both setup paths share
+// resolveAgent, checkCapabilities and buildRunWave.
+// ---------------------------------------------------------------------------
+
+const FAKE_ACP_AGENT = join(HERE, 'fixtures', 'acp', 'fake-agent.mjs');
+/** Every env knob the acp deliver tests set; each test pins all of them. */
+const ACP_ENV_BASE = {
+  RAD_AGENT: 'acp', RAD_AGENT_CMD: undefined, RAD_AGENT_PREFLIGHT: undefined,
+  RAD_AGENT_PREFLIGHT_TIMEOUT_SECONDS: undefined, ANTHROPIC_API_KEY: undefined,
+};
+const ACP_MODEL_WARNING = /acp adapter: model '[^']+' ignored/g;
+
+/** A one-wave approved plan; `waveLines` go under the wave heading. */
+function seedOneWaveAcpPlan(repoRoot, waveLines = []) {
+  const text = [
+    `# ${DELIVER_FEATURE}`, '', 'Status: approved', `Branch: rad/${DELIVER_FEATURE}`, '',
+    '## Waves', '', '### Wave 1', ...waveLines, '', '#### Task 1.1: Fake task', '- [ ] Task A', '',
+  ].join('\n');
+  return seedApprovedPlanText(repoRoot, text);
+}
+
+/** The RAD_AGENT_CMD that runs the fake ACP agent with `scenario`, tracing to `trace`. */
+const fakeAcpCmd = (scenario, trace) => `${process.execPath} ${FAKE_ACP_AGENT} ${scenario} ${trace}`;
+
+/** Count the fake agent's `recv <method>` trace lines for `method`. */
+function tracedCalls(trace, method) {
+  if (!existsSync(trace)) return 0;
+  return readFileSync(trace, 'utf8').split('\n').filter((l) => l.startsWith(`recv ${method} `) || l === `recv ${method}`).length;
+}
+
+/**
+ * Run deliver with the acp env (`env` overrides ACP_ENV_BASE), capturing
+ * stderr only. Unlike runDeliverCaptured it leaves stdout alone: these runs
+ * await real child processes, and under `node --test` stdout is the runner's
+ * event channel, so a long stdout capture swallows other tests' results.
+ */
+async function runAcpDeliver(repoRoot, env, args = []) {
+  const vars = { ...Object.fromEntries(DELIVER_ENV_KEYS.map((k) => [k, undefined])), ...ACP_ENV_BASE, RAD_WORKTREE: '0', ...env };
+  return withProcessEnv(vars, async () => {
+    const originalErr = process.stderr.write.bind(process.stderr);
+    let stderr = '';
+    process.stderr.write = (chunk) => { stderr += chunk; return true; };
+    try {
+      return { code: await deliverCommand([DELIVER_FEATURE, ...args], { repoRoot, sh: okSh }), stderr };
+    } finally {
+      process.stderr.write = originalErr;
+    }
+  });
+}
+
+test('deliver acp — RAD_AGENT=acp without RAD_AGENT_CMD → exit 1 naming RAD_AGENT=acp, no events', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const logFile = seedOneWaveAcpPlan(repoRoot);
+    for (const cmd of [undefined, '   ']) {
+      const { code, stderr } = await runAcpDeliver(repoRoot, { RAD_AGENT_CMD: cmd });
+      assert.equal(code, 1, stderr);
+      assert.match(stderr, /rad deliver: RAD_AGENT_CMD is required when RAD_AGENT=acp/);
+    }
+    assert.deepEqual(readLog(logFile).map((e) => e.type), ['approved'], 'no event appended');
+  });
+});
+
+test('deliver acp — an unknown RAD_AGENT → exit 1 listing command | sdk | acp', async () => {
+  await withTempRepo(async (repoRoot) => {
+    seedOneWaveAcpPlan(repoRoot);
+    const { code, stderr } = await runAcpDeliver(repoRoot, { RAD_AGENT: 'acpx', RAD_AGENT_CMD: 'true' });
+    assert.equal(code, 1, stderr);
+    assert.match(stderr, /unknown RAD_AGENT 'acpx' \(expected command \| sdk \| acp\)/);
+  });
+});
+
+test('resolveAgent — acp returns { kind: acp, cmd }', async () => {
+  await withProcessEnv({ RAD_AGENT_CMD: 'agent --acp' }, () => {
+    assert.deepEqual(resolveAgent({}, 'acp'), { kind: 'acp', cmd: 'agent --acp' });
+  });
+});
+
+test('deliver acp — a {prompt} placeholder in RAD_AGENT_CMD → exit 1 naming it, no events', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const logFile = seedOneWaveAcpPlan(repoRoot);
+    const { code, stderr } = await runAcpDeliver(repoRoot, { RAD_AGENT_CMD: 'agent {prompt}' });
+    assert.equal(code, 1, stderr);
+    assert.match(stderr, /must not contain \{prompt\}/);
+    assert.deepEqual(readLog(logFile).map((e) => e.type), ['approved']);
+  });
+});
+
+test('deliver acp — preflight fails closed on a protocol version mismatch → exit 1, no events', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const logFile = seedOneWaveAcpPlan(repoRoot);
+    const trace = join(repoRoot, 'trace.txt');
+    const { code, stderr } = await runAcpDeliver(repoRoot, { RAD_AGENT_CMD: fakeAcpCmd('wrong-version', trace) });
+    assert.equal(code, 1, stderr);
+    assert.match(stderr, /rad deliver: RAD_AGENT_CMD failed the ACP handshake: .*protocolVersion 2.*requires protocolVersion 1/);
+    assert.doesNotMatch(stderr, /failed to start under the adapter env/);
+    assert.equal(tracedCalls(trace, 'session/prompt'), 0, 'no wave was attempted');
+    assert.deepEqual(readLog(logFile).map((e) => e.type), ['approved']);
+  });
+});
+
+test('deliver acp — a malformed preflight timeout → exit 2 before the probe spawns', async () => {
+  await withTempRepo(async (repoRoot) => {
+    seedOneWaveAcpPlan(repoRoot);
+    const trace = join(repoRoot, 'trace.txt');
+    const { code, stderr } = await runAcpDeliver(repoRoot, {
+      RAD_AGENT_CMD: fakeAcpCmd('complete', trace), RAD_AGENT_PREFLIGHT_TIMEOUT_SECONDS: 'soon',
+    });
+    assert.equal(code, 2, stderr);
+    assert.match(stderr, /RAD_AGENT_PREFLIGHT_TIMEOUT_SECONDS must be a positive integer \(got 'soon'\)/);
+    assert.equal(tracedCalls(trace, 'initialize'), 0);
+  });
+});
+
+test('deliver acp — end to end through the fake agent: preflight passes, the wave succeeds, exit 0', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const logFile = seedOneWaveAcpPlan(repoRoot);
+    const trace = join(repoRoot, 'trace.txt');
+    const { code, stderr } = await runAcpDeliver(repoRoot, { RAD_AGENT_CMD: fakeAcpCmd('complete', trace) });
+    assert.equal(code, 0, stderr);
+    assert.equal(tracedCalls(trace, 'initialize'), 2, 'one preflight handshake plus one wave session');
+    assert.equal(tracedCalls(trace, 'session/prompt'), 1, 'the preflight sends no prompt');
+    const types = readLog(logFile).map((e) => e.type);
+    assert.ok(types.includes('wave-complete') && types.includes('pr-opened'), types.join(','));
+    assert.equal(stderr.match(ACP_MODEL_WARNING), null, 'the default model is not a request');
+  });
+});
+
+test('deliver acp — RAD_AGENT_PREFLIGHT=off skips the handshake probe', async () => {
+  await withTempRepo(async (repoRoot) => {
+    seedOneWaveAcpPlan(repoRoot);
+    const trace = join(repoRoot, 'trace.txt');
+    const { code, stderr } = await runAcpDeliver(repoRoot, {
+      RAD_AGENT_CMD: fakeAcpCmd('complete', trace), RAD_AGENT_PREFLIGHT: 'off',
+    });
+    assert.equal(code, 0, stderr);
+    assert.equal(tracedCalls(trace, 'initialize'), 1, 'only the wave session handshakes');
+  });
+});
+
+test('deliver acp — a constrained wave is refused naming acp before any event or spawn', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const logFile = seedOneWaveAcpPlan(repoRoot, ['Capabilities: fs_read']);
+    const trace = join(repoRoot, 'trace.txt');
+    const res = await runAcpDeliver(repoRoot, { RAD_AGENT_CMD: fakeAcpCmd('complete', trace) });
+    assertRefusedBeforeEvents(res, logFile, [/Wave 1 is capability-constrained/, /the acp adapter cannot narrow/]);
+    assert.equal(tracedCalls(trace, 'initialize'), 0, 'refused before the preflight spawned');
+  });
+});
+
+test('deliver acp — a declared model (wave Model: line or --model) prints exactly one warning', async () => {
+  for (const [label, waveLines, args] of [
+    ['wave Model: line', ['Model: claude-haiku-4-5'], []],
+    ['--model flag', [], ['--model', 'claude-haiku-4-5']],
+  ]) {
+    await withTempRepo(async (repoRoot) => {
+      seedOneWaveAcpPlan(repoRoot, waveLines);
+      const trace = join(repoRoot, 'trace.txt');
+      const { code, stderr } = await runAcpDeliver(repoRoot, { RAD_AGENT_CMD: fakeAcpCmd('complete', trace) }, args);
+      assert.equal(code, 0, `${label}: ${stderr}`);
+      assert.equal(stderr.match(ACP_MODEL_WARNING)?.length, 1, `${label}: ${stderr}`);
+      assert.match(stderr, /model 'claude-haiku-4-5' ignored/, label);
+    });
+  }
+});
