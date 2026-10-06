@@ -156,7 +156,7 @@ Generated outputs and unchanged bodies list only the region the executor must lo
 | UPGRADE.md | 280-335 | "Moving conventions to AGENTS.md" section |
 | docs/rad-tool-portability.md | 15-25, 205-215 | Part 3 delivered |
 | install.sh | 456-492 | Amendment 1: `print_next_steps` names AGENTS.md |
-| scripts/test-install-harness.sh | 540-600 | Amendment 1: next-steps text assertion |
+| scripts/test-install-harness.sh | 500-560 | Amendment 1: next-steps text assertion |
 
 ## Execution Notes
 
@@ -258,7 +258,7 @@ Commands: every `scripts/test-*.sh` under both shells; `scripts/lint-shell-safet
 This wave documents the shipped behaviour.
 
 #### Task 3.1: Docs
-File: docs/maintaining-claude-md.md:1-107, INSTALL.md:55-70, 245-275, 410-417, UPGRADE.md:280-335, docs/rad-tool-portability.md:15-25, 205-215, install.sh:456-492, scripts/test-install-harness.sh:540-600
+File: docs/maintaining-claude-md.md:1-107, INSTALL.md:55-70, 245-275, 410-417, UPGRADE.md:280-335, docs/rad-tool-portability.md:15-25, 205-215, install.sh:456-492, scripts/test-install-harness.sh:500-560
 What: Implement AC#5, plus amendment 1 (`print_next_steps` names `AGENTS.md`, with a test assertion).
 Validate: AC#5, AC#6. Run the full suite list in AC#6. There is no testable surface beyond it.
 
