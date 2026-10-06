@@ -11,3 +11,5 @@ Executor role: architect
 | 1 | 1 | 1.1 Split RAD's own conventions | done | 615206f | 15:54 |
 | 2 | 1 | 1.2 Conventions lint | done | 14434f6 | 15:54 |
 | 3 | 1 | 1.3 draft-insights-plan fallback | done | 97351c2 | 15:54 |
+| 4 | 2 | 2.1 Readers use the fallback | done | 90ec93c | 16:08 |
+| 5 | 2 | 2.2 Install scaffold | done | a98aabe | 16:08 |
