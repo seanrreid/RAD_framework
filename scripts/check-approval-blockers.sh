@@ -23,7 +23,8 @@
 # Exit codes:
 #   0 = no blockers. stdout, in order:
 #       - `high-risk-pattern\t<effective pattern>` as the FIRST line, ONLY when
-#         the effective RAD_HIGH_RISK_PATTERNS differs from the built-in default
+#         the effective pattern (RAD_HIGH_RISK_PATTERNS, else
+#         settings.high_risk_patterns in .rad/config.yml) differs from the built-in default
 #         (plan_high_risk_pattern_is_default). Under the default this line is
 #         absent, so stdout is byte-identical to the pre-tag contract.
 #       - each applied waiver as `<id>\t<justification>` (ids start `high-risk:`
@@ -107,6 +108,19 @@ report_blockers() {
   echo "$count"
 }
 
+# report_pattern_tag
+# Print the `high-risk-pattern` tag line when the effective pattern differs from
+# the built-in default. An unresolvable pattern (is_default exit 2) dies — it is
+# never read as "not default" or printed as an empty pattern.
+report_pattern_tag() {
+  local rc=0 pattern
+  plan_high_risk_pattern_is_default || rc=$?
+  [[ "$rc" -eq 0 ]] && return 0
+  [[ "$rc" -eq 1 ]] || die "could not resolve the high-risk pattern"
+  pattern=$(plan_high_risk_pattern) || die "could not resolve the high-risk pattern"
+  printf '%s\t%s\n' "$HIGH_RISK_PATTERN_TAG" "$pattern"
+}
+
 main() {
   local plan_file="${1:-}" markers findings waivers applied light blockers
   validate_plan_arg "$#" "$plan_file"
@@ -120,9 +134,7 @@ main() {
     echo "$SELF: $blockers approval blocker(s) in $plan_file" >&2
     exit "$EXIT_BLOCKED"
   fi
-  if ! plan_high_risk_pattern_is_default; then
-    printf '%s\t%s\n' "$HIGH_RISK_PATTERN_TAG" "$(plan_high_risk_pattern)"
-  fi
+  report_pattern_tag
   [[ -n "$applied" ]] && printf '%s\n' "$applied"
   exit "$EXIT_OK"
 }
