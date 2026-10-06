@@ -12,3 +12,4 @@ Executor role: architect
 | 2 | Wave 1 | Layer-aware manifest | ✓ complete | 3485123 | 10:33 |
 | 3 | Wave 2 | Hooks dir, rad config settings, install-core conflict | ✓ complete | a130017 | 10:38 |
 | 4 | Wave 2 | Config-backed high-risk pattern | ✓ complete | 5ac2dde | 10:49 |
+| 5 | Wave 3 | Docs and invariants | ✓ complete | bdbca5b | 11:02 |
