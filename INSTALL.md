@@ -34,6 +34,13 @@ bash /tmp/rad/install.sh --dir /path/to/your-project
 
 The script will prompt for any information it needs.
 
+To apply a team preset in the same run, add `--preset <dir>` (see
+[Presets](#presets)):
+
+```bash
+bash /tmp/rad/install.sh --dir /path/to/your-project --preset /path/to/team-preset
+```
+
 ---
 
 ## Non-Interactive Install
@@ -43,6 +50,8 @@ For CI pipelines or scripted setup, skip all prompts:
 ```bash
 bash /tmp/rad/install.sh --dir /path/to/your-project --yes
 ```
+
+`--preset <dir>` works the same way with `--yes`.
 
 ---
 
@@ -107,6 +116,43 @@ drift at any time with `node harness/cli.js install-status`. See
 
 `.claude/agents/` is not populated at install time — the architecture process
 (`/rad-research` → `/rad-design`) generates those files for your specific project.
+
+### Presets
+
+A preset is a team's add-on layer: extra hooks, guardrail extensions, agent
+files, docs, and default settings, installed on top of the core framework and
+tracked in the same `.rad/installed.json`. Use one for org- or client-wide
+defaults that every project should get.
+
+A preset directory holds `preset.yml` (`name`, kebab-case; `version`, a string;
+optional `settings` with `high_risk_patterns` and/or `hooks_dir`) and an optional
+`files/` tree that mirrors the target project. Preset files may only land under
+`scripts/hooks/`, `ai/extensions/`, `.claude/agents/`, or `docs/`.
+
+```bash
+bash /tmp/rad/install.sh --dir /path/to/your-project --preset /path/to/team-preset
+# or, in a project that already has RAD installed:
+node harness/cli.js install-preset --source /path/to/team-preset
+```
+
+- **Add-only.** A path the core layer already owns is refused and nothing is
+  written.
+- **Local edits are kept**, the same as core files: the new version is staged
+  under `.rad/upgrade-pending/`. A preset file you deleted is reported
+  `deleted` and not restored.
+- **Settings are seeded only when absent.** If `.rad/config.yml` has no
+  `settings:` block, the preset's settings are appended as one. If a block
+  already exists, the config is left untouched and each missing key is reported
+  as `unseeded` for you to add by hand.
+- **One preset per project.** The manifest records its name, version, and
+  absolute source path; installing a preset with a different name is refused.
+- **A preset problem never undoes core.** The core install is kept; the
+  installer reports the preset failure at the end and exits 1.
+
+A preset needs `.rad/config.yml`; if the config step failed, the preset step is
+skipped. The RAD repo ships a working example in `presets/example/` (it is not
+installed into projects); its README covers the layout in full. The CLI verbs
+are documented in [docs/rad-cli.md](docs/rad-cli.md#install-commands).
 
 ---
 
@@ -302,6 +348,13 @@ It never touches `CLAUDE.md`, `.claude/agents/`, `.agents/` content, or an exist
 `rad config migrate` to create it from the pre-#87 RAD Configuration block in
 CLAUDE.md (never with `--force`, never editing CLAUDE.md). It works whether or not
 the project was originally set up with the installer.
+
+If a preset is recorded in `.rad/installed.json`, `--upgrade` re-applies it from
+its recorded source after the core upgrade (the same as
+`node harness/cli.js install-preset --reapply`), picking up any changes in that
+source. Pass `--preset <dir>` with `--upgrade` to install or update from a given
+directory instead. If the recorded source directory is gone, the preset step
+fails naming the path; core is still upgraded and the installer exits 1.
 
 See **[UPGRADE.md](UPGRADE.md)** for the full guide, including upgrading
 projects that didn't use the installer, a manual upgrade path, and how local
