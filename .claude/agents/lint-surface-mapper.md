@@ -4,6 +4,7 @@ description: MUST BE USED by convention-lints-orchestrator when mapping lint-pla
 model: claude-haiku-4-5-20251001
 tools: Read, Grep, Glob
 roles: architect
+purpose: context-discipline
 ---
 
 ## Role

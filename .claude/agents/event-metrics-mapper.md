@@ -4,6 +4,7 @@ description: MUST BE USED by event-metrics-orchestrator when mapping the event s
 model: claude-haiku-4-5-20251001
 tools: Read, Grep, Glob
 roles: developer
+purpose: context-discipline
 ---
 
 ## Role
