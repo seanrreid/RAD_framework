@@ -1,7 +1,10 @@
 # Plan: AGENTS.md as the Conventions Source (#171 part 3)
 Created: 2026-10-06
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-10-06T19:32:58.830Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/agents-md-conventions
 Adopted-From: https://github.com/seanrreid/RAD_framework/issues/171
 Issue-Title: Assistant-portable skill surface: one source, generated Claude + Codex wrappers (no symlinks)
