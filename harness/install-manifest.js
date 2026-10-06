@@ -10,6 +10,9 @@
  * Constraints:
  * - User data (CLAUDE.md, .claude/agents/, .claude/settings*.json, .agents/,
  *   .rad/) is never in the core set: only the CORE_* roots below are walked.
+ *   Two narrow exceptions (#171 part 2): the .rad/skills and .rad/agents
+ *   generator sources, and files under MARKED_ROOTS that carry the generated
+ *   marker. Nothing else under .rad/ (config.yml, installed.json) ever ships.
  * - Symlinks and non-regular files are skipped, never followed (#168).
  * - A malformed manifest fails closed: readManifest returns an error, never
  *   "missing", so a caller can never mistake it for a fresh install.
@@ -25,6 +28,7 @@ import {
   readFileSync, writeFileSync, readdirSync, lstatSync, mkdirSync, copyFileSync, chmodSync, renameSync,
 } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
+import { hasGeneratedMarker } from './generated-marker.js';
 
 /** Manifest location, relative to the target root. */
 export const MANIFEST_PATH = '.rad/installed.json';
@@ -53,6 +57,10 @@ const SHA256_HEX = /^[0-9a-f]{64}$/;
 const CORE_TREES = ['.claude/commands', '.claude/skills', 'ai', 'scripts/lib', 'scripts/hooks', 'harness'];
 /** Directories where only top-level files with the given suffix are core. */
 const CORE_FLAT = [{ dir: 'scripts', suffix: '.sh' }];
+/** `rad generate` source trees: shipped whole, so a target can regenerate. */
+const SOURCE_TREES = ['.rad/skills', '.rad/agents'];
+/** User-data roots where only files carrying the generated marker are core. */
+const MARKED_ROOTS = ['.claude/agents', '.agents/skills', '.codex/agents'];
 /** Subtrees excluded from CORE_TREES (installed per-target, never copied). */
 const EXCLUDED_TREES = ['harness/node_modules'];
 /** OS litter never shipped. */
@@ -90,6 +98,15 @@ function walkFlat(root, { dir, suffix }, out) {
   }
 }
 
+/** Collect regular files under `rel` that carry the generated marker (symlinks never followed). */
+function walkMarked(root, rel, out) {
+  const found = new Set();
+  walkTree(root, rel, found);
+  for (const path of found) {
+    if (hasGeneratedMarker(readFileSync(join(root, path), 'utf8'))) out.add(path);
+  }
+}
+
 /**
  * The core file set of a RAD source tree: sorted posix paths relative to
  * `sourceRoot`. This is the ONLY definition of what RAD owns in a target.
@@ -101,6 +118,8 @@ export function listCoreFiles(sourceRoot) {
   const out = new Set();
   for (const tree of CORE_TREES) walkTree(sourceRoot, tree, out);
   for (const flat of CORE_FLAT) walkFlat(sourceRoot, flat, out);
+  for (const tree of SOURCE_TREES) walkTree(sourceRoot, tree, out);
+  for (const root of MARKED_ROOTS) walkMarked(sourceRoot, root, out);
   return [...out].sort();
 }
 

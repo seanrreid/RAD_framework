@@ -267,3 +267,17 @@ invariants:
       - { file: harness/adapters/agent/acp.js, symbol: "if (init?.protocolVersion !== ACP_PROTOCOL_VERSION) {", note: "initializeAgent throws fail-protocol before session/new or any session/prompt" }
       - { file: harness/adapters/agent/acp.js, symbol: "await initializeAgent(session);", note: "the handshake runs initialize first on every path (waves, preflight, acp-check)" }
     bypasses: []
+
+  - id: generated-wrappers-match-source
+    claim: "Every file carrying the generated marker equals what `rad generate` renders from its `.rad/` source, and no marked file lacks a source."
+    authority: "harness/generate.js (planGenerate) and the .rad/ sources"
+    not_evalable: "build-time check with no agent-reachable bypass; covered by the generated-drift CI job and harness/test/generate.test.js"
+    enforced_by:
+      - { file: harness/generate.js, symbol: "export function planGenerate", note: "renders every output and flags marked files with no source" }
+      - { file: harness/generated-marker.js, symbol: "export const GENERATED_MARKER", note: "the marker that puts a file under the drift check" }
+      - { file: .github/workflows/ci.yml, symbol: "node harness/cli.js generate --check", note: "generated-drift CI job" }
+    bypasses:
+      - id: unmarked-hand-edit
+        surface: "a hand-written file without the generated marker"
+        guarded: "no"
+        note: "unmarked files are outside the drift check by design (e.g. the Claude rad-review command)"

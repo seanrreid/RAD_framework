@@ -339,3 +339,32 @@ test('plan: a symlinked output file or output ancestor is a conflict, never foll
     assert.equal(readFileSync(join(root, 'outside/helper.md'), 'utf8'), 'x\n');
   });
 });
+
+test('skill: claude: none + codex: skill emits only the Codex skill', async () => {
+  await withRoot({ '.rad/skills/codex-only/SKILL.md': skillSource('codex-only', ['claude: none', 'codex: skill'], 'Run {{args}}.\n') },
+    async (root) => {
+      const out = await generated(root);
+      assert.deepEqual(Object.keys(out), ['.agents/skills/codex-only/SKILL.md']);
+      assert.match(out['.agents/skills/codex-only/SKILL.md'], /^---\nname: codex-only\n[\s\S]*Run the text the user wrote after the skill name\.\n$/);
+    });
+});
+
+test('skill: claude: none + codex: skill with codex_implicit: false also emits agents/openai.yaml only', async () => {
+  const targets = ['claude: none', 'codex: skill', 'codex_implicit: false'];
+  await withRoot({ '.rad/skills/quiet/SKILL.md': skillSource('quiet', targets) }, async (root) => {
+    const out = await generated(root);
+    assert.deepEqual(Object.keys(out), ['.agents/skills/quiet/SKILL.md', '.agents/skills/quiet/agents/openai.yaml']);
+  });
+});
+
+test('errors: claude: none with codex: none, and a claude.md override with claude: none', async () => {
+  await assertSourceError({ '.rad/skills/s/SKILL.md': skillSource('s', ['claude: none', 'codex: none']) },
+    /claude: none and codex: none emit nothing/);
+  await assertSourceError({ '.rad/skills/s/SKILL.md': skillSource('s', ['claude: none', 'codex: skill']), '.rad/skills/s/claude.md': 'x' },
+    /claude\.md: override for claude, but claude: none/);
+});
+
+test('errors: an unknown claude target names none as an allowed value', async () => {
+  await assertSourceError({ '.rad/skills/s/SKILL.md': skillSource('s', ['claude: nothing', 'codex: skill']) },
+    /unknown target claude: "nothing" \(expected 'skill', 'none' or 'command:<subdir>\/<file>'\)/);
+});

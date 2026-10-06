@@ -6,10 +6,11 @@ Codex CLI, defines the single-source format that `rad generate` turns into
 both assistants' files, and records which part of #171 (or the parity
 follow-up #186) brings each piece across.
 
-Status as of 2026-10-06: part 1 is delivered (this doc, the generator, the
-`generated-drift` CI job, self-protected Codex paths). No real command, skill
-or agent has a `.rad/` source yet, so every row below is still `claude-only`
-in practice; the status column says where it is headed.
+Status as of 2026-10-06: parts 1 and 2 are delivered. Part 1 brought this
+doc, the generator, the `generated-drift` CI job and self-protected Codex
+paths; part 2 migrated the read-only slice into `.rad/` sources. Rows marked
+`generated` have a `.rad/` source and marked outputs; every other row is still
+`claude-only` in practice, and the status column says where it is headed.
 
 ---
 
@@ -18,7 +19,7 @@ in practice; the status column says where it is headed.
 | Part | Delivers | Tracking |
 |------|----------|----------|
 | 1 | This doc; `harness/generate.js`; `rad generate [--check]`; CI `generated-drift`; `^\.codex/` and `^\.agents/skills/` self-protected | #171 |
-| 2 | Read-only slice migrated into `.rad/`: both reviewers, `quality-review`, `accessibility-review`, `rad-status`, a Codex `rad-review` wrapper over `rad review`. Generated outputs and reviewers shipped through core, invariants added | #171 |
+| 2 | Read-only slice migrated into `.rad/`: both reviewers, `quality-review`, `accessibility-review`, `rad-status`, a Codex-only `rad-review` (deterministic scripts plus reviewer sub-agents). Generated outputs and reviewers shipped through core, invariant added. Delivered | #171 |
 | 3 | `AGENTS.md` as the conventions source, `CLAUDE.md` importing it with `@AGENTS.md` (install scaffold, `config migrate`, `lint-claude-md`) | #171 |
 | Parity | State-changing workflow for Codex (plan, adopt, approve, deliver, design, research, epic-decompose, insights, kickoff/wrap); the deliver-gate hook shipping gap | #186 |
 
@@ -49,14 +50,14 @@ Columns:
 | rad-design | `.claude/commands/architect/rad-design.md` | `.agents/skills/rad-design/SKILL.md` | `.rad/skills/rad-design/SKILL.md` | wrapper | sub-agent, `$ARGUMENTS` | yes | planned: parity issue #186 |
 | rad-epic-decompose | `.claude/commands/architect/rad-epic-decompose.md` | `.agents/skills/rad-epic-decompose/SKILL.md` | `.rad/skills/rad-epic-decompose/SKILL.md` | as-is | `$ARGUMENTS`, `gh` | artifact | planned: parity issue #186 |
 | rad-insights | `.claude/commands/shared/rad-insights.md` | `.agents/skills/rad-insights/SKILL.md` | `.rad/skills/rad-insights/SKILL.md` | wrapper | `$ARGUMENTS`, `$1/$2` | yes (`--draft-plans` only) | planned: parity issue #186 |
-| rad-status | `.claude/commands/shared/rad-status.md` | `.agents/skills/rad-status/SKILL.md` | `.rad/skills/rad-status/SKILL.md` | as-is | none | no | planned: part 2 |
+| rad-status | `.claude/commands/shared/rad-status.md` | `.agents/skills/rad-status/SKILL.md` | `.rad/skills/rad-status/SKILL.md` | as-is | none | no | generated (#171 part 2) |
 | rad-plan | `.claude/commands/team/rad-plan.md` | `.agents/skills/rad-plan/SKILL.md` | `.rad/skills/rad-plan/SKILL.md` | wrapper | sub-agent, `$ARGUMENTS` | yes | planned: parity issue #186 |
 | rad-adopt | `.claude/commands/team/rad-adopt.md` | `.agents/skills/rad-adopt/SKILL.md` | `.rad/skills/rad-adopt/SKILL.md` | wrapper | `$ARGUMENTS`, `gh` | yes | planned: parity issue #186 |
 | rad-deliver | `.claude/commands/team/rad-deliver.md` | `.agents/skills/rad-deliver/SKILL.md` (+ `agents/openai.yaml`) | `.rad/skills/rad-deliver/SKILL.md` | wrapper | sub-agent, `$ARGUMENTS` | yes | planned: parity issue #186 |
 | rad-research | `.claude/commands/team/rad-research.md` | `.agents/skills/rad-research/SKILL.md` | `.rad/skills/rad-research/SKILL.md` | wrapper | sub-agent, `$ARGUMENTS` | artifact | planned: parity issue #186 |
-| rad-review | `.claude/commands/team/rad-review.md` | `.agents/skills/rad-review/SKILL.md` | `.rad/skills/rad-review/SKILL.md` | wrapper | sub-agent, `$ARGUMENTS` | artifact (`.agents/findings.jsonl`) | planned: part 2 |
-| quality-review | `.claude/commands/team/quality-review.md` | `.agents/skills/quality-review/SKILL.md` | `.rad/skills/quality-review/SKILL.md` | wrapper | sub-agent, `$ARGUMENTS` | no | planned: part 2 |
-| accessibility-review | `.claude/commands/team/accessibility-review.md` | `.agents/skills/accessibility-review/SKILL.md` | `.rad/skills/accessibility-review/SKILL.md` | wrapper | sub-agent, `$ARGUMENTS` | no | planned: part 2 |
+| rad-review | `.claude/commands/team/rad-review.md` (hand-written, not generated) | `.agents/skills/rad-review/SKILL.md` | `.rad/skills/rad-review/SKILL.md` (Codex-only, `claude: none`) | n/a (Codex only) | sub-agent, `$ARGUMENTS` | Claude: artifact (`.agents/findings.jsonl`); Codex: no | Codex generated (#171 part 2); Claude hand-written |
+| quality-review | `.claude/commands/team/quality-review.md` | `.agents/skills/quality-review/SKILL.md` | `.rad/skills/quality-review/SKILL.md` | wrapper | sub-agent, `$ARGUMENTS` | no | generated (#171 part 2) |
+| accessibility-review | `.claude/commands/team/accessibility-review.md` | `.agents/skills/accessibility-review/SKILL.md` | `.rad/skills/accessibility-review/SKILL.md` | wrapper | sub-agent, `$ARGUMENTS` | no | generated (#171 part 2) |
 
 ### Skills
 
@@ -69,16 +70,20 @@ Columns:
 
 | Tool | Claude path | Codex path | Source | Body | Deps | State | Status |
 |------|-------------|------------|--------|------|------|-------|--------|
-| quality-reviewer | `.claude/agents/quality-reviewer.md` | `.codex/agents/quality-reviewer.toml` | `.rad/agents/quality-reviewer.md` | as-is | none (tools: Read, Bash) | no | planned: part 2 |
-| accessibility-reviewer | `.claude/agents/accessibility-reviewer.md` | `.codex/agents/accessibility-reviewer.toml` | `.rad/agents/accessibility-reviewer.md` | as-is | none (tools: Read, Bash) | no | planned: part 2 |
+| quality-reviewer | `.claude/agents/quality-reviewer.md` | `.codex/agents/quality-reviewer.toml` | `.rad/agents/quality-reviewer.md` | as-is | none (tools: Read, Bash) | no | generated (#171 part 2) |
+| accessibility-reviewer | `.claude/agents/accessibility-reviewer.md` | `.codex/agents/accessibility-reviewer.toml` | `.rad/agents/accessibility-reviewer.md` | as-is | none (tools: Read, Bash) | no | generated (#171 part 2) |
 | 27 orchestrator and mapper agents | `.claude/agents/*-orchestrator.md`, `*-mapper.md` | none | none | n/a | n/a | n/a | not shipped, not ported (RAD-repo-internal, produced by `/rad-design` for this repo's own features) |
 
 ### Why the borderline rows landed where they did
 
-- **rad-review in part 2**: the Claude version dispatches reviewers itself;
-  the Codex version is a thin wrapper over `rad review <reviewer>`, which
-  already runs a reviewer agent through the review lane. It only appends to
-  `.agents/findings.jsonl`, so it belongs with the read-only slice.
+- **rad-review in part 2**: the Claude command stays hand-written and
+  unmarked. The Codex skill comes from a Codex-only source (`claude: none`):
+  it runs `scripts/check-scope.sh`, `scripts/lint-plan.sh`,
+  `scripts/check-approval-blockers.sh` and `scripts/check-tests-present.sh`,
+  then spawns the `quality-reviewer` sub-agent (and `accessibility-reviewer`
+  when UI files changed). It does not call `rad review`, never writes
+  `.agents/findings.jsonl`, and never commits or pushes, so it belongs with
+  the read-only slice. Findings recording can follow with #186.
 - **rad-insights in #186**: reading is its main job, but `--draft-plans` cuts
   a `rad/insights-proposals-<date>` branch and commits a plan, and its
   positional args need a Codex override body. One migration, not two.
@@ -213,9 +218,9 @@ specific material staying in `CLAUDE.md`.
 
 | Gap | Effect | Fixed by |
 |-----|--------|----------|
-| `quality-reviewer` and `accessibility-reviewer` are not shipped by core (`.claude/agents/` is user data in `harness/install-manifest.js`), yet `rad review` loads `.claude/agents/<reviewer>.md` | `rad review` fails in an installed project that never ran `/rad-design` | Part 2 (ships the reviewers and their generated outputs) |
+| `quality-reviewer` and `accessibility-reviewer` are not shipped by core (`.claude/agents/` is user data in `harness/install-manifest.js`), yet `rad review` loads `.claude/agents/<reviewer>.md` | `rad review` fails in an installed project that never ran `/rad-design` | Fixed in part 2: core ships the `.rad/agents` and `.rad/skills` sources and every marked file under `.claude/agents`, `.agents/skills` and `.codex/agents` |
 | `scripts/deliver-gate-hook.mjs` and its `.claude/settings.json` registration are not shipped | Installed projects get the harness check but not the hook layer | #186 (the hook is about deliver; ships with the deliver parity work) |
-| `scripts/lint-agent-files.sh:15-17` says reviewers have no `roles:`, but they do | Misleading comment only | Part 2 (with the reviewer migration) |
+| `scripts/lint-agent-files.sh:15-17` says reviewers have no `roles:`, but they do | Misleading comment only | Fixed in part 2 (comment corrected with the reviewer migration) |
 
 ---
 
