@@ -39,6 +39,12 @@ Decisions (2026-10-06, recorded on #171):
 - **Fallback, no automatic move.** Every reader uses `AGENTS.md` when it exists, else `CLAUDE.md`. Fresh installs get `AGENTS.md` plus a `CLAUDE.md` that imports it. Upgrades never touch a user's `CLAUDE.md`; they print a one-line hint, and `UPGRADE.md` documents the manual move. RAD's own repo moves now.
 - **Lint both files.** The advisory budget applies to `AGENTS.md` and `CLAUDE.md`, plus a warning above Codex's 32 KiB `AGENTS.md` cap.
 
+**Amendment 1 (2026-10-06, during delivery, after Wave 2):** `install.sh` `print_next_steps` (456-492) was outside the declared ranges, and it still says to:
+- "fill in CLAUDE.md";
+- run `git add` without `AGENTS.md`;
+- remember that only `CLAUDE.md` is unchanged on upgrade.
+Task 3.1 now also updates it: point to `AGENTS.md` for conventions, add `AGENTS.md` to the `git add` line, and name both files as unchanged on upgrade. `scripts/test-install-harness.sh` adds an assertion on the new next-steps text.
+
 ## Scope
 
 | In scope | Out of scope |
@@ -149,6 +155,8 @@ Generated outputs and unchanged bodies list only the region the executor must lo
 | INSTALL.md | 55-70, 245-275, 410-417 | Both files |
 | UPGRADE.md | 280-335 | "Moving conventions to AGENTS.md" section |
 | docs/rad-tool-portability.md | 15-25, 205-215 | Part 3 delivered |
+| install.sh | 456-492 | Amendment 1: `print_next_steps` names AGENTS.md |
+| scripts/test-install-harness.sh | 540-600 | Amendment 1: next-steps text assertion |
 
 ## Execution Notes
 
@@ -250,8 +258,8 @@ Commands: every `scripts/test-*.sh` under both shells; `scripts/lint-shell-safet
 This wave documents the shipped behaviour.
 
 #### Task 3.1: Docs
-File: docs/maintaining-claude-md.md:1-107, INSTALL.md:55-70, 245-275, 410-417, UPGRADE.md:280-335, docs/rad-tool-portability.md:15-25, 205-215
-What: Implement AC#5.
+File: docs/maintaining-claude-md.md:1-107, INSTALL.md:55-70, 245-275, 410-417, UPGRADE.md:280-335, docs/rad-tool-portability.md:15-25, 205-215, install.sh:456-492, scripts/test-install-harness.sh:540-600
+What: Implement AC#5, plus amendment 1 (`print_next_steps` names `AGENTS.md`, with a test assertion).
 Validate: AC#5, AC#6. Run the full suite list in AC#6. There is no testable surface beyond it.
 
 ## Program Design
