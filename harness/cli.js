@@ -50,6 +50,7 @@ import {
   readManifest, planInstall, applyInstall, installDrift, planPresetInstall, applyPresetInstall,
 } from './install-manifest.js';
 import { readPreset } from './preset.js';
+import { readSources, renderOutputs, planGenerate, applyGenerate } from './generate.js';
 
 /** Usage line for `rad deliver` (help, parse errors, and the command table). */
 const DELIVER_USAGE = 'rad deliver <feature> [--model <model-id>] [--resume --context <text>]';
@@ -71,6 +72,8 @@ const INSTALL_PRESET_USAGE = 'rad install-preset (--source <dir> | --reapply) [-
 const INSTALL_STATUS_USAGE = 'rad install-status [--target <dir>]';
 /** Usage line for `rad acp-check`. */
 const ACP_CHECK_USAGE = 'rad acp-check --cmd "<agent>" [--timeout <seconds>]';
+/** Usage line for `rad generate`. */
+const GENERATE_USAGE = 'rad generate [--check] [--root <dir>]';
 /** Usage line for `rad config`. */
 const CONFIG_USAGE = 'rad config get <key> | rad config validate | rad config settings'
   + ' | rad config migrate [--from <path>] [--force] | rad config init [--architect <id>] [--platform <p>] [--default-branch <b>] [--force]';
@@ -147,6 +150,11 @@ const SUBCOMMANDS = {
     summary: 'Run the ACP v1 conformance check against an agent command (writes nothing).',
     usage: ACP_CHECK_USAGE,
     run: (argv, ctx) => acpCheckCommand(argv, ctx),
+  },
+  generate: {
+    summary: 'Generate Claude and Codex files from .rad/ sources; --check reports drift and orphans (writes nothing).',
+    usage: GENERATE_USAGE,
+    run: (argv, ctx) => generateCommand(argv, ctx),
   },
   'owner-claim': {
     summary: 'Claim the single-writer lock on a feature (records who holds it).',
@@ -3602,6 +3610,107 @@ export async function acpCheckCommand(argv, ctx) {
   const passed = report.checks.filter((c) => c.ok).length;
   process.stdout.write(`rad acp-check: ${report.ok ? 'ok' : 'failed'}, ${passed} of ${total} checks passed\n`);
   return report.ok ? 0 : FAILED_EXIT_CODE;
+}
+
+/** Prefix for every `rad generate` stderr line. */
+const GENERATE_PREFIX = 'rad generate';
+
+/**
+ * Parse `generate` argv. Throws on an unknown flag, a stray argument, a
+ * repeated flag, or a `--root` with no value.
+ *
+ * @param {string[]} argv
+ * @returns {{ check: boolean, root?: string }}
+ */
+function parseGenerateArgs(argv) {
+  const out = { check: false };
+  for (let i = 0; i < argv.length; i++) {
+    const flag = argv[i];
+    if (flag === '--check') {
+      if (out.check) throw new Error('--check given more than once');
+      out.check = true;
+      continue;
+    }
+    if (flag !== '--root') {
+      throw new Error(flag.startsWith('--') ? `unknown option '${flag}'` : `unexpected argument '${flag}'`);
+    }
+    const value = argv[++i];
+    if (!isNonEmpty(value) || value.startsWith('--')) throw new Error('--root requires a <dir>');
+    if ('root' in out) throw new Error('--root given more than once');
+    out.root = value;
+  }
+  return out;
+}
+
+/** Print each error (already path-prefixed) to stderr; exit 2. */
+function reportGenerateErrors(errors) {
+  for (const e of errors) process.stderr.write(`${GENERATE_PREFIX}: ${e}\n`);
+  return USAGE_EXIT_CODE;
+}
+
+/** Name every conflict on stderr, then `nothing written`; exit 2. */
+function reportGenerateConflicts(conflicts) {
+  for (const { path, reason } of conflicts) process.stderr.write(`${GENERATE_PREFIX}: conflict ${path}: ${reason}\n`);
+  process.stderr.write(`${GENERATE_PREFIX}: nothing written\n`);
+  return USAGE_EXIT_CODE;
+}
+
+/** `--check`: print drift then orphans; exit 1 when either is non-empty, else 0. */
+function reportGenerateCheck(plan) {
+  for (const path of plan.drift) process.stdout.write(`drift ${path}\n`);
+  for (const path of plan.orphans) process.stdout.write(`orphan ${path}\n`);
+  return plan.drift.length + plan.orphans.length > 0 ? FAILED_EXIT_CODE : 0;
+}
+
+/**
+ * Write mode: apply the plan, then print `wrote`, `unchanged`, and `orphan`
+ * lines. Orphans are reported for the operator to delete (never deleted here)
+ * and do not fail write mode; `--check` is the gate that fails on them.
+ */
+function writeGenerated(root, plan) {
+  let wrote;
+  try {
+    ({ wrote } = applyGenerate(root, plan));
+  } catch (err) {
+    process.stderr.write(`${GENERATE_PREFIX}: ${err.message}\n`);
+    return USAGE_EXIT_CODE;
+  }
+  for (const path of wrote) process.stdout.write(`wrote ${path}\n`);
+  for (const path of plan.unchanged) process.stdout.write(`unchanged ${path}\n`);
+  for (const path of plan.orphans) process.stdout.write(`orphan ${path}\n`);
+  return 0;
+}
+
+/**
+ * `generate [--check] [--root <dir>]` — render every output for the sources
+ * under <root>/.rad/ (root defaults to the repo root). Default mode writes them;
+ * `--check` writes nothing and reports `drift <path>` (missing or differing)
+ * and `orphan <path>` (a marked file with no source). An unmarked file at an
+ * output path is a conflict: named on stderr, and nothing is written.
+ *
+ * Exit 0 clean or written; 1 drift or orphans under --check; 2 bad argv, no
+ * .rad/, a source error, or any conflict.
+ *
+ * @param {string[]} argv - args after `generate`
+ * @param {{ repoRoot: string }} ctx
+ * @returns {Promise<number>}
+ */
+export async function generateCommand(argv, ctx) {
+  let args;
+  try {
+    args = parseGenerateArgs(argv);
+  } catch (err) {
+    process.stderr.write(`${GENERATE_PREFIX}: ${err.message}\nUsage: ${GENERATE_USAGE}\n`);
+    return USAGE_EXIT_CODE;
+  }
+  const root = args.root ? resolve(args.root) : ctx.repoRoot;
+  const read = await readSources(root);
+  if (!read.ok) return reportGenerateErrors(read.errors);
+  const rendered = renderOutputs(read.sources);
+  if (!rendered.ok) return reportGenerateErrors(rendered.errors);
+  const plan = planGenerate(root, rendered.outputs);
+  if (plan.conflicts.length) return reportGenerateConflicts(plan.conflicts);
+  return args.check ? reportGenerateCheck(plan) : writeGenerated(root, plan);
 }
 
 /**

@@ -13,7 +13,7 @@ import {
   approveCommand, gateCommand, parsePlanCtx, deliverCommand, stopStatusCommand, forecastCommand, digestCommand,
   resolveHooksDir, makeSpineScriptPort, SCRIPT_ARG_KEYS, reviewCommand, resolveAgent, isMainModule,
   capabilitiesCommand, installCoreCommand, installPresetCommand, installStatusCommand, configCommand,
-  acpCheckCommand,
+  acpCheckCommand, generateCommand,
 } from '../cli.js';
 import { buildReviewPrompt, reviewInstruction } from '../review.js';
 import { REVIEW_INSTRUCTION } from '../evals/reviewers/lib.js';
@@ -2887,4 +2887,153 @@ test('acp-check — argv errors exit 2 with usage and run no agent', async () =>
     assert.match(stderr, pattern, argv.join(' '));
     assert.match(stderr, /Usage: rad acp-check --cmd "<agent>" \[--timeout <seconds>\]/);
   }
+});
+
+// ---------------------------------------------------------------------------
+// rad generate (#171 part 1, AC#3)
+// ---------------------------------------------------------------------------
+
+const GEN_SKILL = `---
+name: review-x
+description: Review things.
+targets:
+  claude: command:team/review-x
+  codex: skill
+---
+
+Review {{args}} carefully.
+`;
+const GEN_SKILL_SOURCE = '.rad/skills/review-x/SKILL.md';
+const GEN_CLAUDE_OUT = '.claude/commands/team/review-x.md';
+const GEN_CODEX_OUT = '.agents/skills/review-x/SKILL.md';
+// Outputs are reported in sorted path order: the Codex (.agents/) path sorts first.
+const GEN_USAGE = /Usage: rad generate \[--check\] \[--root <dir>\]/;
+
+/** A temp root holding `files` (rel -> text); `fn` gets the root. Cleaned up after. */
+async function withGenRoot(files, fn) {
+  const root = mkdtempSync(join(tmpdir(), 'rad-cli-generate-'));
+  try {
+    for (const [rel, content] of Object.entries(files)) {
+      mkdirSync(dirname(join(root, rel)), { recursive: true });
+      writeFileSync(join(root, rel), content);
+    }
+    return await fn(root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+/** Run generateCommand with `argv` against `root` (via --root) and capture output. */
+function runGenerate(root, argv = []) {
+  return captureStdio(() => generateCommand([...argv, '--root', root], { repoRoot: HERE }));
+}
+
+test('generate — writes every output, then a second run reports each as unchanged', async () => {
+  await withGenRoot({ [GEN_SKILL_SOURCE]: GEN_SKILL }, async (root) => {
+    const first = await runGenerate(root);
+    assert.equal(first.code, 0, first.stderr);
+    assert.equal(first.stdout, `wrote ${GEN_CODEX_OUT}\nwrote ${GEN_CLAUDE_OUT}\n`);
+    assert.match(readFileSync(join(root, GEN_CLAUDE_OUT), 'utf8'), /\$ARGUMENTS/);
+    const second = await runGenerate(root);
+    assert.equal(second.code, 0, second.stderr);
+    assert.equal(second.stdout, `unchanged ${GEN_CODEX_OUT}\nunchanged ${GEN_CLAUDE_OUT}\n`);
+  });
+});
+
+test('generate --check — clean after generate (exit 0), writes nothing before it', async () => {
+  await withGenRoot({ [GEN_SKILL_SOURCE]: GEN_SKILL }, async (root) => {
+    const before = await runGenerate(root, ['--check']);
+    assert.equal(before.code, 1);
+    assert.equal(before.stdout, `drift ${GEN_CODEX_OUT}\ndrift ${GEN_CLAUDE_OUT}\n`);
+    assert.equal(existsSync(join(root, GEN_CLAUDE_OUT)), false, '--check must write nothing');
+    await runGenerate(root);
+    const after = await runGenerate(root, ['--check']);
+    assert.equal(after.code, 0, after.stdout + after.stderr);
+    assert.equal(after.stdout, '');
+  });
+});
+
+test('generate --check — a hand-edited output and a deleted output are drift (exit 1)', async () => {
+  await withGenRoot({ [GEN_SKILL_SOURCE]: GEN_SKILL }, async (root) => {
+    await runGenerate(root);
+    writeFileSync(join(root, GEN_CLAUDE_OUT), `${readFileSync(join(root, GEN_CLAUDE_OUT), 'utf8')}hand edit\n`);
+    rmSync(join(root, GEN_CODEX_OUT));
+    const { code, stdout } = await runGenerate(root, ['--check']);
+    assert.equal(code, 1);
+    assert.equal(stdout, `drift ${GEN_CODEX_OUT}\ndrift ${GEN_CLAUDE_OUT}\n`);
+  });
+});
+
+test('generate — a marked output whose source was removed is an orphan: --check exit 1, write mode reports it and keeps it', async () => {
+  await withGenRoot({ [GEN_SKILL_SOURCE]: GEN_SKILL }, async (root) => {
+    await runGenerate(root);
+    rmSync(join(root, '.rad', 'skills'), { recursive: true });
+    const check = await runGenerate(root, ['--check']);
+    assert.equal(check.code, 1);
+    assert.equal(check.stdout, `orphan ${GEN_CODEX_OUT}\norphan ${GEN_CLAUDE_OUT}\n`);
+    const write = await runGenerate(root);
+    assert.equal(write.code, 0, write.stderr);
+    assert.match(write.stdout, new RegExp(`^orphan ${GEN_CLAUDE_OUT}$`, 'm'));
+    assert.equal(existsSync(join(root, GEN_CLAUDE_OUT)), true, 'orphans are never deleted');
+  });
+});
+
+test('generate — an unmarked file at an output path is a conflict: exit 2, named, nothing written', async () => {
+  const handWritten = '# hand-written command\n';
+  await withGenRoot({ [GEN_SKILL_SOURCE]: GEN_SKILL, [GEN_CLAUDE_OUT]: handWritten }, async (root) => {
+    for (const argv of [[], ['--check']]) {
+      const { code, stdout, stderr } = await runGenerate(root, argv);
+      assert.equal(code, 2, argv.join(' '));
+      assert.match(stderr, new RegExp(`^rad generate: conflict ${GEN_CLAUDE_OUT}: `, 'm'));
+      assert.match(stderr, /^rad generate: nothing written$/m);
+      assert.equal(stdout, '');
+    }
+    assert.equal(readFileSync(join(root, GEN_CLAUDE_OUT), 'utf8'), handWritten);
+    assert.equal(existsSync(join(root, GEN_CODEX_OUT)), false, 'no output is written when any conflicts');
+  });
+});
+
+test('generate — no .rad/ directory exits 2', async () => {
+  await withGenRoot({}, async (root) => {
+    for (const argv of [[], ['--check']]) {
+      const { code, stderr } = await runGenerate(root, argv);
+      assert.equal(code, 2);
+      assert.match(stderr, /^rad generate: \.rad\/: no source directory at /m);
+    }
+  });
+});
+
+test('generate — a source error exits 2 naming the source path, writing nothing', async () => {
+  const bad = GEN_SKILL.replace('Review {{args}}', 'Review {{bogus}}');
+  await withGenRoot({ [GEN_SKILL_SOURCE]: bad }, async (root) => {
+    const { code, stdout, stderr } = await runGenerate(root);
+    assert.equal(code, 2);
+    assert.equal(stdout, '');
+    assert.match(stderr, new RegExp(`^rad generate: ${GEN_SKILL_SOURCE.replace(/\./g, '\\.')}`, 'm'));
+    assert.equal(existsSync(join(root, '.claude')), false);
+  });
+});
+
+test('generate — argv errors exit 2 with usage and read nothing', async () => {
+  const cases = [
+    [['--bogus'], /unknown option '--bogus'/],
+    [['stray'], /unexpected argument 'stray'/],
+    [['--root'], /--root requires a <dir>/],
+    [['--root', '--check'], /--root requires a <dir>/],
+    [['--root', 'a', '--root', 'b'], /--root given more than once/],
+    [['--check', '--check'], /--check given more than once/],
+  ];
+  for (const [argv, pattern] of cases) {
+    const { code, stdout, stderr } = await captureStdio(() => generateCommand(argv, { repoRoot: HERE }));
+    assert.equal(code, 2, argv.join(' '));
+    assert.equal(stdout, '');
+    assert.match(stderr, pattern, argv.join(' '));
+    assert.match(stderr, GEN_USAGE);
+  }
+});
+
+test('generate --check — the real repo (no .rad/skills or .rad/agents yet) exits 0 through the CLI', () => {
+  const repoRoot = resolve(HERE, '..', '..');
+  const stdout = execFileSync(process.execPath, [CLI, 'generate', '--check'], { encoding: 'utf8', cwd: repoRoot });
+  assert.equal(stdout, '');
 });
