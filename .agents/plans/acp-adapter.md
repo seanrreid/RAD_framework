@@ -1,7 +1,10 @@
 # Plan: ACP Agent Adapter (#86 part 1)
 Created: 2026-10-06
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-10-06T16:39:07.202Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/acp-adapter
 Adopted-From: https://github.com/seanrreid/RAD_framework/issues/86
 Issue-Title: Give the provider seam a protocol, not two bespoke adapters: evaluate ACP + a _rad/ extension namespace
