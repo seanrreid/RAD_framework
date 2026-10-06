@@ -42,11 +42,13 @@ import { gatherDigestInputs, buildDigest, renderDigest } from './digest.js';
 import { buildReviewPrompt, parseFindings } from './review.js';
 import {
   CONFIG_PATH, SETTINGS_KEYS, loadConfig, getConfigValue, migrateFromClaudeMd, serializeConfig, validateConfig,
-  buildInitConfig,
+  buildInitConfig, seedSettings, writeConfigAtomic,
 } from './config.js';
 import {
-  MANIFEST_PATH, PENDING_DIR, UNKNOWN_RAD_VERSION, readManifest, planInstall, applyInstall, installDrift,
+  MANIFEST_PATH, PENDING_DIR, UNKNOWN_RAD_VERSION, CORE_LAYER, PRESET_LAYER, PRESET_NEEDS_CORE_ERROR,
+  readManifest, planInstall, applyInstall, installDrift, planPresetInstall, applyPresetInstall,
 } from './install-manifest.js';
+import { readPreset } from './preset.js';
 
 /** Usage line for `rad deliver` (help, parse errors, and the command table). */
 const DELIVER_USAGE = 'rad deliver <feature> [--model <model-id>] [--resume --context <text>]';
@@ -62,6 +64,8 @@ const REVIEW_USAGE = 'rad review <reviewer> [--base <ref>]';
 const CAPABILITIES_USAGE = 'rad capabilities <feature> [--plan <path>]';
 /** Usage line for `rad install-core`. */
 const INSTALL_CORE_USAGE = 'rad install-core --source <dir> [--target <dir>]';
+/** Usage line for `rad install-preset`. */
+const INSTALL_PRESET_USAGE = 'rad install-preset --source <dir> [--target <dir>]';
 /** Usage line for `rad install-status`. */
 const INSTALL_STATUS_USAGE = 'rad install-status [--target <dir>]';
 /** Usage line for `rad config`. */
@@ -125,6 +129,11 @@ const SUBCOMMANDS = {
     summary: 'Install or upgrade RAD core files into a target, never overwriting local edits.',
     usage: INSTALL_CORE_USAGE,
     run: (argv, ctx) => installCoreCommand(argv, ctx),
+  },
+  'install-preset': {
+    summary: 'Install or upgrade a preset over an installed core and seed its settings, never overwriting local edits.',
+    usage: INSTALL_PRESET_USAGE,
+    run: (argv, ctx) => installPresetCommand(argv, ctx),
   },
   'install-status': {
     summary: 'Report core files that drifted from .rad/installed.json (read-only).',
@@ -3165,8 +3174,13 @@ export async function capabilitiesCommand(argv, ctx) {
   return 0;
 }
 
-/** Action order for the install-core summary line. */
+/** Action order for the install summary line. */
 const INSTALL_ACTIONS = ['write', 'keep', 'deleted', 'backup-write'];
+/** Report-line prefixes of the install verbs. */
+const INSTALL_CORE_PREFIX = 'rad install-core';
+const INSTALL_PRESET_PREFIX = 'rad install-preset';
+/** How a stale line names what a path is no longer part of, per layer. */
+const STALE_LABELS = Object.freeze({ [CORE_LAYER]: 'core', [PRESET_LAYER]: 'in the preset' });
 /** A source tree must carry this file to be a RAD source (guards a wrong --source). */
 const SOURCE_MARKER = 'harness/cli.js';
 
@@ -3210,14 +3224,15 @@ function installReportLines(plan, backupDir) {
     if (action === 'deleted') lines.push(`deleted: ${path} (removed locally; not restored)`);
     if (action === 'backup-write') lines.push(`backup-write: ${path} (previous copy at ${backupDir}/${path})`);
   }
-  for (const path of plan.stale) lines.push(`stale: ${path} (no longer core; left in place, dropped from manifest)`);
+  const label = STALE_LABELS[plan.layer] ?? plan.layer;
+  for (const path of plan.stale) lines.push(`stale: ${path} (no longer ${label}; left in place, dropped from manifest)`);
   return lines;
 }
 
-/** `rad install-core: write N, keep N, deleted N, backup-write N, stale N`. */
-function installSummaryLine(plan) {
+/** `<prefix>: write N, keep N, deleted N, backup-write N, stale N`. */
+function installSummaryLine(prefix, plan) {
   const counts = INSTALL_ACTIONS.map((a) => `${a} ${plan.actions.filter((x) => x.action === a).length}`);
-  return `rad install-core: ${counts.join(', ')}, stale ${plan.stale.length}`;
+  return `${prefix}: ${counts.join(', ')}, stale ${plan.stale.length}`;
 }
 
 /** Validate install-core argv; returns { sourceRoot, targetRoot } or an error string. */
@@ -3234,14 +3249,14 @@ function resolveInstallCoreArgs(argv, repoRoot) {
   return { sourceRoot, targetRoot: flags.target ? resolve(flags.target) : repoRoot };
 }
 
-/** Refuse an install whose core set takes over paths another layer owns; nothing is written. */
-function reportInstallConflicts(plan) {
+/** Refuse an install whose layer takes over paths another layer owns; nothing is written. */
+function reportInstallConflicts(prefix, plan) {
   for (const path of plan.conflicts) {
     process.stderr.write(
-      `rad install-core: ${path} is owned by layer '${plan.carried[path].layer}'; core will not take it over\n`,
+      `${prefix}: ${path} is owned by layer '${plan.carried[path].layer}'; ${plan.layer} will not take it over\n`,
     );
   }
-  process.stderr.write('rad install-core: nothing written\n');
+  process.stderr.write(`${prefix}: nothing written\n`);
   return USAGE_EXIT_CODE;
 }
 
@@ -3272,19 +3287,120 @@ export async function installCoreCommand(argv, ctx) {
     return USAGE_EXIT_CODE;
   }
   const plan = planInstall({ ...args, manifest: read.ok ? read.manifest : null });
-  if (plan.conflicts.length) return reportInstallConflicts(plan);
+  if (plan.conflicts.length) return reportInstallConflicts(INSTALL_CORE_PREFIX, plan);
   const { backupDir } = applyInstall({
     ...args, plan, now: ctx.now ?? new Date(), radVersion: sourceRadVersion(args.sourceRoot),
   });
-  for (const line of [installSummaryLine(plan), ...installReportLines(plan, backupDir)]) {
+  for (const line of [installSummaryLine(INSTALL_CORE_PREFIX, plan), ...installReportLines(plan, backupDir)]) {
     process.stdout.write(`${line}\n`);
   }
   return plan.actions.some((a) => a.action === 'keep' || a.action === 'deleted') ? FAILED_EXIT_CODE : 0;
 }
 
+/** Validate install-preset argv; returns { presetDir, targetRoot } or an error string. */
+function resolveInstallPresetArgs(argv, repoRoot) {
+  let flags;
+  try {
+    flags = parseInstallFlags(argv, ['--source', '--target']);
+  } catch (err) {
+    return { error: err.message };
+  }
+  if (!flags.source) return { error: '--source <dir> is required' };
+  return { presetDir: resolve(flags.source), targetRoot: flags.target ? resolve(flags.target) : repoRoot };
+}
+
+/** The installed manifest a preset overlays: { manifest } or { errors } (absent core is a refusal, never "fresh"). */
+function presetBaseManifest(targetRoot, presetName) {
+  const read = readManifest(targetRoot);
+  if (read.missing) return { errors: [PRESET_NEEDS_CORE_ERROR] };
+  if (!read.ok) return { errors: [read.error] };
+  const installed = read.manifest.preset;
+  if (installed && installed.name !== presetName) {
+    return { errors: [`preset '${installed.name}' is already installed; switching to '${presetName}' is not supported`] };
+  }
+  return { manifest: read.manifest };
+}
+
+/** The target's config text, once it loads and validates: { text } or { errors }. */
+async function presetTargetConfig(targetRoot) {
+  const config = await loadConfig(targetRoot);
+  if (config.missing) return { errors: [`no ${CONFIG_PATH} in the target; run rad config init first`] };
+  if (!config.ok) return { errors: config.errors.map((e) => `${CONFIG_PATH} is invalid: ${e}`) };
+  return { text: readFileSync(join(targetRoot, CONFIG_PATH), 'utf8') };
+}
+
+/**
+ * Every install-preset refusal, in order, before anything is written. Returns
+ * { errors } or { conflictPlan } to refuse, else { preset, plan, seeded }.
+ */
+async function preparePresetInstall({ presetDir, targetRoot }) {
+  const read = await readPreset(presetDir);
+  if (!read.ok) return { errors: read.errors.map((e) => `invalid preset: ${e}`) };
+  const { preset } = read;
+  const base = presetBaseManifest(targetRoot, preset.name);
+  if (base.errors) return base;
+  const config = await presetTargetConfig(targetRoot);
+  if (config.errors) return config;
+  const planned = planPresetInstall({ presetDir, files: preset.files, targetRoot, manifest: base.manifest });
+  if (!planned.ok) return { errors: [planned.error] };
+  if (planned.plan.conflicts.length) return { conflictPlan: planned.plan };
+  const seeded = await seedSettings(config.text, preset.settings);
+  if (!seeded.ok) return { errors: [seeded.error] };
+  return { preset, plan: planned.plan, seeded };
+}
+
+/** One stdout line per preset setting: seeded, kept, or unseeded (left for the operator). */
+function settingsReportLines({ seeded, kept, unseeded }) {
+  return [
+    ...seeded.map((k) => `seeded: ${k}`),
+    ...kept.map((k) => `kept: ${k}`),
+    ...unseeded.map((k) => `unseeded: ${k} (settings: block exists; add it by hand)`),
+  ];
+}
+
+/**
+ * `install-preset --source <dir> [--target <dir>]` — install or upgrade a
+ * preset's files over an installed core (same per-file rules as install-core)
+ * and seed its settings into .rad/config.yml. Target defaults to the CLI's
+ * repo root. Re-running the same preset is idempotent.
+ *
+ * Exit 0 all written and seeded; 1 any keep, deleted, or unseeded setting;
+ * 2 (nothing written) bad argv, an invalid preset, no or a malformed manifest,
+ * a missing or invalid config, a different preset already installed, or a
+ * path another layer owns.
+ *
+ * @param {string[]} argv - args after `install-preset`
+ * @param {{ repoRoot: string, now?: Date }} ctx
+ * @returns {Promise<number>}
+ */
+export async function installPresetCommand(argv, ctx) {
+  const args = resolveInstallPresetArgs(argv, ctx.repoRoot);
+  if (args.error) {
+    process.stderr.write(`${INSTALL_PRESET_PREFIX}: ${args.error}\nUsage: ${INSTALL_PRESET_USAGE}\n`);
+    return USAGE_EXIT_CODE;
+  }
+  const prep = await preparePresetInstall(args);
+  if (prep.conflictPlan) return reportInstallConflicts(INSTALL_PRESET_PREFIX, prep.conflictPlan);
+  if (prep.errors) {
+    for (const e of prep.errors) process.stderr.write(`${INSTALL_PRESET_PREFIX}: ${e}\n`);
+    process.stderr.write(`${INSTALL_PRESET_PREFIX}: nothing written\n`);
+    return USAGE_EXIT_CODE;
+  }
+  const { preset, plan, seeded } = prep;
+  const { backupDir } = applyPresetInstall({
+    ...args, plan, now: ctx.now ?? new Date(), name: preset.name, version: preset.version,
+  });
+  if (seeded.seeded.length) writeConfigAtomic(args.targetRoot, seeded.text);
+  const lines = [installSummaryLine(INSTALL_PRESET_PREFIX, plan), ...installReportLines(plan, backupDir), ...settingsReportLines(seeded)];
+  for (const line of lines) process.stdout.write(`${line}\n`);
+  const fileIncomplete = plan.actions.some((a) => a.action === 'keep' || a.action === 'deleted');
+  return fileIncomplete || seeded.unseeded.length ? FAILED_EXIT_CODE : 0;
+}
+
 /**
  * `install-status [--target <dir>]` — read-only drift report against
- * .rad/installed.json. Prints `modified: [<layer>] <path>` / `missing: [<layer>] <path>`.
+ * .rad/installed.json. Prints `preset: <name> <version> (<source>)` first when a
+ * preset is recorded, then `modified: [<layer>] <path>` / `missing: [<layer>] <path>`.
  *
  * Exit 0 clean; 1 drift or no manifest; 2 bad argv or a malformed manifest.
  *
@@ -3310,6 +3426,8 @@ export async function installStatusCommand(argv, ctx) {
     process.stderr.write(`rad install-status: ${read.error}\n`);
     return USAGE_EXIT_CODE;
   }
+  const { preset } = read.manifest;
+  if (preset) process.stdout.write(`preset: ${preset.name} ${preset.version} (${preset.source})\n`);
   const { modified, missing } = installDrift({ targetRoot, manifest: read.manifest });
   for (const { path, layer } of modified) process.stdout.write(`modified: [${layer}] ${path}\n`);
   for (const { path, layer } of missing) process.stdout.write(`missing: [${layer}] ${path}\n`);

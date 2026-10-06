@@ -14,13 +14,17 @@
  * - A malformed manifest fails closed: readManifest returns an error, never
  *   "missing", so a caller can never mistake it for a fresh install.
  * - A local edit is never destroyed: it is kept, or backed up before overwrite.
+ * - Every install is planned and applied per LAYER: a layer only baselines,
+ *   writes and stales its own entries; every other layer's entries are carried
+ *   unchanged, and a path recorded under another layer is a conflict, never
+ *   overwritten. Core is one layer; a preset overlay (#71 part 2b) is another.
  */
 
 import { createHash } from 'node:crypto';
 import {
   readFileSync, writeFileSync, readdirSync, lstatSync, mkdirSync, copyFileSync, chmodSync, renameSync,
 } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join, dirname, resolve } from 'node:path';
 
 /** Manifest location, relative to the target root. */
 export const MANIFEST_PATH = '.rad/installed.json';
@@ -31,14 +35,14 @@ export const BACKUP_DIR = '.rad/upgrade-backup';
 
 /** Manifest schema version this module reads and writes. */
 const MANIFEST_VERSION = 1;
-/** The only layer this module WRITES: entries it installs are recorded as core. */
-const CORE_LAYER = 'core';
-/**
- * The layer a preset overlay records. This module never writes it; it only
- * carries recorded non-core entries (this one or any other layer string) over
- * unchanged, and never overwrites the files they name.
- */
+/** The layer the framework's own files (listCoreFiles) are recorded under. */
+export const CORE_LAYER = 'core';
+/** The layer a preset overlay's files are recorded under. */
 export const PRESET_LAYER = 'preset';
+/** A preset's installable files live in this subdirectory of the preset dir. */
+export const PRESET_FILES_DIR = 'files';
+/** Keys of the manifest's optional top-level `preset` block, each a string. */
+const PRESET_META_KEYS = ['name', 'version', 'source'];
 /** Recorded rad_version when the source revision cannot be determined. */
 export const UNKNOWN_RAD_VERSION = 'unknown';
 /** Permission bits copied from source to target (exec bits included). */
@@ -106,17 +110,29 @@ export function hashFile(path) {
 }
 
 /** True for a relative posix path with no '..', '.', or empty segment. */
-function isSafeRelPath(p) {
+export function isSafeRelPath(p) {
   if (typeof p !== 'string' || p === '' || p.startsWith('/') || p.includes('\\')) return false;
   return p.split('/').every((seg) => seg !== '' && seg !== '.' && seg !== '..');
 }
 
+const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+
+/** Shape error of the optional top-level `preset` block ('' when absent or valid). */
+function presetMetaError(preset) {
+  if (preset === undefined) return '';
+  if (!isPlainObject(preset)) return "'preset' is not an object";
+  const bad = PRESET_META_KEYS.find((k) => typeof preset[k] !== 'string');
+  return bad ? `'preset.${bad}' is not a string` : '';
+}
+
 /** Shape errors of a parsed manifest (empty when valid). */
 function manifestShapeError(m) {
-  if (m === null || typeof m !== 'object' || Array.isArray(m)) return 'manifest is not a JSON object';
+  if (!isPlainObject(m)) return 'manifest is not a JSON object';
   if (m.version !== MANIFEST_VERSION) return `unsupported manifest version ${JSON.stringify(m.version)}`;
+  const presetError = presetMetaError(m.preset);
+  if (presetError) return presetError;
   const files = m.files;
-  if (files === null || typeof files !== 'object' || Array.isArray(files)) return "'files' is not an object";
+  if (!isPlainObject(files)) return "'files' is not an object";
   for (const [path, entry] of Object.entries(files)) {
     if (!isSafeRelPath(path)) return `unsafe path ${JSON.stringify(path)}`;
     if (entry === null || typeof entry !== 'object') return `entry for ${path} is not an object`;
@@ -162,44 +178,95 @@ function decideAction({ targetPath, sourceHash, baseline }) {
   return 'backup-write';
 }
 
-/** Recorded entries split by layer: `core` (this module's) and `carried` (every other layer). */
-function splitRecorded(manifest) {
-  const core = {};
+/** Recorded entries split into `own` (entries of `layer`) and `carried` (every other layer). */
+function splitRecorded(manifest, layer) {
+  const own = {};
   const carried = {};
   for (const [path, entry] of Object.entries(manifest?.files ?? {})) {
-    if (entry.layer === CORE_LAYER) core[path] = entry;
+    if (entry.layer === layer) own[path] = entry;
     else carried[path] = entry;
   }
-  return { core, carried };
+  return { own, carried };
+}
+
+/** Throw unless every path is safe and names a regular file (never a followed symlink) under sourceRoot. */
+function assertInstallableSources(sourceRoot, files) {
+  for (const path of files) {
+    if (!isSafeRelPath(path)) throw new Error(`refusing to plan: unsafe path ${JSON.stringify(path)}`);
+    const st = lstatOrNull(join(sourceRoot, path));
+    if (!st || !st.isFile()) throw new Error(`refusing to plan: ${path} is not a regular file in the source`);
+  }
 }
 
 /**
- * Plan an install or upgrade of the core set into `targetRoot`. Read-only.
+ * Plan installing an explicit file list into `targetRoot` under `layer`. Read-only.
+ * Throws (before anything is written) on an unsafe path or a source path that
+ * is not a regular file; callers validate their list first (readPreset does).
  *
- * - `stale`: recorded core-layer paths core no longer ships.
- * - `conflicts`: sorted recorded non-core paths that core now ships. Actions are
- *   still computed for them, but callers MUST refuse to apply a plan whose
- *   `conflicts` is non-empty (applyInstall throws on one as a backstop).
- * - `carried`: every recorded non-core entry (any layer string but core), which
- *   the new manifest keeps unchanged.
+ * - baselines: only this layer's own recorded entries.
+ * - `stale`: sorted recorded entries of this layer the list no longer ships
+ *   (dropped from the new manifest; their files are left on disk).
+ * - `conflicts`: sorted recorded paths of ANY other layer that the list ships.
+ *   Actions are still computed for them, but callers MUST refuse to apply a
+ *   plan whose `conflicts` is non-empty (applyLayerInstall throws as a backstop).
+ * - `carried`: every other layer's entries, kept unchanged in the new manifest.
+ * - `preset` / `radVersion`: the existing manifest's top-level values (or null),
+ *   carried into the new manifest unless the apply call overrides them.
  *
- * @param {{ sourceRoot: string, targetRoot: string, manifest: object | null }} args
- * @returns {{ actions: { path: string, action: string, sourceHash: string, baseline: string | null }[],
- *             stale: string[], conflicts: string[], carried: Object<string, { layer: string, sha256: string }> }}
+ * @param {{ layer: string, files: string[], sourceRoot: string, targetRoot: string, manifest: object | null }} args
+ * @returns {{ layer: string, actions: { path: string, action: string, sourceHash: string, baseline: string | null }[],
+ *             stale: string[], conflicts: string[], carried: Object<string, { layer: string, sha256: string }>,
+ *             preset: { name: string, version: string, source: string } | null, radVersion: string | null }}
  */
-export function planInstall({ sourceRoot, targetRoot, manifest }) {
-  const recorded = splitRecorded(manifest);
-  const core = listCoreFiles(sourceRoot);
-  const actions = core.map((path) => {
+export function planLayerInstall({ layer, files, sourceRoot, targetRoot, manifest }) {
+  assertInstallableSources(sourceRoot, files);
+  const recorded = splitRecorded(manifest, layer);
+  const actions = [...files].sort().map((path) => {
     const sourceHash = hashFile(join(sourceRoot, path));
-    const baseline = Object.hasOwn(recorded.core, path) ? recorded.core[path].sha256 : null;
+    const baseline = Object.hasOwn(recorded.own, path) ? recorded.own[path].sha256 : null;
     const action = decideAction({ targetPath: join(targetRoot, path), sourceHash, baseline });
     return { path, action, sourceHash, baseline };
   });
-  const coreSet = new Set(core);
-  const stale = Object.keys(recorded.core).filter((p) => !coreSet.has(p)).sort();
-  const conflicts = Object.keys(recorded.carried).filter((p) => coreSet.has(p)).sort();
-  return { actions, stale, conflicts, carried: recorded.carried };
+  const shipped = new Set(files);
+  const stale = Object.keys(recorded.own).filter((p) => !shipped.has(p)).sort();
+  const conflicts = Object.keys(recorded.carried).filter((p) => shipped.has(p)).sort();
+  const radVersion = typeof manifest?.rad_version === 'string' ? manifest.rad_version : null;
+  return { layer, actions, stale, conflicts, carried: recorded.carried, preset: manifest?.preset ?? null, radVersion };
+}
+
+/**
+ * Plan an install or upgrade of the core set into `targetRoot`: planLayerInstall
+ * over listCoreFiles(sourceRoot) under the core layer. Read-only.
+ *
+ * @param {{ sourceRoot: string, targetRoot: string, manifest: object | null }} args
+ * @returns {ReturnType<typeof planLayerInstall>}
+ */
+export function planInstall({ sourceRoot, targetRoot, manifest }) {
+  return planLayerInstall({ layer: CORE_LAYER, files: listCoreFiles(sourceRoot), sourceRoot, targetRoot, manifest });
+}
+
+/** The directory a preset's installable files are read from. */
+export function presetFilesRoot(presetDir) {
+  return join(presetDir, PRESET_FILES_DIR);
+}
+
+/** Error returned by planPresetInstall when there is no manifest to install onto. */
+export const PRESET_NEEDS_CORE_ERROR = `core is not installed (no ${MANIFEST_PATH}); run rad install-core first`;
+
+/**
+ * Plan a preset install: planLayerInstall under the preset layer, sourcing
+ * `files` (posix paths relative to <presetDir>/files, as readPreset returns
+ * them) from presetFilesRoot(presetDir). Read-only. A preset overlays an
+ * installed core, so a null manifest is refused here, as a returned error,
+ * rather than left to every caller.
+ *
+ * @param {{ presetDir: string, files: string[], targetRoot: string, manifest: object | null }} args
+ * @returns {{ ok: true, plan: ReturnType<typeof planLayerInstall> } | { ok: false, error: string }}
+ */
+export function planPresetInstall({ presetDir, files, targetRoot, manifest }) {
+  if (!manifest) return { ok: false, error: PRESET_NEEDS_CORE_ERROR };
+  const plan = planLayerInstall({ layer: PRESET_LAYER, files, sourceRoot: presetFilesRoot(presetDir), targetRoot, manifest });
+  return { ok: true, plan };
 }
 
 /** Filesystem-safe timestamp (no colons or dots) for a backup directory name. */
@@ -220,16 +287,22 @@ function recordedHash({ action, sourceHash, baseline }) {
   return baseline; // keep / deleted: the OLD baseline stays, so the next upgrade still sees the edit
 }
 
-/** Build the manifest object with sorted file keys: core entries plus the carried non-core ones. */
-function buildManifest(plan, { now, radVersion }) {
+/**
+ * Build the manifest object with sorted file keys: the plan's layer entries
+ * plus the carried ones. `installed_at` is the time of this write, whichever
+ * layer made it. `preset` is written only when set, so a manifest that never
+ * had a preset keeps its exact key order.
+ */
+function buildManifest(plan, { now, radVersion, preset }) {
   const unsorted = { ...(plan.carried ?? {}) };
   for (const a of plan.actions) {
     const sha256 = recordedHash(a);
-    if (sha256) unsorted[a.path] = { layer: CORE_LAYER, sha256 };
+    if (sha256) unsorted[a.path] = { layer: plan.layer ?? CORE_LAYER, sha256 };
   }
   const files = {};
   for (const path of Object.keys(unsorted).sort()) files[path] = unsorted[path];
-  return { version: MANIFEST_VERSION, rad_version: radVersion, installed_at: now.toISOString(), files };
+  const head = { version: MANIFEST_VERSION, rad_version: radVersion, installed_at: now.toISOString() };
+  return preset ? { ...head, preset, files } : { ...head, files };
 }
 
 /** Write the manifest atomically (temp file + rename) so a crash never leaves half a file. */
@@ -242,20 +315,21 @@ function writeManifest(targetRoot, manifest) {
 }
 
 /**
- * Execute a plan: copy writes, back up then overwrite backup-writes, stage
- * keeps under PENDING_DIR, leave deleted paths absent, and write the manifest.
- * Stale manifest paths are left on disk and dropped from the new manifest;
- * carried non-core entries are kept unchanged. Throws, before touching the
- * filesystem, on a plan with conflicts: core must never overwrite a file
- * another layer owns.
+ * Execute a layer plan: copy writes, back up then overwrite backup-writes,
+ * stage keeps under PENDING_DIR, leave deleted paths absent, and write the
+ * manifest atomically. Stale paths are left on disk and dropped from the new
+ * manifest; carried entries of other layers are kept unchanged. Throws, before
+ * touching the filesystem, on a plan with conflicts: a layer must never
+ * overwrite a file another layer owns.
  *
- * @param {{ sourceRoot: string, targetRoot: string, plan: ReturnType<typeof planInstall>,
- *           now: Date, radVersion: string }} args
+ * @param {{ sourceRoot: string, targetRoot: string, plan: ReturnType<typeof planLayerInstall>,
+ *           now: Date, radVersion: string, preset?: object | null }} args
+ *   `preset` replaces the plan's carried preset block when given (null removes it).
  * @returns {{ manifest: object, backupDir: string }} backupDir is relative to targetRoot
  */
-export function applyInstall({ sourceRoot, targetRoot, plan, now, radVersion }) {
+export function applyLayerInstall({ sourceRoot, targetRoot, plan, now, radVersion, preset }) {
   if (plan.conflicts?.length) {
-    throw new Error(`refusing to install: core now ships paths another layer owns: ${plan.conflicts.join(', ')}`);
+    throw new Error(`refusing to install: ${plan.layer ?? CORE_LAYER} ships paths another layer owns: ${plan.conflicts.join(', ')}`);
   }
   const backupDir = `${BACKUP_DIR}/${backupStamp(now)}`;
   for (const { path, action } of plan.actions) {
@@ -265,9 +339,38 @@ export function applyInstall({ sourceRoot, targetRoot, plan, now, radVersion }) 
     if (action === 'write' || action === 'backup-write') copyWithMode(source, target);
     else if (action === 'keep') copyWithMode(source, join(targetRoot, PENDING_DIR, path));
   }
-  const manifest = buildManifest(plan, { now, radVersion });
+  const manifest = buildManifest(plan, { now, radVersion, preset: preset === undefined ? plan.preset : preset });
   writeManifest(targetRoot, manifest);
   return { manifest, backupDir };
+}
+
+/**
+ * Execute a core plan (planInstall): applyLayerInstall with the plan's carried
+ * preset block kept, so a core upgrade never drops preset metadata.
+ *
+ * @param {{ sourceRoot: string, targetRoot: string, plan: ReturnType<typeof planInstall>,
+ *           now: Date, radVersion: string }} args
+ * @returns {{ manifest: object, backupDir: string }}
+ */
+export function applyInstall({ sourceRoot, targetRoot, plan, now, radVersion }) {
+  return applyLayerInstall({ sourceRoot, targetRoot, plan, now, radVersion });
+}
+
+/**
+ * Execute a preset plan (planPresetInstall). The manifest's `rad_version` is
+ * kept (a preset has no RAD source to read one from) and its `preset` block
+ * becomes { name, version, source } with source the absolute preset dir.
+ *
+ * @param {{ presetDir: string, targetRoot: string, plan: ReturnType<typeof planLayerInstall>,
+ *           now: Date, name: string, version: string }} args
+ * @returns {{ manifest: object, backupDir: string }}
+ */
+export function applyPresetInstall({ presetDir, targetRoot, plan, now, name, version }) {
+  if (plan.layer !== PRESET_LAYER) throw new Error(`refusing to install: plan is for layer ${plan.layer}, not ${PRESET_LAYER}`);
+  const preset = { name, version, source: resolve(presetDir) };
+  return applyLayerInstall({
+    sourceRoot: presetFilesRoot(presetDir), targetRoot, plan, now, radVersion: plan.radVersion ?? UNKNOWN_RAD_VERSION, preset,
+  });
 }
 
 /**

@@ -9,7 +9,8 @@ import { fileURLToPath } from 'node:url';
 
 import {
   MANIFEST_PATH, PENDING_DIR, BACKUP_DIR, PRESET_LAYER, listCoreFiles, hashFile, readManifest, planInstall, applyInstall,
-  backupStamp, installDrift,
+  backupStamp, installDrift, isSafeRelPath, planLayerInstall, planPresetInstall, applyPresetInstall, presetFilesRoot,
+  PRESET_NEEDS_CORE_ERROR,
 } from '../install-manifest.js';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -390,5 +391,174 @@ test('installDrift — modified entries carry their layer, sorted by path across
       modified: [{ path: 'ai/guardrails.md', layer: 'core' }, { path: 'presets/p.md', layer: PRESET_LAYER }],
       missing: [],
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Layer-generic install: presets (#71 part 2b)
+// ---------------------------------------------------------------------------
+
+const PRESET_META = { name: 'team-x', version: '1.0.0' };
+/** Files a fixture preset ships (path under files/ -> content). */
+const PRESET_FIXTURE = {
+  'docs/team.md': 'team doc v1\n',
+  'scripts/hooks/pre-wave/check.sh': '#!/bin/sh\necho check\n',
+};
+
+/** Write a preset dir beside `source` with `files` under files/; returns its path. */
+function writePreset(source, files = PRESET_FIXTURE) {
+  const presetDir = join(dirname(source), 'preset');
+  rmSync(presetDir, { recursive: true, force: true });
+  writeTree(join(presetDir, 'files'), files);
+  return presetDir;
+}
+
+/** Plan + apply a preset over the target's current manifest; returns { plan, result }. */
+function installPreset(presetDir, target, files = Object.keys(PRESET_FIXTURE)) {
+  const read1 = readManifest(target);
+  assert.ok(read1.ok, read1.error ?? 'manifest missing');
+  const planned = planPresetInstall({ presetDir, files, targetRoot: target, manifest: read1.manifest });
+  assert.ok(planned.ok, planned.error);
+  const result = applyPresetInstall({ presetDir, targetRoot: target, plan: planned.plan, now: NOW, ...PRESET_META });
+  return { plan: planned.plan, result };
+}
+
+test('isSafeRelPath — exported; rejects absolute, backslash, empty, ".", ".." segments', () => {
+  assert.equal(isSafeRelPath('docs/a.md'), true);
+  for (const bad of ['', '/abs', 'a\\b', 'a//b', './a', 'a/../b', '..', 'a/.', 7, null]) {
+    assert.equal(isSafeRelPath(bad), false, JSON.stringify(bad));
+  }
+});
+
+test('preset install — fresh files written under the preset layer; core entries carried; preset block recorded', () => {
+  withRoots(({ source, target }) => {
+    install(source, target);
+    const before = JSON.parse(read(target, MANIFEST_PATH));
+    const presetDir = writePreset(source);
+    chmodSync(join(presetDir, 'files/scripts/hooks/pre-wave/check.sh'), 0o755);
+    const { plan, result } = installPreset(presetDir, target);
+    assert.deepEqual(plan.actions.map((a) => a.action), ['write', 'write']);
+    assert.deepEqual([plan.stale, plan.conflicts], [[], []]);
+    assert.equal(read(target, 'docs/team.md'), 'team doc v1\n');
+    assert.equal(statSync(join(target, 'scripts/hooks/pre-wave/check.sh')).mode & 0o777, 0o755, 'exec bit carried');
+    const m = JSON.parse(read(target, MANIFEST_PATH));
+    assert.deepEqual(Object.keys(m), ['version', 'rad_version', 'installed_at', 'preset', 'files']);
+    assert.deepEqual(m.preset, { ...PRESET_META, source: presetDir });
+    assert.equal(m.rad_version, RAD_VERSION, 'rad_version kept from the existing manifest');
+    assert.equal(m.installed_at, NOW.toISOString());
+    assert.deepEqual(m.files['docs/team.md'], { layer: PRESET_LAYER, sha256: hashFile(join(presetDir, 'files/docs/team.md')) });
+    for (const p of Object.keys(CORE_FIXTURE)) assert.deepEqual(m.files[p], before.files[p], p);
+    assert.deepEqual(result.manifest, m);
+  });
+});
+
+test('preset install — a null manifest is refused by the planner (core must be installed first)', () => {
+  withRoots(({ source, target }) => {
+    const presetDir = writePreset(source);
+    const planned = planPresetInstall({ presetDir, files: Object.keys(PRESET_FIXTURE), targetRoot: target, manifest: null });
+    assert.deepEqual(planned, { ok: false, error: PRESET_NEEDS_CORE_ERROR });
+    assert.equal(existsSync(join(target, 'docs')), false);
+  });
+});
+
+test('preset install — a path recorded as core is a conflict; apply refuses before writing', () => {
+  withRoots(({ source, target }) => {
+    install(source, target);
+    const presetDir = writePreset(source, { 'ai/guardrails.md': 'preset guardrails\n' });
+    const before = read(target, MANIFEST_PATH);
+    const planned = planPresetInstall({ presetDir, files: ['ai/guardrails.md'], targetRoot: target, manifest: readManifest(target).manifest });
+    assert.deepEqual(planned.plan.conflicts, ['ai/guardrails.md']);
+    assert.throws(() => applyPresetInstall({ presetDir, targetRoot: target, plan: planned.plan, now: NOW, ...PRESET_META }),
+      /refusing to install: preset ships paths another layer owns: ai\/guardrails\.md/);
+    assert.equal(read(target, 'ai/guardrails.md'), 'guardrails\n');
+    assert.equal(read(target, MANIFEST_PATH), before);
+  });
+});
+
+test('preset install — an existing unbaselined differing target file is backed up then overwritten', () => {
+  withRoots(({ source, target }) => {
+    install(source, target);
+    writeTree(target, { 'docs/team.md': 'user doc\n' });
+    const { plan, result } = installPreset(writePreset(source), target);
+    assert.equal(actionOf(plan, 'docs/team.md'), 'backup-write');
+    assert.equal(read(target, join(result.backupDir, 'docs/team.md')), 'user doc\n');
+    assert.equal(read(target, 'docs/team.md'), 'team doc v1\n');
+  });
+});
+
+test('preset upgrade — a locally edited preset file is kept and the new version staged', () => {
+  withRoots(({ source, target }) => {
+    install(source, target);
+    const presetDir = writePreset(source);
+    installPreset(presetDir, target);
+    const v1 = hashFile(join(target, 'docs/team.md'));
+    writeFileSync(join(target, 'docs/team.md'), 'local edit\n');
+    writeFileSync(join(presetDir, 'files/docs/team.md'), 'team doc v2\n');
+    const { plan, result } = installPreset(presetDir, target);
+    assert.equal(actionOf(plan, 'docs/team.md'), 'keep');
+    assert.equal(read(target, 'docs/team.md'), 'local edit\n');
+    assert.equal(read(target, join(PENDING_DIR, 'docs/team.md')), 'team doc v2\n');
+    assert.equal(result.manifest.files['docs/team.md'].sha256, v1, 'old baseline kept');
+  });
+});
+
+test('preset upgrade — a file the preset dropped is stale: out of the manifest, left on disk; core untouched', () => {
+  withRoots(({ source, target }) => {
+    install(source, target);
+    const presetDir = writePreset(source);
+    installPreset(presetDir, target);
+    const { plan, result } = installPreset(presetDir, target, ['docs/team.md']);
+    assert.deepEqual(plan.stale, ['scripts/hooks/pre-wave/check.sh']);
+    assert.ok(!('scripts/hooks/pre-wave/check.sh' in result.manifest.files));
+    assert.ok(existsSync(join(target, 'scripts/hooks/pre-wave/check.sh')));
+    for (const p of Object.keys(CORE_FIXTURE)) assert.equal(result.manifest.files[p].layer, 'core', p);
+  });
+});
+
+test('install-core after a preset install keeps the preset entries and the preset block', () => {
+  withRoots(({ source, target }) => {
+    install(source, target);
+    const presetDir = writePreset(source);
+    installPreset(presetDir, target);
+    const { plan, result } = install(source, target);
+    assert.deepEqual([plan.stale, plan.conflicts], [[], []]);
+    assert.deepEqual(result.manifest.preset, { ...PRESET_META, source: presetDir });
+    assert.equal(result.manifest.files['docs/team.md'].layer, PRESET_LAYER);
+    assert.deepEqual(readManifest(target).manifest, result.manifest);
+  });
+});
+
+test('planLayerInstall — refuses an unsafe path or a symlinked source before anything is written', () => {
+  withRoots(({ source, target }) => {
+    install(source, target);
+    const presetDir = writePreset(source);
+    symlinkSync(join(source, 'ai/guardrails.md'), join(presetDir, 'files/docs/link.md'));
+    const manifest = readManifest(target).manifest;
+    const plan = (files) => planLayerInstall({ layer: PRESET_LAYER, files, sourceRoot: presetFilesRoot(presetDir), targetRoot: target, manifest });
+    assert.throws(() => plan(['../source/ai/guardrails.md']), /unsafe path/);
+    assert.throws(() => plan(['docs/link.md']), /not a regular file/);
+    assert.throws(() => plan(['docs/missing.md']), /not a regular file/);
+  });
+});
+
+test('readManifest — a malformed preset block is rejected', () => {
+  withRoots(({ source, target }) => {
+    install(source, target);
+    const base = JSON.parse(read(target, MANIFEST_PATH));
+    const cases = [
+      [{ name: 'a', version: '1' }, /'preset\.source' is not a string/],
+      ['team-x', /'preset' is not an object/],
+      [null, /'preset' is not an object/],
+      [['a'], /'preset' is not an object/],
+      [{ name: 'a', version: 1, source: '/p' }, /'preset\.version' is not a string/],
+    ];
+    for (const [preset, re] of cases) {
+      writeFileSync(join(target, MANIFEST_PATH), JSON.stringify({ ...base, preset }));
+      const got = readManifest(target);
+      assert.equal(got.ok, false);
+      assert.match(got.error, re);
+    }
+    writeFileSync(join(target, MANIFEST_PATH), JSON.stringify({ ...base, preset: { name: 'a', version: '1', source: '/p' } }));
+    assert.ok(readManifest(target).ok);
   });
 });

@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 import {
   approveCommand, gateCommand, parsePlanCtx, deliverCommand, stopStatusCommand, forecastCommand, digestCommand,
   resolveHooksDir, makeSpineScriptPort, SCRIPT_ARG_KEYS, reviewCommand, resolveAgent, isMainModule,
-  capabilitiesCommand, installCoreCommand, installStatusCommand, configCommand,
+  capabilitiesCommand, installCoreCommand, installPresetCommand, installStatusCommand, configCommand,
 } from '../cli.js';
 import { buildReviewPrompt, reviewInstruction } from '../review.js';
 import { REVIEW_INSTRUCTION } from '../evals/reviewers/lib.js';
@@ -2389,5 +2389,188 @@ test('install-status AC#5 — each drifted path is labelled with its layer', asy
     const res = await runInstallStatus(['--target', target]);
     assert.equal(res.code, 1);
     assert.equal(res.stdout, 'modified: [preset] ai/guardrails.md\nmissing: [core] harness/cli.js\n');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// rad install-preset + the install-status preset line — preset-install Wave 2
+// (AC#4, AC#5). Each test installs the fixture core (plus one core file under a
+// preset root, for the core-conflict case) and a valid config into the target,
+// then builds a preset dir beside it.
+// ---------------------------------------------------------------------------
+
+const PRESET_NAME = 'team-x';
+const PRESET_FILES = [['scripts/hooks/wave-complete/10-team.sh', '#!/bin/sh\nexit 0\n'], ['docs/team.md', 'team\n']];
+const CORE_UNDER_PRESET_ROOT = 'ai/extensions/core.md';
+
+/** Write a preset dir: preset.yml text plus `files` ([rel, body] under files/). */
+function writePreset(dir, { yml, files = PRESET_FILES }) {
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'preset.yml'), yml);
+  for (const [rel, body] of files) {
+    mkdirSync(dirname(join(dir, 'files', rel)), { recursive: true });
+    writeFileSync(join(dir, 'files', rel), body);
+  }
+}
+
+const presetYml = (name = PRESET_NAME, version = '1.0.0') =>
+  `name: ${name}\nversion: "${version}"\nsettings:\n  hooks_dir: ops/hooks\n`;
+
+/** Installed core + valid config in the target, and a preset dir; `fn` gets { source, target, preset }. */
+async function withPresetRoots(fn) {
+  await withInstallRoots(async ({ source, target }) => {
+    mkdirSync(dirname(join(source, CORE_UNDER_PRESET_ROOT)), { recursive: true });
+    writeFileSync(join(source, CORE_UNDER_PRESET_ROOT), 'core ext\n');
+    const core = await runInstallCore(['--source', source, '--target', target]);
+    assert.equal(core.code, 0, core.stderr);
+    writeSettingsConfig(target);
+    const preset = join(dirname(source), 'preset');
+    writePreset(preset, { yml: presetYml() });
+    await fn({ source, target, preset });
+  });
+}
+
+function runInstallPreset(argv, repoRoot = '/nonexistent-default-target') {
+  return captureStdio(() => installPresetCommand(argv, { repoRoot, now: INSTALL_NOW }));
+}
+
+const readManifestJson = (target) => JSON.parse(readFileSync(join(target, '.rad/installed.json'), 'utf8'));
+
+test('install-preset AC#4 — fresh install writes files, seeds settings, records the preset (exit 0)', async () => {
+  await withPresetRoots(async ({ target, preset }) => {
+    const original = readFileSync(join(target, '.rad/config.yml'), 'utf8');
+    const res = await runInstallPreset(['--source', preset, '--target', target]);
+    assert.equal(res.code, 0, res.stderr);
+    assert.equal(res.stdout, 'rad install-preset: write 2, keep 0, deleted 0, backup-write 0, stale 0\nseeded: hooks_dir\n');
+    assert.equal(readFileSync(join(target, 'docs/team.md'), 'utf8'), 'team\n');
+    const config = readFileSync(join(target, '.rad/config.yml'), 'utf8');
+    assert.ok(config.startsWith(original), 'the original config text is kept byte-for-byte');
+    assert.match(config.slice(original.length), /settings:\n\s+hooks_dir:.*ops\/hooks/);
+    const manifest = readManifestJson(target);
+    assert.deepEqual(manifest.preset, { name: PRESET_NAME, version: '1.0.0', source: preset });
+    assert.equal(manifest.files['docs/team.md'].layer, 'preset');
+    assert.equal(manifest.files['harness/cli.js'].layer, 'core');
+  });
+});
+
+test('install-preset AC#4 — --target defaults to the CLI repo root', async () => {
+  await withPresetRoots(async ({ target, preset }) => {
+    const res = await runInstallPreset(['--source', preset], target);
+    assert.equal(res.code, 0, res.stderr);
+    assert.ok(existsSync(join(target, 'docs/team.md')));
+  });
+});
+
+test('install-preset AC#4 — an immediate re-run is idempotent (exit 0, tree unchanged)', async () => {
+  await withPresetRoots(async ({ target, preset }) => {
+    await runInstallPreset(['--source', preset, '--target', target]);
+    const before = hashTree(target);
+    const res = await runInstallPreset(['--source', preset, '--target', target]);
+    assert.equal(res.code, 0, res.stderr);
+    assert.equal(res.stdout, 'rad install-preset: write 2, keep 0, deleted 0, backup-write 0, stale 0\nkept: hooks_dir\n');
+    assert.equal(hashTree(target), before);
+  });
+});
+
+test('install-preset AC#4 — an edited preset file is kept and the new version staged (exit 1)', async () => {
+  await withPresetRoots(async ({ target, preset }) => {
+    await runInstallPreset(['--source', preset, '--target', target]);
+    writeFileSync(join(target, 'docs/team.md'), 'local edit\n');
+    writeFileSync(join(preset, 'files/docs/team.md'), 'team v2\n');
+    const res = await runInstallPreset(['--source', preset, '--target', target]);
+    assert.equal(res.code, 1);
+    assert.match(res.stdout, /^rad install-preset: write 1, keep 1, deleted 0, backup-write 0, stale 0$/m);
+    assert.match(res.stdout, /^keep: docs\/team\.md \(local edit kept; new version staged at \.rad\/upgrade-pending\/docs\/team\.md\)$/m);
+    assert.equal(readFileSync(join(target, 'docs/team.md'), 'utf8'), 'local edit\n');
+    assert.equal(readFileSync(join(target, '.rad/upgrade-pending/docs/team.md'), 'utf8'), 'team v2\n');
+  });
+});
+
+test('install-preset AC#4 — an existing settings: block → key unseeded (exit 1), config unchanged', async () => {
+  await withPresetRoots(async ({ target, preset }) => {
+    writeSettingsConfig(target, { high_risk_patterns: 'auth/' });
+    const original = readFileSync(join(target, '.rad/config.yml'), 'utf8');
+    const res = await runInstallPreset(['--source', preset, '--target', target]);
+    assert.equal(res.code, 1);
+    assert.match(res.stdout, /^unseeded: hooks_dir \(settings: block exists; add it by hand\)$/m);
+    assert.equal(readFileSync(join(target, '.rad/config.yml'), 'utf8'), original);
+    assert.ok(existsSync(join(target, 'docs/team.md')), 'files are still installed');
+  });
+});
+
+/** Refusal cases: [label, setup({ source, target, preset }) → argv or undefined, stderr pattern]. */
+const PRESET_REFUSALS = [
+  ['no manifest', ({ target }) => rmSync(join(target, '.rad/installed.json')), /core is not installed.*run rad install-core first/],
+  ['malformed manifest', ({ target }) => writeFileSync(join(target, '.rad/installed.json'), '{ broken'), /installed\.json is not valid JSON/],
+  ['no config', ({ target }) => rmSync(join(target, '.rad/config.yml')), /no \.rad\/config\.yml in the target/],
+  ['invalid config', ({ target }) => writeInvalidConfig(target), /\.rad\/config\.yml is invalid: .*settings\.nope/],
+  ['conflict with a core path', ({ preset }) => writePreset(preset, { yml: presetYml(), files: [[CORE_UNDER_PRESET_ROOT, 'p\n']] }),
+    /^rad install-preset: ai\/extensions\/core\.md is owned by layer 'core'; preset will not take it over$/m],
+  ['invalid preset', ({ preset }) => writeFileSync(join(preset, 'preset.yml'), 'name: Bad Name\n'),
+    /^rad install-preset: invalid preset: name must be kebab-case.*\n^rad install-preset: invalid preset: version must be/m],
+  ['missing --source', ({ target }) => ['--target', target], /--source <dir> is required\nUsage: rad install-preset/],
+  ['unknown flag', ({ target, preset }) => ['--source', preset, '--target', target, '--force'], /unknown option '--force'\nUsage: rad install-preset/],
+];
+
+test('install-preset AC#4 — every refusal exits 2 with the target tree byte-identical', async () => {
+  for (const [label, setup, pattern] of PRESET_REFUSALS) {
+    await withPresetRoots(async (roots) => {
+      const argv = setup(roots) ?? ['--source', roots.preset, '--target', roots.target];
+      const before = hashTree(roots.target);
+      const res = await runInstallPreset(argv);
+      assert.equal(res.code, 2, `${label}: ${res.stderr}`);
+      assert.equal(res.stdout, '', label);
+      assert.match(res.stderr, pattern, label);
+      assert.equal(hashTree(roots.target), before, `${label}: nothing written`);
+      assert.ok(!existsSync(join(roots.target, '.rad/upgrade-pending')), label);
+      assert.ok(!existsSync(join(roots.target, '.rad/upgrade-backup')), label);
+    });
+  }
+});
+
+test('install-preset AC#4 — a different installed preset name → exit 2 naming it, tree byte-identical', async () => {
+  await withPresetRoots(async ({ target, preset }) => {
+    await runInstallPreset(['--source', preset, '--target', target]);
+    writeFileSync(join(preset, 'preset.yml'), presetYml('other-team'));
+    const before = hashTree(target);
+    const res = await runInstallPreset(['--source', preset, '--target', target]);
+    assert.equal(res.code, 2);
+    assert.match(res.stderr, /preset 'team-x' is already installed; switching to 'other-team' is not supported/);
+    assert.match(res.stderr, /nothing written/);
+    assert.equal(hashTree(target), before);
+  });
+});
+
+test('install-status AC#5 — prints the preset line before drift lines; exit codes unchanged', async () => {
+  await withPresetRoots(async ({ target, preset }) => {
+    await runInstallPreset(['--source', preset, '--target', target]);
+    const clean = await runInstallStatus(['--target', target]);
+    assert.equal(clean.code, 0, clean.stderr);
+    assert.equal(clean.stdout, `preset: ${PRESET_NAME} 1.0.0 (${preset})\n`);
+    writeFileSync(join(target, 'docs/team.md'), 'edit\n');
+    const drift = await runInstallStatus(['--target', target]);
+    assert.equal(drift.code, 1);
+    assert.equal(drift.stdout, `preset: ${PRESET_NAME} 1.0.0 (${preset})\nmodified: [preset] docs/team.md\n`);
+  });
+});
+
+test('install-status AC#5 — no preset recorded → no preset line', async () => {
+  await withPresetRoots(async ({ target }) => {
+    const res = await runInstallStatus(['--target', target]);
+    assert.equal(res.code, 0, res.stderr);
+    assert.equal(res.stdout, '');
+  });
+});
+
+test('install-core AC#4 — a core upgrade after a preset keeps the preset metadata and entries', async () => {
+  await withPresetRoots(async ({ source, target, preset }) => {
+    await runInstallPreset(['--source', preset, '--target', target]);
+    const before = readManifestJson(target);
+    writeFileSync(join(source, 'harness/cli.js'), '// cli v2\n');
+    const res = await runInstallCore(['--source', source, '--target', target]);
+    assert.equal(res.code, 0, res.stderr);
+    const after = readManifestJson(target);
+    assert.deepEqual(after.preset, before.preset);
+    for (const [rel] of PRESET_FILES) assert.deepEqual(after.files[rel], before.files[rel], rel);
   });
 });
