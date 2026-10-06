@@ -1,7 +1,7 @@
 # Plan: Config-Backed Settings and a Layer-Aware Manifest (#71 part 2a)
 Created: 2026-10-06
 Author: architect
-Status: approved
+Status: in-progress
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-10-06T14:30:38.319Z
 Recorded-By: sean@torchcodelab.com
