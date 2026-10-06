@@ -20,7 +20,7 @@ paths; part 2 migrated the read-only slice into `.rad/` sources. Rows marked
 |------|----------|----------|
 | 1 | This doc; `harness/generate.js`; `rad generate [--check]`; CI `generated-drift`; `^\.codex/` and `^\.agents/skills/` self-protected | #171 |
 | 2 | Read-only slice migrated into `.rad/`: both reviewers, `quality-review`, `accessibility-review`, `rad-status`, a Codex-only `rad-review` (deterministic scripts plus reviewer sub-agents). Generated outputs and reviewers shipped through core, invariant added. Delivered | #171 |
-| 3 | `AGENTS.md` as the conventions source, `CLAUDE.md` importing it with `@AGENTS.md` (install scaffold, `config migrate`, `lint-claude-md`) | #171 |
+| 3 | `AGENTS.md` as the conventions source, `CLAUDE.md` importing it with `@AGENTS.md`; readers use `AGENTS.md` with a `CLAUDE.md` fallback; install scaffold and `lint-claude-md` cover both files (`config migrate` unchanged). Delivered | #171 |
 | Parity | State-changing workflow for Codex (plan, adopt, approve, deliver, design, research, epic-decompose, insights, kickoff/wrap); the deliver-gate hook shipping gap | #186 |
 
 ---
@@ -208,9 +208,18 @@ enforcement boundary". So:
 
 Codex reads `AGENTS.md`. Claude Code reads `AGENTS.md` natively only when
 there is no `CLAUDE.md`; otherwise `CLAUDE.md` must import it with
-`@AGENTS.md`, which Anthropic recommends over a symlink. Part 3 makes
-`AGENTS.md` the conventions source and has `CLAUDE.md` import it, with Claude-
-specific material staying in `CLAUDE.md`.
+`@AGENTS.md`, which Anthropic recommends over a symlink. Part 3 (delivered)
+makes `AGENTS.md` the conventions source and has `CLAUDE.md` import it, with
+Claude-specific material staying in `CLAUDE.md`.
+
+The import is expanded only when Claude Code loads `CLAUDE.md` at session
+start, so RAD's direct readers (reviewers, skills, commands,
+`scripts/draft-insights-plan.sh`) read `AGENTS.md`, or `CLAUDE.md` when the
+project has no `AGENTS.md`. Installs and upgrades never move an existing
+`CLAUDE.md`; `UPGRADE.md` "Moving conventions to AGENTS.md (#171)" documents
+the manual move. `scripts/lint-claude-md.sh` checks both files against the
+150-line budget and warns when `AGENTS.md` exceeds Codex's 32 KiB
+`project_doc_max_bytes`. See `docs/maintaining-claude-md.md`.
 
 ---
 

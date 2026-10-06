@@ -327,6 +327,49 @@ node harness/cli.js config init --architect <id>
 
 ---
 
+## Moving conventions to AGENTS.md (#171)
+
+RAD now keeps project conventions in `AGENTS.md`, which Codex reads natively,
+and a small `CLAUDE.md` that imports it with `@AGENTS.md`. Fresh installs get
+both files. An upgrade never edits or overwrites your files:
+
+| Your project has | `install.sh --upgrade` does |
+|------------------|-----------------------------|
+| neither file | copies both templates |
+| `AGENTS.md` only | copies only the `CLAUDE.md` stub |
+| `CLAUDE.md` only | adds nothing and prints a one-line hint pointing here |
+| both | nothing |
+
+**Nothing breaks if you don't move.** Every RAD reader takes conventions from
+`AGENTS.md` when it exists, otherwise from `CLAUDE.md`, so a project that keeps
+its conventions in `CLAUDE.md` works as before.
+
+### The manual move
+
+1. Create `AGENTS.md` in the project root from the conventions in your
+   `CLAUDE.md` (Project, Stack, Structure, Commands, Architecture Decisions,
+   Coding Conventions, Testing Standards, Never Do, Known Constraints, and so
+   on). Move the text as it is; reword a rule only where it names Claude but
+   applies to any agent.
+2. In `CLAUDE.md`, replace those sections with the single line `@AGENTS.md`.
+   Claude Code expands the import when it loads `CLAUDE.md` at session start.
+3. Keep Claude-only notes in `CLAUDE.md`, below the import: namespaced command
+   names, hooks such as the deliver gate, and maintenance notes about
+   `CLAUDE.md` itself. RAD's own `CLAUDE.md` is an example.
+4. Check both files against the budgets, then commit:
+   ```bash
+   scripts/lint-claude-md.sh
+   git add AGENTS.md CLAUDE.md
+   git commit -m "docs: move conventions to AGENTS.md"
+   ```
+
+Once `AGENTS.md` exists it is the conventions file: readers do not fall back to
+`CLAUDE.md` for a section it lacks, so move every convention in one step. See
+[docs/maintaining-claude-md.md](docs/maintaining-claude-md.md) for the split
+and the budgets (150 lines each; 32 KiB for `AGENTS.md`).
+
+---
+
 ## See also
 
 - [INSTALL.md](INSTALL.md) — first-time installation and uninstalling

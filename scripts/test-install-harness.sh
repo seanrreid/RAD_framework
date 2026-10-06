@@ -535,6 +535,16 @@ for row in $CONVENTIONS_ROWS; do
   check_conventions "$CONV_T" "$row" "$TMP/conv-upgrade-$row.out" "upgrade"
 done
 
+# Amendment 1: a fresh install's next steps point to AGENTS.md for conventions
+# and stage it for commit; an upgrade names both files as unchanged.
+NEXT_STEPS_OUT="$TMP/conv-fresh-neither.out"
+assert_contains "$NEXT_STEPS_OUT" "1. Review .rad/config.yml and fill in AGENTS.md" \
+  "fresh install next steps -> step 1 names AGENTS.md"
+assert_contains "$NEXT_STEPS_OUT" "git add .claude/ .agents/ .rad/ scripts/ harness/ ai/ AGENTS.md CLAUDE.md" \
+  "fresh install next steps -> git add includes AGENTS.md"
+assert_contains "$TMP/conv-upgrade-neither.out" "AGENTS.md, CLAUDE.md, .rad/config.yml" \
+  "upgrade next steps -> names AGENTS.md and CLAUDE.md as unchanged"
+
 # ── summary ─────────────────────────────────────────────────────────────────
 echo "─────────────────────────────────────────"
 echo "PASS: $PASS  FAIL: $FAIL"
