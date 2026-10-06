@@ -8,3 +8,5 @@ Executor role: architect
 
 | Step | Wave | Task | Status | Commit | Time |
 |------|------|------|--------|--------|------|
+| 1 | Wave 1 | settings schema and serializer | ✓ complete | bd095a2 | 10:32 |
+| 2 | Wave 1 | Layer-aware manifest | ✓ complete | 3485123 | 10:33 |
