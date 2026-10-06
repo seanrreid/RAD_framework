@@ -128,7 +128,7 @@ Line ranges are the context an executor must load. Generated outputs are written
 | harness/generate.js | 305-320 | Skip the Claude emit for `none` |
 | harness/test/generate.test.js | 335-400 | `claude: none` cases (append) |
 | harness/generated-marker.js | 1-40 | New (amendment 1): `GENERATED_MARKER`, `hasGeneratedMarker` |
-| harness/generate.js | 25-60 | Import and re-export the marker from the new module (amendment 1) |
+| harness/generate.js | 25-60, 260-285 | Import and re-export the marker from the new module (amendment 1) |
 | harness/install-manifest.js | 1-60 | Import marker helper; constants |
 | harness/install-manifest.js | 60-110 | `listCoreFiles` ships `.rad` sources and marked outputs |
 | harness/test/install-manifest.test.js | 560-640 | Shipping cases (append) |
@@ -194,7 +194,7 @@ Validate: AC#3. Edge cases:
 Command: `npm test --prefix harness`.
 
 #### Task 1.2: Ship sources and marked outputs through core
-File: harness/generated-marker.js:1-40, harness/generate.js:25-60, harness/install-manifest.js:1-60, harness/install-manifest.js:60-110, harness/test/install-manifest.test.js:560-640
+File: harness/generated-marker.js:1-40, harness/generate.js:25-60, 260-285, harness/install-manifest.js:1-60, harness/install-manifest.js:60-110, harness/test/install-manifest.test.js:560-640
 What: Implement the `install-manifest.js` part of AC#4. Amendment 1: first move the marker into `harness/generated-marker.js` (re-exported from `generate.js`), so no two modules import each other.
 Validate: AC#4. Edge cases:
 - a marked file under each new root ships;
