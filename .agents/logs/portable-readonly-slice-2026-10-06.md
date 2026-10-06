@@ -12,3 +12,4 @@ Executor role: architect
 | 2 | 1 | 1.2 Ship sources and marked outputs through core | blocked_intent (import cycle: generate.js:31 imports isSafeRelPath from install-manifest.js) | — | 14:58 |
 | 3 | 1 | 1.2 Ship sources and marked outputs through core (amendment 1) | complete | ea5f5ff | 15:03 |
 | 4 | 2 | 2.1 Migrate the slice | complete | c5dd897 | 15:15 |
+| 5 | 3 | 3.1 Matrix and invariant | complete | 657b8e7 | 15:23 |
