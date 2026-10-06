@@ -32,7 +32,8 @@ bash /tmp/rad/install.sh --dir /path/to/your-project
 ```
 
 Follow the post-install steps in [INSTALL.md](../INSTALL.md): fill in
-`CLAUDE.md`, create platform labels, and commit the installed files.
+`AGENTS.md` (the conventions source; `CLAUDE.md` holds only Claude Code
+specifics), create platform labels, and commit the installed files.
 
 ### 1. Run /rad-research
 
@@ -153,7 +154,7 @@ flag it in the plan doc as an out-of-scope dependency. Your options:
 1. **Handle it yourself** — implement the out-of-scope piece and note it
    when you record approval (or in a comment on the deliver PR)
 2. **Expand their scope** — if the request is reasonable, update the agent
-   file to include the directory and update the scope map in `CLAUDE.md`
+   file to include the directory and update `agent_scope_map` in `.rad/config.yml`
 3. **Create a helper** — add a new context tool that returns exactly the
    information they need without expanding their read access broadly
 
@@ -313,19 +314,20 @@ and re-run `/rad-deliver` — it resumes from the execution log.
 
 ---
 
-## Keeping CLAUDE.md current
+## Keeping AGENTS.md current
 
-The most common maintenance failure: `CLAUDE.md` drifts from reality.
+The most common maintenance failure: the conventions file (`AGENTS.md`, or
+`CLAUDE.md` if the project has no `AGENTS.md`) drifts from reality.
 
 Signs of drift:
 - Team members' agents reference paths that don't exist
 - Claude makes wrong assumptions about the stack or conventions
 - The same thing gets corrected across multiple plans
 
-When you spot drift: fix `CLAUDE.md` immediately and commit:
+When you spot drift: fix `AGENTS.md` immediately and commit:
 ```bash
-git commit -m "docs: update CLAUDE.md — [what changed]"
+git commit -m "docs: update AGENTS.md — [what changed]"
 ```
 
-Do a full CLAUDE.md review monthly or after any significant refactor.
+Do a full `AGENTS.md` review monthly or after any significant refactor.
 See `docs/maintaining-claude-md.md` for the review checklist.

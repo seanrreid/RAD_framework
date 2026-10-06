@@ -136,8 +136,8 @@ git clone https://github.com/seanrreid/RAD_framework /tmp/rad
 bash /tmp/rad/install.sh --dir /path/to/your-project
 ```
 
-The installer handles directory structure, commands, scripts, and CLAUDE.md
-scaffolding in one step. See [INSTALL.md](INSTALL.md) for the full guide
+The installer handles directory structure, commands, scripts, and the
+`AGENTS.md` and `CLAUDE.md` scaffolding in one step. See [INSTALL.md](INSTALL.md) for the full guide
 including upgrade and uninstall instructions.
 
 ---
@@ -146,7 +146,8 @@ including upgrade and uninstall instructions.
 
 ```
 your-project/
-├── CLAUDE.md                         ← always-loaded project context + RAD config
+├── AGENTS.md                         ← project conventions (the conventions source)
+├── CLAUDE.md                         ← imports AGENTS.md + Claude Code specifics
 ├── .claude/
 │   ├── agents/                       ← auto-discovered by Claude Code
 │   │   ├── orchestrator.md
@@ -184,7 +185,7 @@ your-project/
 │   └── findings/README.md            ← findings log schema and query reference
 └── scripts/
     ├── detect-platform.sh            ← detects git platform from remote
-    ├── get-default-branch.sh         ← resolves default_branch from CLAUDE.md
+    ├── get-default-branch.sh         ← resolves default_branch from .rad/config.yml (via rad config get)
     ├── checkout-plan.sh              ← checks out a plan's rad/[feature] branch
     ├── fetch-epic.sh                 ← fetches an epic + children for /rad-epic-decompose
     ├── rad-label.sh                  ← applies RAD labels to a PR
@@ -222,7 +223,7 @@ your-project/
 | `docs/onboarding.md` | Guide for new team members |
 | `docs/apply-to-existing.md` | Applying RAD to an existing project (2–3 weeks) |
 | `docs/12-factor-agents.md` | How RAD maps to 12-Factor Agent principles |
-| `docs/maintaining-claude-md.md` | Keeping CLAUDE.md accurate over time |
+| `docs/maintaining-claude-md.md` | Maintaining AGENTS.md and CLAUDE.md: keeping conventions accurate over time |
 | `.agents/findings/README.md` | Findings log schema, record types, and jq query reference |
 
 ---

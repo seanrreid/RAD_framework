@@ -40,7 +40,7 @@ platform setup and label creation.
 Commit the installed files before proceeding:
 
 ```bash
-git add .claude/ .agents/ scripts/ CLAUDE.md
+git add .claude/ .agents/ scripts/ AGENTS.md CLAUDE.md
 git commit -m "chore: install RAD framework"
 ```
 
@@ -83,7 +83,7 @@ generates directly on the next invocation.)
 Commit everything — the generated agents are the architecture:
 
 ```bash
-git add .claude/agents/ .agents/research/ .agents/architecture/ CLAUDE.md
+git add .claude/agents/ .agents/research/ .agents/architecture/ AGENTS.md CLAUDE.md
 git commit -m "chore: initialize RAD agent architecture"
 git push
 ```
@@ -250,7 +250,7 @@ Run this after `/rad-deliver` completes. It checks:
 - All changed files were in the plan's scope
 - Implementation matches the plan
 - Every Acceptance Criterion has coverage
-- Conventions from `CLAUDE.md` are followed
+- Conventions from `AGENTS.md` (or `CLAUDE.md` if the project has no `AGENTS.md`) are followed
 - All tests from the plan were written
 
 Its report opens with a `### Digest` section — the ranked output of
@@ -336,7 +336,8 @@ Run this at the start of any session to see:
 
 Useful for the architect to see team progress without asking.
 
-For a richer start-of-session ritual, run `/kickoff`: it reads `CLAUDE.md`,
+For a richer start-of-session ritual, run `/kickoff`: it reads `AGENTS.md` (or `CLAUDE.md`
+if the project has no `AGENTS.md`),
 guards against working on the default branch, and reports plans by status from
 the `rad/` branch tips. At the end of a session, run `/wrap` to update any plan
 statuses that changed, append a dated progress note, and flag uncommitted work.
@@ -418,7 +419,7 @@ or above `RAD_FINDINGS_THRESHOLD` (default 5) into **one** plan,
 `.agents/plans/insights-proposals-<date>.md`, on a new
 `rad/insights-proposals-<date>` branch (honors `RAD_BRANCH_PREFIX`). It commits only
 the plan and does not push or approve it. A category that maps to a known
-convention becomes a CLAUDE.md Coding Conventions bullet task. An unmapped category
+convention becomes an `AGENTS.md` Coding Conventions bullet task. An unmapped category
 becomes a lint task with a co-located test fixture. Pass `--dry-run` to preview
 without creating a branch or commit.
 

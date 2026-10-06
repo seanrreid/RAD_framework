@@ -2,7 +2,7 @@
 
 For projects that don't yet have a RAD agent architecture. Expect 2–3 weeks
 of gradual rollout rather than a big-bang migration. The extra time is spent
-on archaeology, accurate CLAUDE.md authoring, and agent validation against
+on archaeology, accurate AGENTS.md authoring, and agent validation against
 the real codebase.
 
 ---
@@ -16,7 +16,7 @@ architecture you designed. The risks are:
 - **Wrong boundaries** — `/rad-research` generates scopes from what you
   describe. If your description doesn't match the real directory structure,
   the agent scopes will be wrong and the team will hit them immediately.
-- **Stale CLAUDE.md** — writing CLAUDE.md from memory produces a document
+- **Stale AGENTS.md** — writing AGENTS.md from memory produces a document
   full of what you think is true, not what is true. Claude will make wrong
   assumptions and the team will spend sessions correcting them.
 - **Workflow resistance** — a team with existing habits will resist more
@@ -43,7 +43,7 @@ bash /tmp/rad/install.sh --dir /path/to/your-project
 Complete the post-install steps in [INSTALL.md](../INSTALL.md), then commit:
 
 ```bash
-git add .claude/ .agents/ scripts/ CLAUDE.md
+git add .claude/ .agents/ scripts/ AGENTS.md CLAUDE.md
 git commit -m "chore: install RAD framework"
 ```
 
@@ -134,9 +134,10 @@ developer actually needs for routine work. Demote it to `developer`.
 Fix issues in the `.claude/agents/*.md` files directly. This week of solo
 validation is the highest-leverage time investment in the whole migration.
 
-### Step 5: Write an accurate CLAUDE.md
+### Step 5: Write an accurate AGENTS.md
 
-Write CLAUDE.md last — after the audit, not before. Verify every fact:
+Write `AGENTS.md` (the conventions source) last — after the audit, not
+before. Put only Claude Code-specific notes in `CLAUDE.md`. Verify every fact:
 
 ```bash
 # Stack and versions — verify, don't guess
@@ -157,7 +158,7 @@ npm test -- --passWithNoTests 2>&1 | tail -5
 ```
 
 The rule: if you can't verify it from the codebase right now, don't put it
-in CLAUDE.md. A blank section is harmless. A wrong section causes correction
+in `AGENTS.md`. A blank section is harmless. A wrong section causes correction
 loops in every session.
 
 ---
@@ -238,12 +239,12 @@ Each person should:
 
 The first week of full-team operation will surface remaining issues:
 - Scope boundaries that need adjustment
-- CLAUDE.md facts that are wrong or missing
+- `AGENTS.md` facts that are wrong or missing
 - Wave structure confusion (most teams default to everything sequential at first)
 - Plan approval (`/rad-approve`) turnaround bottlenecks
 
 Treat this week as calibration, not failure. Fix issues in the agent files
-and CLAUDE.md as they surface. Commit each fix immediately.
+and `AGENTS.md` as they surface. Commit each fix immediately.
 
 ---
 
@@ -257,7 +258,7 @@ and re-run `/rad-design` to regenerate the agent files.
 
 ### "Claude keeps doing things it shouldn't"
 
-CLAUDE.md is wrong or incomplete. Find the specific wrong fact, verify the
+`AGENTS.md` is wrong or incomplete. Find the specific wrong fact, verify the
 correct one against the codebase, fix it, commit.
 
 ### "Plan approval is slowing us down"
@@ -293,12 +294,12 @@ they need, or expand scope narrowly with documented justification.
   feature being started
 - Plan reviews take under 10 minutes and `/rad-approve` is run same day
 - `/rad-deliver` runs cleanly on approved plans without scope violations
-- CLAUDE.md is being updated when new facts are discovered
+- `AGENTS.md` is being updated when new facts are discovered
 - The team is catching their own scope issues in `/rad-review` before
   you see them in the deliver PR
 - Context rot complaints have dropped (sessions stay focused)
 
 If you're not seeing this at 30 days, the bottleneck is usually one of:
 plan reviews taking too long to approve, agent scopes that don't match reality,
-or a CLAUDE.md that hasn't been maintained. Check those three before
+or an `AGENTS.md` that hasn't been maintained. Check those three before
 assuming the framework isn't working.
