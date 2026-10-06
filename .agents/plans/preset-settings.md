@@ -1,7 +1,10 @@
 # Plan: Config-Backed Settings and a Layer-Aware Manifest (#71 part 2a)
 Created: 2026-10-06
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-10-06T14:30:38.319Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/preset-settings
 Adopted-From: https://github.com/seanrreid/RAD_framework/issues/71
 Issue-Title: Layered packaging model for portable RAD distribution: core → presets → project overrides (spec-kit bundles analog)
