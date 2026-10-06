@@ -2358,3 +2358,40 @@ test('(capcls-c) AC#7 waveCapabilities {} vs omitted → byte-identical event se
   assert.equal(JSON.stringify(empty), JSON.stringify(omitted));
   assert.ok(omitted.filter((e) => e.type === 'wave-started').every((e) => !('capabilities' in e.data)));
 });
+
+// ── acp-surface AC#4: permission decisions on wave-attempt ──────────────────
+
+const PERMS = [{ kind: 'edit', decision: 'allow' }, { kind: null, decision: 'cancelled' }];
+const attemptsOf = (state) => state.appended.filter((e) => e.type === 'wave-attempt');
+
+test('(perm-a) AC#4 result.permissions is recorded on the wave-attempt data', async () => {
+  const { state } = await runOneWave({ runWave: async () => ({ outcome: 'success', permissions: PERMS }) });
+  const [attempt] = attemptsOf(state);
+  assert.deepEqual(attempt.data.permissions, PERMS);
+  assert.deepEqual(Object.keys(attempt.data), ['wave', 'attempt', 'outcome', 'usage', 'permissions']);
+});
+
+test('(perm-b) AC#4 absent or empty permissions -> byte-identical event sequence, no key', async () => {
+  const runWith = async (extra) =>
+    (await runOneWave({ plan: twoWaves, runWave: async () => ({ outcome: 'success', ...extra }) })).state.appended;
+  const absent = await runWith({});
+  for (const extra of [{ permissions: [] }, { permissions: undefined }, { permissions: 'edit' }]) {
+    const appended = await runWith(extra);
+    assert.equal(JSON.stringify(appended), JSON.stringify(absent), JSON.stringify(extra));
+  }
+  assert.ok(absent.filter((e) => e.type === 'wave-attempt').every((e) => !('permissions' in e.data)));
+});
+
+test('(perm-c) AC#4 a veto-sourced attempt keeps its provenance shape plus permissions', async () => {
+  const spy = makeVetoSpy({ point: 'post-wave', outcome: 'fail-scope' });
+  const { state } = await runOneWave({
+    runWave: async () => ({ outcome: 'success', permissions: PERMS }),
+    runHooks: spy.runHooks,
+  });
+  const [attempt] = attemptsOf(state);
+  assert.equal(attempt.data.outcome, 'fail-scope');
+  assert.equal(attempt.data.source, 'hook');
+  assert.equal(attempt.data.point, 'post-wave');
+  assert.equal(attempt.data.hook, 'hooks/post-wave/01.sh');
+  assert.deepEqual(attempt.data.permissions, PERMS);
+});

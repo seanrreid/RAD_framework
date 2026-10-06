@@ -438,12 +438,18 @@ function appendWaveStarted({ state, feature, now, wave, attempt, waveModels, wav
 /**
  * Build a `wave-attempt` event's data. `attempt` is always recorded;
  * `fingerprint` (the digest the doom-loop compares) only when `print` is set,
- * i.e. the resolved action was retry/revision. Optional keys are spread, never
- * present-and-undefined. Post-wave veto provenance keeps its prior shape.
+ * i.e. the resolved action was retry/revision; `permissions` (the acp adapter's
+ * permission decisions) only when `result.permissions` is a non-empty array.
+ * Optional keys are spread, never present-and-undefined. Post-wave veto
+ * provenance keeps its prior shape.
  */
 function attemptData({ wave, attempt, outcome, result, evidence, vetoSource, print }) {
   const printEvidence = print ? { fingerprint: print } : {};
-  const base = { wave: wave.n, attempt, outcome, usage: result.usage, ...evidence, ...printEvidence };
+  const hasPermissions = Array.isArray(result.permissions) && result.permissions.length > 0;
+  const permissions = hasPermissions ? { permissions: result.permissions } : {};
+  const base = {
+    wave: wave.n, attempt, outcome, usage: result.usage, ...evidence, ...printEvidence, ...permissions,
+  };
   return vetoSource
     ? { ...base, source: 'hook', point: vetoSource.point, hook: vetoSource.hook }
     : base;
