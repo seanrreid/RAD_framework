@@ -5,11 +5,14 @@ spine and whatever agent actually executes a wave. It is plain text — no vendo
 SDK, no JSON-RPC, no proprietary message format — so any agent that can read a
 prompt and emit a `WAVE_RESULT` block can drive a RAD delivery.
 
-Two adapters ship today and both honor this contract:
+Three adapters ship today and all honor this contract:
 
 - **`command`** (default, vendor-neutral) — shells out to an operator-configured
   CLI agent (`claude -p`, `codex exec`, `aider`, or a wrapper script).
 - **`sdk`** (Anthropic) — drives the Claude Agent SDK `query` loop.
+- **`acp`** (vendor-neutral) — speaks Agent Client Protocol v1 to an agent
+  spawned from `RAD_AGENT_CMD`. ACP is only the transport: the prompt and the
+  `WAVE_RESULT` block are the same plain text.
 
 The contract lives in `harness/adapters/agent/contract.js` (pure, SDK-free). The
 adapters live alongside it.
@@ -55,10 +58,13 @@ This section explains the design. It does not change any execution behaviour.
 
 ## The adapter interface
 
-An adapter is a factory that returns a `runWave` function:
+RAD ships three adapters, selected by `RAD_AGENT`: `command` (spawns any CLI
+agent), `sdk` (the Claude Agent SDK) and `acp` (an Agent Client Protocol v1
+agent; see [The `acp` adapter](#the-acp-adapter)). Each is a factory that
+returns a `runWave` function:
 
 ```
-runWave(wave, planCtx) -> Promise<{ outcome, status, tasks?, usage? }>
+runWave(wave, planCtx) -> Promise<{ outcome, status, tasks?, usage?, permissions? }>
 ```
 
 - `wave` — the wave descriptor from the plan: `{ n, type, tasks: [...] }`.
@@ -73,6 +79,7 @@ The returned result:
 | `status` | string | **required** | `complete` or `failed` — the wave-level roll-up |
 | `tasks` | array of `{ title, status, commit, concern, error }` | **optional** — present only when the agent reported at least one parseable task; otherwise the key is **omitted** | the per-task records parsed out of the `WAVE_RESULT` block, passed through for the execution log and for downstream event recording |
 | `usage` | `{ input, output, total, cacheRead?, cacheWrite?, cost? }` (numbers) | **optional and adapter-optional** — an adapter that observes no token counts omits the key entirely; within it, `cacheRead` / `cacheWrite` / `cost` are each **optional** and **absent** (never `0`, never `undefined`) when unreported | normalized token usage for the wave attempt, produced by `normalizeUsage`: `input` is the uncached input remainder, `cacheRead` the cache tokens read, `cacheWrite` the cache tokens written, `cost` the provider-reported spend (#121) |
+| `permissions` | array of `{ kind, decision }` | **optional, `acp` only**; omitted when the agent made no permission request | each `session/request_permission` the acp adapter answered: `kind` is the ACP tool kind (or `null`), `decision` is `allow`, `reject` or `cancelled`. The spine copies a non-empty array onto the `wave-attempt` event; no fold reads it |
 
 Both optional fields are **adapter-optional**: an adapter that reports neither
 behaves exactly as one that predates them. A missing `usage` contributes `0` to
@@ -144,8 +151,94 @@ today's `allowedTools`.
 cause a refusal **before launch** (exit 2, before any event is appended) — it
 must never run the wave with more than the effective set. The `command` adapter
 cannot narrow an agent CLI's tools, so deliver refuses any constrained wave
-narrower than all five classes on it; the `sdk` adapter maps classes to tools
-and refuses `mcp`, which it cannot grant.
+narrower than all five classes on it; the `acp` adapter is refused the same
+way, because an ACP agent may act without asking permission; the `sdk` adapter
+maps classes to tools and refuses `mcp`, which it cannot grant.
+
+### The `acp` adapter
+
+`harness/adapters/agent/acp.js` is a hand-written, zero-dependency ACP v1
+client (Node built-ins only). It spawns `RAD_AGENT_CMD` with the same
+allow-listed env as the `command` adapter (`buildChildEnv`), with the repo
+root as its cwd, and speaks newline-delimited JSON-RPC 2.0 over the agent's
+stdio. One process and one session per attempt. Why RAD speaks ACP, and what
+it gives up, is in [`acp-evaluation.md`](./acp-evaluation.md).
+
+**Command string.** Tokenized on whitespace like the `command` path, so a path
+cannot contain spaces (use a wrapper script). A `{prompt}` token is rejected:
+the prompt travels over the protocol. `{model}` is not substituted.
+
+**Handshake.**
+
+1. `initialize` with `protocolVersion: 1` and no client capabilities
+   (`fs.readTextFile`, `fs.writeTextFile` and `terminal` all `false`). Any
+   other `protocolVersion` in the answer is `fail-protocol`, before a prompt is
+   sent. `authMethods` are not acted on: the agent must already be
+   authenticated.
+2. `session/new` with `cwd` = the repo root and `mcpServers: []`. A missing or
+   empty `sessionId` is `fail-protocol`.
+
+**Turn.** One `session/prompt` carrying `buildWavePrompt` as a single text
+block. The `agent_message_chunk` text is collected and parsed with
+`contract.js`, exactly as on the `command` path. If the turn has no
+`WAVE_RESULT` block, RAD sends one reprompt in the same session; still none is
+`fail-protocol`. Every agent request other than `session/request_permission`
+(`fs/*`, `terminal/*`, anything else) is answered `-32601` (method not found).
+
+**`stopReason` mapping.**
+
+| `stopReason` | Result |
+|--------------|--------|
+| `end_turn`, `max_tokens`, `max_turn_requests` | the turn text goes through the normal `WAVE_RESULT` parse |
+| `refusal` | `fail-scope` |
+| `cancelled` after RAD's own timeout cancel | `fail-timeout` |
+| `cancelled` RAD did not ask for, or any unknown value | `fail-protocol` |
+
+**Timeout and failures.** At the wave deadline RAD sends `session/cancel`,
+waits a grace period for the turn to settle, then SIGTERM and SIGKILL; the
+attempt is `fail-timeout`. An agent crash, a line that is not JSON-RPC 2.0, a
+response to an unknown id, or an error response is `fail-protocol`.
+
+**Permission policy.** Each `session/request_permission` is answered from the
+wave's effective capability classes (default `fs_read`, `fs_write`, `shell`):
+
+| ACP tool `kind` | Capability class |
+|-----------------|------------------|
+| `read`, `search`, `think` | `fs_read` |
+| `edit`, `delete`, `move` | `fs_write` |
+| `execute` | `shell` |
+| `fetch` | `net` |
+| `other`, `switch_mode`, missing | none: always refused |
+
+RAD selects the `allow_once` option when the class is in the effective set and
+`reject_once` otherwise. If the wanted option is not offered it answers
+`cancelled`. It never selects `allow_always` or `reject_always`. After RAD has
+cancelled the turn, every permission request is answered `cancelled`. The
+decisions are returned as `permissions` and recorded on the `wave-attempt`
+event. They are defence in depth, not enforcement: an agent may run a tool
+without asking, so a constrained wave is refused before launch (see
+[Capabilities](#capabilities)).
+
+**Usage.** Stable v1 `usage_update` carries only `used` and `size` (context
+occupancy) and an optional `cost`, so a conformant agent's attempts carry no
+`usage` and count as `0` toward `RAD_TOKEN_BUDGET`. If an agent sends the draft
+`Usage` token fields (`inputTokens`, `outputTokens`, `totalTokens`,
+`cachedReadTokens`, `cachedWriteTokens`), they are mapped through
+`normalizeUsage`, with `cost` taken only when its currency is USD.
+
+**Model.** ACP v1 has no stable model selector. An explicit `--model` or a
+wave `Model:` line produces one warning per run
+(`acp adapter: model '<id>' ignored; ...`) and the agent uses its own
+configured model. Without either, nothing is printed.
+
+**Preflight.** Before Wave 1, `rad deliver` runs the handshake only
+(`initialize` and `session/new`, no prompt, so no model cost), under the same
+`RAD_AGENT_PREFLIGHT` and `RAD_AGENT_PREFLIGHT_TIMEOUT_SECONDS` rules as the
+`command` path. A failure exits 1 with
+`RAD_AGENT_CMD failed the ACP handshake: <error>`.
+
+To check an agent before using it, run `rad acp-check --cmd "<agent>"` (see
+[`rad-cli.md`](./rad-cli.md#rad-acp-check)).
 
 ---
 
@@ -356,8 +449,15 @@ input exists in the harness.
 
 ## Writing a new adapter
 
-Both shipped adapters follow the same skeleton; reuse the shared helpers in
-`contract.js` rather than reimplementing the protocol.
+**Preferred: speak ACP v1 and pass `rad acp-check`.** For a provider RAD does
+not support yet, the first choice is no new adapter at all: run (or write) an
+ACP v1 agent for it, use `RAD_AGENT=acp`, and check it with
+`rad acp-check --cmd "<agent>"` (see [`rad-cli.md`](./rad-cli.md#rad-acp-check)).
+Write a bespoke adapter only when the provider cannot speak ACP or needs
+something ACP cannot carry, such as enforced capability classes.
+
+A bespoke adapter follows the same skeleton as the shipped ones; reuse the
+shared helpers in `contract.js` rather than reimplementing the protocol.
 
 1. **Build the prompt:** `buildWavePrompt(wave, planCtx)`.
 2. **Run your agent once**, capturing its full text output. Apply a wall-clock
@@ -383,14 +483,17 @@ Both shipped adapters follow the same skeleton; reuse the shared helpers in
    refusal path (as `command` is) so a constrained wave is refused before
    launch — see [Capabilities](#capabilities).
 
-### `command` vs `sdk`
+### `command` vs `sdk` vs `acp`
 
-| | `command` | `sdk` |
-|---|-----------|-------|
-| Transport | spawns an OS process, prompt on stdin (or `{prompt}` token) | Claude Agent SDK `query` async loop |
-| Credentials | **none** required by the adapter — the configured command owns them | requires `ANTHROPIC_API_KEY` |
-| Retries | timeout terminal; spawn/non-zero exit surfaced | `transient` retried with backoff |
-| Selection | `RAD_AGENT=command` (default) + `RAD_AGENT_CMD=<cmd>` | `RAD_AGENT=sdk` |
+| | `command` | `sdk` | `acp` |
+|---|-----------|-------|-------|
+| Transport | spawns an OS process, prompt on stdin (or `{prompt}` token) | Claude Agent SDK `query` async loop | spawns an OS process, ACP v1 JSON-RPC over stdio; `{prompt}` rejected |
+| Credentials | **none** required by the adapter — the configured command owns them | requires `ANTHROPIC_API_KEY` | **none** required by the adapter; the agent must already be authenticated |
+| Retries | timeout terminal; spawn/non-zero exit surfaced | `transient` retried with backoff | timeout terminal (`session/cancel`, then kill); protocol errors `fail-protocol` |
+| Capabilities | constrained waves refused | mapped to `allowedTools`; `mcp` refused | constrained waves refused; permission requests answered and recorded |
+| Model | `{model}` token in the command | `--model` / wave `Model:` | ignored with one warning |
+| Usage | `RAD_USAGE` line, if printed | SDK token counts | none from a conformant v1 agent |
+| Selection | `RAD_AGENT=command` (default) + `RAD_AGENT_CMD=<cmd>` | `RAD_AGENT=sdk` | `RAD_AGENT=acp` + `RAD_AGENT_CMD=<agent>` |
 
 Selection is purely environment-driven (no config-file loader). See
 [`rad-cli.md`](./rad-cli.md) for the `rad deliver` selection details and the

@@ -162,20 +162,26 @@ approval).
 ### Agent Adapter
 
 `rad deliver` selects the wave-execution agent via environment variables (no
-config-file loader). Both adapters honor the provider-neutral wave contract in
+config-file loader). All three adapters honor the provider-neutral wave contract in
 `docs/rad-wave-contract.md`.
 
 ```
-RAD_AGENT:     command   # command | sdk  (default: command)
-RAD_AGENT_CMD:           # the CLI to spawn, required when RAD_AGENT=command
+RAD_AGENT:     command   # command | sdk | acp  (default: command)
+RAD_AGENT_CMD:           # the CLI to spawn, required when RAD_AGENT=command or acp
 ```
 
 - `command` (default) — spawns an operator-configured CLI agent
   (`RAD_AGENT_CMD`, e.g. `claude -p`, `codex exec`, `aider`). Requires **no**
   `ANTHROPIC_API_KEY`; credentials are the configured command's concern.
 - `sdk` — drives the Claude Agent SDK; requires `ANTHROPIC_API_KEY`.
+- `acp` — spawns `RAD_AGENT_CMD` as an Agent Client Protocol v1 agent under the
+  same allow-listed env as `command`. Requires **no** `ANTHROPIC_API_KEY`; the
+  agent must already be authenticated. `{prompt}` is rejected and models are
+  ignored with a warning (see the `acp` adapter section of
+  `docs/rad-wave-contract.md`). Any other `RAD_AGENT` value exits 1 with
+  `expected command | sdk | acp`.
 
-**Env-less auth contract (command path).** `RAD_AGENT_CMD` runs under an
+**Env-less auth contract (command and acp paths).** `RAD_AGENT_CMD` runs under an
 **allow-listed** env — only `PATH HOME LANG LC_ALL TMPDIR TERM USER` are
 forwarded — so it must authenticate **without inherited env vars**: on-disk
 credentials or the OS keychain, not an env-injected token (an exported
@@ -192,7 +198,10 @@ model call per deliver). If it exits non-zero, cannot spawn, or times out,
 deliver exits 1 with `RAD_AGENT_CMD failed to start under the adapter env (it
 must authenticate without inherited env vars): <error>` — before any event is
 appended (in worktree mode the probe runs inside the new worktree, which is then
-preserved). The SDK path and an injected `runWave` never probe.
+preserved). On the acp path the probe is the ACP handshake only (`initialize`
+and `session/new`, no prompt and no model cost), and a failure exits 1 with
+`RAD_AGENT_CMD failed the ACP handshake: <error>`. The SDK path and an injected
+`runWave` never probe.
 `RAD_AGENT_PREFLIGHT_TIMEOUT_SECONDS` sets the probe deadline (default **60**); a
 malformed value (non-numeric, zero, negative) is a hard error — **exit 2**, never
 a silent fall back. It is not validated when `RAD_AGENT_PREFLIGHT=off`, since no

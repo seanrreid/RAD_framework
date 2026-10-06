@@ -187,12 +187,14 @@ invariants:
         note: "a malformed value exits 2; a large value only delays fail-timeout"
 
   - id: adapter-env-allow-listed
-    claim: "The command agent adapter spawns RAD_AGENT_CMD (deliver waves) and RAD_REVIEW_AGENT_CMD / RAD_AGENT_CMD (the rad review lane) with only the allow-listed environment variables, so no exported credential reaches either child."
+    claim: "The command agent adapter spawns RAD_AGENT_CMD (deliver waves) and RAD_REVIEW_AGENT_CMD / RAD_AGENT_CMD (the rad review lane), and the acp adapter spawns RAD_AGENT_CMD (deliver waves, its preflight and rad acp-check), with only the allow-listed environment variables, so no exported credential reaches any of these children."
     authority: "the ENV_ALLOW_LIST constant in harness/adapters/agent/command.js"
     evals: [harness/evals/delivery.eval.js]
     enforced_by:
       - { file: harness/adapters/agent/command.js, symbol: "ENV_ALLOW_LIST" }
       - { file: harness/adapters/agent/command.js, symbol: "export async function runCommandPrompt", note: "review lane runs through the same allow-listed spawn" }
+      - { file: harness/adapters/agent/command.js, symbol: "export function buildChildEnv", note: "the allow-listed env builder both adapters share" }
+      - { file: harness/adapters/agent/acp.js, symbol: "env: buildChildEnv()", note: "the acp spawn (waves, preflight, acp-check) uses the same allow-listed env" }
     bypasses:
       - id: preflight-off
         surface: "RAD_AGENT_PREFLIGHT=off"
@@ -230,6 +232,7 @@ invariants:
       - { file: harness/capabilities.js, symbol: "export function resolveWaveCapabilities", note: "explicit requests denied by .rad/config.yml capabilities.deny refuse, never drop" }
       - { file: harness/capabilities.js, symbol: "export function sdkAllowedTools", note: "an unmappable set fails closed, never widening to the default" }
       - { file: harness/cli.js, symbol: "const refusal = commandRefusal(resolved.byWave);", note: "the command adapter cannot restrict tools, so a narrowed wave refuses" }
+      - { file: harness/cli.js, symbol: "const refusal = commandRefusal(resolved.byWave, 'acp');", note: "an ACP agent may act without asking permission, so a narrowed wave refuses on acp too" }
       - { file: harness/adapters/agent/sdk.js, symbol: "allowedTools: [...allowedTools]", note: "the per-wave allow-list reaches the SDK query" }
     bypasses:
       - id: skill-path
@@ -254,3 +257,13 @@ invariants:
         surface: "a symlinked target directory (such as docs/)"
         guarded: "no"
         note: "written through, same as core; a symlink at the file path itself is never written through (kept as a local edit)"
+
+  - id: acp-protocol-pinned
+    claim: "An ACP agent that answers initialize with any protocolVersion other than 1 is refused before any prompt is sent."
+    authority: "the ACP_PROTOCOL_VERSION constant in harness/adapters/agent/acp.js"
+    not_evalable: "protocol handshake with no agent-reachable bypass; covered by harness/test/acp-adapter.test.js and rad acp-check"
+    enforced_by:
+      - { file: harness/adapters/agent/acp.js, symbol: "export const ACP_PROTOCOL_VERSION = 1;" }
+      - { file: harness/adapters/agent/acp.js, symbol: "if (init?.protocolVersion !== ACP_PROTOCOL_VERSION) {", note: "initializeAgent throws fail-protocol before session/new or any session/prompt" }
+      - { file: harness/adapters/agent/acp.js, symbol: "await initializeAgent(session);", note: "the handshake runs initialize first on every path (waves, preflight, acp-check)" }
+    bypasses: []
