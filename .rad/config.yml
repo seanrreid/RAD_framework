@@ -87,7 +87,7 @@ agent_scope_map:
     roles: [developer]
   - agent: findings-surface-mapper
     type: context-tool
-    reads: ".agents/findings.jsonl samples, rad-insights + wrap skills, CLAUDE.md conventions, lint-plan.sh"
+    reads: ".agents/findings.jsonl samples, rad-insights + wrap skills, AGENTS.md conventions, lint-plan.sh"
     roles: [developer]
   - agent: harness-ci-parent-orchestrator
     type: parent-orchestrator
@@ -119,9 +119,9 @@ agent_scope_map:
     roles: [architect]
   - agent: quality-reviewer
     type: reviewer
-    reads: "current diff or specified files, CLAUDE.md conventions"
+    reads: "current diff or specified files, AGENTS.md conventions"
     roles: [architect, developer, designer]
   - agent: accessibility-reviewer
     type: reviewer
-    reads: "current diff or specified files, CLAUDE.md stack info"
+    reads: "current diff or specified files, AGENTS.md stack info"
     roles: [architect, developer, designer]

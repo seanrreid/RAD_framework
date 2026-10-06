@@ -77,7 +77,8 @@ trailing hyphen).
 Read these for grounding so each child story reflects the project's actual
 conventions and architecture — do **not** scan speculatively beyond this set:
 
-- `CLAUDE.md` — project conventions, stack, constraints, role assignments.
+- `AGENTS.md` (or `CLAUDE.md` if the project has no `AGENTS.md`) — project
+  conventions, stack, constraints, role assignments.
 - `.agents/architecture/` — the approved agent architecture and scope map, for
   mapping child stories onto affected domains. (Read these as **context only**;
   never hand-edit them, and never read `.claude/agents/` as an input.)
@@ -199,8 +200,8 @@ Next steps:
   command only shapes; it does not plan, research, or deliver.
 - Never auto-commit, push, open a PR, or flip any approval/plan status — the
   architect commits and signs off manually.
-- Never read `.claude/agents/` as an input; read context only from `CLAUDE.md`,
-  `.agents/architecture/`, and recent `.agents/plans/`.
+- Never read `.claude/agents/` as an input; read context only from `AGENTS.md`
+  (or `CLAUDE.md`), `.agents/architecture/`, and recent `.agents/plans/`.
 - Never write or mutate any plan's `Status:` field, and never hand-edit
   `.claude/agents/` or `.agents/architecture/`.
 - Never mutate GitHub issues unless `RAD_UPDATE_ISSUES=true`; default off, and the

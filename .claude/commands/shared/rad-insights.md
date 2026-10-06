@@ -77,7 +77,7 @@ A category that keeps recurring across review cycles is a signal the project is
 missing a convention (or a lint rule) that would prevent it. This step turns the
 Step 3 category counts into **suggestions only** — every output is framed
 "suggestion — apply via PR; never auto-applied". This skill NEVER edits
-`CLAUDE.md` or `scripts/lint-plan.sh` itself.
+`AGENTS.md`, `CLAUDE.md` or `scripts/lint-plan.sh` itself.
 
 **Threshold.** Resolved from `RAD_FINDINGS_THRESHOLD` with `Number.parseInt`
 semantics: unset, `0`, NaN (non-numeric), or negative all fall back to the
@@ -93,9 +93,9 @@ jq -r 'select(.type=="finding") | .category' .agents/findings.jsonl \
 ```
 
 For **each** category the filter emits, produce one suggestion block containing
-EITHER a ready-to-paste `## Coding Conventions` bullet for `CLAUDE.md` OR a
-described lint rule (prose only — do not write lint code), targeted at the
-category. Examples of the mapping:
+EITHER a ready-to-paste `## Coding Conventions` bullet for the conventions file
+(`AGENTS.md`, or `CLAUDE.md` if the project has none) OR a described lint rule
+(prose only — do not write lint code), targeted at the category. Examples of the mapping:
 
 - `testing` → convention bullet about test-coverage expectations for changed behavior
 - `code-clarity` → convention bullet about naming/function-size/comment expectations
@@ -108,7 +108,7 @@ Suggestion block format (repeat per category):
 
 ```markdown
 #### Recurring: [category] — [N] findings (threshold: [t])
-Suggested `## Coding Conventions` bullet for CLAUDE.md:
+Suggested `## Coding Conventions` bullet for [AGENTS.md | CLAUDE.md]:
 - [one concrete, checkable convention line targeting the category]
 [OR: Suggested lint rule (described, not implemented): [one-sentence rule description]]
 > Suggestion — apply via PR; never auto-applied.
@@ -482,7 +482,7 @@ Reading the output:
 
 ### Step 4f: Fold per-wave-position reliability (model-tiering advisory)
 
-Per-Wave `Model:` tiering (see CLAUDE.md "Cost & Frugality") is only worth
+Per-Wave `Model:` tiering (see `docs/configuration.md` "Cost & Frugality") is only worth
 suggesting where history shows a wave position is reliably first-try or reliably
 retried. The counting lives in `harness/events.js` (`waveReliability`) — import
 it, never re-implement it. Same invocation convention as Steps 4c–4e: run from
@@ -1133,8 +1133,8 @@ carries per-task data yet.
   proposal must preserve the wave-prompt template's #112 prefix-ordering constraint
 - All-zero reliability counts are the "no wave data yet" path, not an error — render
   the zeros text from the template and move on
-- Findings Recurrence (Step 3b) outputs are suggestions only — never edit CLAUDE.md
-  or scripts/lint-plan.sh from this skill; every block must carry the
+- Findings Recurrence (Step 3b) outputs are suggestions only — never edit AGENTS.md,
+  CLAUDE.md or scripts/lint-plan.sh from this skill; every block must carry the
   "Suggestion — apply via PR; never auto-applied" framing
 - RAD_FINDINGS_THRESHOLD parses via Number.parseInt; unset/0/NaN/negative → default 5
 - The plan drafter (`--draft-plans`, `scripts/draft-insights-plan.sh`) runs ONLY when

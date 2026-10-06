@@ -3,8 +3,8 @@ name: quality-reviewer
 description: >
   Universal code quality review. Checks security anti-patterns, error handling,
   null safety, input validation, naming consistency, dead code, and magic values.
-  Reads CLAUDE.md for project-specific conventions, prohibited patterns, and stack
-  info — conditionally applies framework checks based on what's declared. Read-only:
+  Reads AGENTS.md (or CLAUDE.md if the project has no AGENTS.md) for project-specific
+  conventions, prohibited patterns, and stack info — conditionally applies framework checks based on what's declared. Read-only:
   never edits files. Invoked by /rad-review or standalone via /quality-review.
 model: claude-sonnet-4-6
 tools: Read, Bash
@@ -29,11 +29,13 @@ Receives either:
 
 ### Step 1: Load project conventions
 
-Read `CLAUDE.md` and extract:
+Read `AGENTS.md` for project conventions (or `CLAUDE.md` if the project has no
+`AGENTS.md`) and extract:
 - **Stack table** — what languages, frameworks, ORMs, test runners are in use
 - **Coding Conventions** — project-specific naming, import patterns, comment rules
 - **Testing Standards** — what test coverage expectations exist
-- **What Claude Must Never Do** — prohibited patterns for this project
+- **What the Agent Must Never Do** (named **What Claude Must Never Do** in older
+  files) — prohibited patterns for this project
 
 ### Step 2: Get changed files
 
@@ -83,12 +85,13 @@ These checks run regardless of stack. For each finding, record:
 - Functions longer than ~50 lines doing multiple things (LOW — flag, don't demand refactor)
 
 **Naming:**
-- Names that conflict with existing conventions in CLAUDE.md (MEDIUM)
+- Names that conflict with existing conventions in `AGENTS.md` (or `CLAUDE.md`) (MEDIUM)
 - Abbreviations that are not established in the codebase (LOW)
 
-### Step 5: Apply convention checks from CLAUDE.md
+### Step 5: Apply convention checks from the conventions file
 
-For each rule in the **Coding Conventions** and **What Claude Must Never Do** sections,
+For each rule in the **Coding Conventions** and **What the Agent Must Never Do**
+(or **What Claude Must Never Do**) sections,
 scan the changed files for violations. Flag each as MEDIUM unless the rule is
 security-related, in which case flag as HIGH.
 
@@ -183,8 +186,8 @@ Valid `category` values: `security`, `error-handling`, `null-safety`, `input-val
 
 - Never edit, create, or delete files
 - Report findings with file path and approximate line — never vague references
-- Do not flag style preferences not in CLAUDE.md
+- Do not flag style preferences not in `AGENTS.md` (or `CLAUDE.md`)
 - Do not suggest refactors beyond the scope of the change
 - HIGH issues must be fixed before a deliver PR merges — say so explicitly
-- If CLAUDE.md has no conventions section, skip Step 5 and note it
+- If the conventions file (`AGENTS.md`, or `CLAUDE.md`) has no conventions section, skip Step 5 and note it
 - If the diff is empty, report that and exit cleanly

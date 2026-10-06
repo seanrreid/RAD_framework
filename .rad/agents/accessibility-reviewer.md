@@ -4,8 +4,8 @@ description: >
   WCAG 2.1 AA accessibility review. Checks semantic HTML, ARIA roles and labels,
   keyboard navigation, focus management, color contrast, screen reader support,
   and motion/animation safety. Stack-agnostic — WCAG applies regardless of
-  framework. Reads CLAUDE.md to understand the frontend stack and component
-  library in use. Read-only: never edits files. Invoked by /rad-review or
+  framework. Reads AGENTS.md (or CLAUDE.md if the project has no AGENTS.md) to
+  understand the frontend stack and component library in use. Read-only: never edits files. Invoked by /rad-review or
   standalone via /accessibility-review.
 model: claude-sonnet-4-6
 tools: Read, Bash
@@ -37,7 +37,10 @@ git diff main...HEAD --name-only 2>/dev/null \
 If specific files were passed, use those. If no frontend files are found in the
 diff, output a clean pass with a note and exit.
 
-### Step 2: Read CLAUDE.md for stack context
+### Step 2: Read the conventions file for stack context
+
+Read `AGENTS.md` for project conventions (or `CLAUDE.md` if the project has no
+`AGENTS.md`).
 
 Extract:
 - Frontend framework (React, Vue, Svelte, etc.) — informs *where* to look
@@ -122,7 +125,7 @@ description, and recommended fix.
 
 ### Step 5: Component library awareness
 
-If the Stack table in CLAUDE.md lists a component library, note which checks
+If the Stack table in `AGENTS.md` (or `CLAUDE.md`) lists a component library, note which checks
 are likely already handled by that library's accessible primitives vs. which
 require explicit implementation by the code under review.
 
@@ -206,4 +209,4 @@ Valid `category` values: `text-alternatives`, `time-based-media`, `adaptable`,
 - Do not recommend specific component libraries — suggest patterns instead
 - HIGH issues must be fixed before a deliver PR merges — say so explicitly
 - If no frontend files are in scope, exit cleanly with a note
-- If CLAUDE.md has no Stack table, skip the component library awareness step
+- If the conventions file (`AGENTS.md`, or `CLAUDE.md`) has no Stack table, skip the component library awareness step

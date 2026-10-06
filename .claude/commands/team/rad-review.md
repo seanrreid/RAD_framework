@@ -29,7 +29,8 @@ git diff "$BASE"...HEAD --name-only
 
 ### Step 1: Load context
 
-- Read `CLAUDE.md` conventions and constraints
+- Read `AGENTS.md` for project conventions and constraints (or `CLAUDE.md` if the
+  project has no `AGENTS.md`)
 - Read the plan file for this work branch:
   ```bash
   BASE=$(scripts/get-default-branch.sh)
@@ -330,6 +331,6 @@ Append — never overwrite. Create the file if it does not exist.
 - Out-of-scope changes are always HIGH priority — no exceptions
 - An acceptance criterion with no task delivering it is always HIGH priority
 - HIGH issues block architect review — fix them first
-- Do not flag style preferences not in `CLAUDE.md`
+- Do not flag style preferences not in `AGENTS.md` (or `CLAUDE.md`)
 - If a test is missing, it is a HIGH priority issue — tests are not optional
 - If the plan was deviated from without a noted reason, flag as MEDIUM
