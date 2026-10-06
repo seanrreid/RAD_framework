@@ -187,14 +187,19 @@ test('migrateFromClaudeMd: missing required keys are named; empty input never th
 });
 
 // Guard: config lives only in .rad/config.yml. Fails if a config block
-// (### Git Platform / ### Role Assignments / ### Agent Scope Map) returns to CLAUDE.md.
-test("this repo's CLAUDE.md carries no config; .rad/config.yml is the source", async () => {
+// (### Git Platform / ### Role Assignments / ### Agent Scope Map) returns to
+// CLAUDE.md or to AGENTS.md (the conventions file CLAUDE.md imports).
+const CONVENTIONS_FILES = ['CLAUDE.md', 'AGENTS.md'];
+
+test("this repo's CLAUDE.md and AGENTS.md carry no config; .rad/config.yml is the source", async () => {
   const committed = await loadConfig(REPO_ROOT);
   assert.equal(committed.ok, true, JSON.stringify(committed.errors));
   assert.equal(committed.doc.roles.architect[0], 'sean@torchcodelab.com');
-  const { missing, blocks } = migrateFromClaudeMd(readFileSync(join(REPO_ROOT, 'CLAUDE.md'), 'utf8'));
-  assert.deepEqual(missing, ['platform', 'default_branch', 'roles.architect']);
-  assert.deepEqual(blocks, []);
+  for (const file of CONVENTIONS_FILES) {
+    const { missing, blocks } = migrateFromClaudeMd(readFileSync(join(REPO_ROOT, file), 'utf8'));
+    assert.deepEqual(missing, ['platform', 'default_branch', 'roles.architect'], file);
+    assert.deepEqual(blocks, [], file);
+  }
 });
 
 // --- rad config verbs ------------------------------------------------------

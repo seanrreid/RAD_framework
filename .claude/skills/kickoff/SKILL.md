@@ -1,10 +1,10 @@
 ---
 name: kickoff
 description: >
-  Session startup ritual for a RAD project. Reads CLAUDE.md, guards against
-  working on the default branch, reports plans by status (reading rad/ branch
-  tips), optionally triages open issues, and asks what to focus on. Run at the
-  start of a work session.
+  Session startup ritual for a RAD project. Reads AGENTS.md (or CLAUDE.md),
+  guards against working on the default branch, reports plans by status
+  (reading rad/ branch tips), optionally triages open issues, and asks what to
+  focus on. Run at the start of a work session.
 ---
 
 # Session Kickoff
@@ -16,7 +16,8 @@ surface what needs attention, and pick a focus. Keep the briefing under ~400 wor
 
 ### 1. Load project context
 
-Read `CLAUDE.md` — project description, stack, and conventions. This is the
+Read `AGENTS.md` for project conventions (or `CLAUDE.md` if the project has no
+`AGENTS.md`) — project description, stack, and conventions. This is the
 contract for the session. Read role assignments from `.rad/config.yml`:
 
 ```bash
@@ -115,7 +116,7 @@ What would you like to work on?
 
 ## Rules
 
-- Read `CLAUDE.md` every session — never assume stale context
+- Read `AGENTS.md` (or `CLAUDE.md`) every session — never assume stale context
 - Always run the branch guard before suggesting work
 - Plans live on `rad/` branch tips — use `rad-status.sh`, don't just scan the working tree
 - Keep the briefing scannable and under ~400 words

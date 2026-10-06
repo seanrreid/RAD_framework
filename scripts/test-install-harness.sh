@@ -14,6 +14,8 @@
 #     scripts/lib ships, a local edit is kept + staged (exit 1), a pre-manifest
 #     upgrade backs up then overwrites, a malformed manifest stops the install,
 #     and a missing node is a named prerequisite error
+#   - conventions scaffold: AGENTS.md + CLAUDE.md templates copy only into absent
+#     paths (fresh and upgrade); a CLAUDE.md-only target is kept and gets a hint
 #   - presets: --preset installs files + settings, a plain --upgrade re-applies
 #     the recorded preset; a deleted tracked file, an unseeded setting, a gone
 #     source or a different preset name exit 1 without reverting the core;
@@ -467,6 +469,81 @@ REVIEW_RC=0
 [[ "$REVIEW_RC" -eq 0 ]] && ok "rad review quality-reviewer exits 0 on the generated agent" \
   || { bad "rad review quality-reviewer exited $REVIEW_RC"; cat "$TMP/review.out"; }
 assert_contains "$TMP/review-prompt.txt" "$REVIEWER_BODY_LINE" "rad review prompt carries the generated reviewer body"
+
+# ── 8. conventions scaffold: AGENTS.md + CLAUDE.md (#171 part 3) ───────────
+# Each row of the scaffold table, fresh and upgrade. A user's own file must stay
+# byte-identical; the move hint appears only when the target has CLAUDE.md alone.
+readonly CONVENTIONS_ROWS="neither agents claude both"
+readonly MOVE_HINT_MARKER='UPGRADE.md "Moving conventions to AGENTS.md"'
+USER_AGENTS="$TMP/user-agents.md"
+USER_CLAUDE="$TMP/user-claude.md"
+printf '# My AGENTS\n\n## Coding Conventions\n\n- user rule\n' >"$USER_AGENTS"
+printf '# My CLAUDE\n\n## Coding Conventions\n\n- user rule\n' >"$USER_CLAUDE"
+
+# seed_conventions <dir> <row> -> leaves exactly the row's user files in <dir>.
+seed_conventions() {
+  rm -f "$1/AGENTS.md" "$1/CLAUDE.md"
+  case "$2" in
+    agents) cp "$USER_AGENTS" "$1/AGENTS.md" ;;
+    claude) cp "$USER_CLAUDE" "$1/CLAUDE.md" ;;
+    both)   cp "$USER_AGENTS" "$1/AGENTS.md"; cp "$USER_CLAUDE" "$1/CLAUDE.md" ;;
+    neither) ;;
+    *) echo "seed_conventions: unknown row '$2'" >&2; exit 2 ;;
+  esac
+}
+
+# same_file <actual> <expected> <label> -> passes when the files are byte-identical.
+same_file() { cmp -s "$1" "$2" && ok "$3" || bad "$3 ($1 differs from $2)"; }
+
+# check_conventions <dir> <row> <output-file> <mode> -> asserts the row's outcome.
+check_conventions() {
+  local dir="$1" row="$2" out="$3" label="$4 $2"
+  [[ "$INSTALL_RC" -eq 0 ]] && ok "$label -> installer exits 0" \
+    || { bad "$label -> installer exited $INSTALL_RC"; cat "$out"; }
+  case "$row" in
+    neither)
+      same_file "$dir/AGENTS.md" "$REPO_ROOT/AGENTS.md" "$label -> AGENTS.md template copied"
+      same_file "$dir/CLAUDE.md" "$REPO_ROOT/CLAUDE.md" "$label -> CLAUDE.md stub copied" ;;
+    agents)
+      same_file "$dir/AGENTS.md" "$USER_AGENTS" "$label -> user AGENTS.md byte-identical"
+      same_file "$dir/CLAUDE.md" "$REPO_ROOT/CLAUDE.md" "$label -> CLAUDE.md stub copied" ;;
+    claude)
+      same_file "$dir/CLAUDE.md" "$USER_CLAUDE" "$label -> user CLAUDE.md byte-identical"
+      assert_not_exists "$dir/AGENTS.md" "$label -> no AGENTS.md added" ;;
+    both)
+      same_file "$dir/AGENTS.md" "$USER_AGENTS" "$label -> user AGENTS.md byte-identical"
+      same_file "$dir/CLAUDE.md" "$USER_CLAUDE" "$label -> user CLAUDE.md byte-identical" ;;
+  esac
+  if [[ "$row" == "claude" ]]; then
+    assert_contains "$out" "$MOVE_HINT_MARKER" "$label -> prints the move hint"
+  elif grep -qF -- "$MOVE_HINT_MARKER" "$out"; then
+    bad "$label -> printed the move hint, expected none"
+  else
+    ok "$label -> no move hint"
+  fi
+}
+
+for row in $CONVENTIONS_ROWS; do
+  CONV_T="$(new_repo "conv-fresh-$row")"
+  seed_conventions "$CONV_T" "$row"
+  run_install "$CONV_T" "$TMP/conv-fresh-$row.out" --architect "$FIXTURE_ARCHITECT"
+  check_conventions "$CONV_T" "$row" "$TMP/conv-fresh-$row.out" "fresh install"
+
+  CONV_T="$(upgrade_target "conv-upgrade-$row")"
+  seed_conventions "$CONV_T" "$row"
+  run_install "$CONV_T" "$TMP/conv-upgrade-$row.out" --upgrade
+  check_conventions "$CONV_T" "$row" "$TMP/conv-upgrade-$row.out" "upgrade"
+done
+
+# Amendment 1: a fresh install's next steps point to AGENTS.md for conventions
+# and stage it for commit; an upgrade names both files as unchanged.
+NEXT_STEPS_OUT="$TMP/conv-fresh-neither.out"
+assert_contains "$NEXT_STEPS_OUT" "1. Review .rad/config.yml and fill in AGENTS.md" \
+  "fresh install next steps -> step 1 names AGENTS.md"
+assert_contains "$NEXT_STEPS_OUT" "git add .claude/ .agents/ .rad/ scripts/ harness/ ai/ AGENTS.md CLAUDE.md" \
+  "fresh install next steps -> git add includes AGENTS.md"
+assert_contains "$TMP/conv-upgrade-neither.out" "AGENTS.md, CLAUDE.md, .rad/config.yml" \
+  "upgrade next steps -> names AGENTS.md and CLAUDE.md as unchanged"
 
 # ── summary ─────────────────────────────────────────────────────────────────
 echo "─────────────────────────────────────────"

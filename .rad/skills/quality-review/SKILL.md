@@ -3,7 +3,7 @@ name: quality-review
 description: >
   Run the quality-reviewer agent on the current diff or specified files.
   Checks security, error handling, null safety, input validation, naming,
-  and CLAUDE.md conventions. Standalone — does not require a plan file.
+  and project conventions (AGENTS.md, or CLAUDE.md). Standalone — does not require a plan file.
 targets:
   claude: command:team/quality-review
   codex: skill
@@ -27,7 +27,8 @@ Run a quality review on the current branch changes or specified files.
 Invoke the `quality-reviewer` agent with `{{args}}` as context.
 
 The agent will:
-1. Read `CLAUDE.md` for project conventions and stack info
+1. Read `AGENTS.md` for project conventions and stack info (or `CLAUDE.md` if
+   the project has no `AGENTS.md`)
 2. Get the relevant diff or file list
 3. Apply universal quality checks + convention checks
 4. Output a structured findings report

@@ -3,8 +3,9 @@
 # Drafts ONE RAD plan bundling every findings category that recurs at or above
 # the recurrence threshold (/rad-insights Step 3b), cuts its rad/ work branch
 # from the default branch, and commits only the plan. Mapped categories get a
-# CLAUDE.md `## Coding Conventions` bullet task; unmapped ones get a described
-# lint task (never skipped). Every rule-specific decision is left as a
+# `## Coding Conventions` bullet task in the conventions file (AGENTS.md when
+# present, else CLAUDE.md); unmapped ones get a described lint task (never
+# skipped). Every rule-specific decision is left as a
 # clarification marker, so check-approval-blockers.sh refuses the plan until a
 # human finishes it. NEVER pushes and never approves.
 #
@@ -20,7 +21,8 @@
 #   1 = refused, nothing written: dirty tracked worktree, target branch exists
 #       locally or on origin, origin cannot be verified, too many categories for
 #       one lint-valid plan, or a git step failed
-#   2 = usage error, missing/unreadable findings log, malformed findings line,
+#   2 = usage error, missing/unreadable findings log, unreadable conventions
+#       file (AGENTS.md / CLAUDE.md), malformed findings line,
 #       RAD_FINDINGS_FILE starting with '-' or containing a newline, or an
 #       invalid branch name from RAD_BRANCH_PREFIX
 
@@ -34,6 +36,9 @@ readonly TASKS_PER_WAVE=3
 readonly MAX_WAVES=5 # lint-plan.sh caps a plan at 5 waves x 3 tasks
 readonly NEW_FILE_LINES="1-40"
 readonly FALLBACK_CONVENTIONS_LINES="1-1"
+readonly AGENTS_FILE="AGENTS.md"
+readonly CLAUDE_FILE="CLAUDE.md"
+readonly NO_MATCH_EXIT=1 # grep: no line matched (any higher status is an error)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 die() { echo "$SELF: $2" >&2; exit "$1"; }
@@ -88,12 +93,26 @@ crossing_rows() {
     | awk -F'\t' -v t="$1" '$1 >= t+0' | sort -t "$(printf '\t')" -k1,1nr -k2,2
 }
 
+# conventions_file — the project conventions file: AGENTS.md when it exists,
+# else CLAUDE.md, else nothing (the plan text then names CLAUDE.md).
+conventions_file() {
+  if [[ -f "$AGENTS_FILE" ]]; then echo "$AGENTS_FILE"
+  elif [[ -f "$CLAUDE_FILE" ]]; then echo "$CLAUDE_FILE"; fi
+  return 0 # neither file is a valid answer, not an error
+}
+
+# conventions_range <file> — line range of `## Coding Conventions` in <file>.
+# No file or no section → the fallback lines. Once AGENTS.md exists it IS the
+# conventions file: an AGENTS.md without the section does NOT fall back to
+# CLAUDE.md, because CLAUDE.md then only imports AGENTS.md (@AGENTS.md).
 conventions_range() {
-  local start end
-  start=$(grep -n '^## Coding Conventions' CLAUDE.md 2>/dev/null | head -1 | cut -d: -f1) \
-    || { echo "$FALLBACK_CONVENTIONS_LINES"; return; } # no CLAUDE.md or no section → fallback
-  [[ -z "$start" ]] && { echo "$FALLBACK_CONVENTIONS_LINES"; return; }
-  end=$(awk -v s="$start" 'NR > s && /^## / { print NR - 1; exit } END { if (NR > s) print NR }' CLAUDE.md | head -1)
+  local file="$1" hit start end rc=0
+  [[ -z "$file" ]] && { echo "$FALLBACK_CONVENTIONS_LINES"; return; }
+  hit=$(grep -n -m 1 '^## Coding Conventions' "$file") || rc=$?
+  ((rc > NO_MATCH_EXIT)) && die 2 "cannot read conventions file: $file (grep exit $rc)"
+  ((rc == NO_MATCH_EXIT)) && { echo "$FALLBACK_CONVENTIONS_LINES"; return; }
+  start="${hit%%:*}"
+  end=$(awk -v s="$start" 'NR > s && /^## / { print NR - 1; exit } END { if (NR > s) print NR }' "$file" | head -1)
   echo "$start-${end:-$start}"
 }
 
@@ -115,7 +134,7 @@ EOF
   for ((i = 0; i < N; i++)); do echo "- \`${CATS[$i]}\`: ${COUNTS[$i]} findings (threshold $THRESHOLD)"; done
   printf '\n## Scope\n\n| In scope | Out of scope |\n|---|---|\n'
   for ((i = 0; i < N; i++)); do
-    if is_mapped "${CATS[$i]}"; then echo "| \`${SLUGS[$i]}\`: CLAUDE.md convention bullet | Rewriting existing code for \`${SLUGS[$i]}\` |"
+    if is_mapped "${CATS[$i]}"; then echo "| \`${SLUGS[$i]}\`: $CONV_FILE convention bullet | Rewriting existing code for \`${SLUGS[$i]}\` |"
     else echo "| \`${SLUGS[$i]}\`: described lint rule + fixture | Auto-fixing \`${SLUGS[$i]}\` findings |"; fi
   done
 }
@@ -125,7 +144,7 @@ render_criteria() {
   printf '\n## Acceptance Criteria\n\n'
   for ((i = 0; i < N; i++)); do
     if is_mapped "${CATS[$i]}"; then
-      echo "$((i + 1)). CLAUDE.md \`## Coding Conventions\` gains one concrete, checkable bullet targeting recurring \`${SLUGS[$i]}\` findings."
+      echo "$((i + 1)). $CONV_FILE \`## Coding Conventions\` gains one concrete, checkable bullet targeting recurring \`${SLUGS[$i]}\` findings."
     else
       echo "$((i + 1)). \`scripts/lint-${SLUGS[$i]}.sh\` flags the recurring \`${SLUGS[$i]}\` pattern, with a co-located \`scripts/test-lint-${SLUGS[$i]}.sh\` fixture."
     fi
@@ -136,7 +155,7 @@ render_criteria() {
 render_files() {
   local i
   printf '\n## Files in Scope\n\n| File | Lines | Change |\n|------|-------|--------|\n'
-  [[ "$HAS_MAPPED" == 1 ]] && echo "| CLAUDE.md | $CONV_RANGE | Add \`## Coding Conventions\` bullets |"
+  [[ "$HAS_MAPPED" == 1 ]] && echo "| $CONV_FILE | $CONV_RANGE | Add \`## Coding Conventions\` bullets |"
   for ((i = 0; i < N; i++)); do
     is_mapped "${CATS[$i]}" && continue
     echo "| scripts/lint-${SLUGS[$i]}.sh | $NEW_FILE_LINES | New |"
@@ -151,7 +170,7 @@ render_files() {
 - harness/
 
 ### Key Files
-- CLAUDE.md — \`## Coding Conventions\` ($CONV_RANGE)
+- $CONV_FILE — \`## Coding Conventions\` ($CONV_RANGE)
 - $FINDINGS_FILE — the recurrence evidence
 
 ### Reminders
@@ -164,7 +183,7 @@ render_task() {
   local i="$1" id="$2" c="${CATS[$1]}" s="${SLUGS[$1]}"
   local edge="edge cases: empty findings log (nothing drafted), threshold boundary (count == threshold still drafts), category with no mapping (gets a lint task, never skipped)"
   if is_mapped "$c"; then
-    printf '\n#### Task %s: %s convention bullet\nFile: CLAUDE.md:%s\n' "$id" "$s" "$CONV_RANGE"
+    printf '\n#### Task %s: %s convention bullet\nFile: %s:%s\n' "$id" "$s" "$CONV_FILE" "$CONV_RANGE"
     echo "What: Add one \`## Coding Conventions\` bullet about $(hint_for "$c") (${COUNTS[$i]} findings, threshold $THRESHOLD)."
     echo "[NEEDS CLARIFICATION: exact wording/regex for the $s rule]"
     echo "Validate: AC#$((i + 1)) — prose only, no testable surface: review the bullet; $edge."
@@ -183,7 +202,7 @@ render_waves() {
   for ((i = 0; i < N; i++)); do
     w=$((i / TASKS_PER_WAVE + 1))
     if ((i % TASKS_PER_WAVE == 0)); then
-      printf '\n### Wave %s — sequential\nTasks run one at a time (convention tasks share CLAUDE.md).\n' "$w"
+      printf '\n### Wave %s — sequential\nTasks run one at a time (convention tasks share %s).\n' "$w" "$CONV_FILE"
     fi
     render_task "$i" "$w.$((i % TASKS_PER_WAVE + 1))"
   done
@@ -253,7 +272,7 @@ Tasks: $N" || die 1 "git commit failed on $BRANCH"
 }
 
 main() {
-  local dry_run=0 rows count cat
+  local dry_run=0 rows count cat found
   case "${1:-}" in
     "") ;;
     --dry-run) dry_run=1 ;;
@@ -274,7 +293,10 @@ main() {
   ((N <= MAX_WAVES * TASKS_PER_WAVE)) \
     || die 1 "$N categories cross the threshold (max $((MAX_WAVES * TASKS_PER_WAVE)) per plan); raise RAD_FINDINGS_THRESHOLD"
   DATE=$(date +%Y-%m-%d) SLUG="insights-proposals-$DATE"
-  BRANCH="${RAD_BRANCH_PREFIX:-rad/}$SLUG" CONV_RANGE=$(conventions_range)
+  BRANCH="${RAD_BRANCH_PREFIX:-rad/}$SLUG"
+  found=$(conventions_file)
+  CONV_RANGE=$(conventions_range "$found")
+  CONV_FILE="${found:-$CLAUDE_FILE}"
   validate_branch
   if [[ "$dry_run" == 1 ]]; then render_plan; exit 0; fi
   refuse_unless_clean

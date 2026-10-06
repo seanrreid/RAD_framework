@@ -15,8 +15,13 @@
 # An existing .rad/config.yml is never touched. If the config cannot be created,
 # every other file is still installed and the installer exits 1.
 #
-# On upgrade, CLAUDE.md, .rad/config.yml, .claude/agents/, and .agents/ content
-# are never overwritten. Framework files are installed through the manifest at
+# Conventions: the AGENTS.md (conventions) and CLAUDE.md (`@AGENTS.md` import)
+# templates are copied only into absent paths, on install and upgrade alike. A
+# target with only its own CLAUDE.md keeps it as the conventions file (readers
+# fall back to it) and gets a hint pointing at UPGRADE.md's manual move.
+#
+# On upgrade, AGENTS.md, CLAUDE.md, .rad/config.yml, .claude/agents/, and
+# .agents/ content are never overwritten. Framework files are installed through the manifest at
 # .rad/installed.json: a locally edited framework file is kept (its update is
 # staged under .rad/upgrade-pending/) and the installer exits 1; with no
 # manifest, a differing file is backed up under .rad/upgrade-backup/ first.
@@ -43,7 +48,7 @@ CONFIG_FAILED=false
 # Set by install_core when install-core kept a locally edited file; main exits 1
 # after every other step has run.
 CORE_KEPT=false
-# Whether the target had its own CLAUDE.md before scaffold_claude_md ran: an
+# Whether the target had its own CLAUDE.md before scaffold_conventions ran: an
 # upgrade must migrate only from the user's file, never from the RAD template.
 CLAUDE_MD_PREEXISTED=false
 # Absolute path of the --preset directory; empty when the flag was not given.
@@ -58,6 +63,7 @@ PRESET_FAILURE_REASON=""
 readonly USAGE="Usage: ./install.sh [--dir <path>] [--upgrade] [--yes] [--architect <id>] [--preset <dir>]"
 readonly RAD_CONFIG=".rad/config.yml"
 readonly FALLBACK_DEFAULT_BRANCH="main"
+readonly CONVENTIONS_MOVE_HINT='Conventions stay in CLAUDE.md (read as the fallback). To move them to AGENTS.md, see UPGRADE.md "Moving conventions to AGENTS.md".'
 
 # ── Output helpers ────────────────────────────────────────────────────────────
 
@@ -302,22 +308,38 @@ copy_agents_meta() {
   success ".agents/ structure ready"
 }
 
-scaffold_claude_md() {
-  header "CLAUDE.md"
+# Copies the AGENTS.md and CLAUDE.md templates into absent paths only; an
+# existing file is never edited or overwritten. A CLAUDE.md-only target keeps
+# its file as the conventions source and gets CONVENTIONS_MOVE_HINT instead.
+scaffold_conventions() {
+  header "AGENTS.md + CLAUDE.md"
 
-  if [[ -f "$TARGET_DIR/CLAUDE.md" ]]; then
-    if [[ "$UPGRADE" == "true" ]]; then
-      warn "CLAUDE.md already exists — skipping (preserved on upgrade)"
-    else
-      warn "CLAUDE.md already exists — skipping"
-      warn "RAD settings live in .rad/config.yml, not CLAUDE.md. See CLAUDE.md in the RAD repo for the template."
+  local has_agents=false has_claude=false
+  if [[ -f "$TARGET_DIR/AGENTS.md" ]]; then has_agents=true; fi
+  if [[ -f "$TARGET_DIR/CLAUDE.md" ]]; then has_claude=true; fi
+
+  if [[ "$has_claude" == "true" ]]; then
+    if [[ "$has_agents" == "true" ]]; then
+      warn "AGENTS.md and CLAUDE.md already exist — skipping"
+      return
     fi
+    warn "CLAUDE.md already exists — skipping AGENTS.md and CLAUDE.md"
+    if [[ "$UPGRADE" != "true" ]]; then
+      warn "RAD settings live in .rad/config.yml, not CLAUDE.md. See AGENTS.md and CLAUDE.md in the RAD repo for the templates."
+    fi
+    info "$CONVENTIONS_MOVE_HINT"
     return
   fi
 
+  if [[ "$has_agents" == "true" ]]; then
+    warn "AGENTS.md already exists — kept"
+  else
+    cp "$RAD_DIR/AGENTS.md" "$TARGET_DIR/AGENTS.md"
+    success "AGENTS.md created from template"
+  fi
   cp "$RAD_DIR/CLAUDE.md" "$TARGET_DIR/CLAUDE.md"
-  success "CLAUDE.md created from template"
-  info "Fill in all sections before running /rad-research"
+  success "CLAUDE.md created from template (imports AGENTS.md)"
+  info "Fill in AGENTS.md before running /rad-research"
 }
 
 # Sets PLATFORM (one of the valid platforms; `manual` when detection is unusable).
@@ -445,7 +467,7 @@ print_next_steps() {
   if [[ "$UPGRADE" == "true" ]]; then
     echo "  Commands and scripts are up to date, except locally edited framework files:"
     echo "  those were kept, with their updates staged under .rad/upgrade-pending/."
-    echo "  CLAUDE.md, .rad/config.yml, .claude/agents/, and .agents/ content were not changed."
+    echo "  AGENTS.md, CLAUDE.md, .rad/config.yml, .claude/agents/, and .agents/ content were not changed."
     echo ""
     echo "  Run /rad-status in Claude Code to verify everything looks right."
     echo ""
@@ -454,16 +476,17 @@ print_next_steps() {
 
   echo "  Next steps:"
   echo ""
-  echo "  1. Review $RAD_CONFIG and fill in CLAUDE.md"
+  echo "  1. Review $RAD_CONFIG and fill in AGENTS.md"
   echo "     Check roles, platform, and default_branch in $TARGET_DIR/$RAD_CONFIG."
-  echo "     Open $TARGET_DIR/CLAUDE.md and complete the project and conventions sections."
+  echo "     Open $TARGET_DIR/AGENTS.md and complete the project and conventions sections."
+  echo "     CLAUDE.md imports it (@AGENTS.md) and holds only Claude Code specifics."
   echo ""
   echo "  2. Create the deliver-PR label (GitHub example)"
   echo "     gh label create 'rad:deliver' --color '0e8a16' --description 'RAD delivery PR'"
   echo "     (rad:<status> labels are auto-created on first use by scripts/rad-label.sh)"
   echo ""
   echo "  3. Commit the RAD files"
-  echo "     git add .claude/ .agents/ .rad/ scripts/ harness/ ai/ CLAUDE.md"
+  echo "     git add .claude/ .agents/ .rad/ scripts/ harness/ ai/ AGENTS.md CLAUDE.md"
   echo "     git commit -m 'chore: install RAD framework'"
   echo ""
   echo "  4. Start the architecture process"
@@ -488,7 +511,7 @@ main() {
   echo ""
   if [[ "$UPGRADE" == "true" ]]; then
     info "Upgrading RAD in: $TARGET_DIR"
-    info "User data (CLAUDE.md, .rad/config.yml, .claude/agents/, .agents/) will not be changed"
+    info "User data (AGENTS.md, CLAUDE.md, .rad/config.yml, .claude/agents/, .agents/) will not be changed"
     info "Locally edited framework files are kept; updates are staged in .rad/upgrade-pending/"
   else
     info "Installing RAD into: $TARGET_DIR"
@@ -499,7 +522,7 @@ main() {
   if [[ "$UPGRADE" == "true" ]]; then remove_stale_skills; fi
   copy_agents_meta
   if [[ -f "$TARGET_DIR/CLAUDE.md" ]]; then CLAUDE_MD_PREEXISTED=true; fi
-  scaffold_claude_md
+  scaffold_conventions
   detect_and_report_platform
   setup_rad_config
   install_preset

@@ -127,6 +127,41 @@ grep -q "^# Plan: Insights Proposals $DATE" "$OUT" || fail "AC#10: --dry-run did
 [[ ! -e "$GREPO/$PLAN" ]] || fail "AC#10: --dry-run wrote the plan file"
 echo "✓ AC#10: --dry-run prints the plan, branch list and status unchanged, no file"
 
+# ── Conventions file fallback (#171): AGENTS.md, else CLAUDE.md, else fallback ─
+# expect_conventions <label> <file:range> — dry-run cites that file and range in
+# the convention task, Files in Scope and Key Files.
+expect_conventions() {
+  local label="$1" want="$2" file="${2%%:*}" range="${2#*:}"
+  run_draft -- --dry-run; expect "AC#2 $label" 0
+  grep -qx "File: $want" "$OUT" || fail "AC#2 $label: convention task does not cite $want"
+  grep -qF "| $file | $range | Add" "$OUT" || fail "AC#2 $label: Files in Scope does not name $file"
+  grep -qF -- "- $file — \`## Coding Conventions\` ($range)" "$OUT" || fail "AC#2 $label: Key Files does not name $file"
+  echo "✓ AC#2: $label → $want"
+}
+AGENTS_FIXTURE='# Agents\n\n## Coding Conventions\n\n- a\n- b\n\n## Next\n'
+expect_conventions "CLAUDE.md only" "CLAUDE.md:4-7"
+printf "$AGENTS_FIXTURE" > "$GREPO/AGENTS.md"
+expect_conventions "both files (AGENTS.md wins)" "AGENTS.md:3-7"
+mv "$GREPO/CLAUDE.md" "$TMP/CLAUDE.md.saved"
+expect_conventions "AGENTS.md only" "AGENTS.md:3-7"
+rm "$GREPO/AGENTS.md"
+expect_conventions "neither file (fallback lines)" "CLAUDE.md:1-1"
+mv "$TMP/CLAUDE.md.saved" "$GREPO/CLAUDE.md"
+printf '# Agents\n\nno conventions section\n' > "$GREPO/AGENTS.md"
+expect_conventions "AGENTS.md without the section (no CLAUDE.md fallback)" "AGENTS.md:1-1"
+printf "$AGENTS_FIXTURE" > "$GREPO/AGENTS.md"
+chmod 000 "$GREPO/AGENTS.md"
+if [[ -r "$GREPO/AGENTS.md" ]]; then
+  echo "- AC#2: unreadable AGENTS.md case skipped (running as a user that bypasses file modes)"
+else
+  run_draft -- --dry-run; expect "AC#2 unreadable AGENTS.md" 2
+  grep -q "cannot read conventions file: AGENTS.md" "$ERR" || fail "AC#2: unreadable AGENTS.md not reported: $(cat "$ERR")"
+  echo "✓ AC#2: unreadable AGENTS.md exits 2 naming the file (fail-closed, no silent fallback)"
+fi
+chmod 644 "$GREPO/AGENTS.md"
+rm "$GREPO/AGENTS.md"
+[[ -z "$(status)" ]] || fail "AC#2: conventions fixtures left the worktree dirty: $(status)"
+
 # ── Unknown flag → usage, exit 2 ──────────────────────────────────────────────
 run_draft -- --bogus; expect "AC#10 unknown flag" 2
 grep -q "usage" "$ERR" || fail "AC#10: unknown flag did not print usage"

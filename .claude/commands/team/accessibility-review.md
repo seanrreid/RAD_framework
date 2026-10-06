@@ -21,7 +21,8 @@ Invoke the `accessibility-reviewer` agent with `$ARGUMENTS` as context.
 
 The agent will:
 1. Identify relevant frontend files from the diff or arguments
-2. Read `CLAUDE.md` for stack and component library context
+2. Read `AGENTS.md` for stack and component library context (or `CLAUDE.md` if
+   the project has no `AGENTS.md`)
 3. Apply WCAG 2.1 AA checks across all perceivable, operable,
    understandable, and robust criteria
 4. Output a structured findings report with WCAG criterion references

@@ -59,7 +59,8 @@ bash /tmp/rad/install.sh --dir /path/to/your-project --yes
 
 ```
 your-project/
-├── CLAUDE.md                         ← scaffolded from template (project conventions)
+├── AGENTS.md                         ← scaffolded from template (project conventions)
+├── CLAUDE.md                         ← scaffolded stub: `@AGENTS.md` + Claude Code specifics
 ├── .rad/
 │   ├── config.yml                    ← .rad/config.yml, written by `rad config init` (platform, roles, scope map)
 │   └── installed.json                ← install manifest: framework files + hashes (commit it)
@@ -245,7 +246,7 @@ and ask it to re-read before proceeding.
 
 ## Post-Install Setup
 
-### 1. Review `.rad/config.yml`, then fill in CLAUDE.md
+### 1. Review `.rad/config.yml`, then fill in AGENTS.md
 
 `.rad/config.yml` is the single source for RAD's config data: `platform`,
 `default_branch`, `roles` (architect, developers, designers), and the
@@ -266,9 +267,18 @@ If the config could not be written (for example, no git identity and no
 `--architect`), `install.sh` finishes the rest of the install, then exits 1 and
 prints the exact `rad config init` command to run.
 
-Then open `CLAUDE.md` and complete every section. CLAUDE.md now holds your
+Then open `AGENTS.md` and complete every section. AGENTS.md holds your
 project conventions (stack, structure, commands, coding and testing standards);
-RAD's config data lives in `.rad/config.yml`, not CLAUDE.md.
+RAD's config data lives in `.rad/config.yml`, not in either conventions file.
+`CLAUDE.md` imports AGENTS.md with `@AGENTS.md` and holds only Claude Code
+specifics; leave conventions out of it.
+
+The installer never overwrites an existing file. If the project already had
+`AGENTS.md`, only the `CLAUDE.md` stub is added. If it already had `CLAUDE.md`
+but no `AGENTS.md`, neither file is added: RAD reads conventions from
+`CLAUDE.md` as the fallback, and the installer prints a hint pointing to
+[UPGRADE.md "Moving conventions to AGENTS.md (#171)"](UPGRADE.md#moving-conventions-to-agentsmd-171).
+See [docs/maintaining-claude-md.md](docs/maintaining-claude-md.md) for the split.
 
 ### 2. Platform labels (usually automatic)
 
@@ -410,8 +420,13 @@ Claude Code discovers commands from `.claude/commands/` in the project root.
 Verify the files are present and you've opened the correct directory in Claude Code.
 Run `/rad-status` to confirm the command set loaded.
 
-**CLAUDE.md not found after install**
-The installer creates it from the RAD template. If it's missing, copy it manually:
+**AGENTS.md or CLAUDE.md not found after install**
+The installer copies each from the RAD template only when the project has
+neither file, or (for the `CLAUDE.md` stub) when it already has `AGENTS.md`. A
+project with only `CLAUDE.md` keeps it as the conventions file and gets no
+`AGENTS.md`; that is expected (see UPGRADE.md "Moving conventions to AGENTS.md
+(#171)"). If a file is missing otherwise, copy it manually:
 ```bash
+cp /tmp/rad/AGENTS.md /path/to/your-project/AGENTS.md
 cp /tmp/rad/CLAUDE.md /path/to/your-project/CLAUDE.md
 ```
