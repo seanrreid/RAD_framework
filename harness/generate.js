@@ -110,6 +110,7 @@ function identityErrors(rel, data, allowedKeys, expectedName) {
 /** Parse targets.claude: { value } or { error }. */
 function claudeTarget(rel, raw) {
   if (raw === 'skill') return { value: { kind: 'skill' } };
+  if (raw === 'none') return { value: { kind: 'none' } };
   if (typeof raw === 'string' && raw.startsWith(COMMAND_PREFIX)) {
     const path = raw.slice(COMMAND_PREFIX.length);
     const segs = path.split('/');
@@ -117,7 +118,7 @@ function claudeTarget(rel, raw) {
       return { value: { kind: 'command', path } };
     }
   }
-  return { error: `${rel}: unknown target claude: ${JSON.stringify(raw)} (expected 'skill' or 'command:<subdir>/<file>')` };
+  return { error: `${rel}: unknown target claude: ${JSON.stringify(raw)} (expected 'skill', 'none' or 'command:<subdir>/<file>')` };
 }
 
 /** Parse a skill's targets mapping: { value } or { errors }. */
@@ -131,6 +132,7 @@ function parseTargets(rel, targets) {
   const implicit = targets.codex_implicit ?? true;
   if (typeof implicit !== 'boolean') errors.push(`${rel}: codex_implicit must be true or false`);
   else if (!implicit && codex !== 'skill') errors.push(`${rel}: codex_implicit requires codex: skill`);
+  if (claude.value?.kind === 'none' && codex === 'none') errors.push(`${rel}: claude: none and codex: none emit nothing`);
   if (errors.length) return { errors };
   return { value: { claude: claude.value, codex, codexImplicit: implicit } };
 }
@@ -167,6 +169,9 @@ async function readSkill(root, name) {
   errors.push(...(targets.errors ?? []), ...(over.errors ?? []));
   if (!errors.length && over.overrides.codex !== undefined && targets.value.codex === 'none') {
     errors.push(`${dirRel}/${OVERRIDE_FILES.codex}: override for codex, but codex: none`);
+  }
+  if (!errors.length && over.overrides.claude !== undefined && targets.value.claude.kind === 'none') {
+    errors.push(`${dirRel}/${OVERRIDE_FILES.claude}: override for claude, but claude: none`);
   }
   if (errors.length) return { errors };
   const { description } = fm.data;
@@ -311,7 +316,7 @@ function renderSkill(skill) {
   };
   const { claude, codex, codexImplicit } = skill.targets;
   if (claude.kind === 'command') emit('claude', `.claude/commands/${claude.path}.md`, [desc]);
-  else emit('claude', `.claude/skills/${skill.name}/${SKILL_FILE}`, [`name: ${skill.name}`, desc]);
+  else if (claude.kind === 'skill') emit('claude', `.claude/skills/${skill.name}/${SKILL_FILE}`, [`name: ${skill.name}`, desc]);
   if (codex === 'skill') emit('codex', `.agents/skills/${skill.name}/${SKILL_FILE}`, [`name: ${skill.name}`, desc]);
   if (codex === 'skill' && !codexImplicit) {
     const yaml = `${markerLine('hash', skill.source)}\npolicy:\n  allow_implicit_invocation: false\n`;
