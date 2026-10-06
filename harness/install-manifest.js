@@ -31,8 +31,14 @@ export const BACKUP_DIR = '.rad/upgrade-backup';
 
 /** Manifest schema version this module reads and writes. */
 const MANIFEST_VERSION = 1;
-/** The only layer this module records today. */
+/** The only layer this module WRITES: entries it installs are recorded as core. */
 const CORE_LAYER = 'core';
+/**
+ * The layer a preset overlay records. This module never writes it; it only
+ * carries recorded non-core entries (this one or any other layer string) over
+ * unchanged, and never overwrites the files they name.
+ */
+export const PRESET_LAYER = 'preset';
 /** Recorded rad_version when the source revision cannot be determined. */
 export const UNKNOWN_RAD_VERSION = 'unknown';
 /** Permission bits copied from source to target (exec bits included). */
@@ -156,25 +162,44 @@ function decideAction({ targetPath, sourceHash, baseline }) {
   return 'backup-write';
 }
 
+/** Recorded entries split by layer: `core` (this module's) and `carried` (every other layer). */
+function splitRecorded(manifest) {
+  const core = {};
+  const carried = {};
+  for (const [path, entry] of Object.entries(manifest?.files ?? {})) {
+    if (entry.layer === CORE_LAYER) core[path] = entry;
+    else carried[path] = entry;
+  }
+  return { core, carried };
+}
+
 /**
  * Plan an install or upgrade of the core set into `targetRoot`. Read-only.
  *
+ * - `stale`: recorded core-layer paths core no longer ships.
+ * - `conflicts`: sorted recorded non-core paths that core now ships. Actions are
+ *   still computed for them, but callers MUST refuse to apply a plan whose
+ *   `conflicts` is non-empty (applyInstall throws on one as a backstop).
+ * - `carried`: every recorded non-core entry (any layer string but core), which
+ *   the new manifest keeps unchanged.
+ *
  * @param {{ sourceRoot: string, targetRoot: string, manifest: object | null }} args
  * @returns {{ actions: { path: string, action: string, sourceHash: string, baseline: string | null }[],
- *             stale: string[] }}
+ *             stale: string[], conflicts: string[], carried: Object<string, { layer: string, sha256: string }> }}
  */
 export function planInstall({ sourceRoot, targetRoot, manifest }) {
-  const recorded = manifest?.files ?? {};
+  const recorded = splitRecorded(manifest);
   const core = listCoreFiles(sourceRoot);
   const actions = core.map((path) => {
     const sourceHash = hashFile(join(sourceRoot, path));
-    const baseline = Object.hasOwn(recorded, path) ? recorded[path].sha256 : null;
+    const baseline = Object.hasOwn(recorded.core, path) ? recorded.core[path].sha256 : null;
     const action = decideAction({ targetPath: join(targetRoot, path), sourceHash, baseline });
     return { path, action, sourceHash, baseline };
   });
   const coreSet = new Set(core);
-  const stale = Object.keys(recorded).filter((p) => !coreSet.has(p)).sort();
-  return { actions, stale };
+  const stale = Object.keys(recorded.core).filter((p) => !coreSet.has(p)).sort();
+  const conflicts = Object.keys(recorded.carried).filter((p) => coreSet.has(p)).sort();
+  return { actions, stale, conflicts, carried: recorded.carried };
 }
 
 /** Filesystem-safe timestamp (no colons or dots) for a backup directory name. */
@@ -195,13 +220,15 @@ function recordedHash({ action, sourceHash, baseline }) {
   return baseline; // keep / deleted: the OLD baseline stays, so the next upgrade still sees the edit
 }
 
-/** Build the manifest object with sorted file keys. */
+/** Build the manifest object with sorted file keys: core entries plus the carried non-core ones. */
 function buildManifest(plan, { now, radVersion }) {
-  const files = {};
-  for (const a of [...plan.actions].sort((x, y) => (x.path < y.path ? -1 : 1))) {
+  const unsorted = { ...(plan.carried ?? {}) };
+  for (const a of plan.actions) {
     const sha256 = recordedHash(a);
-    if (sha256) files[a.path] = { layer: CORE_LAYER, sha256 };
+    if (sha256) unsorted[a.path] = { layer: CORE_LAYER, sha256 };
   }
+  const files = {};
+  for (const path of Object.keys(unsorted).sort()) files[path] = unsorted[path];
   return { version: MANIFEST_VERSION, rad_version: radVersion, installed_at: now.toISOString(), files };
 }
 
@@ -217,13 +244,19 @@ function writeManifest(targetRoot, manifest) {
 /**
  * Execute a plan: copy writes, back up then overwrite backup-writes, stage
  * keeps under PENDING_DIR, leave deleted paths absent, and write the manifest.
- * Stale manifest paths are left on disk and dropped from the new manifest.
+ * Stale manifest paths are left on disk and dropped from the new manifest;
+ * carried non-core entries are kept unchanged. Throws, before touching the
+ * filesystem, on a plan with conflicts: core must never overwrite a file
+ * another layer owns.
  *
  * @param {{ sourceRoot: string, targetRoot: string, plan: ReturnType<typeof planInstall>,
  *           now: Date, radVersion: string }} args
  * @returns {{ manifest: object, backupDir: string }} backupDir is relative to targetRoot
  */
 export function applyInstall({ sourceRoot, targetRoot, plan, now, radVersion }) {
+  if (plan.conflicts?.length) {
+    throw new Error(`refusing to install: core now ships paths another layer owns: ${plan.conflicts.join(', ')}`);
+  }
   const backupDir = `${BACKUP_DIR}/${backupStamp(now)}`;
   for (const { path, action } of plan.actions) {
     const source = join(sourceRoot, path);
@@ -238,19 +271,21 @@ export function applyInstall({ sourceRoot, targetRoot, plan, now, radVersion }) 
 }
 
 /**
- * Compare a target to its manifest. Read-only.
+ * Compare a target to its manifest, every layer included. Read-only.
  *
  * @param {{ targetRoot: string, manifest: object }} args
- * @returns {{ modified: string[], missing: string[] }}
+ * @returns {{ modified: { path: string, layer: string }[], missing: { path: string, layer: string }[] }}
+ *   each sorted by path
  */
 export function installDrift({ targetRoot, manifest }) {
   const modified = [];
   const missing = [];
   for (const path of Object.keys(manifest.files).sort()) {
+    const { layer, sha256 } = manifest.files[path];
     const target = join(targetRoot, path);
     const st = lstatOrNull(target);
-    if (!st) missing.push(path);
-    else if (!st.isFile() || hashFile(target) !== manifest.files[path].sha256) modified.push(path);
+    if (!st) missing.push({ path, layer });
+    else if (!st.isFile() || hashFile(target) !== sha256) modified.push({ path, layer });
   }
   return { modified, missing };
 }

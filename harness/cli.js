@@ -3216,8 +3216,8 @@ export async function installStatusCommand(argv, ctx) {
     return USAGE_EXIT_CODE;
   }
   const { modified, missing } = installDrift({ targetRoot, manifest: read.manifest });
-  for (const p of modified) process.stdout.write(`modified: ${p}\n`);
-  for (const p of missing) process.stdout.write(`missing: ${p}\n`);
+  for (const { path } of modified) process.stdout.write(`modified: ${path}\n`);
+  for (const { path } of missing) process.stdout.write(`missing: ${path}\n`);
   return modified.length + missing.length > 0 ? FAILED_EXIT_CODE : 0;
 }
 
