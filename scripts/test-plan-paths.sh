@@ -830,4 +830,15 @@ rc=0
 grep -q 'exited 0 with no output' "$err_out" || fail "plan_high_risk_pattern: empty-output reason missing"
 echo "✓ plan_high_risk_pattern: CLI exit 0 with no output ⇒ non-zero (fail closed)"
 
+# Self-protected set (#171 part 1): the generated Codex outputs join .claude/.
+for p in .codex/agents/x.toml .agents/skills/x/SKILL.md .agents/skills/x/agents/openai.yaml \
+         harness/cli.js scripts/x.sh .claude/agents/a.md .agents/state/f/events.jsonl .rad/config.yml \
+         gates.yaml docs/matrix.yml; do
+  path_is_self_protected "$p" || fail "path_is_self_protected: $p must be protected"
+done
+for p in .agents/plans/x.md .agents/skillset/x docs/.codex/x .agents/logs/x.md src/.claude/x codex/x; do
+  if path_is_self_protected "$p"; then fail "path_is_self_protected: $p must NOT be protected"; fi
+done
+echo "✓ path_is_self_protected: .codex/ and .agents/skills/ protected; .agents/plans, .agents/skillset, docs/.codex not; existing set unchanged"
+
 echo "ALL PASS"
