@@ -47,6 +47,11 @@ This is a large issue, split into three plans:
 
 State-changing parity (plan, approve, deliver for Codex) is filed as a follow-up issue during this plan.
 
+**Amendment 1 (2026-10-06, during delivery, after Wave 1):** the plan got the TOML constraint wrong. `]]]` is legal inside a TOML multi-line literal string (`'''…'''`); a test round-trips it. What such a string actually cannot hold is `'''` or a control character other than tab and LF, so the generator rejects those instead. Two smaller corrections:
+- `readSources` is async, because of the lazy js-yaml import.
+- `harness/generate.js` came out at about 470 lines, not 340.
+AC#2, the Execution Notes, the Task 1.1 edge cases, the Program Design and the Files in Scope row are updated to match.
+
 ## Scope
 
 | In scope | Out of scope |
@@ -95,7 +100,7 @@ State-changing parity (plan, approve, deliver for Codex) is filed as a follow-up
      - a name that doesn't match its file or directory;
      - an unknown target;
      - an unknown `{{token}}`;
-     - a body containing `]]]` that can't be put in a TOML literal;
+     - an agent body containing `'''` or a control character other than tab and LF, which a TOML multi-line literal string cannot hold (amendment 1);
      - two sources that emit the same path.
 3. **`rad generate [--check] [--root <dir>]`** (`harness/cli.js`).
    - **Default mode:** writes every output for the sources under `<root>/.rad/` (root defaults to the repo root), creating parent directories, and prints `wrote <path>` / `unchanged <path>`.
@@ -130,7 +135,7 @@ The anchors were spot-checked directly (`plan-paths.sh:104`, `check-scope.sh:77-
 | File | Lines | Change |
 |------|-------|--------|
 | docs/rad-tool-portability.md | 1-300 | New: matrix + design |
-| harness/generate.js | 1-340 | New: source parsing, output rendering, plan/apply/check |
+| harness/generate.js | 1-470 | New: source parsing, output rendering, plan/apply/check |
 | harness/test/generate.test.js | 1-360 | New: rendering, errors, determinism, check/orphan/conflict |
 | harness/cli.js | 55-80 | `GENERATE_USAGE` |
 | harness/cli.js | 115-155 | Registry entry `generate` |
@@ -159,7 +164,7 @@ The anchors were spot-checked directly (`plan-paths.sh:104`, `check-scope.sh:77-
 - **Generated output must be byte-stable.** Running `generate` twice changes nothing, and `--check` after `generate` is clean.
 - **Never overwrite an unmarked file.** That is the conflict rule protecting hand-written files.
 - **No symlinks:** never create or follow one in sources or outputs (lstat).
-- **TOML is written by hand, not with a library.** Use a literal multi-line string for `developer_instructions`, escape-free by construction, with `]]]` rejected. Quote strings with JSON-compatible escapes for `name` and `description`.
+- **TOML is written by hand, not with a library.** Use a literal multi-line string for `developer_instructions`, escape-free by construction, with `'''` and control characters other than tab and LF rejected (amendment 1). Quote strings with JSON-compatible escapes for `name` and `description`.
 - Node built-ins and the vendored js-yaml only. No en dashes.
 
 ## Wave Plan
@@ -168,7 +173,7 @@ The anchors were spot-checked directly (`plan-paths.sh:104`, `check-scope.sh:77-
 These tasks touch disjoint files.
 
 #### Task 1.1: Generator engine
-File: harness/generate.js:1-340, harness/test/generate.test.js:1-360
+File: harness/generate.js:1-470, harness/test/generate.test.js:1-360
 What: Implement AC#2.
 Validate: AC#2. Edge cases:
 - **Skill sources:**
@@ -186,7 +191,7 @@ Validate: AC#2. Edge cases:
   - a missing or mismatched name;
   - an unknown target;
   - an unknown token;
-  - `]]]` in a body;
+  - `'''` or a disallowed control character in an agent body (amendment 1);
   - a duplicate output path;
   - a symlinked source.
 - **Determinism:** two runs give identical output.
@@ -239,7 +244,7 @@ Validate: AC#1, AC#5, AC#6. Every matrix row matches a real file (check with `ls
 
 ### Signatures
 - `harness/generate.js`:
-  - `readSources(root) → { ok, sources } | { ok: false, errors }`;
+  - `async readSources(root) → { ok, sources } | { ok: false, errors }` (amendment 1: async);
   - `renderOutputs(sources) → { ok, outputs: [{ path, content, source }] } | { ok: false, errors }`;
   - `planGenerate(root, outputs) → { writes, unchanged, drift, orphans, conflicts }`;
   - `applyGenerate(root, plan)`;
