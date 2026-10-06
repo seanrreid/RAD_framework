@@ -1,0 +1,13 @@
+# Example RAD preset. Copy this directory, rename it, and edit it for your team.
+# See README.md beside this file for the full preset format.
+name: example
+version: "1"
+
+settings:
+  # CUSTOMIZE: a project high_risk_patterns REPLACES the built-in default
+  # entirely; it is not merged with it. So EXTEND the default, never narrow it:
+  # keep the built-in alternatives below (copied verbatim from
+  # RAD_HIGH_RISK_DEFAULT_PATTERN in scripts/lib/plan-paths.sh) and append your
+  # own with `|`. This example adds infra and terraform path segments.
+  # The value must stay a single line and BSD grep -E (ERE) compatible.
+  high_risk_patterns: '(^|[/_.-])(o?auth(n|z|entication|enticate|orization|orize)?|payments?|billing|migrations?|secrets?|credentials?|tokens?)([/_.-]|[A-Z0-9]|$)|(^|[/_.-])(infra|terraform)([/_.-]|$)'
