@@ -19,7 +19,7 @@
 
 import { fileURLToPath } from 'node:url';
 import { basename, dirname, join, resolve } from 'node:path';
-import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync, realpathSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync, realpathSync, statSync } from 'node:fs';
 import process from 'node:process';
 import { spawnSync, execFileSync } from 'node:child_process';
 
@@ -65,7 +65,7 @@ const CAPABILITIES_USAGE = 'rad capabilities <feature> [--plan <path>]';
 /** Usage line for `rad install-core`. */
 const INSTALL_CORE_USAGE = 'rad install-core --source <dir> [--target <dir>]';
 /** Usage line for `rad install-preset`. */
-const INSTALL_PRESET_USAGE = 'rad install-preset --source <dir> [--target <dir>]';
+const INSTALL_PRESET_USAGE = 'rad install-preset (--source <dir> | --reapply) [--target <dir>]';
 /** Usage line for `rad install-status`. */
 const INSTALL_STATUS_USAGE = 'rad install-status [--target <dir>]';
 /** Usage line for `rad config`. */
@@ -3297,16 +3297,47 @@ export async function installCoreCommand(argv, ctx) {
   return plan.actions.some((a) => a.action === 'keep' || a.action === 'deleted') ? FAILED_EXIT_CODE : 0;
 }
 
-/** Validate install-preset argv; returns { presetDir, targetRoot } or an error string. */
+/** The boolean flag that re-applies the recorded preset (parseInstallFlags only takes value flags). */
+const REAPPLY_FLAG = '--reapply';
+/** What an operator does when the recorded preset source is gone. */
+const REAPPLY_FIX = 'pass --preset <dir> to install.sh, or rad install-preset --source <dir>';
+
+/**
+ * Validate install-preset argv; returns { presetDir, targetRoot },
+ * { reapply: true, targetRoot }, or an error string. `--reapply` is stripped
+ * before the value-flag parse so install-core/status parsing is unchanged.
+ */
 function resolveInstallPresetArgs(argv, repoRoot) {
+  const reapplyCount = argv.filter((a) => a === REAPPLY_FLAG).length;
+  if (reapplyCount > 1) return { error: `${REAPPLY_FLAG} given more than once` };
   let flags;
   try {
-    flags = parseInstallFlags(argv, ['--source', '--target']);
+    flags = parseInstallFlags(argv.filter((a) => a !== REAPPLY_FLAG), ['--source', '--target']);
   } catch (err) {
     return { error: err.message };
   }
+  const targetRoot = flags.target ? resolve(flags.target) : repoRoot;
+  if (reapplyCount && flags.source) return { error: `--source and ${REAPPLY_FLAG} are mutually exclusive` };
+  if (reapplyCount) return { reapply: true, targetRoot };
   if (!flags.source) return { error: '--source <dir> is required' };
-  return { presetDir: resolve(flags.source), targetRoot: flags.target ? resolve(flags.target) : repoRoot };
+  return { presetDir: resolve(flags.source), targetRoot };
+}
+
+/**
+ * The preset dir `--reapply` re-installs from: { presetDir }, { none: true }
+ * when no preset is recorded, or { errors } (no/malformed manifest, or a
+ * recorded source that is missing or not a directory). Reads only.
+ */
+function recordedPresetSource(targetRoot) {
+  const read = readManifest(targetRoot);
+  if (read.missing) return { errors: [PRESET_NEEDS_CORE_ERROR] };
+  if (!read.ok) return { errors: [read.error] };
+  const source = read.manifest.preset?.source;
+  if (!read.manifest.preset) return { none: true };
+  if (!isNonEmpty(source) || !existsSync(source) || !statSync(source).isDirectory()) {
+    return { errors: [`recorded preset source ${source} is missing or not a directory; ${REAPPLY_FIX}`] };
+  }
+  return { presetDir: source };
 }
 
 /** The installed manifest a preset overlays: { manifest } or { errors } (absent core is a refusal, never "fresh"). */
@@ -3349,6 +3380,13 @@ async function preparePresetInstall({ presetDir, targetRoot }) {
   return { preset, plan: planned.plan, seeded };
 }
 
+/** Print each install-preset refusal, then `nothing written`; exit 2. */
+function reportPresetRefusal(errors) {
+  for (const e of errors) process.stderr.write(`${INSTALL_PRESET_PREFIX}: ${e}\n`);
+  process.stderr.write(`${INSTALL_PRESET_PREFIX}: nothing written\n`);
+  return USAGE_EXIT_CODE;
+}
+
 /** One stdout line per preset setting: seeded, kept, or unseeded (left for the operator). */
 function settingsReportLines({ seeded, kept, unseeded }) {
   return [
@@ -3359,33 +3397,37 @@ function settingsReportLines({ seeded, kept, unseeded }) {
 }
 
 /**
- * `install-preset --source <dir> [--target <dir>]` — install or upgrade a
- * preset's files over an installed core (same per-file rules as install-core)
- * and seed its settings into .rad/config.yml. Target defaults to the CLI's
- * repo root. Re-running the same preset is idempotent.
+ * `install-preset (--source <dir> | --reapply) [--target <dir>]` — install or
+ * upgrade a preset's files over an installed core (same per-file rules as
+ * install-core) and seed its settings into .rad/config.yml. `--reapply` reads
+ * the source from the manifest's recorded preset and then behaves exactly as
+ * `--source <recorded>`; with no preset recorded it is a no-op (exit 0). Target
+ * defaults to the CLI's repo root. Re-running the same preset is idempotent.
  *
  * Exit 0 all written and seeded; 1 any keep, deleted, or unseeded setting;
  * 2 (nothing written) bad argv, an invalid preset, no or a malformed manifest,
- * a missing or invalid config, a different preset already installed, or a
- * path another layer owns.
+ * a missing or invalid config, a different preset already installed, a path
+ * another layer owns, or (--reapply) a recorded source that is not a directory.
  *
  * @param {string[]} argv - args after `install-preset`
  * @param {{ repoRoot: string, now?: Date }} ctx
  * @returns {Promise<number>}
  */
 export async function installPresetCommand(argv, ctx) {
-  const args = resolveInstallPresetArgs(argv, ctx.repoRoot);
-  if (args.error) {
-    process.stderr.write(`${INSTALL_PRESET_PREFIX}: ${args.error}\nUsage: ${INSTALL_PRESET_USAGE}\n`);
+  const parsed = resolveInstallPresetArgs(argv, ctx.repoRoot);
+  if (parsed.error) {
+    process.stderr.write(`${INSTALL_PRESET_PREFIX}: ${parsed.error}\nUsage: ${INSTALL_PRESET_USAGE}\n`);
     return USAGE_EXIT_CODE;
   }
-  const prep = await preparePresetInstall(args);
+  const recorded = parsed.reapply ? recordedPresetSource(parsed.targetRoot) : { presetDir: parsed.presetDir };
+  if (recorded.none) {
+    process.stdout.write(`${INSTALL_PRESET_PREFIX}: no preset recorded; nothing to do\n`);
+    return 0;
+  }
+  const args = { presetDir: recorded.presetDir, targetRoot: parsed.targetRoot };
+  const prep = recorded.errors ? recorded : await preparePresetInstall(args);
   if (prep.conflictPlan) return reportInstallConflicts(INSTALL_PRESET_PREFIX, prep.conflictPlan);
-  if (prep.errors) {
-    for (const e of prep.errors) process.stderr.write(`${INSTALL_PRESET_PREFIX}: ${e}\n`);
-    process.stderr.write(`${INSTALL_PRESET_PREFIX}: nothing written\n`);
-    return USAGE_EXIT_CODE;
-  }
+  if (prep.errors) return reportPresetRefusal(prep.errors);
   const { preset, plan, seeded } = prep;
   const { backupDir } = applyPresetInstall({
     ...args, plan, now: ctx.now ?? new Date(), name: preset.name, version: preset.version,
