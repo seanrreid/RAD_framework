@@ -13,3 +13,4 @@ Executor role: architect
 | 3 | 1 | 1.3 draft-insights-plan fallback | done | 97351c2 | 15:54 |
 | 4 | 2 | 2.1 Readers use the fallback | done | 90ec93c | 16:08 |
 | 5 | 2 | 2.2 Install scaffold | done | a98aabe | 16:08 |
+| 6 | 3 | 3.1 Docs and install next steps | done | e27c414 | 16:25 |
