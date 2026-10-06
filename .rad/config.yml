@@ -39,7 +39,7 @@ agent_scope_map:
     roles: [architect]
   - agent: sync-surface-mapper
     type: context-tool
-    reads: "rad-approve/deliver verb sites, git-vs-host-CLI invocation, detect-platform.sh + mirror scripts, CLAUDE.md RAD config, .env.example"
+    reads: "rad-approve/deliver verb sites, git-vs-host-CLI invocation, detect-platform.sh + mirror scripts, .rad/config.yml, .env.example"
     roles: [architect]
   - agent: event-fold-orchestrator
     type: role-orchestrator
@@ -115,7 +115,7 @@ agent_scope_map:
     roles: [architect]
   - agent: lint-surface-mapper
     type: context-tool
-    reads: "lint-plan.sh, check-scope.sh, lib/plan-paths.sh, .claude/agents samples, CLAUDE.md scope map"
+    reads: "lint-plan.sh, check-scope.sh, lib/plan-paths.sh, .claude/agents samples, .rad/config.yml agent_scope_map"
     roles: [architect]
   - agent: quality-reviewer
     type: reviewer
