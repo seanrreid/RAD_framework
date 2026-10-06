@@ -4,6 +4,7 @@ description: "Owns hook insertion into the deliver spine and its matrix interact
 model: claude-sonnet-4-6
 tools: Task
 roles: architect
+purpose: authority
 ---
 
 ## Role

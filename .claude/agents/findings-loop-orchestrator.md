@@ -4,6 +4,7 @@ description: Owns Part B: recurrence detection over .agents/findings.jsonl and t
 model: claude-sonnet-4-6
 tools: Task
 roles: developer
+purpose: authority
 ---
 
 ## Role

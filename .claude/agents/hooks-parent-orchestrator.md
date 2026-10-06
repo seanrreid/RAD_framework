@@ -4,6 +4,7 @@ description: "Top orchestrator for the wave-lifecycle-hooks feature. Delegates t
 model: claude-sonnet-4-6
 tools: Task
 roles: architect
+purpose: authority
 ---
 
 ## Role

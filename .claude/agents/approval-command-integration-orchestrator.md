@@ -4,6 +4,7 @@ description: "Owns where the verbs write approval authority. Delegate here for a
 model: claude-sonnet-4-6
 tools: Task
 roles: architect
+purpose: authority
 ---
 
 ## Role

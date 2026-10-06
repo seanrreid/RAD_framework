@@ -4,6 +4,7 @@ description: "Owns how state moves between machines. Delegate here for anything 
 model: claude-sonnet-4-6
 tools: Task
 roles: architect
+purpose: authority
 ---
 
 ## Role

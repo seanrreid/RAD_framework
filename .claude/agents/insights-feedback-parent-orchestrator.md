@@ -4,6 +4,7 @@ description: Top orchestrator for the insights-feedback-loop feature. Delegates 
 model: claude-sonnet-4-6
 tools: Task
 roles: developer
+purpose: authority
 ---
 
 ## Role

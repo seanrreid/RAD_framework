@@ -4,6 +4,7 @@ description: Owns Part A: cross-feature reliability metrics folded from .agents/
 model: claude-sonnet-4-6
 tools: Task
 roles: developer
+purpose: authority
 ---
 
 ## Role
