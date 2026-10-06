@@ -8,6 +8,7 @@
 #   ./install.sh --upgrade              # update commands + skills + scripts, skip user data
 #   ./install.sh --yes                  # accept all defaults without prompting
 #   ./install.sh --architect <id>       # architect for .rad/config.yml (default: git user.email)
+#   ./install.sh --preset <dir>         # apply a team preset (files + settings), with or without --upgrade
 #
 # Fresh install writes .rad/config.yml via `harness/cli.js config init`; upgrade
 # migrates it from a pre-#87 CLAUDE.md via `config migrate` when it is absent.
@@ -20,6 +21,13 @@
 # staged under .rad/upgrade-pending/) and the installer exits 1; with no
 # manifest, a differing file is backed up under .rad/upgrade-backup/ first.
 # A malformed manifest stops the install before any framework file is written.
+#
+# Presets: after the config step, --preset <dir> runs `install-preset --source`;
+# a plain --upgrade re-applies the recorded preset (`install-preset --reapply`).
+# A preset never removes or reverts the core install: a kept/deleted preset
+# file or an unseeded setting, or a preset that could not be applied at all,
+# makes the installer exit 1 after every other step has run. With no config,
+# the preset step is skipped (a preset needs .rad/config.yml).
 
 set -euo pipefail
 
@@ -38,8 +46,16 @@ CORE_KEPT=false
 # Whether the target had its own CLAUDE.md before scaffold_claude_md ran: an
 # upgrade must migrate only from the user's file, never from the RAD template.
 CLAUDE_MD_PREEXISTED=false
+# Absolute path of the --preset directory; empty when the flag was not given.
+PRESET=""
+# Set by install_preset: INCOMPLETE on install-preset exit 1 (kept/deleted file
+# or unseeded setting), FAILED on exit 2 (nothing written). main exits 1.
+PRESET_INCOMPLETE=false
+PRESET_FAILED=false
+# First line of the install-preset output when it failed (exit 2), for main's summary.
+PRESET_FAILURE_REASON=""
 
-readonly USAGE="Usage: ./install.sh [--dir <path>] [--upgrade] [--yes] [--architect <id>]"
+readonly USAGE="Usage: ./install.sh [--dir <path>] [--upgrade] [--yes] [--architect <id>] [--preset <dir>]"
 readonly RAD_CONFIG=".rad/config.yml"
 readonly FALLBACK_DEFAULT_BRANCH="main"
 
@@ -66,6 +82,10 @@ while [[ $# -gt 0 ]]; do
     --architect)
       [[ $# -ge 2 && -n "$2" && "$2" != --* ]] || error "--architect requires a value. $USAGE"
       ARCHITECT="$2"; shift 2 ;;
+    --preset)
+      [[ $# -ge 2 && -n "$2" && "$2" != -* ]] || error "--preset requires a directory. $USAGE"
+      [[ -d "$2" ]] || error "--preset must name an existing directory, got: '$2'. $USAGE"
+      PRESET="$(CDPATH='' cd -- "$2" && pwd)"; shift 2 ;;
     *) error "Unknown option: $1. $USAGE" ;;
   esac
 done
@@ -217,6 +237,48 @@ install_core() {
   info "scripts/             - includes get-default-branch.sh, checkout-plan.sh, rad-label.sh, lib/"
   info "harness/cli.js       - zero-npm rad CLI (vendored js-yaml, lazy SDK)"
   info "scripts/hooks/       - pre/post-wave + on-outcome lifecycle hook dirs"
+}
+
+# Exit codes of `harness/cli.js install-preset` (see harness/cli.js).
+readonly PRESET_EXIT_APPLIED=0
+readonly PRESET_EXIT_INCOMPLETE=1
+
+# Applies --preset, or on a plain --upgrade re-applies the recorded preset,
+# through the source clone's CLI (same version as the core just installed).
+# Never fails the run here: outcomes set PRESET_INCOMPLETE / PRESET_FAILED and
+# main exits 1 after every other step. Skipped when the config step failed.
+install_preset() {
+  if [[ -z "$PRESET" && "$UPGRADE" != "true" ]]; then return; fi
+  header "Preset"
+
+  if [[ "$CONFIG_FAILED" == "true" ]]; then
+    warn "Preset step skipped: a preset needs $RAD_CONFIG, which was not created"
+    return
+  fi
+
+  local mode out rc
+  if [[ -n "$PRESET" ]]; then mode="--source"; else mode="--reapply"; fi
+  if out=$(run_install_preset "$mode" 2>&1); then rc=$PRESET_EXIT_APPLIED; else rc=$?; fi
+  printf '%s\n' "$out" | sed 's/^/    /'
+  case "$rc" in
+    "$PRESET_EXIT_APPLIED") success "Preset step complete" ;;
+    "$PRESET_EXIT_INCOMPLETE")
+      PRESET_INCOMPLETE=true
+      warn "Preset applied incompletely: some preset files or settings were not written" ;;
+    *)
+      PRESET_FAILED=true
+      PRESET_FAILURE_REASON="$(printf '%s\n' "$out" | head -n 1)"
+      warn "Preset not applied (install-preset exit $rc); the core install is unaffected" ;;
+  esac
+}
+
+# run_install_preset <--source|--reapply> -> runs install-preset, passing its exit code.
+run_install_preset() {
+  if [[ "$1" == "--source" ]]; then
+    node "$RAD_DIR/harness/cli.js" install-preset --source "$PRESET" --target "$TARGET_DIR"
+  else
+    node "$RAD_DIR/harness/cli.js" install-preset --reapply --target "$TARGET_DIR"
+  fi
 }
 
 copy_agents_meta() {
@@ -440,17 +502,33 @@ main() {
   scaffold_claude_md
   detect_and_report_platform
   setup_rad_config
+  install_preset
   ensure_deliver_label
   print_next_steps
+  exit_on_incomplete
+}
 
+# Reports every incomplete step, then exits 1 if there was any. Each step has
+# already run, so the core install is never reverted by a later failure.
+exit_on_incomplete() {
+  local incomplete=false
   if [[ "$CONFIG_FAILED" == "true" ]]; then
     echo -e "  ${RED}✗${NC} Installed, but $RAD_CONFIG was not created — run the command above, then re-check with: node harness/cli.js config validate" >&2
-    exit 1
+    incomplete=true
   fi
   if [[ "$CORE_KEPT" == "true" ]]; then
     echo -e "  ${RED}✗${NC} Installed, but locally edited framework files were kept — review them with: node harness/cli.js install-status, and merge the staged copies under .rad/upgrade-pending/" >&2
-    exit 1
+    incomplete=true
   fi
+  if [[ "$PRESET_INCOMPLETE" == "true" ]]; then
+    echo -e "  ${RED}✗${NC} Installed, but the preset was applied incompletely — review it with: node harness/cli.js install-status, and the staged copies under .rad/upgrade-pending/" >&2
+    incomplete=true
+  fi
+  if [[ "$PRESET_FAILED" == "true" ]]; then
+    echo -e "  ${RED}✗${NC} Installed, but the preset was not applied: $PRESET_FAILURE_REASON" >&2
+    incomplete=true
+  fi
+  if [[ "$incomplete" == "true" ]]; then exit 1; fi
 }
 
 main

@@ -14,6 +14,10 @@
 #     scripts/lib ships, a local edit is kept + staged (exit 1), a pre-manifest
 #     upgrade backs up then overwrites, a malformed manifest stops the install,
 #     and a missing node is a named prerequisite error
+#   - presets: --preset installs files + settings, a plain --upgrade re-applies
+#     the recorded preset; a deleted tracked file, an unseeded setting, a gone
+#     source or a different preset name exit 1 without reverting the core;
+#     --preset usage errors install nothing; no config skips the preset step
 # Every installer run uses an isolated git identity (no global/system config,
 # empty HOME) so the developer's real git email never leaks into a result.
 # Self-contained: installs into a throwaway temp dir, asserts, always cleans up.
@@ -313,6 +317,115 @@ NONODE_RC=0
   || bad "node missing -> installer exited 0"
 assert_contains "$TMP/nonode.out" "node is required" "node missing -> error names node"
 assert_not_exists "$NONODE_T/harness" "node missing -> nothing installed"
+
+# ── 6. presets: --preset install, --upgrade re-apply, failure modes ─────────
+readonly EXAMPLE_PRESET="$REPO_ROOT/presets/example"
+readonly PRESET_HOOK="scripts/hooks/on-outcome/50-example-preset.sh"
+readonly PRESET_EXT="ai/extensions/example-preset.md"
+readonly PRESET_HIGH_RISK="$(grep '^  high_risk_patterns:' "$EXAMPLE_PRESET/preset.yml" | sed "s/^  high_risk_patterns: '//; s/'\$//")"
+
+# expect_rc <expected> <label> <output-file> -> asserts INSTALL_RC, dumps output on mismatch.
+expect_rc() {
+  [[ "$INSTALL_RC" -eq "$1" ]] && ok "$2 -> installer exits $1" \
+    || { bad "$2 -> installer exited $INSTALL_RC, expected $1"; cat "$3"; }
+}
+
+# copy_preset <name> -> echoes a writable copy of the example preset under $TMP.
+copy_preset() {
+  cp -R "$EXAMPLE_PRESET" "$TMP/$1"
+  echo "$TMP/$1"
+}
+
+# install_status <target> -> echoes `install-status` output for <target>.
+install_status() { ( cd "$1" && isolated node harness/cli.js install-status 2>&1 ); }
+
+# 6a. fresh install with --preset lands files + settings and records the preset
+PRE_T="$(new_repo preset-fresh)"
+run_install "$PRE_T" "$TMP/preset-fresh.out" --architect "$FIXTURE_ARCHITECT" --preset "$EXAMPLE_PRESET"
+expect_rc 0 "fresh install with --preset" "$TMP/preset-fresh.out"
+[[ -x "$PRE_T/$PRESET_HOOK" ]] && ok "--preset -> the preset hook landed executable" \
+  || bad "--preset -> $PRESET_HOOK missing or not executable"
+cmp -s "$EXAMPLE_PRESET/files/$PRESET_EXT" "$PRE_T/$PRESET_EXT" \
+  && ok "--preset -> the preset extension landed" || bad "--preset -> $PRESET_EXT missing or differs"
+PRE_HR="$( ( cd "$PRE_T" && isolated node harness/cli.js config get settings.high_risk_patterns 2>&1 ) )"
+[[ "$PRE_HR" == "$PRESET_HIGH_RISK" ]] && ok "--preset -> config get returns the preset high_risk_patterns" \
+  || bad "--preset -> config get settings.high_risk_patterns returned '$PRE_HR'"
+install_status "$PRE_T" >"$TMP/preset-fresh.status"
+assert_contains "$TMP/preset-fresh.status" "preset: example 1 (" "--preset -> install-status records the preset"
+config_valid "$PRE_T" && ok "--preset -> config stays valid" || bad "--preset -> config validate failed"
+
+# 6b. --upgrade without --preset re-applies the recorded (copied) preset
+RE_P="$(copy_preset preset-copy)"
+RE_T="$(new_repo preset-reapply)"
+run_install "$RE_T" "$TMP/preset-reapply-1.out" --architect "$FIXTURE_ARCHITECT" --preset "$RE_P"
+expect_rc 0 "install from a copied preset" "$TMP/preset-reapply-1.out"
+echo "# changed in the preset source" >>"$RE_P/files/$PRESET_EXT"
+run_install "$RE_T" "$TMP/preset-reapply-2.out" --upgrade
+expect_rc 0 "--upgrade re-applying the recorded preset" "$TMP/preset-reapply-2.out"
+cmp -s "$RE_P/files/$PRESET_EXT" "$RE_T/$PRESET_EXT" \
+  && ok "--upgrade -> the changed preset file was re-applied" || bad "--upgrade -> $PRESET_EXT not updated"
+
+# 6c. a tracked preset file the user deleted is reported, not restored
+rm "$RE_T/$PRESET_EXT"
+run_install "$RE_T" "$TMP/preset-deleted.out" --upgrade
+expect_rc 1 "--upgrade with a deleted preset file" "$TMP/preset-deleted.out"
+assert_contains "$TMP/preset-deleted.out" "deleted: $PRESET_EXT" "deleted preset file -> output reports it"
+assert_not_exists "$RE_T/$PRESET_EXT" "deleted preset file -> not restored"
+
+# 6d. the recorded preset source is gone -> core still upgraded, exit 1
+rm -rf "$RE_P"
+cp "$REPO_ROOT/ai/guardrails.md" "$TMP/guardrails.src"
+run_install "$RE_T" "$TMP/preset-gone.out" --upgrade
+expect_rc 1 "--upgrade with the recorded preset source gone" "$TMP/preset-gone.out"
+assert_contains "$TMP/preset-gone.out" "$RE_P" "missing preset source -> output names the path"
+assert_contains "$TMP/preset-gone.out" "Framework core installed" "missing preset source -> core still upgraded"
+cmp -s "$TMP/guardrails.src" "$RE_T/ai/guardrails.md" \
+  && ok "missing preset source -> core files intact" || bad "missing preset source -> ai/guardrails.md differs"
+
+# 6e. --preset usage errors install nothing
+USAGE_N=0
+for case_args in "/nonexistent-rad-preset" "" "--yes"; do
+  USAGE_N=$((USAGE_N + 1))
+  USE_T="$(new_repo "preset-usage-$USAGE_N")"
+  if [[ -z "$case_args" ]]; then
+    run_install "$USE_T" "$TMP/preset-usage.out" --preset
+  else
+    run_install "$USE_T" "$TMP/preset-usage.out" --preset "$case_args"
+  fi
+  [[ "$INSTALL_RC" -ne 0 ]] && ok "--preset '$case_args' -> usage error (non-zero)" \
+    || bad "--preset '$case_args' -> installer exited 0"
+  assert_contains "$TMP/preset-usage.out" "--preset" "--preset '$case_args' -> error names the flag"
+  assert_not_exists "$USE_T/harness" "--preset '$case_args' -> nothing installed"
+done
+
+# 6f. --upgrade --preset over an existing settings: block that already has the key -> kept, exit 0
+run_install "$PRE_T" "$TMP/preset-kept.out" --upgrade --preset "$EXAMPLE_PRESET"
+expect_rc 0 "--upgrade --preset over an existing setting" "$TMP/preset-kept.out"
+assert_contains "$TMP/preset-kept.out" "kept: high_risk_patterns" "existing setting -> reported kept"
+
+# 6g. a settings: block without the key -> unseeded, exit 1, config stays valid
+UNS_T="$(upgrade_target preset-unseeded)"
+printf 'settings:\n  hooks_dir: x\n' >>"$UNS_T/.rad/config.yml"
+run_install "$UNS_T" "$TMP/preset-unseeded.out" --upgrade --preset "$EXAMPLE_PRESET"
+expect_rc 1 "--preset with an unseeded setting" "$TMP/preset-unseeded.out"
+assert_contains "$TMP/preset-unseeded.out" "unseeded: high_risk_patterns" "unseeded setting -> output names it"
+config_valid "$UNS_T" && ok "unseeded setting -> config stays valid" || bad "unseeded setting -> config validate failed"
+
+# 6h. a different preset name over an installed one -> exit 1, not switched, core upgraded
+OTHER_P="$(copy_preset preset-other)"
+sed 's/^name: example$/name: other/' "$EXAMPLE_PRESET/preset.yml" >"$OTHER_P/preset.yml"
+run_install "$PRE_T" "$TMP/preset-other.out" --upgrade --preset "$OTHER_P"
+expect_rc 1 "--upgrade --preset with a different preset name" "$TMP/preset-other.out"
+assert_contains "$TMP/preset-other.out" "Framework core installed" "different preset -> core still upgraded"
+install_status "$PRE_T" >"$TMP/preset-other.status"
+assert_contains "$TMP/preset-other.status" "preset: example 1 (" "different preset -> preset not switched"
+
+# 6i. no config (no identity) -> preset step skipped with a warning, exit 1
+NOCFG_T="$(new_repo preset-noconfig)"
+run_install "$NOCFG_T" "$TMP/preset-noconfig.out" --preset "$EXAMPLE_PRESET"
+expect_rc 1 "--preset with no config created" "$TMP/preset-noconfig.out"
+assert_contains "$TMP/preset-noconfig.out" "Preset step skipped" "no config -> preset step skipped with a warning"
+assert_not_exists "$NOCFG_T/$PRESET_EXT" "no config -> no preset file written"
 
 # ── summary ─────────────────────────────────────────────────────────────────
 echo "─────────────────────────────────────────"
