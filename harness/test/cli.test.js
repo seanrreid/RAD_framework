@@ -6,13 +6,14 @@ import {
 import { createHash } from 'node:crypto';
 import { basename, join, dirname, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import {
   approveCommand, gateCommand, parsePlanCtx, deliverCommand, stopStatusCommand, forecastCommand, digestCommand,
   resolveHooksDir, makeSpineScriptPort, SCRIPT_ARG_KEYS, reviewCommand, resolveAgent, isMainModule,
   capabilitiesCommand, installCoreCommand, installPresetCommand, installStatusCommand, configCommand,
+  acpCheckCommand,
 } from '../cli.js';
 import { buildReviewPrompt, reviewInstruction } from '../review.js';
 import { REVIEW_INSTRUCTION } from '../evals/reviewers/lib.js';
@@ -2816,5 +2817,74 @@ test('deliver acp — a declared model (wave Model: line or --model) prints exac
       assert.equal(stderr.match(ACP_MODEL_WARNING)?.length, 1, `${label}: ${stderr}`);
       assert.match(stderr, /model 'claude-haiku-4-5' ignored/, label);
     });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// rad acp-check — ACP v1 conformance check (part 2, AC#3)
+//
+// Runs go through a CLI subprocess: they await real agent processes and print
+// to stdout, which under `node --test` is the runner's event channel.
+// ---------------------------------------------------------------------------
+
+/** Run `rad acp-check <args>` as a subprocess; resolves { code, stdout, stderr }. */
+function runAcpCheck(args) {
+  return new Promise((resolveRun) => {
+    execFile(process.execPath, [CLI, 'acp-check', ...args], (err, stdout, stderr) => {
+      resolveRun({ code: err ? err.code : 0, stdout, stderr });
+    });
+  });
+}
+
+const ACP_CHECK_ORDER = ['spawn', 'initialize', 'session/new', 'prompt', 'wave-result', 'shutdown'];
+
+test('acp-check — complete: PASS per check, summary, exit 0', async () => {
+  const { code, stdout, stderr } = await runAcpCheck(['--cmd', `${process.execPath} ${FAKE_ACP_AGENT} complete`]);
+  assert.equal(code, 0, stderr);
+  const lines = stdout.trim().split('\n');
+  assert.deepEqual(lines.slice(0, 6), ACP_CHECK_ORDER.map((n) => `PASS ${n}`));
+  assert.equal(lines[6], 'rad acp-check: ok, 6 of 6 checks passed');
+  assert.equal(lines.length, 7);
+});
+
+test('acp-check — wrong-version: FAIL initialize, no later lines, exit 1', async () => {
+  const { code, stdout } = await runAcpCheck(['--cmd', `${process.execPath} ${FAKE_ACP_AGENT} wrong-version`]);
+  assert.equal(code, 1);
+  const lines = stdout.trim().split('\n');
+  assert.equal(lines[0], 'PASS spawn');
+  assert.match(lines[1], /^FAIL initialize: .*protocolVersion 2/);
+  assert.equal(lines[2], 'rad acp-check: failed, 1 of 6 checks passed');
+  assert.equal(lines.length, 3);
+});
+
+test('acp-check — a turn with no block: FAIL wave-result, exit 1', async () => {
+  const { code, stdout } = await runAcpCheck(['--cmd', `${process.execPath} ${FAKE_ACP_AGENT} reprompt-bad`]);
+  assert.equal(code, 1);
+  assert.match(stdout, /^FAIL wave-result: no WAVE_RESULT block/m);
+  assert.match(stdout, /rad acp-check: failed, 4 of 6 checks passed\n$/);
+});
+
+test('acp-check — a hung agent times out at a named check (prompt) under --timeout', async () => {
+  const { code, stdout } = await runAcpCheck(['--cmd', `${process.execPath} ${FAKE_ACP_AGENT} hang`, '--timeout', '1']);
+  assert.equal(code, 1);
+  assert.match(stdout, /^FAIL prompt: acp-check timed out after 1000ms/m);
+});
+
+test('acp-check — argv errors exit 2 with usage and run no agent', async () => {
+  const cases = [
+    [[], /--cmd is required/],
+    [['--cmd'], /--cmd requires a value/],
+    [['--cmd', 'agent', '--bogus', 'x'], /unknown option '--bogus'/],
+    [['--cmd', 'agent', 'stray'], /unexpected argument 'stray'/],
+    [['--cmd', 'agent', '--timeout', '0'], /--timeout must be a positive integer/],
+    [['--cmd', 'agent', '--timeout', 'abc'], /--timeout must be a positive integer/],
+    [['--cmd', 'agent', '--timeout', '-5'], /--timeout requires a value|--timeout must be a positive integer/],
+    [['--cmd', 'a', '--cmd', 'b'], /--cmd given more than once/],
+  ];
+  for (const [argv, pattern] of cases) {
+    const { code, stderr } = await captureStdio(() => acpCheckCommand(argv, { repoRoot: HERE }));
+    assert.equal(code, 2, argv.join(' '));
+    assert.match(stderr, pattern, argv.join(' '));
+    assert.match(stderr, /Usage: rad acp-check --cmd "<agent>" \[--timeout <seconds>\]/);
   }
 });

@@ -1,11 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, readFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
-import { createAcpAdapter, probeAcp, decidePermission, ACP_PROTOCOL_VERSION } from '../adapters/agent/acp.js';
+import {
+  createAcpAdapter, probeAcp, decidePermission, checkAcpAgent, ACP_PROTOCOL_VERSION, ACP_CHECK_NAMES, ACP_CHECK_PROMPT,
+} from '../adapters/agent/acp.js';
 import { buildChildEnv, tokenizeCommand } from '../adapters/agent/command.js';
 import { extractWaveResultBlock, parseWaveResult, toWaveResult } from '../adapters/agent/contract.js';
 import { DEFAULT_CAPABILITIES } from '../capabilities.js';
@@ -292,4 +294,93 @@ test('probeAcp: wrong version and ENOENT fail with a named error', async () => {
   const missing = await probeAcp({ cmd: join(workDir, 'no-such-acp-agent'), repoRoot: workDir, ...FAST });
   assert.equal(missing.ok, false);
   assert.match(missing.error, /ENOENT/);
+});
+
+// --- checkAcpAgent: the rad acp-check conformance run (part 2, AC#2) ----------
+
+const checkNames = (report) => report.checks.map((c) => c.name);
+const lastCheck = (report) => report.checks[report.checks.length - 1];
+
+test('checkAcpAgent: complete passes all six checks in order and leaves no process', async () => {
+  const { trace, cmd } = fake('complete');
+  const report = await checkAcpAgent({ cmd, repoRoot: workDir, ...FAST });
+  assert.equal(report.ok, true, JSON.stringify(report));
+  assert.deepEqual(checkNames(report), [...ACP_CHECK_NAMES]);
+  assert.ok(report.checks.every((c) => c.ok && typeof c.detail === 'string'));
+  assert.equal(received(trace, 'session/prompt').length, 1, 'exactly one prompt, no reprompt');
+  assert.equal(paramsOf(received(trace, 'session/prompt')[0]).prompt[0].text, ACP_CHECK_PROMPT);
+  assert.equal(isAlive(pidOf(trace)), false);
+});
+
+test('checkAcpAgent: the conformance prompt itself carries a success WAVE_RESULT block', () => {
+  const parsed = parseWaveResult(extractWaveResultBlock(ACP_CHECK_PROMPT));
+  assert.equal(toWaveResult(parsed).outcome, 'success');
+  assert.equal(parsed.tasks.length, 1);
+});
+
+test('checkAcpAgent: wrong-version fails at initialize and runs no later check', async () => {
+  const { trace, cmd } = fake('wrong-version');
+  const report = await checkAcpAgent({ cmd, repoRoot: workDir, ...FAST });
+  assert.equal(report.ok, false);
+  assert.deepEqual(checkNames(report), ['spawn', 'initialize']);
+  assert.equal(lastCheck(report).ok, false);
+  assert.match(lastCheck(report).detail, /protocolVersion 2/);
+  assert.equal(received(trace, 'session/new').length, 0);
+});
+
+test('checkAcpAgent: a turn with no block fails at wave-result (no reprompt)', async () => {
+  const { trace, cmd } = fake('reprompt-bad');
+  const report = await checkAcpAgent({ cmd, repoRoot: workDir, ...FAST });
+  assert.equal(report.ok, false);
+  assert.equal(lastCheck(report).name, 'wave-result');
+  assert.match(lastCheck(report).detail, /no WAVE_RESULT block/);
+  assert.equal(received(trace, 'session/prompt').length, 1);
+});
+
+test('checkAcpAgent: a crash mid-turn fails at prompt', async () => {
+  const report = await checkAcpAgent({ cmd: fake('crash').cmd, repoRoot: workDir, ...FAST });
+  assert.equal(lastCheck(report).name, 'prompt');
+  assert.equal(lastCheck(report).ok, false);
+  assert.match(lastCheck(report).detail, /exited/);
+});
+
+test('checkAcpAgent: ignore-cancel times out at prompt and the process is still killed', async () => {
+  const { trace, cmd } = fake('ignore-cancel');
+  const report = await checkAcpAgent({ cmd, repoRoot: workDir, timeoutMs: SHORT_DEADLINE_MS, killGraceMs: FAST.killGraceMs });
+  assert.equal(report.ok, false);
+  assert.equal(lastCheck(report).name, 'prompt');
+  assert.match(lastCheck(report).detail, /acp-check timed out after 400ms/);
+  assert.equal(isAlive(pidOf(trace)), false);
+});
+
+test('checkAcpAgent: an agent that outlives stdin close fails at shutdown', async () => {
+  const { trace, cmd } = fake('linger');
+  const report = await checkAcpAgent({ cmd, repoRoot: workDir, ...FAST });
+  assert.equal(report.ok, false);
+  assert.deepEqual(checkNames(report), [...ACP_CHECK_NAMES]);
+  assert.equal(lastCheck(report).ok, false);
+  assert.match(lastCheck(report).detail, /did not exit within 200ms of stdin closing \(ended at: SIGTERM\)/);
+  assert.equal(isAlive(pidOf(trace)), false);
+});
+
+test('checkAcpAgent: ENOENT and an unparseable cmd fail at spawn', async () => {
+  const missing = await checkAcpAgent({ cmd: join(workDir, 'no-such-acp-agent'), repoRoot: workDir, ...FAST });
+  assert.deepEqual(checkNames(missing), ['spawn']);
+  assert.match(lastCheck(missing).detail, /ENOENT/);
+  for (const cmd of ['', 'agent {prompt}']) {
+    const report = await checkAcpAgent({ cmd, repoRoot: workDir, ...FAST });
+    assert.deepEqual(checkNames(report), ['spawn'], cmd);
+    assert.equal(report.ok, false);
+  }
+});
+
+test('checkAcpAgent: writes nothing into the agent cwd', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'rad-acp-check-'));
+  try {
+    const report = await checkAcpAgent({ cmd: `${process.execPath} ${FAKE_AGENT} complete`, repoRoot: root, ...FAST });
+    assert.equal(report.ok, true);
+    assert.deepEqual(readdirSync(root), []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

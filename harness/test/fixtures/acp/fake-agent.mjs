@@ -125,6 +125,8 @@ const SCENARIOS = {
     process.stderr.write('boom: fake agent crashed mid-turn\n');
     process.exit(3);
   },
+  // Completes the turn but stays up after stdin closes (exits on SIGTERM): fails acp-check's shutdown.
+  linger: (msg) => finish(msg, GOOD_BLOCK),
   'fs-request': readFileRequest,
   permissions: askPermissions,
 };
@@ -169,13 +171,13 @@ if (!(scenario in SCENARIOS) && !HANDSHAKE_SCENARIOS.includes(scenario)) {
   process.exit(2);
 }
 trace(`pid ${process.pid}`);
-if (scenario === 'ignore-cancel') {
-  process.on('SIGTERM', () => trace('SIGTERM ignored'));
-  setInterval(() => {}, 1_000);
-}
+/** Scenarios that keep running after stdin closes. */
+const OUTLIVES_STDIN = ['ignore-cancel', 'linger'];
+if (scenario === 'ignore-cancel') process.on('SIGTERM', () => trace('SIGTERM ignored'));
+if (OUTLIVES_STDIN.includes(scenario)) setInterval(() => {}, 1_000);
 const rl = createInterface({ input: process.stdin, crlfDelay: Infinity });
 rl.on('line', (line) => onMessage(JSON.parse(line)));
 rl.on('close', () => {
   trace('stdin closed');
-  if (scenario !== 'ignore-cancel') process.exit(0);
+  if (!OUTLIVES_STDIN.includes(scenario)) process.exit(0);
 });
