@@ -8,3 +8,4 @@ Executor role: architect
 
 | Step | Wave | Task | Status | Commit | Time |
 |------|------|------|--------|--------|------|
+| 1 | 1 | 1.1 Audit the mappers | complete | a9d6693 | 16:58 |
