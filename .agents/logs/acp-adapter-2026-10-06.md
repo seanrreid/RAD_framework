@@ -9,3 +9,4 @@ Executor role: architect
 | Step | Wave | Task | Status | Commit | Time |
 |------|------|------|--------|--------|------|
 | 1 | Wave 1 | ACP client and adapter | ✓ done_with_concerns | 3a73cd6 | 12:49 |
+| 2 | Wave 1 | Adapter-named capability refusal | ✓ complete | 348b7e6 | 12:49 |
