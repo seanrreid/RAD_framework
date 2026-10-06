@@ -117,6 +117,18 @@ jobs:
           node-version: 20
       - run: scripts/lint-invariants.sh
 
+  # All PRs — generated-file drift (fail-closed, #171): every Claude and Codex
+  # output must match its .rad/ source, and no marked orphan may remain.
+  # Thin wrapper: the same command runs on any runner. No sources yet: exits 0.
+  generated-drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: node harness/cli.js generate --check
+
   # All PRs — scripted adversarial gate evals (blocking): each case attacks a
   # registry invariant in a throwaway fixture repo with a scripted adversary.
   # Thin wrapper: the same command runs on any runner. Live-agent lane is manual.
