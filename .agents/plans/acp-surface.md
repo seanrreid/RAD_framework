@@ -1,7 +1,10 @@
 # Plan: ACP Decision Doc, Conformance Check and Docs (#86 part 2)
 Created: 2026-10-06
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-10-06T17:18:55.746Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/acp-surface
 Adopted-From: https://github.com/seanrreid/RAD_framework/issues/86
 Issue-Title: Give the provider seam a protocol, not two bespoke adapters: evaluate ACP + a _rad/ extension namespace
