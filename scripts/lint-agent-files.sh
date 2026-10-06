@@ -12,9 +12,9 @@
 #     itself a violation, not an exemption): model must start with
 #     claude-haiku, must not list Task, and the description must start with
 #     "MUST BE USED" or "Use PROACTIVELY".
-#   - files WITHOUT a `roles:` field are RAD-external utility agents (e.g.
-#     quality-reviewer): basic frontmatter is linted, but they are exempt from
-#     the context-tool description/model rules and the scope-map bijection.
+#   - files WITHOUT a `roles:` field are RAD-external utility agents: basic
+#     frontmatter is linted, but they are exempt from the context-tool
+#     description/model rules and the scope-map bijection.
 #
 # Part 2 — scope-map sync against `agent_scope_map` in .rad/config.yml (read via
 # `rad config get agent_scope_map`, one JSON object per row):
