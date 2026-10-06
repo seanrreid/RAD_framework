@@ -1,7 +1,10 @@
 # Plan: Migrate the Read-Only Slice and Ship It (#171 part 2)
 Created: 2026-10-06
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-10-06T18:56:36.674Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/portable-readonly-slice
 Adopted-From: https://github.com/seanrreid/RAD_framework/issues/171
 Issue-Title: Assistant-portable skill surface: one source, generated Claude + Codex wrappers (no symlinks)
