@@ -1,7 +1,10 @@
 # Plan: Fix Stale CLAUDE.md and Config References in Docs (#190)
 Created: 2026-10-06
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-10-06T20:37:10.514Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/conventions-doc-refs
 
 ## Context
