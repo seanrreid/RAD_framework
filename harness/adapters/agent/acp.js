@@ -34,6 +34,7 @@ import {
   extractWaveResultBlock,
   parseWaveResult,
   toWaveResult,
+  resultToOutcome,
   syntheticFailure,
   sanitizeErrorMessage,
   normalizeUsage,
@@ -75,6 +76,18 @@ const REPROMPT_TEXT =
   'Your previous response did not include the required WAVE_RESULT block. '
   + 'Reply with exactly one WAVE_RESULT ... END_WAVE_RESULT block for this wave, '
   + 'and nothing after it.';
+
+/** The ordered `checkAcpAgent` checks; the run stops at the first failure. */
+export const ACP_CHECK_NAMES = Object.freeze(['spawn', 'initialize', 'session/new', 'prompt', 'wave-result', 'shutdown']);
+/** The one prompt `checkAcpAgent` sends: it asks for a fixed one-task WAVE_RESULT block. */
+export const ACP_CHECK_PROMPT = [
+  'This is a RAD ACP conformance check (rad acp-check). Do not use any tools and do not change any files.',
+  'Reply with exactly this block and nothing after it:',
+  '',
+  'WAVE_RESULT', 'wave: 1', 'status: complete', 'tasks:',
+  '  - title: ACP conformance check', '    status: complete', '    commit: —',
+  '    concern: —', '    error: —', 'END_WAVE_RESULT',
+].join('\n');
 
 const INITIALIZE_PARAMS = Object.freeze({
   protocolVersion: ACP_PROTOCOL_VERSION,
@@ -284,21 +297,30 @@ function exitWithin(conn, ms) {
   return Promise.race([conn.exited.then(() => true), expired]).finally(() => clearTimeout(timer));
 }
 
+/** How `shutdown` ended: which step the agent finally exited on. */
+const SHUTDOWN_GRACEFUL = 'stdin-close';
+const SHUTDOWN_SIGTERM = 'SIGTERM';
+const SHUTDOWN_SIGKILL = 'SIGKILL';
+const SHUTDOWN_STUCK = 'still running after SIGKILL';
+const SHUTDOWN_NOT_SPAWNED = 'not spawned';
+
 /**
  * Shut the agent down. Graceful: close stdin and give it `killGraceMs` to exit.
  * Then (or straight away when not graceful) SIGTERM, and SIGKILL after another
- * `killGraceMs`. Every wait is bounded.
+ * `killGraceMs`. Every wait is bounded. Returns the step the agent exited on
+ * (a SHUTDOWN_* value); the adapter ignores it, `checkAcpAgent` reports it.
  */
 async function shutdown(conn, killGraceMs, { graceful }) {
   if (graceful) {
     if (!conn.child.stdin.destroyed) conn.child.stdin.end();
-    if (await exitWithin(conn, killGraceMs)) return;
+    if (await exitWithin(conn, killGraceMs)) return SHUTDOWN_GRACEFUL;
   }
   signalChild(conn.child, 'SIGTERM');
-  if (await exitWithin(conn, killGraceMs)) return;
+  if (await exitWithin(conn, killGraceMs)) return SHUTDOWN_SIGTERM;
   signalChild(conn.child, 'SIGKILL');
-  if (await exitWithin(conn, killGraceMs)) return;
+  if (await exitWithin(conn, killGraceMs)) return SHUTDOWN_SIGKILL;
   process.stderr.write(`acp adapter: agent pid ${conn.child.pid} did not exit after SIGKILL\n`);
+  return SHUTDOWN_STUCK;
 }
 
 // ── Session: deadline, handlers, handshake, turns ──────────────────────────
@@ -416,7 +438,18 @@ function newSession({ argv, repoRoot, timeoutMs, killGraceMs, label }, effective
  * authenticated agent, and a later auth error surfaces as a failure.
  */
 async function handshake(session) {
+  spawnAgent(session);
+  await initializeAgent(session);
+  await createAgentSession(session);
+}
+
+/** Handshake step 1: spawn the agent and open the JSON-RPC connection. */
+function spawnAgent(session) {
   session.conn = openConnection(session.argv, session.cwd, sessionHandlers(session));
+}
+
+/** Handshake step 2: `initialize`; any protocolVersion other than 1 fails closed. */
+async function initializeAgent(session) {
   const init = await raceDeadline(request(session.conn, 'initialize', INITIALIZE_PARAMS), session.deadline);
   if (init?.protocolVersion !== ACP_PROTOCOL_VERSION) {
     throw protocolFailure(
@@ -424,6 +457,10 @@ async function handshake(session) {
       + `RAD requires protocolVersion ${ACP_PROTOCOL_VERSION}`,
     );
   }
+}
+
+/** Handshake step 3: `session/new`, which must return a non-empty sessionId. */
+async function createAgentSession(session) {
   const created = await raceDeadline(
     request(session.conn, 'session/new', { cwd: session.cwd, mcpServers: [] }),
     session.deadline,
@@ -487,11 +524,11 @@ function failureResult(outcome, waveId, message, session) {
   return withPermissions(result, session);
 }
 
-/** Close the session's process (if one was spawned) and clear its deadline. */
+/** Close the session's process (if one was spawned) and clear its deadline; returns how it ended. */
 async function closeSession(session) {
   session.deadline.clear();
-  if (!session.conn) return;
-  await shutdown(session.conn, session.killGraceMs, { graceful: !session.deadline.expired });
+  if (!session.conn) return SHUTDOWN_NOT_SPAWNED;
+  return shutdown(session.conn, session.killGraceMs, { graceful: !session.deadline.expired });
 }
 
 /** One attempt: fresh process + session, the wave turn, at most one reprompt. */
@@ -574,4 +611,99 @@ export async function probeAcp({
   } finally {
     await closeSession(session);
   }
+}
+
+// ── Conformance check (rad acp-check) ──────────────────────────────────────
+
+/** Resolve once the child has spawned; reject with an AcpFailure when it cannot run (e.g. ENOENT). */
+function spawned(child) {
+  return new Promise((resolveSpawn, reject) => {
+    child.once('spawn', resolveSpawn);
+    child.once('error', (err) => reject(protocolFailure(`could not run the ACP agent: ${err?.message ?? err}`)));
+  });
+}
+
+/** `spawn`: the command parses and the process starts. */
+async function checkSpawn(session, cmd) {
+  try {
+    session.argv = parseAgentCommand(cmd);
+  } catch (err) {
+    throw protocolFailure(err.message);
+  }
+  spawnAgent(session);
+  await raceDeadline(spawned(session.conn.child), session.deadline);
+  return `started pid ${session.conn.child.pid}`;
+}
+
+/** `wave-result`: the turn's block parses and maps to the `success` outcome. */
+function checkWaveResult(block) {
+  if (!block) throw protocolFailure('no WAVE_RESULT block in the turn text');
+  const outcome = resultToOutcome(parseWaveResult(block));
+  if (outcome !== 'success') throw protocolFailure(`WAVE_RESULT maps to outcome ${outcome}, expected success`);
+  return 'WAVE_RESULT maps to outcome success';
+}
+
+/** Every check but `shutdown`, in ACP_CHECK_NAMES order; each returns its pass detail or throws an AcpFailure. */
+const CHECK_STEPS = [
+  ['spawn', (session, cmd) => checkSpawn(session, cmd)],
+  ['initialize', async (session) => { await initializeAgent(session); return `protocolVersion ${ACP_PROTOCOL_VERSION}`; }],
+  ['session/new', async (session) => { await createAgentSession(session); return `sessionId ${session.id}`; }],
+  ['prompt', async (session) => {
+    session.checkBlock = await runTurn(session, ACP_CHECK_PROMPT);
+    return `stopReason in ${[...PARSE_STOP_REASONS].join(', ')}`;
+  }],
+  ['wave-result', (session) => checkWaveResult(session.checkBlock)],
+];
+
+/** Run the steps in order, stopping at the first failure (which is recorded). */
+async function runChecks(session, cmd) {
+  const checks = [];
+  for (const [name, step] of CHECK_STEPS) {
+    try {
+      checks.push({ name, ok: true, detail: await step(session, cmd) });
+    } catch (err) {
+      if (!(err instanceof AcpFailure)) throw err;
+      checks.push({ name, ok: false, detail: sanitizeErrorMessage(err.message) });
+      break;
+    }
+  }
+  return checks;
+}
+
+/** `shutdown`: the agent exited on stdin close alone, within the grace period. */
+function shutdownCheck(ended, killGraceMs) {
+  if (ended === SHUTDOWN_GRACEFUL) {
+    return { name: 'shutdown', ok: true, detail: `exited within ${killGraceMs}ms of stdin closing` };
+  }
+  const detail = `did not exit within ${killGraceMs}ms of stdin closing (ended at: ${ended})`;
+  return { name: 'shutdown', ok: false, detail };
+}
+
+/**
+ * Conformance check for an ACP agent: one process, one session, one prompt,
+ * through the adapter's own handshake and turn machinery. The checks run in
+ * ACP_CHECK_NAMES order and stop at the first failure. Permission requests get
+ * the default policy (DEFAULT_CAPABILITIES). Writes nothing. Never throws for
+ * an agent failure.
+ *
+ * @param {Object} opts
+ * @param {string} opts.cmd - the agent command, tokenized like RAD_AGENT_CMD
+ * @param {string} [opts.repoRoot] - the agent's cwd and the session's `cwd`
+ * @param {number} [opts.timeoutMs] - deadline for the whole check (default: the wave timeout)
+ * @param {number} [opts.killGraceMs] - the shutdown grace period; internal (tests)
+ * @returns {Promise<{ ok: boolean, checks: Array<{ name: string, ok: boolean, detail: string }> }>}
+ */
+export async function checkAcpAgent({
+  cmd, repoRoot, timeoutMs = DEFAULT_WAVE_TIMEOUT_MS, killGraceMs = KILL_GRACE_MS,
+} = {}) {
+  const session = newSession({ argv: null, repoRoot, timeoutMs, killGraceMs, label: 'acp-check' }, DEFAULT_CAPABILITIES);
+  let checks;
+  let ended;
+  try {
+    checks = await runChecks(session, cmd);
+  } finally {
+    ended = await closeSession(session);
+  }
+  if (checks.every((c) => c.ok)) checks.push(shutdownCheck(ended, killGraceMs));
+  return { ok: checks.length === ACP_CHECK_NAMES.length && checks.every((c) => c.ok), checks };
 }

@@ -77,12 +77,13 @@
  *   string hash of the plan body, from harness/plan-fingerprint.js) attesting to
  *   WHICH plan body was approved. The fold does not read it; it is data-only.
  *
- *   The `wave-attempt` event's `data` MAY carry two OPTIONAL, data-only keys that
- *   record what the wave agent claimed it did (see WaveAttemptEvidence below).
- *   Both are ADDITIVE and ABSENT-BY-DEFAULT: when the wave result carries neither,
+ *   The `wave-attempt` event's `data` MAY carry OPTIONAL, data-only keys that
+ *   record what the wave agent claimed it did, and (`permissions`) what RAD
+ *   answered its permission requests (see WaveAttemptEvidence below).
+ *   All are ADDITIVE and ABSENT-BY-DEFAULT: when the wave result carries none,
  *   the appended event is byte-identical to a pre-existing one, and every fold in
  *   this module returns identical results on a history that lacks them. No fold
- *   reads either key.
+ *   reads any of them.
  * @property {string}  actor        - WHO the event is attributed to (human identity)
  * @property {string}  ts           - ISO timestamp, passed in by the caller
  * @property {string} [recordedBy]  - WHO physically ran the command, if not `actor`
@@ -123,6 +124,11 @@
  * @property {{command: string, status: number, passed: boolean}} [verify] - the
  *   verification command run for the wave, its exit status, and whether it passed.
  *   Omitted when the wave ran no verification command.
+ * @property {Array<{kind: string|null, decision: 'allow'|'reject'|'cancelled'}>} [permissions]
+ *   - the acp adapter's answers to the agent's session/request_permission calls,
+ *   in order: the ACP tool kind (null when the agent sent none) and RAD's
+ *   decision. Data-only, like `tasks` and `verify`: no fold reads it. Omitted
+ *   when the wave result carries none or an empty array.
  */
 
 /**

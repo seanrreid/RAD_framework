@@ -30,7 +30,7 @@ import { makeWorktreeLifecycle } from './adapters/worktree.js';
 import { deliverSpine } from './spine.js';
 import { createHookRunner } from './hook-runner.js';
 import { createCommandAdapter, probeCommand, runCommandPrompt } from './adapters/agent/command.js';
-import { createAcpAdapter, probeAcp } from './adapters/agent/acp.js';
+import { createAcpAdapter, probeAcp, checkAcpAgent, ACP_CHECK_NAMES } from './adapters/agent/acp.js';
 import { sanitizeErrorMessage } from './adapters/agent/contract.js';
 import { loadMatrix } from './matrix.js';
 import { classifyStop, STOP_CLASSES } from './stops.js';
@@ -69,6 +69,8 @@ const INSTALL_CORE_USAGE = 'rad install-core --source <dir> [--target <dir>]';
 const INSTALL_PRESET_USAGE = 'rad install-preset (--source <dir> | --reapply) [--target <dir>]';
 /** Usage line for `rad install-status`. */
 const INSTALL_STATUS_USAGE = 'rad install-status [--target <dir>]';
+/** Usage line for `rad acp-check`. */
+const ACP_CHECK_USAGE = 'rad acp-check --cmd "<agent>" [--timeout <seconds>]';
 /** Usage line for `rad config`. */
 const CONFIG_USAGE = 'rad config get <key> | rad config validate | rad config settings'
   + ' | rad config migrate [--from <path>] [--force] | rad config init [--architect <id>] [--platform <p>] [--default-branch <b>] [--force]';
@@ -140,6 +142,11 @@ const SUBCOMMANDS = {
     summary: 'Report core files that drifted from .rad/installed.json (read-only).',
     usage: INSTALL_STATUS_USAGE,
     run: (argv, ctx) => installStatusCommand(argv, ctx),
+  },
+  'acp-check': {
+    summary: 'Run the ACP v1 conformance check against an agent command (writes nothing).',
+    usage: ACP_CHECK_USAGE,
+    run: (argv, ctx) => acpCheckCommand(argv, ctx),
   },
   'owner-claim': {
     summary: 'Claim the single-writer lock on a feature (records who holds it).',
@@ -3534,6 +3541,67 @@ export async function installStatusCommand(argv, ctx) {
   for (const { path, layer } of modified) process.stdout.write(`modified: [${layer}] ${path}\n`);
   for (const { path, layer } of missing) process.stdout.write(`missing: [${layer}] ${path}\n`);
   return modified.length + missing.length > 0 ? FAILED_EXIT_CODE : 0;
+}
+
+/** The flags `rad acp-check` accepts, each taking one value. */
+const ACP_CHECK_FLAGS = ['--cmd', '--timeout'];
+
+/**
+ * Parse `acp-check` argv. Throws on an unknown flag, a missing or repeated
+ * value, a missing --cmd, or a --timeout that is not a positive integer.
+ *
+ * @param {string[]} argv
+ * @returns {{ cmd: string, timeoutMs?: number }}
+ */
+function parseAcpCheckArgs(argv) {
+  const flags = {};
+  for (let i = 0; i < argv.length; i++) {
+    const flag = argv[i];
+    if (!ACP_CHECK_FLAGS.includes(flag)) {
+      throw new Error(flag.startsWith('--') ? `unknown option '${flag}'` : `unexpected argument '${flag}'`);
+    }
+    const value = argv[++i];
+    if (!isNonEmpty(value) || value.startsWith('--')) throw new Error(`${flag} requires a value`);
+    if (flag in flags) throw new Error(`${flag} given more than once`);
+    flags[flag] = value;
+  }
+  if (!isNonEmpty(flags['--cmd'])) throw new Error('--cmd is required');
+  const timeout = flags['--timeout'];
+  if (timeout !== undefined && !POSITIVE_INTEGER_PATTERN.test(timeout)) {
+    throw new Error(`--timeout must be a positive integer number of seconds (got '${timeout}')`);
+  }
+  return { cmd: flags['--cmd'], timeoutMs: timeout === undefined ? undefined : Number(timeout) * 1000 };
+}
+
+/**
+ * `acp-check --cmd "<agent>" [--timeout <seconds>]` — run checkAcpAgent once
+ * against the agent (cwd: the repo root) and print `PASS <name>` or
+ * `FAIL <name>: <detail>` per check run, then one summary line. --timeout
+ * bounds the whole check and defaults to the wave timeout. Writes no events
+ * and no files.
+ *
+ * Exit 0 every check passed; 1 a check failed; 2 bad argv.
+ *
+ * @param {string[]} argv - args after `acp-check`
+ * @param {{ repoRoot: string }} ctx
+ * @returns {Promise<number>}
+ */
+export async function acpCheckCommand(argv, ctx) {
+  let args;
+  try {
+    args = parseAcpCheckArgs(argv);
+  } catch (err) {
+    process.stderr.write(`rad acp-check: ${err.message}\nUsage: ${ACP_CHECK_USAGE}\n`);
+    return USAGE_EXIT_CODE;
+  }
+  const report = await checkAcpAgent({ cmd: args.cmd, repoRoot: ctx.repoRoot, timeoutMs: args.timeoutMs });
+  for (const { name, ok, detail } of report.checks) {
+    process.stdout.write(ok ? `PASS ${name}\n` : `FAIL ${name}: ${detail}\n`);
+  }
+  const total = ACP_CHECK_NAMES.length;
+  const passed = report.checks.filter((c) => c.ok).length;
+  process.stdout.write(`rad acp-check: ${report.ok ? 'ok' : 'failed'}, ${passed} of ${total} checks passed\n`);
+  return report.ok ? 0 : FAILED_EXIT_CODE;
 }
 
 /**

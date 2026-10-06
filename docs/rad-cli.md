@@ -305,9 +305,9 @@ The runner is chosen by environment variable — there is no config-file loader.
 
 | Env var | Values | Default | Meaning |
 |---------|--------|---------|---------|
-| `RAD_AGENT` | `command` \| `sdk` | `command` | which adapter drives the wave |
-| `RAD_AGENT_CMD` | any command string | — | the CLI to spawn (command path only) |
-| `RAD_AGENT_PREFLIGHT` | `off` | — (probe runs) | exactly `off` skips the command-path startup preflight |
+| `RAD_AGENT` | `command` \| `sdk` \| `acp` | `command` | which adapter drives the wave |
+| `RAD_AGENT_CMD` | any command string | — | the CLI to spawn (command and acp paths) |
+| `RAD_AGENT_PREFLIGHT` | `off` | — (probe runs) | exactly `off` skips the command- and acp-path startup preflight |
 | `RAD_AGENT_PREFLIGHT_TIMEOUT_SECONDS` | positive integer | `60` | preflight probe deadline; malformed exits 2 |
 | `RAD_TOKEN_BUDGET` | positive integer | — | per-deliver cumulative token ceiling (cost breaker) |
 | `RAD_REVIEW_AGENT_CMD` | any command string | — (falls back to `RAD_AGENT_CMD`) | review-lane CLI for [`rad review`](#rad-review) and `/rad-review`; not used by `rad deliver` |
@@ -319,12 +319,19 @@ The runner is chosen by environment variable — there is no config-file loader.
   `rad deliver` exits 1 with `RAD_AGENT_CMD is required when RAD_AGENT=command`.
 - **`sdk`** — requires `ANTHROPIC_API_KEY`. If unset, `rad deliver` exits 1 with
   `ANTHROPIC_API_KEY is required`.
+- **`acp`** — requires **no** `ANTHROPIC_API_KEY`; the ACP agent must already
+  be authenticated (RAD does not run ACP `authenticate`). `RAD_AGENT_CMD` **is
+  required**; if unset, `rad deliver` exits 1 with
+  `RAD_AGENT_CMD is required when RAD_AGENT=acp`. A `{prompt}` token in it exits
+  1 before any event is appended: the prompt travels over the protocol.
 
-An unrecognized `RAD_AGENT` value exits 1 with a clear message.
+An unrecognized `RAD_AGENT` value exits 1 with
+`unknown RAD_AGENT '<value>' (expected command | sdk | acp)`.
 
 **Command-path env and startup preflight.** The command adapter hands
 `RAD_AGENT_CMD` only an allow-listed env (`PATH`, `HOME`, `LANG`, `LC_ALL`,
-`TMPDIR`, `TERM`, `USER`), so the CLI must authenticate **without inherited env
+`TMPDIR`, `TERM`, `USER`), and the acp adapter spawns it under the same env, so
+the CLI must authenticate **without inherited env
 vars** — on-disk credentials or the OS keychain, not an exported token. To catch
 a CLI that is not logged in *before* any work starts, `rad deliver` runs a
 **preflight** on the command path, after the approval gate and before
@@ -337,7 +344,19 @@ non-zero exit, spawn error, or timeout exits 1 with:
 rad deliver: RAD_AGENT_CMD failed to start under the adapter env (it must authenticate without inherited env vars): <error>
 ```
 
-`<error>` is a sanitized, capped excerpt of the CLI's output. The preflight is
+`<error>` is a sanitized, capped excerpt of the CLI's output.
+
+On the **acp** path the preflight is the ACP handshake only: `initialize` and
+`session/new`, with no prompt, so it costs no model call. The same
+`RAD_AGENT_PREFLIGHT` and `RAD_AGENT_PREFLIGHT_TIMEOUT_SECONDS` rules apply. A
+failure (an agent that cannot start, speaks another `protocolVersion`, or
+returns no session) exits 1 with:
+
+```
+rad deliver: RAD_AGENT_CMD failed the ACP handshake: <error>
+```
+
+The preflight is
 skipped when `RAD_AGENT=sdk` or a `runWave` is injected (tests), and when
 `RAD_AGENT_PREFLIGHT` is **exactly** `off` — unset, empty, or any other value
 runs it. If your agent needs an env-injected credential, set `RAD_AGENT_CMD` to a
@@ -361,10 +380,17 @@ node harness/cli.js deliver my-feature
 export RAD_AGENT=sdk
 export ANTHROPIC_API_KEY=sk-ant-...
 node harness/cli.js deliver my-feature
+
+# ACP path — any Agent Client Protocol v1 agent, no API key needed here:
+export RAD_AGENT=acp
+export RAD_AGENT_CMD="gemini --acp"  # see the ACP recipes below
+node harness/cli.js deliver my-feature
 ```
 
 See [`rad-wave-contract.md`](./rad-wave-contract.md) for the provider-neutral
-wave contract both adapters honor.
+wave contract all three adapters honor, and
+[The `acp` adapter](./rad-wave-contract.md#the-acp-adapter) for the handshake,
+`stopReason` mapping and permission policy.
 
 **Model:** `--model` defaults to `claude-opus-4-8` and applies to the **`sdk`**
 path only (the `command` path's model is the configured command's concern):
@@ -372,6 +398,37 @@ path only (the `command` path's model is the configured command's concern):
 ```bash
 RAD_AGENT=sdk node harness/cli.js deliver my-feature --model claude-sonnet-4-6
 ```
+
+On the **acp** path no model is sent (ACP v1 has no stable model selector). An
+explicit `--model` or a wave `Model:` line prints one warning per run and the
+agent uses the model in its own config; the default `--model` is not passed, so
+it never warns.
+
+#### ACP recipes
+
+Deliver-side `RAD_AGENT_CMD` values for `RAD_AGENT=acp`. Each agent must be
+logged in beforehand under your own account: it gets only the allow-listed env,
+so exported tokens (`OPENAI_API_KEY`, `GEMINI_API_KEY` and the like) do not
+reach it. The command is split on whitespace, so it cannot contain `{prompt}`
+and its paths cannot contain spaces; use a wrapper script otherwise. Constrained
+waves are refused on acp, as on `command`.
+
+| Agent | `RAD_AGENT_CMD` | Source | Notes | Verified |
+|-------|-----------------|--------|-------|----------|
+| Claude Code (`claude-agent-acp`) | `npx -y @agentclientprotocol/claude-agent-acp` | the package's `bin` (`claude-agent-acp`) in [claude-agent-acp](https://github.com/agentclientprotocol/claude-agent-acp); the README gives install steps but no run command | Built on the Claude Agent SDK. Log in with `claude` interactively first. | no — not yet run against `rad acp-check` |
+| Codex (`codex-acp`) | `npx -y @agentclientprotocol/codex-acp` | [codex-acp README](https://github.com/agentclientprotocol/codex-acp) | The README lists ChatGPT login, `CODEX_API_KEY`/`OPENAI_API_KEY` and a gateway; only an on-disk login can work here, since RAD forwards no keys and does not call `authenticate`. | no — not yet run against `rad acp-check` |
+| Gemini CLI | `gemini --acp` | [Gemini CLI ACP mode](https://geminicli.com/docs/cli/acp-mode/) | Log in with `gemini` interactively first. | no — not yet run against `rad acp-check` |
+
+**Marking a recipe verified.** With the agent logged in, run from the repo root:
+
+```bash
+node harness/cli.js acp-check --cmd "<RAD_AGENT_CMD>"
+```
+
+If it prints `rad acp-check: ok, 6 of 6 checks passed`, put the date and the
+result (for example `2026-10-06 — 6 of 6 checks passed`) in the Verified
+column. Never mark a row verified without running it; a failure goes in the
+column as the first `FAIL` line. See [rad acp-check](#rad-acp-check).
 
 **Exit codes:**
 
@@ -547,6 +604,55 @@ node harness/cli.js deliver my-feature                                # isolated
 RAD_WORKTREE_DIR=/tmp/rad-trees node harness/cli.js deliver my-feature
 RAD_WORKTREE=0 node harness/cli.js deliver my-feature                 # opt out: main checkout
 ```
+
+---
+
+### rad acp-check
+
+```
+rad acp-check --cmd "<agent>" [--timeout <seconds>]
+```
+
+Runs the ACP v1 conformance check against one agent command, through the same
+handshake and turn code the acp adapter uses. The command is tokenized like
+`RAD_AGENT_CMD` (whitespace split, `{prompt}` rejected), spawned under the same
+allow-listed env, with the repo root as its cwd. It sends one fixed prompt that
+asks for a one-task `WAVE_RESULT` block, and answers any permission request
+with the default capability set (`fs_read`, `fs_write`, `shell`). It writes no
+events and no files, and it is not part of CI: it needs a logged-in agent.
+
+The checks run in order and stop at the first failure:
+
+| Check | Passes when |
+|-------|-------------|
+| `spawn` | the command parses and the process starts |
+| `initialize` | the agent answers `protocolVersion` 1 |
+| `session/new` | the agent returns a `sessionId` |
+| `prompt` | the `session/prompt` turn ends with `stopReason` `end_turn`, `max_tokens` or `max_turn_requests` |
+| `wave-result` | the turn text holds a `WAVE_RESULT` block that maps to the `success` outcome |
+| `shutdown` | after stdin closes, the agent exits within 5 seconds without SIGTERM or SIGKILL |
+
+`shutdown` runs only when the first five pass. Unlike a wave, the check sends
+no reprompt: a turn without the block fails `wave-result`.
+
+**Output.** One line per check run, `PASS <name>` or `FAIL <name>: <detail>`,
+then a summary line:
+
+```
+PASS spawn
+PASS initialize
+FAIL session/new: agent returned no sessionId from session/new
+rad acp-check: failed, 2 of 6 checks passed
+```
+
+A full pass ends with `rad acp-check: ok, 6 of 6 checks passed`.
+
+`--timeout` bounds the whole check, in whole seconds (default **600**, the wave
+timeout). A check still running at the deadline fails with a timeout detail.
+
+**Exit codes:** `0` every check passed; `1` a check failed; `2` bad arguments:
+a missing `--cmd`, a flag without a value, an unknown flag, a stray argument, a
+repeated flag, or a `--timeout` that is not a positive integer.
 
 ---
 
