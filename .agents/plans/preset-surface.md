@@ -34,6 +34,11 @@ Decisions (2026-10-06, on #71):
 - The example preset ships settings, a hook and an `ai/extensions` file, each marked CUSTOMIZE.
 - The recorded `source` is an absolute path, so re-apply has to handle a source that doesn't exist on another machine.
 
+**Amendment 1 (2026-10-06, during delivery, after Wave 1):** AC#1 and AC#4 said a re-apply "restores a deleted preset file". That contradicts the 2b engine, which this plan must not change: like core, a file the user deleted while its manifest entry remains is reported `deleted` (exit 1) and is **not** restored, because the deletion is treated as a local edit. Re-apply instead:
+- picks up changes in the preset source;
+- restores only a file that has no manifest entry.
+The Wave 1 `--reapply` test covers the no-entry case. AC#4's upgrade case now proves re-apply by changing a file in the preset source. The docs must not claim deleted files are restored.
+
 ## Scope
 
 | In scope | Out of scope |
@@ -92,7 +97,8 @@ Decisions (2026-10-06, on #71):
      - `config get settings.high_risk_patterns` returns the preset value;
      - `install-status` shows `preset: example 1 (...)`;
      - exit 0.
-   - **`--upgrade` without `--preset`:** re-applies, restoring a deleted preset file. Exit 0.
+   - **`--upgrade` without `--preset`:** re-applies the recorded preset. The fixture installs from a copied preset, then changes a file in that copy; after the upgrade, the target file matches the new content. Exit 0 (amendment 1).
+   - **A tracked preset file the user deleted:** `--upgrade` reports it `deleted`, does not restore it, and exits 1 (amendment 1).
    - **`--upgrade` with a recorded source that's gone:** points at a copied preset that is then removed. Core is still upgraded, the output names the missing path, and the exit is 1.
    - **`--preset /nonexistent`:** usage error, and nothing is installed.
    - **Preset over an existing `settings:` block:** the output shows `unseeded: high_risk_patterns`, and the exit is 1.
@@ -186,7 +192,7 @@ Validate: AC#1. Edge cases:
 - neither flag;
 - no manifest;
 - a malformed manifest;
-- a successful re-apply restores a deleted preset file.
+- a successful re-apply restores a preset file that has no manifest entry (amendment 1: a tracked file the user deleted stays `deleted`).
 
 Command: `npm test --prefix harness`.
 
