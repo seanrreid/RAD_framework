@@ -1,7 +1,8 @@
 # Plan: ACP Decision Doc, Conformance Check and Docs (#86 part 2)
 Created: 2026-10-06
 Author: architect
-Status: in-progress
+Status: complete
+Completed-At: 2026-10-06T17:45:59Z
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-10-06T17:18:55.746Z
 Recorded-By: sean@torchcodelab.com
