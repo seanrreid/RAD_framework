@@ -1,7 +1,8 @@
 # Plan: Migrate the Read-Only Slice and Ship It (#171 part 2)
 Created: 2026-10-06
 Author: architect
-Status: in-progress
+Status: complete
+Completed-At: 2026-10-06T19:24:11Z
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-10-06T18:59:59.631Z
 Recorded-By: sean@torchcodelab.com
