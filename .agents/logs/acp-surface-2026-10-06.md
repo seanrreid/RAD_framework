@@ -9,3 +9,4 @@ Executor role: architect
 | Step | Wave | Task | Status | Commit | Time |
 |------|------|------|--------|--------|------|
 | 1 | 1 | Task 1.1: Conformance check | complete | 3f370b2 | 13:23 |
+| 2 | 1 | Task 1.2: Permissions in the event log | complete | 3ef0e6c | 13:26 |
