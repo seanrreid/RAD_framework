@@ -1,7 +1,7 @@
 # Plan: AGENTS.md as the Conventions Source (#171 part 3)
 Created: 2026-10-06
 Author: architect
-Status: approved
+Status: in-progress
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-10-06T19:32:58.830Z
 Recorded-By: sean@torchcodelab.com
