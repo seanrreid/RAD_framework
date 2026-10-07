@@ -239,11 +239,14 @@ function makeDeliverSh({
 /** No-op prepare port: these tests exercise isolation, not branch sync. */
 const noopPrepare = async () => ({ ok: true, data: {} });
 
+/** No-op finish port: these tests exercise isolation, not plan publishing. */
+const noopFinish = { beforePr: async () => ({ ok: true, data: {} }), afterPr: async () => ({ ok: true, data: {} }) };
+
 /**
  * Run deliverCommand with RAD_WORKTREE forced on ('1') / off ('0' — the only
  * opt-out; unset is ON), or left UNSET when `worktree` is undefined. Restores env after.
  */
-async function runDeliver({ worktree, repoRoot, sh, runWave, env = {}, prepare = noopPrepare }) {
+async function runDeliver({ worktree, repoRoot, sh, runWave, env = {}, prepare = noopPrepare, finish = noopFinish }) {
   const names = ['RAD_WORKTREE', 'RAD_AGENT', 'ANTHROPIC_API_KEY', 'RAD_BRANCH_PREFIX'];
   const saved = Object.fromEntries(names.map((n) => [n, process.env[n]]));
   if (worktree === undefined) delete process.env.RAD_WORKTREE;
@@ -254,7 +257,7 @@ async function runDeliver({ worktree, repoRoot, sh, runWave, env = {}, prepare =
   delete process.env.RAD_BRANCH_PREFIX;
   Object.assign(process.env, env);
   try {
-    return await deliverCommand([FEATURE], { repoRoot, sh, runWave, prepare });
+    return await deliverCommand([FEATURE], { repoRoot, sh, runWave, prepare, finish });
   } finally {
     for (const n of names) {
       if (saved[n] !== undefined) process.env[n] = saved[n];
@@ -343,10 +346,10 @@ test('deliver: #113 AC#5 — Lane B: plan + approval only on the work branch →
     const code = await runDeliver({ worktree: true, repoRoot, sh, runWave });
 
     assert.equal(code, 0, 'Lane B worktree deliver must succeed');
-    // Gate read the branch tip through the sh port, from the main checkout.
-    assert.deepEqual(sh.gitShows, [
-      { args: ['show', `rad/${FEATURE}:.agents/state/${FEATURE}/events.jsonl`], cwd: repoRoot },
-    ]);
+    // The delivered short-circuit, then the gate, read the branch tip through
+    // the sh port, from the main checkout.
+    const tipRead = { args: ['show', `rad/${FEATURE}:.agents/state/${FEATURE}/events.jsonl`], cwd: repoRoot };
+    assert.deepEqual(sh.gitShows, [tipRead, tipRead]);
     const create = sh.lifecycle.find((c) => c.cmd === 'create');
     assert.deepEqual(create.args, ['create', FEATURE, `rad/${FEATURE}`]);
     // Events were read + appended in the worktree (on the work branch)…
@@ -629,3 +632,124 @@ test('deliver: a preserved worktree prints its path and the lifecycle remove com
     assert.ok(stderr.includes(`scripts/worktree-lifecycle.sh remove ${FEATURE} ${worktreeDir}`), stderr);
   });
 });
+
+// ---------------------------------------------------------------------------
+// FINISH WIRING — Q4 teardown and the delivered short-circuit (worktree mode)
+// ---------------------------------------------------------------------------
+
+test('deliver: finish — afterPr failing tears the worktree down (complete, not preserve) and exits 1', async () => {
+  await withTempDirs(async (repoRoot, worktreeDir) => {
+    writeApprovedPlan(worktreeDir, FEATURE);
+    const sh = makeDeliverSh({ worktreePath: worktreeDir });
+    const finish = {
+      beforePr: async () => ({ ok: true, data: {} }),
+      afterPr: async () => ({ ok: false, detail: 'push failed: offline' }),
+    };
+
+    const code = await runDeliver({ worktree: true, repoRoot, sh, runWave: async () => ({ outcome: 'success' }), finish });
+
+    assert.equal(code, 1, 'an afterPr failure exits 1');
+    const cmds = sh.lifecycle.map((c) => c.cmd);
+    assert.ok(cmds.includes('remove'), 'a delivered run is torn down');
+    assert.ok(!cmds.includes('preserve'), 'a delivered run is not preserved');
+    assert.ok(sh.runEventCalls.some((c) => c.args[0] === 'commit'), 'run events are committed before teardown');
+  });
+});
+
+/** The branch-tip log of a delivered feature: approved → deliver-started → pr-opened. */
+const DELIVERED_EVENTS_JSONL = [
+  APPROVED_EVENTS_JSONL.trim(),
+  JSON.stringify({ type: 'deliver-started', actor: 'dev@example.com', ts: '2026-01-02T00:00:00.000Z' }),
+  JSON.stringify({ type: 'pr-opened', actor: 'dev@example.com', ts: '2026-01-02T00:00:00.000Z' }),
+].join('\n') + '\n';
+
+/**
+ * makeDeliverSh over a delivered branch tip, answering the plan read with
+ * `planText` and recording push / label calls. `push` / `label` set exit statuses.
+ */
+function makeDeliveredSh({ planText, push = 0, label = 0 }) {
+  const base = makeDeliverSh({ branchEvents: DELIVERED_EVENTS_JSONL });
+  const pushes = [];
+  const labels = [];
+  const planRef = `rad/${FEATURE}:${join('.agents', 'plans', `${FEATURE}.md`)}`;
+  const sh = (file, args, opts) => {
+    if (file === 'git' && args[0] === 'show' && args[1] === planRef) return { status: 0, stdout: planText, stderr: '' };
+    if (file === 'git' && args[0] === 'push') {
+      pushes.push({ args, cwd: opts?.cwd });
+      return { status: push, stdout: '', stderr: push ? 'remote rejected' : '' };
+    }
+    if (String(file).endsWith('rad-label.sh')) {
+      labels.push({ args, cwd: opts?.cwd });
+      return { status: label, stdout: '', stderr: label ? 'gh: not authenticated' : '' };
+    }
+    return base(file, args, opts);
+  };
+  Object.assign(sh, { pushes, labels, lifecycle: base.lifecycle, runEventCalls: base.runEventCalls });
+  return sh;
+}
+
+const ISSUE_PLAN = '# wt-feature\n\nStatus: complete\nIssue: 42\n\n## Waves\n';
+
+/** Run deliver in worktree mode capturing stdout/stderr (the short-circuit writes both). */
+async function runDeliverOutput(opts) {
+  const out = { stdout: '', stderr: '' };
+  const saved = { out: process.stdout.write, err: process.stderr.write };
+  process.stdout.write = (chunk) => { out.stdout += chunk; return true; };
+  process.stderr.write = (chunk) => { out.stderr += chunk; return true; };
+  try {
+    out.code = await runDeliver(opts);
+  } finally {
+    process.stdout.write = saved.out;
+    process.stderr.write = saved.err;
+  }
+  return out;
+}
+
+test('deliver: delivered branch tip short-circuits — push (never forced) then label review, no worktree', async () => {
+  await withTempDirs(async (repoRoot) => {
+    const sh = makeDeliveredSh({ planText: ISSUE_PLAN });
+    let waves = 0;
+    const runWave = async () => { waves += 1; return { outcome: 'success' }; };
+
+    const { code, stdout } = await runDeliverOutput({ worktree: true, repoRoot, sh, runWave });
+
+    assert.equal(code, 0);
+    assert.match(stdout, new RegExp(`rad deliver: already delivered feature=${FEATURE}`));
+    assert.deepEqual(sh.pushes, [{ args: ['push', 'origin', `rad/${FEATURE}`], cwd: repoRoot }]);
+    assert.deepEqual(sh.labels.map((l) => l.args), [['42', 'review']]);
+    assert.equal(sh.lifecycle.length, 0, 'no worktree is created');
+    assert.equal(sh.runEventCalls.length, 0, 'nothing is committed');
+    assert.equal(waves, 0, 'no wave runs');
+  });
+});
+
+test('deliver: delivered short-circuit with no plan issue pushes and skips the label', async () => {
+  await withTempDirs(async (repoRoot) => {
+    const sh = makeDeliveredSh({ planText: '# wt-feature\n\nStatus: complete\n' });
+
+    const { code, stdout } = await runDeliverOutput({ worktree: true, repoRoot, sh, runWave: async () => ({ outcome: 'success' }) });
+
+    assert.equal(code, 0);
+    assert.match(stdout, /label skipped: no issue/);
+    assert.equal(sh.pushes.length, 1);
+    assert.equal(sh.labels.length, 0);
+  });
+});
+
+for (const [name, opts, reason] of [
+  ['push', { push: 1 }, /^rad deliver: git push origin rad\/wt-feature exited 1: remote rejected/m],
+  ['label', { label: 1 }, /^rad deliver: scripts\/rad-label\.sh 42 review exited 1: gh: not authenticated/m],
+]) {
+  test(`deliver: delivered short-circuit — a failed ${name} exits 1 with the reason`, async () => {
+    await withTempDirs(async (repoRoot) => {
+      const sh = makeDeliveredSh({ planText: ISSUE_PLAN, ...opts });
+
+      const { code, stdout, stderr } = await runDeliverOutput({ worktree: true, repoRoot, sh, runWave: async () => ({ outcome: 'success' }) });
+
+      assert.equal(code, 1);
+      assert.match(stderr, reason);
+      assert.doesNotMatch(stdout, /already delivered/);
+      if (name === 'push') assert.equal(sh.labels.length, 0, 'no label after a failed push');
+    });
+  });
+}

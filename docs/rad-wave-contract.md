@@ -372,6 +372,7 @@ plan — re-running unchanged cannot succeed).
 | `gate` (pre-start) | `needs-decision` | `gate` | `plan not approved; run /rad-approve` |
 | `merge-conflict` | `needs-decision` | `merge-conflict` | `merging origin/{base} into {branch} conflicts ({detail}); resolve the conflict on the branch, commit, and re-run with --resume` |
 | `prepare-failed` | `failed` | `prepare-failed` | `prepare failed: {detail}` |
+| `finish-failed` | `failed` | `finish-failed` | `finishing the run failed: {detail}; re-run rad deliver to finish` |
 
 `{wave}` renders as `wave N` (or `the wave` when absent); any other absent
 placeholder renders as `unknown`.
@@ -399,6 +400,30 @@ is safe: on an up-to-date, in-progress branch it only labels. Success appends
 the audit-only `run-prepared { base, merged, fastForwarded, committed, pushed }`,
 which never moves a feature's phase. A failure to resolve the default branch
 happens before the spine and exits `1` with no event.
+
+### Finish phase
+
+After the last wave and its approval re-check, the run ends in this order:
+approval-during-run guard → `check-scope.sh` → `finish.beforePr` →
+`open-pr.sh` → append `pr-opened` → `finish.afterPr`.
+
+- **beforePr** sets the plan's `Status: complete` and `Completed-At:` (an
+  existing `Completed-At` is kept on a rerun), commits the plan and
+  `.agents/state/<f>/events.jsonl` (`deliver(<f>): mark plan complete`), pushes
+  — required in both modes, with no `RAD_SYNC` gate — and labels the issue
+  `review`. A failure stops with `finish-failed`; the PR is not opened.
+- **open-pr.sh** treats an existing open PR/MR for the head branch (gh, glab,
+  tea) as success: it prints `PR already open: <url>`, exits `0`, and creates
+  nothing. A failing lookup exits non-zero and never falls through to create.
+- **afterPr** commits the event log (`deliver(<f>): record pr-opened`), pushes,
+  and labels `review`. `pr-opened` makes the phase terminal `delivered`, so
+  **nothing is appended after it**: an afterPr failure records no
+  `deliver-stopped`; the run exits `1` with the `finish-failed` decision line.
+
+Re-running a delivered feature skips the gate, prepare and waves and only
+publishes: in main mode it re-runs afterPr; in worktree mode it pushes the
+work branch (never forced) and labels `review`. Either prints
+`rad deliver: already delivered feature=<f>` and exits `0`.
 
 ### Between-wave checks
 
