@@ -1,7 +1,7 @@
 # Plan: rad approve Commits by Default, and rad plan-status (#186 part 2b)
 Created: 2026-10-07
 Author: architect
-Status: approved
+Status: in-progress
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-10-07T14:57:18.467Z
 Recorded-By: sean@torchcodelab.com
