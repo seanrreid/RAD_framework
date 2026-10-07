@@ -493,6 +493,26 @@ per-wave prompts, selects an **agent adapter** (see below), calls `deliverSpine`
 with the adapter's `runWave`, and streams wave output to stdout. The plan must be
 in `Status: approved` on its `rad/<feature>` branch tip.
 
+#### Prepare phase
+
+Before orphan handling and the first wave, `rad deliver` prepares the work
+branch in the run root (the worktree, or the repo root with `RAD_WORKTREE=0`):
+it fetches origin, fast-forwards to `origin/<branch>` if that is ahead, merges
+`origin/<default>` (`--no-edit`; never rebase or force-push), sets the plan to
+`Status: in-progress`, commits only the plan (`deliver(<f>): begin
+execution`), pushes, and labels the issue `in-progress`. Re-running is safe.
+Success records the audit-only `run-prepared` event.
+
+- **A reachable `origin` is required** — an unreachable remote stops the run
+  with `prepare-failed` (exit `1`).
+- **Main mode (`RAD_WORKTREE=0`)** must be on the work branch with nothing
+  staged, or the run stops with `prepare-failed`.
+- A merge conflict aborts the merge, leaves the tree unchanged, and stops with
+  `merge-conflict` (exit `3`) — see [Resuming a stopped run](#resuming-a-stopped-run).
+- Failing to resolve the default branch exits `1` before the spine starts.
+
+Full contract: [Prepare phase](./rad-wave-contract.md#prepare-phase).
+
 #### Adapter selection
 
 The agent comes from one of two sources, never mixed (full reference:
@@ -646,7 +666,7 @@ column as the first `FAIL` line. See [rad acp-check](#rad-acp-check).
 | `0` | complete (evidenced by the `deliverCompleted` fold) |
 | `1` | failed — credential/selection or preflight failure, a `failed` stop, or completion not evidenced (an unknown option or missing feature also exits `1`) |
 | `2` | usage / config error — every `--resume` refusal (including `--context` with no value), malformed `RAD_MAX_FAILED_ATTEMPTS` / `RAD_AGENT_PREFLIGHT_TIMEOUT_SECONDS` |
-| `3` | needs a human decision — a `needs-decision` stop (see [Resuming a stopped run](#resuming-a-stopped-run)) |
+| `3` | needs a human decision — a `needs-decision` stop, e.g. `merge-conflict` (see [Resuming a stopped run](#resuming-a-stopped-run)) |
 
 See the Stop contract in [`rad-wave-contract.md`](./rad-wave-contract.md#stop-contract)
 for the stop classes behind `1` and `3`.
@@ -654,7 +674,8 @@ for the stop classes behind `1` and `3`.
 #### Resuming a stopped run
 
 A run that stopped with class `needs-decision` (exit `3` — `token-budget`,
-`failed-attempt-cap`, `approval-changed`, or a matrix/hook-veto `surface`) can be
+`failed-attempt-cap`, `approval-changed`, `merge-conflict`, or a matrix/hook-veto
+`surface`) can be
 re-run with the operator's decision attached:
 
 ```bash
@@ -668,6 +689,13 @@ audit-only `run-resumed` event right after `deliver-started`, with `recordedBy`
 approved gate plus the between-wave approval and scope re-checks run unchanged.
 A `failed` stop is not resumable — fix the plan or code and plain re-run. Without
 `--resume`, the event sequence and prompts are byte-for-byte unchanged.
+
+For a `merge-conflict` stop, resolve the conflict on the work branch — in the
+preserved worktree in worktree mode, since a stop keeps it — commit, then resume:
+
+```bash
+node harness/cli.js deliver my-feature --resume --context "<what you did>"
+```
 
 Eligibility is checked in this order, **before** any event is appended or any
 worktree is created. Every refusal prints `rad deliver: <reason>` and exits **2**:

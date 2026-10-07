@@ -370,6 +370,8 @@ plan — re-running unchanged cannot succeed).
 | `failed-attempt-cap` | `needs-decision` | `failed-attempt-cap` | `{failed} failed attempts reached RAD_MAX_FAILED_ATTEMPTS={cap}; raise the cap, re-plan, or stop` |
 | `approval-changed` | `needs-decision` | `approval-changed` | `the plan changed since approval (or approval no longer holds); re-approve before re-running` |
 | `gate` (pre-start) | `needs-decision` | `gate` | `plan not approved; run /rad-approve` |
+| `merge-conflict` | `needs-decision` | `merge-conflict` | `merging origin/{base} into {branch} conflicts ({detail}); resolve the conflict on the branch, commit, and re-run with --resume` |
+| `prepare-failed` | `failed` | `prepare-failed` | `prepare failed: {detail}` |
 
 `{wave}` renders as `wave N` (or `the wave` when absent); any other absent
 placeholder renders as `unknown`.
@@ -378,6 +380,25 @@ Every stop after `deliver-started` appends exactly one audit-only
 `deliver-stopped` event `{ class, reason, decision, wave?, action?, outcome? }`.
 Success appends none — success is `pr-opened`. A pre-start `gate` stop happens
 before `deliver-started` and so records no event.
+
+### Prepare phase
+
+After `deliver-started`, any `run-resumed`, and the hooks preflight, and before
+orphan handling and the first wave, `rad deliver` runs a prepare phase in the
+run root (the worktree, or the repo root with `RAD_WORKTREE=0`). It requires
+HEAD on the work branch with nothing staged, then: fetches `origin/<default>`
+(plus the work branch when origin has it); fast-forwards to `origin/<branch>`
+when that is ahead (true divergence is `prepare-failed`); merges
+`origin/<default>` with `--no-edit` when HEAD lacks it — **merge, never rebase
+or force-push**; a conflicted merge is aborted, leaving the tree unchanged, and
+stops with `merge-conflict`; sets the plan's `Status: in-progress`; and commits
+only the plan (`deliver(<f>): begin execution`), pushes, and labels the issue
+`in-progress`. An unreachable origin is `prepare-failed`, so deliver
+**requires a reachable remote**. Each step checks before it acts, so a re-run
+is safe: on an up-to-date, in-progress branch it only labels. Success appends
+the audit-only `run-prepared { base, merged, fastForwarded, committed, pushed }`,
+which never moves a feature's phase. A failure to resolve the default branch
+happens before the spine and exits `1` with no event.
 
 ### Between-wave checks
 
