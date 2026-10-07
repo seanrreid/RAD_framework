@@ -513,6 +513,27 @@ Success records the audit-only `run-prepared` event.
 
 Full contract: [Prepare phase](./rad-wave-contract.md#prepare-phase).
 
+#### Finish phase
+
+After the last wave, `rad deliver` runs the approval-during-run guard and
+`check-scope.sh`, then finishes in the run root:
+
+1. **beforePr** — sets the plan to `Status: complete` with `Completed-At:` (kept
+   on a rerun), commits the plan and the event log (`deliver(<f>): mark plan
+   complete`), pushes (required in both modes; no `RAD_SYNC` gate), and labels
+   the issue `review`. A failure stops with `finish-failed` (exit `1`) and the
+   PR is not opened.
+2. **open-pr.sh** — opens the PR. An existing **open** PR/MR for the head branch
+   counts as success: it prints `PR already open: <url>`, exits `0`, and creates
+   nothing. A failing lookup exits non-zero and never falls through to create.
+3. **`pr-opened`** is appended — the feature is now `delivered`.
+4. **afterPr** — commits the event log (`deliver(<f>): record pr-opened`),
+   pushes, and labels `review`. Nothing is recorded after `pr-opened`, so a
+   failure here appends no event; the run exits `1` with the `finish-failed`
+   decision line.
+
+Full contract: [Finish phase](./rad-wave-contract.md#finish-phase).
+
 #### Adapter selection
 
 The agent comes from one of two sources, never mixed (full reference:
@@ -671,6 +692,14 @@ column as the first `FAIL` line. See [rad acp-check](#rad-acp-check).
 See the Stop contract in [`rad-wave-contract.md`](./rad-wave-contract.md#stop-contract)
 for the stop classes behind `1` and `3`.
 
+A `finish-failed` stop exits `1` and is not resumable; a plain rerun recovers it.
+Re-running a feature that is already `delivered` (plain or `--resume`) skips the
+gate, prepare and waves: in main mode it re-runs afterPr (commit and push the
+event log, label `review`); in worktree mode it pushes the work branch (never
+forced) and labels `review`. It prints `rad deliver: already delivered
+feature=<f>` and exits `0`; any failure prints the reason and exits `1`. The
+log is read from the branch tip in worktree mode, the repo root in main mode.
+
 #### Resuming a stopped run
 
 A run that stopped with class `needs-decision` (exit `3` — `token-budget`,
@@ -793,6 +822,12 @@ complete/preserve** lifecycle:
    its marker is rewritten to `status: "preserved"` so you can inspect the
    isolated tree. The structured failure line surfaces its path as
    `worktree=<dir>`.
+
+   **Exception:** an afterPr failure in the [finish phase](#finish-phase) comes
+   after `pr-opened`, so the run is delivered and the worktree is torn down as
+   if completed (the teardown safety-net commit puts `pr-opened` on the local
+   branch); the run still exits `1`. If that commit fails, the worktree is
+   preserved as usual.
 
 **The marker is a safety interlock.** `remove`/`preserve` refuse to act on any
 directory that does not carry a valid `.rad-worktree.json` marker for the named
