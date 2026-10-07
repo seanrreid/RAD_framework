@@ -56,6 +56,7 @@ import {
   readManifest, planInstall, applyInstall, installDrift, planPresetInstall, applyPresetInstall,
 } from './install-manifest.js';
 import { readPreset } from './preset.js';
+import { selectAgent } from './agent-select.js';
 import { readSources, renderOutputs, planGenerate, applyGenerate } from './generate.js';
 import { mergeDeliverGateHook } from './claude-settings.js';
 import {
@@ -223,11 +224,6 @@ const SUBCOMMANDS = {
 const PREFLIGHT_OFF = 'off';
 /** Accepted RAD_AGENT values; the unknown-value message lists them in this order. */
 const AGENT_KINDS = ['command', 'sdk', 'acp'];
-
-/** The RAD_AGENT selection, trimmed; unset or blank selects 'command'. */
-function agentKindFromEnv() {
-  return isNonEmpty(process.env.RAD_AGENT) ? process.env.RAD_AGENT.trim() : 'command';
-}
 
 /**
  * Env var overriding the preflight probe deadline, in whole seconds. Unset or
@@ -812,15 +808,18 @@ function loadPlanCtx(root, feature) {
 }
 
 /**
- * Validate the selected agent's credentials from the environment, WITHOUT
- * constructing anything. An injected ctx.runWave (tests) skips the check.
+ * Validate the selected agent's credentials, WITHOUT constructing anything.
+ * An injected ctx.runWave (tests) skips the check. `selection` is selectAgent's
+ * result: the kind and command come from it (environment OR config, never mixed).
  *
+ * @param {{ runWave?: Function }} ctx
+ * @param {{ kind?: string, cmd?: string, source?: 'env'|'config' }} selection
  * @returns {{ injected: Function } | { kind: 'sdk', apiKey: string }
  *   | { kind: 'command'|'acp', cmd: string } | { code: number }}
  */
-export function resolveAgent(ctx, agentKind) {
+export function resolveAgent(ctx, selection) {
   if (ctx.runWave) return { injected: ctx.runWave };
-  if (agentKind === 'sdk') {
+  if (selection.kind === 'sdk') {
     // SDK path: requires ANTHROPIC_API_KEY (checked before any SDK construction
     // or model call). Credentials are the SDK's concern, not the command path's.
     const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -831,11 +830,15 @@ export function resolveAgent(ctx, agentKind) {
     return { kind: 'sdk', apiKey };
   }
   // Command (default) and acp paths: no ANTHROPIC_API_KEY required, since
-  // credentials are the configured agent's concern. RAD_AGENT_CMD is mandatory.
-  const kind = agentKind === 'acp' ? 'acp' : 'command';
-  const cmd = process.env.RAD_AGENT_CMD;
+  // credentials are the configured agent's concern. A command is mandatory:
+  // RAD_AGENT_CMD from the environment, or agent.command from the config.
+  const kind = selection.kind === 'acp' ? 'acp' : 'command';
+  const { cmd } = selection;
   if (!isNonEmpty(cmd)) {
-    process.stderr.write(`rad deliver: RAD_AGENT_CMD is required when RAD_AGENT=${kind}\n`);
+    const missing = selection.source === 'config'
+      ? `agent.command is required when agent.adapter is ${kind} in ${CONFIG_PATH}`
+      : `RAD_AGENT_CMD is required when RAD_AGENT=${kind}`;
+    process.stderr.write(`rad deliver: ${missing}\n`);
     return { code: 1 };
   }
   return { kind, cmd };
@@ -994,7 +997,7 @@ async function buildRunWave(agent, { model, root, planCtx }) {
  * Main-checkout setup (RAD_WORKTREE='0'): plan read → gate → agent — the
  * pre-isolation order, byte-for-byte. Everything is rooted at repoRoot.
  */
-async function setupMainRun({ ctx, feature, model, agentKind, repoRoot, sh }) {
+async function setupMainRun({ ctx, feature, model, selection, repoRoot, sh }) {
   const planCtx = loadPlanCtx(repoRoot, feature);
   if (!planCtx) return { code: 1 };
   const state = createGitStateStore({ repoRoot, sh });
@@ -1004,7 +1007,7 @@ async function setupMainRun({ ctx, feature, model, agentKind, repoRoot, sh }) {
     process.stderr.write(`rad deliver: gate not passed for '${feature}' — ${g.reason}\n`);
     return { code: 1 };
   }
-  const agent = resolveAgent(ctx, agentKind);
+  const agent = resolveAgent(ctx, selection);
   if (agent.code !== undefined) return agent;
   const refused = await checkCapabilities({ planCtx, root: repoRoot, agent });
   if (refused) return refused;
@@ -1197,8 +1200,8 @@ function finishWorktree({ worktree, completed, sh, root, feature }) {
  * worktree, so events are read and written on the work branch and the main
  * checkout is never modified. A failure after create preserves the worktree.
  */
-async function setupWorktreeRun({ ctx, feature, model, agentKind, repoRoot, sh }) {
-  const agent = resolveAgent(ctx, agentKind);
+async function setupWorktreeRun({ ctx, feature, model, selection, repoRoot, sh }) {
+  const agent = resolveAgent(ctx, selection);
   if (agent.code !== undefined) return agent;
   const prepared = prepareWorktreeRoot({ feature, repoRoot, sh });
   if (prepared.code !== undefined) return prepared;
@@ -1403,17 +1406,50 @@ function hooksDirFrom(raw, source, root) {
 }
 
 /**
- * The `settings:` block deliver runs with, loaded once from `repoRoot`. A
- * missing config file means no settings; an invalid one is an error (never
- * treated as absent).
+ * The .rad/config.yml deliver runs with, loaded once from `repoRoot` before any
+ * setup. A missing file is `doc: null` (deliver has never required the config);
+ * an invalid one is an error, never treated as absent.
  *
- * @returns {Promise<{ ok: true, settings: Object } | { ok: false, errors: string[] }>}
+ * @returns {Promise<{ ok: true, doc: Object|null } | { ok: false, errors: string[] }>}
  */
-async function loadDeliverSettings(repoRoot) {
+async function loadDeliverConfig(repoRoot) {
   const loaded = await loadConfig(repoRoot);
-  if (loaded.missing) return { ok: true, settings: {} };
+  if (loaded.missing) return { ok: true, doc: null };
   if (!loaded.ok) return { ok: false, errors: loaded.errors };
-  return { ok: true, settings: loaded.doc.settings ?? {} };
+  return { ok: true, doc: loaded.doc };
+}
+
+/** Write deliver's invalid-config refusal (one line per error); returns exit 2. */
+function refuseInvalidDeliverConfig(errors) {
+  process.stderr.write(`rad deliver: ${CONFIG_PATH} is invalid:\n`);
+  for (const e of errors) process.stderr.write(`  - ${e}\n`);
+  return USAGE_EXIT_CODE;
+}
+
+/**
+ * Select the wave agent (environment all-or-nothing, else the config's
+ * `agent:` block — see agent-select.js) BEFORE any setup, so a refusal leaves
+ * no worktree and no event. An invalid config selects as if absent, so an
+ * environment setup behaves as today (the later settings check still refuses
+ * it); with no environment agent, that invalid config is the reported reason.
+ * An injected ctx.runWave (tests) skips the selection checks, as it always
+ * skipped the unknown-kind check.
+ *
+ * @returns {{ selection: Object } | { code: number }}
+ */
+function selectDeliverAgent(ctx, configLoad) {
+  const selection = selectAgent(process.env, configLoad.ok ? configLoad.doc : null);
+  if (ctx.runWave) return { selection };
+  if (selection.error !== undefined) {
+    if (!configLoad.ok) return { code: refuseInvalidDeliverConfig(configLoad.errors) };
+    process.stderr.write(`rad deliver: ${selection.error}\n`);
+    return { code: USAGE_EXIT_CODE };
+  }
+  if (!AGENT_KINDS.includes(selection.kind)) {
+    process.stderr.write(`rad deliver: unknown RAD_AGENT '${selection.kind}' (expected ${AGENT_KINDS.join(' | ')})\n`);
+    return { code: 1 };
+  }
+  return { selection };
 }
 
 /**
@@ -1530,9 +1566,6 @@ export async function deliverCommand(argv, ctx) {
   }
 
   const { feature, modelExplicit } = parsed;
-  // acp honours no model (ACP v1 has no stable selector), so only an explicit
-  // --model reaches it, where createAcpAdapter turns it into its one warning.
-  const model = agentKindFromEnv() === 'acp' && !modelExplicit ? undefined : parsed.model;
 
   if (!isNonEmpty(feature)) {
     process.stderr.write('rad deliver: a feature name is required\n');
@@ -1540,16 +1573,19 @@ export async function deliverCommand(argv, ctx) {
     return 1;
   }
 
-  // Adapter selection (ENV-driven, no config-file loader). RAD_AGENT picks the
-  // runner: 'command' (default, vendor-neutral CLI), 'sdk' (Anthropic SDK) or
-  // 'acp' (an Agent Client Protocol v1 agent spawned from RAD_AGENT_CMD).
-  // Credential requirements differ per path and are validated in resolveAgent —
-  // an injected ctx.runWave (tests) skips construction and the credential check.
-  const agentKind = agentKindFromEnv();
-  if (!ctx.runWave && !AGENT_KINDS.includes(agentKind)) {
-    process.stderr.write(`rad deliver: unknown RAD_AGENT '${agentKind}' (expected ${AGENT_KINDS.join(' | ')})\n`);
-    return 1;
-  }
+  // Adapter selection. The environment (RAD_AGENT / RAD_AGENT_CMD) wins outright
+  // when either is set; otherwise `agent:` in .rad/config.yml applies. The kind
+  // picks the runner: 'command' (vendor-neutral CLI), 'sdk' (Anthropic SDK) or
+  // 'acp' (an Agent Client Protocol v1 agent). Credential requirements differ per
+  // path and are validated in resolveAgent — an injected ctx.runWave (tests)
+  // skips construction and the credential check. Config is read once, here.
+  const configLoad = await loadDeliverConfig(repoRoot);
+  const selected = selectDeliverAgent(ctx, configLoad);
+  if (selected.code !== undefined) return selected.code;
+  const { selection } = selected;
+  // acp honours no model (ACP v1 has no stable selector), so only an explicit
+  // --model reaches it, where createAcpAdapter turns it into its one warning.
+  const model = selection.kind === 'acp' && !modelExplicit ? undefined : parsed.model;
 
   // Failed-attempt cap: parsed BEFORE setup so a malformed value exits 2 with
   // no worktree created and no event appended.
@@ -1561,16 +1597,11 @@ export async function deliverCommand(argv, ctx) {
     return USAGE_EXIT_CODE;
   }
 
-  // Settings + hooks dir: loaded and validated BEFORE setup so an invalid
-  // config or a malformed hooks dir exits 2 with no worktree created and no
-  // event appended. Config is read once, from repoRoot.
-  const settingsLoad = await loadDeliverSettings(repoRoot);
-  if (!settingsLoad.ok) {
-    process.stderr.write(`rad deliver: ${CONFIG_PATH} is invalid:\n`);
-    for (const e of settingsLoad.errors) process.stderr.write(`  - ${e}\n`);
-    return USAGE_EXIT_CODE;
-  }
-  const { settings } = settingsLoad;
+  // Settings + hooks dir: validated BEFORE setup so an invalid config or a
+  // malformed hooks dir exits 2 with no worktree created and no event appended.
+  // Uses the config loaded once above, from repoRoot.
+  if (!configLoad.ok) return refuseInvalidDeliverConfig(configLoad.errors);
+  const settings = configLoad.doc?.settings ?? {};
   const hooksCheck = resolveHooksDir(process.env, repoRoot, settings);
   if (!hooksCheck.ok) {
     process.stderr.write(
@@ -1596,7 +1627,7 @@ export async function deliverCommand(argv, ctx) {
   // check-*.sh / open-pr.sh run are rooted at an isolated git worktree on the
   // work branch. RAD_WORKTREE_DIR (optional base dir) is read by the lifecycle
   // script itself, so we just let it flow through the environment.
-  const setupOpts = { ctx, feature, model, agentKind, repoRoot, sh };
+  const setupOpts = { ctx, feature, model, selection, repoRoot, sh };
   const setup = worktreeEnabled()
     ? await setupWorktreeRun(setupOpts)
     : await setupMainRun(setupOpts);
@@ -2820,10 +2851,42 @@ function parseReviewArgs(argv) {
   return out;
 }
 
-/** First non-empty review-lane command var → { cmd, source }, else null. */
-function resolveReviewAgent(env) {
+/** The summary-line source name when the review command comes from the config. */
+const REVIEW_CONFIG_SOURCE = 'agent.command';
+/** The only config adapter whose command the review lane can spawn. */
+const REVIEW_CONFIG_ADAPTER = 'command';
+const NO_REVIEW_AGENT_MESSAGE = 'rad review: no review agent configured'
+  + ` — set RAD_REVIEW_AGENT_CMD, RAD_AGENT_CMD, or agent: in ${CONFIG_PATH}\n`;
+
+/**
+ * First non-empty review-lane command var → { cmd, source }; else the config's
+ * agent.command when agent.adapter is 'command'; else null. `config` is the
+ * loaded doc or null (missing or invalid config).
+ */
+function resolveReviewAgent(env, config) {
   const source = REVIEW_AGENT_ENV_VARS.find((name) => isNonEmpty(env[name]?.trim()));
-  return source ? { cmd: env[source], source } : null;
+  if (source) return { cmd: env[source], source };
+  const agent = config?.agent;
+  if (agent?.adapter === REVIEW_CONFIG_ADAPTER && isNonEmpty(agent.command)) {
+    return { cmd: agent.command, source: REVIEW_CONFIG_SOURCE };
+  }
+  return null;
+}
+
+/**
+ * The review agent, or { code } after writing the reason. An invalid config is
+ * consulted as absent, so an environment command works as before; with nothing
+ * resolved, the invalid config (not "nothing configured") is the reported reason.
+ */
+function reviewAgentOrRefuse(env, configLoad) {
+  const agent = resolveReviewAgent(env, configLoad.ok ? configLoad.doc : null);
+  if (agent) return { agent };
+  if (!configLoad.ok && !configLoad.missing) {
+    process.stderr.write(`rad review: ${CONFIG_PATH} is invalid: ${configLoad.errors.join('; ')}\n`);
+  } else {
+    process.stderr.write(NO_REVIEW_AGENT_MESSAGE);
+  }
+  return { code: USAGE_EXIT_CODE };
 }
 
 /** RAD_REVIEW_TIMEOUT_SECONDS → ms (default 600s); throws on a malformed value. */
@@ -2857,7 +2920,7 @@ function reviewSummaryLine({ reviewer, agent, findings, result }) {
 }
 
 /** Validate argv + config; returns the run inputs, or { code } after writing the reason. */
-function prepareReview(argv, ctx, env) {
+function prepareReview(argv, ctx, env, configLoad) {
   let args;
   try {
     args = parseReviewArgs(argv);
@@ -2873,11 +2936,9 @@ function prepareReview(argv, ctx, env) {
     process.stderr.write(`rad review: cannot read reviewer agent ${agentRel}: ${err.message}\n`);
     return { code: USAGE_EXIT_CODE };
   }
-  const agent = resolveReviewAgent(env);
-  if (!agent) {
-    process.stderr.write('rad review: no review agent configured — set RAD_REVIEW_AGENT_CMD or RAD_AGENT_CMD\n');
-    return { code: USAGE_EXIT_CODE };
-  }
+  const resolved = reviewAgentOrRefuse(env, configLoad);
+  if (resolved.code !== undefined) return resolved;
+  const { agent } = resolved;
   let timeoutMs;
   try {
     timeoutMs = reviewTimeoutMs(env);
@@ -2891,7 +2952,8 @@ function prepareReview(argv, ctx, env) {
 /**
  * `review <reviewer> [--base <ref>]` — run one `.claude/agents/<reviewer>.md`
  * reviewer through the review lane: RAD_REVIEW_AGENT_CMD if set, else
- * RAD_AGENT_CMD, spawned via runCommandPrompt (same allow-listed env as waves).
+ * RAD_AGENT_CMD, else agent.command from .rad/config.yml (command adapter only),
+ * spawned via runCommandPrompt (same allow-listed env as waves).
  * Prints the agent's stdout verbatim and a one-line stderr summary naming the
  * winning env var and the executable's basename only. Exit 0 when the output
  * carries a parseable rad-findings block; 1 when it does not or the run failed;
@@ -2904,7 +2966,7 @@ function prepareReview(argv, ctx, env) {
  */
 export async function reviewCommand(argv, ctx) {
   const env = ctx.env ?? process.env;
-  const prep = prepareReview(argv, ctx, env);
+  const prep = prepareReview(argv, ctx, env, await loadConfig(ctx.repoRoot));
   if (prep.code !== undefined) return prep.code;
   const { args, agentMd, agent, timeoutMs } = prep;
   const { reviewer } = args;

@@ -18,7 +18,8 @@ import {
 import { buildReviewPrompt, reviewInstruction } from '../review.js';
 import { REVIEW_INSTRUCTION } from '../evals/reviewers/lib.js';
 import { planFingerprint } from '../plan-fingerprint.js';
-import { buildInitConfig, serializeConfig } from '../config.js';
+import { buildInitConfig, serializeConfig, AGENT_PRESETS } from '../config.js';
+import { selectAgent, NO_AGENT_CONFIGURED } from '../agent-select.js';
 import { createGitStateStore, defaultSh } from '../adapters/git-state-store.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -1566,13 +1567,55 @@ test('review — unreadable agent file exits 2 naming it', async () => {
   });
 });
 
-test('review — neither command var set (or blank) exits 2 naming both', async () => {
+const NO_REVIEW_AGENT = /rad review: no review agent configured — set RAD_REVIEW_AGENT_CMD, RAD_AGENT_CMD, or agent: in \.rad\/config\.yml\n/;
+
+/** Write a valid .rad/config.yml under `root` whose `agent:` block is `agent`. */
+function writeAgentConfig(root, agent) {
+  mkdirSync(join(root, '.rad'), { recursive: true });
+  writeFileSync(join(root, '.rad/config.yml'), serializeConfig(buildInitConfig({ architect: 'arch@example.com', agent })));
+}
+
+test('review — no command var (or blank) and no config agent exits 2 naming all three sources', async () => {
   await withReviewRepo(async (repoRoot) => {
     for (const env of [{}, { RAD_REVIEW_AGENT_CMD: '', RAD_AGENT_CMD: '   ' }]) {
       const { code, stderr } = await runReview([REVIEWER, '--base', 'main'], { repoRoot, env });
       assert.equal(code, 2);
-      assert.match(stderr, /no review agent configured — set RAD_REVIEW_AGENT_CMD or RAD_AGENT_CMD/);
+      assert.match(stderr, NO_REVIEW_AGENT);
     }
+    // An sdk agent: block has no command the review lane can spawn.
+    writeAgentConfig(repoRoot, { adapter: 'sdk' });
+    const sdk = await runReview([REVIEWER, '--base', 'main'], { repoRoot, env: {} });
+    assert.equal(sdk.code, 2);
+    assert.match(sdk.stderr, NO_REVIEW_AGENT);
+  });
+});
+
+test('review — with no command var, agent.command from .rad/config.yml runs (command adapter)', async () => {
+  await withReviewRepo(async (repoRoot) => {
+    writeAgentConfig(repoRoot, AGENT_PRESETS.claude);
+    const calls = [];
+    const fake = async (opts) => { calls.push(opts); return { ok: true, stdout: FINDINGS_OUT }; };
+    const { code, stderr } = await runReview([REVIEWER, '--base', 'main'], { repoRoot, env: {}, runCommandPrompt: fake });
+    assert.equal(code, 0, stderr);
+    assert.equal(calls[0].cmd, 'claude -p');
+    assert.match(stderr, /agent=agent\.command executable=claude /);
+  });
+});
+
+test('review — a command var beats the config agent; an invalid config never blocks it', async () => {
+  await withReviewRepo(async (repoRoot) => {
+    writeAgentConfig(repoRoot, AGENT_PRESETS.claude);
+    const calls = [];
+    const fake = async (opts) => { calls.push(opts); return { ok: true, stdout: FINDINGS_OUT }; };
+    const argv = [REVIEWER, '--base', 'main'];
+    assert.equal((await runReview(argv, { repoRoot, env: { RAD_AGENT_CMD: 'envcmd' }, runCommandPrompt: fake })).code, 0);
+    writeFileSync(join(repoRoot, '.rad/config.yml'), 'version: 1\n');
+    assert.equal((await runReview(argv, { repoRoot, env: { RAD_AGENT_CMD: 'envcmd' }, runCommandPrompt: fake })).code, 0);
+    assert.deepEqual(calls.map((c) => c.cmd), ['envcmd', 'envcmd']);
+    const refused = await runReview(argv, { repoRoot, env: {}, runCommandPrompt: fake });
+    assert.equal(refused.code, 2);
+    assert.match(refused.stderr, /rad review: \.rad\/config\.yml is invalid: /);
+    assert.equal(calls.length, 2, 'no agent run on a refusal');
   });
 });
 
@@ -1694,7 +1737,7 @@ test('review AC#7 — two lanes: rad review runs B while deliver resolution stil
       const { code, stdout } = await runReview([REVIEWER, '--base', 'main'], { repoRoot });
       assert.equal(code, 0);
       assert.equal(stdout, FINDINGS_OUT);
-      assert.deepEqual(resolveAgent({}, 'command'), { kind: 'command', cmd: a.cmd });
+      assert.deepEqual(resolveAgent({}, selectAgent(process.env, null)), { kind: 'command', cmd: a.cmd });
     });
     assert.equal(existsSync(join(repoRoot, 'laneA.dump.json')), false);
     assert.equal(existsSync(join(repoRoot, 'laneB.dump.json')), true);
@@ -1947,6 +1990,71 @@ test('deliver capabilities — sdk adapter + an mcp wave → exit 2 before any S
     const logFile = seedApprovedPlanText(repoRoot, capabilityPlanText({ wave1: 'fs_read, mcp' }));
     const res = await withProcessEnv(FAKE_SDK_ENV, () => runDeliverCaptured({ repoRoot }));
     assertRefusedBeforeEvents(res, logFile, [/Wave 1/, /mcp/, /sdk adapter/]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// rad deliver — agent selection: environment all-or-nothing, else `agent:` in
+// .rad/config.yml, else exit 2 before any setup (#186 part 3a, AC#3/AC#4).
+// ---------------------------------------------------------------------------
+
+/** No environment agent at all: every selection/credential var pinned unset. */
+const NO_ENV_AGENT = {
+  RAD_AGENT: undefined, RAD_AGENT_CMD: undefined, RAD_AGENT_PREFLIGHT: 'off', ANTHROPIC_API_KEY: undefined,
+};
+
+test('deliver agent — config agent: (no RAD_AGENT/RAD_AGENT_CMD) reaches adapter resolution as command', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const logFile = seedApprovedPlanText(repoRoot, capabilityPlanText({ wave2: 'fs_read' }));
+    writeAgentConfig(repoRoot, { adapter: 'command', command: 'true' });
+    // The command adapter's own capability refusal proves the config selection reached checkCapabilities.
+    const res = await withProcessEnv(NO_ENV_AGENT, () => runDeliverCaptured({ repoRoot }));
+    assertRefusedBeforeEvents(res, logFile, [/Wave 2/, /\[fs_read\]/, /RAD_AGENT=sdk/]);
+  });
+});
+
+test('deliver agent — config agent: command runs the wave agent with nothing in the environment', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const logFile = seedApprovedPlanText(repoRoot, capabilityPlanText());
+    writeAgentConfig(repoRoot, { adapter: 'command', command: 'true {prompt}' });
+    const { code, stderr } = await runDeliverStderrOnly({ repoRoot, env: NO_ENV_AGENT });
+    assert.notEqual(code, 2, `setup must not refuse; stderr:\n${stderr}`);
+    assert.ok(readLog(logFile).some((e) => e.type === 'wave-started'), 'the run reached the agent');
+  });
+});
+
+test('deliver agent — nothing configured → exit 2 naming both sources, no worktree, no events', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const logFile = seedApprovedPlanText(repoRoot, capabilityPlanText());
+    const rec = recordingSh();
+    const res = await withProcessEnv(NO_ENV_AGENT, () =>
+      runDeliverCaptured({ repoRoot, sh: rec.sh, env: { RAD_WORKTREE: '1' } }));
+    assertRefusedBeforeEvents(res, logFile, []);
+    assert.equal(res.stderr, `rad deliver: ${NO_AGENT_CONFIGURED}\n`);
+    assert.deepEqual(rec.calls, [], 'no git/worktree command ran');
+    assert.equal(existsSync(join(repoRoot, '.rad')), false);
+  });
+});
+
+test('deliver agent — an invalid config with no environment agent → exit 2 naming the config, no events', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const logFile = seedApprovedPlanText(repoRoot, capabilityPlanText());
+    writeInvalidConfig(repoRoot);
+    const res = await withProcessEnv(NO_ENV_AGENT, () => runDeliverCaptured({ repoRoot }));
+    assertRefusedBeforeEvents(res, logFile, [/rad deliver: \.rad\/config\.yml is invalid:/, /nope/]);
+  });
+});
+
+test('deliver agent — the environment beats the config (all-or-nothing)', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const logFile = seedApprovedPlanText(repoRoot, capabilityPlanText());
+    // Config alone would select sdk and fail on the missing ANTHROPIC_API_KEY.
+    writeAgentConfig(repoRoot, { adapter: 'sdk' });
+    const env = { ...NO_ENV_AGENT, RAD_AGENT_CMD: 'true {prompt}' };
+    const { code, stderr } = await runDeliverStderrOnly({ repoRoot, env });
+    assert.doesNotMatch(stderr, /ANTHROPIC_API_KEY/);
+    assert.notEqual(code, 2, `setup must not refuse; stderr:\n${stderr}`);
+    assert.ok(readLog(logFile).some((e) => e.type === 'wave-started'), 'the env command agent ran');
   });
 });
 
@@ -2727,9 +2835,16 @@ test('deliver acp — an unknown RAD_AGENT → exit 1 listing command | sdk | ac
 });
 
 test('resolveAgent — acp returns { kind: acp, cmd }', async () => {
-  await withProcessEnv({ RAD_AGENT_CMD: 'agent --acp' }, () => {
-    assert.deepEqual(resolveAgent({}, 'acp'), { kind: 'acp', cmd: 'agent --acp' });
+  await withProcessEnv({ RAD_AGENT: 'acp', RAD_AGENT_CMD: 'agent --acp' }, () => {
+    assert.deepEqual(resolveAgent({}, selectAgent(process.env, null)), { kind: 'acp', cmd: 'agent --acp' });
   });
+});
+
+test('resolveAgent — a config selection supplies the command; the injected runWave still wins first', () => {
+  const selection = { kind: 'command', cmd: 'claude -p', source: 'config' };
+  assert.deepEqual(resolveAgent({}, selection), { kind: 'command', cmd: 'claude -p' });
+  const injected = async () => ({ outcome: 'success' });
+  assert.deepEqual(resolveAgent({ runWave: injected }, selection), { injected });
 });
 
 test('deliver acp — a {prompt} placeholder in RAD_AGENT_CMD → exit 1 naming it, no events', async () => {
