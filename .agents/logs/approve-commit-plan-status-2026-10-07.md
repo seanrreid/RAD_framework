@@ -8,3 +8,5 @@ Executor role: architect
 
 | Step | Wave | Task | Status | Commit | Time |
 |------|------|------|--------|--------|------|
+| 1 | Wave 1 | Commit-message and status helpers | ✓ complete | 18e58ba | 14:59 |
+| 2 | Wave 1 | Shared resumable publish step | ✓ complete | b83cb7d | 14:59 |
