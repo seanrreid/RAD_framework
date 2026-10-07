@@ -412,7 +412,13 @@ effect on `rad deliver`. `--base` defaults to `scripts/get-default-branch.sh`
 `git diff <base>...HEAD`.
 
 **Resolution order.** The command is the first non-empty of
-`RAD_REVIEW_AGENT_CMD`, then `RAD_AGENT_CMD`. Neither set → exit 2. The agent
+`RAD_REVIEW_AGENT_CMD`, then `RAD_AGENT_CMD`, then `agent.command` from
+`.rad/config.yml` — used only when `agent.adapter` is `command` (an `sdk` or
+`acp` agent has no command the review lane can spawn). None of them → exit 2
+with `no review agent configured — set RAD_REVIEW_AGENT_CMD, RAD_AGENT_CMD, or
+agent: in .rad/config.yml`. An invalid config is consulted as absent, so an
+environment command still works; with no environment command it is reported as
+the reason. The agent
 file is read relative to the RAD checkout that holds `harness/cli.js` (not the
 current directory), and the command runs there.
 
@@ -425,11 +431,11 @@ contains a `{prompt}` token, which is replaced by the prompt as a single argv
 element.
 
 **Output.** The agent's stdout is printed verbatim. One summary line goes to
-stderr, naming the winning env var and only the executable's basename — never
+stderr, naming the winning source and only the executable's basename — never
 the full command string:
 
 ```
-rad review: reviewer=<reviewer> agent=<RAD_REVIEW_AGENT_CMD|RAD_AGENT_CMD> executable=<basename> findings=<n|none>
+rad review: reviewer=<reviewer> agent=<RAD_REVIEW_AGENT_CMD|RAD_AGENT_CMD|agent.command> executable=<basename> findings=<n|none>
 ```
 
 **Exit codes:** `0` when the output carries a parseable ` ```rad-findings `
@@ -489,7 +495,22 @@ in `Status: approved` on its `rad/<feature>` branch tip.
 
 #### Adapter selection
 
-The runner is chosen by environment variable — there is no config-file loader.
+The agent comes from one of two sources, never mixed (full reference:
+[Agent Adapter](configuration.md#agent-adapter)):
+
+1. **Environment** — if `RAD_AGENT` or `RAD_AGENT_CMD` is set (non-blank), the
+   variables below decide everything, exactly as before, and `agent:` is
+   ignored.
+2. **`agent:` in `.rad/config.yml`** — otherwise, `agent.adapter` and
+   `agent.command` play the roles of `RAD_AGENT` and `RAD_AGENT_CMD`. Write it
+   with `rad config init --agent claude|codex` (presets `claude -p` /
+   `codex exec`) or `--agent-cmd "<cmd>"` / `--agent-adapter sdk`.
+
+Neither → `rad deliver` exits **2** with `no agent configured — set agent: in
+.rad/config.yml (rad config init --agent claude|codex) or
+RAD_AGENT/RAD_AGENT_CMD`, before any worktree or event. (A config `agent:` with
+`adapter: command|acp` but no command is already rejected by config
+validation.)
 
 | Env var | Values | Default | Meaning |
 |---------|--------|---------|---------|
@@ -498,7 +519,7 @@ The runner is chosen by environment variable — there is no config-file loader.
 | `RAD_AGENT_PREFLIGHT` | `off` | — (probe runs) | exactly `off` skips the command- and acp-path startup preflight |
 | `RAD_AGENT_PREFLIGHT_TIMEOUT_SECONDS` | positive integer | `60` | preflight probe deadline; malformed exits 2 |
 | `RAD_TOKEN_BUDGET` | positive integer | — | per-deliver cumulative token ceiling (cost breaker) |
-| `RAD_REVIEW_AGENT_CMD` | any command string | — (falls back to `RAD_AGENT_CMD`) | review-lane CLI for [`rad review`](#rad-review) and `/rad-review`; not used by `rad deliver` |
+| `RAD_REVIEW_AGENT_CMD` | any command string | — (falls back to `RAD_AGENT_CMD`, then `agent.command`) | review-lane CLI for [`rad review`](#rad-review) and `/rad-review`; not used by `rad deliver` |
 
 **Per-path credential requirements:**
 
