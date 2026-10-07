@@ -19,6 +19,7 @@ invariants:
       - { file: scripts/check-approval-integrity.sh, symbol: "merge-base --is-ancestor", note: "CI: approval is an ancestor of the PR head" }
       - { file: scripts/deliver-gate-hook.mjs, symbol: "function block", note: "PreToolUse hook blocks an unapproved /rad-deliver (exit 2)" }
       - { file: .claude/settings.json, symbol: "deliver-gate-hook.mjs", note: "hook registration" }
+      - { file: harness/claude-settings.js, symbol: "export function mergeDeliverGateHook", note: "install merges the hook registration into an installed project's settings" }
       - { file: scripts/check-role.sh, symbol: "VALID_ROLES=" }
       - { file: scripts/detect-deliver-pr.sh, symbol: "readonly EXIT_NOT_DELIVER=3", note: "CI: deliver PRs detected by plan Branch: header, not branch prefix (#154)" }
     display_only:

@@ -659,7 +659,8 @@ repeated flag, or a `--timeout` that is not a positive integer.
 ## Install commands
 
 The installer (`install.sh`) drives these verbs; they can also be run by hand.
-All three work on `.rad/installed.json`, where each tracked file carries its
+`install-core`, `install-status` and `install-preset` work on
+`.rad/installed.json`, where each tracked file carries its
 layer (`core` or `preset`) and SHA-256. `--target` defaults to the CLI's repo
 root. See [INSTALL.md](../INSTALL.md#presets) and
 [UPGRADE.md](../UPGRADE.md#how-upgrades-handle-local-edits) for the full rules.
@@ -728,6 +729,33 @@ setting was unseeded; `2` nothing written: bad arguments, an invalid preset,
 core not installed, a malformed manifest, a missing or invalid
 `.rad/config.yml`, a path another layer owns, a different preset already
 installed, or (`--reapply`) a missing recorded source.
+
+---
+
+### rad install-hooks
+
+```
+rad install-hooks [--target <dir>]
+```
+
+Registers the deliver-gate PreToolUse hook (`scripts/deliver-gate-hook.mjs`)
+in the target's `.claude/settings.json`. An absent file is created; a file that
+already registers the hook (any PreToolUse hook command containing
+`deliver-gate-hook.mjs`) is left untouched; otherwise a `Skill`-matcher entry is
+appended, keeping every other key and its order. It prints
+`rad install-hooks: <created|added|present> .claude/settings.json`.
+
+- **Fail-closed.** Nothing is written when `.claude/settings.json` is empty,
+  malformed or the wrong shape, is a symlink or not a regular file, or when
+  `<target>/scripts/deliver-gate-hook.mjs` is missing.
+- **Atomic.** The merged file is written in one rename, and never when the
+  status is `present`.
+- `install.sh` runs it after the core install, on a fresh install and on
+  `--upgrade`. `.claude/settings.local.json` is never touched.
+
+**Exit codes:** `0` `created`, `added` or `present`; `2` nothing written: bad
+arguments, a settings file that cannot be merged, a symlinked or non-regular
+settings file, or a missing hook script.
 
 ---
 

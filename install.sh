@@ -33,6 +33,13 @@
 # file or an unseeded setting, or a preset that could not be applied at all,
 # makes the installer exit 1 after every other step has run. With no config,
 # the preset step is skipped (a preset needs .rad/config.yml).
+#
+# Deliver-gate hook: right after the core install (fresh and --upgrade alike),
+# `install-hooks` registers scripts/deliver-gate-hook.mjs in the target's
+# .claude/settings.json, merging into an existing file and never overwriting
+# it. A settings file it cannot merge (malformed, symlinked) is left untouched
+# and makes the installer exit 1 after every other step has run.
+# .claude/settings.local.json is never touched.
 
 set -euo pipefail
 
@@ -59,6 +66,10 @@ PRESET_INCOMPLETE=false
 PRESET_FAILED=false
 # First line of the install-preset output when it failed (exit 2), for main's summary.
 PRESET_FAILURE_REASON=""
+# Set by install_claude_hooks when install-hooks failed (nothing written); main
+# exits 1 after every other step, reporting the captured output.
+HOOKS_FAILED=false
+HOOKS_FAILURE_REASON=""
 
 readonly USAGE="Usage: ./install.sh [--dir <path>] [--upgrade] [--yes] [--architect <id>] [--preset <dir>]"
 readonly RAD_CONFIG=".rad/config.yml"
@@ -243,6 +254,26 @@ install_core() {
   info "scripts/             - includes get-default-branch.sh, checkout-plan.sh, rad-label.sh, lib/"
   info "harness/cli.js       - zero-npm rad CLI (vendored js-yaml, lazy SDK)"
   info "scripts/hooks/       - pre/post-wave + on-outcome lifecycle hook dirs"
+}
+
+# Registers the deliver-gate PreToolUse hook in the target's .claude/settings.json
+# through install-hooks (merge, never overwrite). Never fails the run here: a
+# non-zero exit sets HOOKS_FAILED and main exits 1 after every other step; the
+# core install is never undone. .claude/settings.local.json is never touched.
+install_claude_hooks() {
+  header "Registering the deliver-gate hook"
+
+  local out
+  if out=$(node "$RAD_DIR/harness/cli.js" install-hooks --target "$TARGET_DIR" 2>&1); then
+    printf '%s\n' "$out" | sed 's/^/    /'
+    success "Deliver-gate hook registered in .claude/settings.json"
+  else
+    local rc=$?
+    printf '%s\n' "$out" | sed 's/^/    /'
+    HOOKS_FAILED=true
+    HOOKS_FAILURE_REASON="$out"
+    warn "Deliver-gate hook not registered (install-hooks exit $rc); the core install is unaffected"
+  fi
 }
 
 # Exit codes of `harness/cli.js install-preset` (see harness/cli.js).
@@ -519,6 +550,7 @@ main() {
 
   create_dirs
   install_core
+  install_claude_hooks
   if [[ "$UPGRADE" == "true" ]]; then remove_stale_skills; fi
   copy_agents_meta
   if [[ -f "$TARGET_DIR/CLAUDE.md" ]]; then CLAUDE_MD_PREEXISTED=true; fi
@@ -549,6 +581,10 @@ exit_on_incomplete() {
   fi
   if [[ "$PRESET_FAILED" == "true" ]]; then
     echo -e "  ${RED}✗${NC} Installed, but the preset was not applied: $PRESET_FAILURE_REASON" >&2
+    incomplete=true
+  fi
+  if [[ "$HOOKS_FAILED" == "true" ]]; then
+    echo -e "  ${RED}✗${NC} Installed, but the deliver-gate hook was not registered: $HOOKS_FAILURE_REASON; fix .claude/settings.json, then run: node harness/cli.js install-hooks" >&2
     incomplete=true
   fi
   if [[ "$incomplete" == "true" ]]; then exit 1; fi

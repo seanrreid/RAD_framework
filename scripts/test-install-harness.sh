@@ -20,6 +20,11 @@
 #     the recorded preset; a deleted tracked file, an unseeded setting, a gone
 #     source or a different preset name exit 1 without reverting the core;
 #     --preset usage errors install nothing; no config skips the preset step
+#   - deliver-gate hook: install-hooks runs after the core on fresh install and
+#     --upgrade; it creates .claude/settings.json, appends to one with other
+#     keys, leaves a registered file byte-identical, and leaves a malformed one
+#     byte-identical (exit 1, naming .claude/settings.json); a pre-seeded
+#     .claude/settings.local.json is never touched
 # Every installer run uses an isolated git identity (no global/system config,
 # empty HOME) so the developer's real git email never leaks into a result.
 # Self-contained: installs into a throwaway temp dir, asserts, always cleans up.
@@ -544,6 +549,58 @@ assert_contains "$NEXT_STEPS_OUT" "git add .claude/ .agents/ .rad/ scripts/ harn
   "fresh install next steps -> git add includes AGENTS.md"
 assert_contains "$TMP/conv-upgrade-neither.out" "AGENTS.md, CLAUDE.md, .rad/config.yml" \
   "upgrade next steps -> names AGENTS.md and CLAUDE.md as unchanged"
+
+# ── deliver-gate hook registration (install-hooks) ───────────────────────────
+readonly HOOK_SETTINGS=".claude/settings.json"
+readonly HOOK_LOCAL_SETTINGS=".claude/settings.local.json"
+readonly HOOK_MARKER="deliver-gate-hook.mjs"
+readonly LOCAL_SETTINGS_FIXTURE="$TMP/settings.local.fixture.json"
+printf '{ "permissions": { "allow": ["Bash(ls)"] } }\n' >"$LOCAL_SETTINGS_FIXTURE"
+
+# seed_local_settings <dir> -> pre-seeds .claude/settings.local.json from the fixture.
+seed_local_settings() { mkdir -p "$1/.claude"; cp "$LOCAL_SETTINGS_FIXTURE" "$1/$HOOK_LOCAL_SETTINGS"; }
+
+# Fresh install: settings.json created with the hook; settings.local.json untouched.
+HOOK_FRESH_T="$(new_repo hook-fresh)"
+seed_local_settings "$HOOK_FRESH_T"
+run_install "$HOOK_FRESH_T" "$TMP/hook-fresh.out" --architect "$FIXTURE_ARCHITECT"
+expect_rc 0 "hooks: fresh install" "$TMP/hook-fresh.out"
+assert_contains "$HOOK_FRESH_T/$HOOK_SETTINGS" "$HOOK_MARKER" "hooks: fresh install -> settings.json registers the hook"
+same_file "$HOOK_FRESH_T/$HOOK_LOCAL_SETTINGS" "$LOCAL_SETTINGS_FIXTURE" \
+  "hooks: fresh install -> settings.local.json byte-identical"
+
+# Upgrade over a settings.json with other keys: keys kept, hook appended.
+HOOK_UPG_T="$(upgrade_target hook-upgrade)"
+printf '{ "env": { "KEEP_ME": "1" }, "hooks": { "Stop": [] } }\n' >"$HOOK_UPG_T/$HOOK_SETTINGS"
+seed_local_settings "$HOOK_UPG_T"
+run_install "$HOOK_UPG_T" "$TMP/hook-upgrade.out" --upgrade
+expect_rc 0 "hooks: upgrade over existing settings" "$TMP/hook-upgrade.out"
+assert_contains "$HOOK_UPG_T/$HOOK_SETTINGS" "KEEP_ME" "hooks: upgrade -> existing settings keys kept"
+assert_contains "$HOOK_UPG_T/$HOOK_SETTINGS" "\"Stop\"" "hooks: upgrade -> existing hook events kept"
+assert_contains "$HOOK_UPG_T/$HOOK_SETTINGS" "$HOOK_MARKER" "hooks: upgrade -> hook appended"
+same_file "$HOOK_UPG_T/$HOOK_LOCAL_SETTINGS" "$LOCAL_SETTINGS_FIXTURE" \
+  "hooks: upgrade -> settings.local.json byte-identical"
+
+# A second upgrade leaves the registered settings.json byte-identical.
+cp "$HOOK_UPG_T/$HOOK_SETTINGS" "$TMP/hook-upgrade.settings.before"
+run_install "$HOOK_UPG_T" "$TMP/hook-upgrade-2.out" --upgrade
+expect_rc 0 "hooks: second upgrade" "$TMP/hook-upgrade-2.out"
+same_file "$HOOK_UPG_T/$HOOK_SETTINGS" "$TMP/hook-upgrade.settings.before" \
+  "hooks: second upgrade -> settings.json byte-identical"
+
+# A malformed settings.json is left byte-identical; the installer exits 1 naming it.
+HOOK_MAL_T="$(upgrade_target hook-malformed)"
+printf '{ not json\n' >"$HOOK_MAL_T/$HOOK_SETTINGS"
+cp "$HOOK_MAL_T/$HOOK_SETTINGS" "$TMP/hook-malformed.settings.before"
+seed_local_settings "$HOOK_MAL_T"
+run_install "$HOOK_MAL_T" "$TMP/hook-malformed.out" --upgrade
+expect_rc 1 "hooks: malformed settings.json" "$TMP/hook-malformed.out"
+same_file "$HOOK_MAL_T/$HOOK_SETTINGS" "$TMP/hook-malformed.settings.before" \
+  "hooks: malformed settings.json -> left byte-identical"
+assert_contains "$TMP/hook-malformed.out" "the deliver-gate hook was not registered: rad install-hooks: $HOOK_SETTINGS" \
+  "hooks: malformed settings.json -> summary names .claude/settings.json"
+same_file "$HOOK_MAL_T/$HOOK_LOCAL_SETTINGS" "$LOCAL_SETTINGS_FIXTURE" \
+  "hooks: malformed settings.json -> settings.local.json byte-identical"
 
 # ── summary ─────────────────────────────────────────────────────────────────
 echo "─────────────────────────────────────────"
