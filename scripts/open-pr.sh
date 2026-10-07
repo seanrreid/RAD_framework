@@ -10,6 +10,13 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly CONFIG_ERROR_EXIT=1
+readonly LOOKUP_ERROR_EXIT=1
+# GitLab MR JSON: anchor on the MR's own web_url (author/project web_urls lack
+# /-/merge_requests/, and escaped quotes inside descriptions cannot match).
+readonly GITLAB_MR_URL_RE='"web_url": *"[^"]+/-/merge_requests/[0-9]+"'
+# tea has no --head filter, so open PRs are listed and filtered here; one page
+# of this size (Gitea's default max page size) bounds the scan.
+readonly FORGEJO_PR_LIST_LIMIT=50
 
 # Parse args
 TITLE=""
@@ -54,7 +61,50 @@ fi
 PLATFORM=$("$SCRIPT_DIR/detect-platform.sh" --quiet)
 REMOTE_URL=$(git remote get-url origin 2>/dev/null || echo "")
 
+# --- Existing-PR lookup -----------------------------------------------------
+# Each existing_<platform> prints the URL of the open PR/MR whose head is $HEAD
+# (nothing when none) and returns non-zero when the list command fails.
+
+existing_github() {
+  gh pr list --head "$HEAD" --state open --json url --jq '.[0].url // empty'
+}
+
+existing_gitlab() {
+  local json matches rc=0
+  json=$(glab mr list --source-branch "$HEAD" --output json) || return 1
+  matches=$(printf '%s\n' "$json" | grep -oE "$GITLAB_MR_URL_RE") || rc=$?
+  # grep exit 1 = no open MR; >1 is a real error.
+  [[ $rc -eq 1 ]] && return 0
+  [[ $rc -ne 0 ]] && { echo "ERROR: parsing glab mr list output failed (grep exit $rc)" >&2; return 1; }
+  printf '%s\n' "$matches" | head -n 1 | sed -E 's/.*"(https?:[^"]+)"$/\1/'
+}
+
+existing_forgejo() {
+  local tsv
+  tsv=$(tea pr list --state open --limit "$FORGEJO_PR_LIST_LIMIT" --output tsv --fields head,url) || return 1
+  # tea quotes each DSV value; strip the quotes before comparing the head.
+  printf '%s\n' "$tsv" | awk -F'\t' -v h="$HEAD" \
+    '{ for (i = 1; i <= NF; i++) gsub(/^"|"$/, "", $i) } $1 == h { print $2; exit }'
+}
+
+# An open PR for $HEAD is success: re-running deliver must not open a duplicate.
+# $1 = lookup function, $2 = CLI name. Returns 0 (and prints the URL) when one
+# exists, 1 when none. A failed lookup exits — never fall through to create.
+# The branch was already pushed before dispatch, so nothing else is needed.
+report_existing_pr() {
+  local url
+  url=$("$1") || {
+    echo "ERROR: open-pr: could not check for an open PR on $HEAD ($2 list failed; reason above). No PR opened." >&2
+    exit "$LOOKUP_ERROR_EXIT"
+  }
+  [[ -z "$url" ]] && return 1
+  echo "PR already open: $url"
+}
+
 open_github() {
+  # An existing PR skips verify_closing_links: its body was not written here.
+  report_existing_pr existing_github gh && return 0
+
   # Build flag arrays so each label is its own quoted --label arg and an empty
   # draft flag contributes no argument (no unquoted string expansion).
   # The count-guarded loop and ${arr[@]+"${arr[@]}"} expansion keep empty arrays
@@ -156,6 +206,8 @@ verify_closing_links() {
 }
 
 open_gitlab() {
+  report_existing_pr existing_gitlab glab && return 0
+
   # Fixed flags as an array (no unquoted string expansion).
   local mr_flags=(--squash-before-merge)
   [[ -n "$DRAFT" ]] && mr_flags+=(--draft)
@@ -184,6 +236,7 @@ open_gitlab() {
 
 open_forgejo() {
   if command -v tea &>/dev/null; then
+    report_existing_pr existing_forgejo tea && return 0
     tea pr create \
       --title "$TITLE" \
       --description "$BODY" \

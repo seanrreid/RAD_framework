@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # test-open-pr.sh
 # Regression test for open-pr.sh label/draft argument handling (issue #2)
-# and GitHub closing-issue link verification (issue #163).
+# GitHub closing-issue link verification (issue #163), and an existing open
+# PR/MR treated as success (#186).
 # The framework has no external test harness, so this is a self-contained,
 # runnable assertion script: it stubs gh/glab/git on PATH, drives open-pr.sh,
 # and asserts the exact argv each platform CLI receives.
@@ -16,18 +17,34 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
 # Build stubs that capture argv. $1 = remote URL (drives detect-platform.sh).
+# `gh pr list` / `glab mr list` answer from LIST_FIXTURE (unset/empty = no open
+# PR, "fail" = the list command errors, anything else = that PR URL) and never
+# touch <cli>.argv, so the create argv capture stays intact.
 make_stubs() {
+  rm -f "$TMP/gh.argv" "$TMP/glab.argv" "$TMP/git.push"
   cat > "$TMP/git" <<EOF
 #!/bin/sh
-# Minimal git stub: report a remote URL for detection, no-op everything else.
+# Minimal git stub: report a remote URL for detection, log pushes, no-op the rest.
 case "\$1 \$2" in
   "remote get-url") echo "$1" ;;
+  "push "*) echo "\$*" >> "$TMP/git.push" ;;
   *) : ;;
 esac
 EOF
   for cli in gh glab; do
     cat > "$TMP/$cli" <<EOF
 #!/bin/sh
+case "\$1 \$2" in
+  "pr list"|"mr list")
+    case "\${LIST_FIXTURE:-}" in
+      "") [ "$cli" = glab ] && echo "[]" ;;
+      fail) echo "stub: HTTP 401 list denied" >&2; exit 1 ;;
+      *) if [ "$cli" = glab ]; then
+           printf '[{"iid":3,"author":{"web_url":"https://gitlab.com/u"},"web_url":"%s"}]\n' "\$LIST_FIXTURE"
+         else echo "\$LIST_FIXTURE"; fi ;;
+    esac
+    exit 0 ;;
+esac
 : > "$TMP/$cli.argv"
 for a in "\$@"; do printf '%s\n' "\$a" >> "$TMP/$cli.argv"; done
 echo "https://example.test/pr/1"
@@ -221,5 +238,49 @@ require_called "$TMP/gh.argv" "gh"
 [ "$(arg_after "$TMP/gh.argv" "--base")" = "develop" ] || fail "explicit --base: base wrong: [$(arg_after "$TMP/gh.argv" "--base")]"
 grep -qF "cannot resolve the default branch" "$TMP/err" && fail "explicit --base: lookup error reported" || true
 echo "✓ explicit --base with a broken config: lookup skipped, PR opened on develop"
+
+# --- Existing open PR is success (deliver re-runs) --------------------------
+# Run open-pr.sh with LIST_FIXTURE=$1, capturing stdout/stderr and the exit code.
+run_existing() {
+  RC=0
+  LIST_FIXTURE="$1" PATH="$TMP:$PATH" "$HERE/open-pr.sh" --title t --head rad/x --no-draft \
+    --body "Closes #12" >"$TMP/out" 2>"$TMP/err" || RC=$?
+}
+GH_PR_URL="https://github.com/o/r/pull/9"
+GL_MR_URL="https://gitlab.com/o/r/-/merge_requests/3"
+
+# 14. GitHub, open PR exists → exit 0, URL reported, branch pushed, no create/view.
+make_stubs "git@github.com:o/r.git"
+run_existing "$GH_PR_URL"
+[ "$RC" -eq 0 ] || fail "gh existing: expected exit 0, got $RC: $(cat "$TMP/err")"
+grep -qxF "PR already open: $GH_PR_URL" "$TMP/out" || fail "gh existing: URL not reported: $(cat "$TMP/out")"
+[ -f "$TMP/gh.argv" ] && fail "gh existing: gh pr create/view called: $(cat "$TMP/gh.argv")" || true
+grep -qF "rad/x" "$TMP/git.push" 2>/dev/null || fail "gh existing: branch not pushed"
+echo "✓ GitHub: existing open PR → success, no pr create"
+
+# 15. GitHub, gh pr list fails → non-zero with the reason, no create.
+make_stubs "git@github.com:o/r.git"
+run_existing fail
+[ "$RC" -ne 0 ] || fail "gh list fail: expected non-zero exit"
+grep -qF "HTTP 401 list denied" "$TMP/err" || fail "gh list fail: reason not surfaced: $(cat "$TMP/err")"
+grep -qF "No PR opened" "$TMP/err" || fail "gh list fail: missing open-pr reason: $(cat "$TMP/err")"
+[ -f "$TMP/gh.argv" ] && fail "gh list fail: fell through to create: $(cat "$TMP/gh.argv")" || true
+echo "✓ GitHub: pr list failure → non-zero, no pr create"
+
+# 16. GitLab, open MR exists → exit 0, MR URL (not the author's) reported, no create.
+make_stubs "git@gitlab.com:o/r.git"
+run_existing "$GL_MR_URL"
+[ "$RC" -eq 0 ] || fail "glab existing: expected exit 0, got $RC: $(cat "$TMP/err")"
+grep -qxF "PR already open: $GL_MR_URL" "$TMP/out" || fail "glab existing: URL not reported: $(cat "$TMP/out")"
+[ -f "$TMP/glab.argv" ] && fail "glab existing: glab mr create called: $(cat "$TMP/glab.argv")" || true
+echo "✓ GitLab: existing open MR → success, no mr create"
+
+# 17. GitLab, glab mr list fails → non-zero, no create.
+make_stubs "git@gitlab.com:o/r.git"
+run_existing fail
+[ "$RC" -ne 0 ] || fail "glab list fail: expected non-zero exit"
+grep -qF "HTTP 401 list denied" "$TMP/err" || fail "glab list fail: reason not surfaced: $(cat "$TMP/err")"
+[ -f "$TMP/glab.argv" ] && fail "glab list fail: fell through to create: $(cat "$TMP/glab.argv")" || true
+echo "✓ GitLab: mr list failure → non-zero, no mr create"
 
 echo "ALL PASS"
