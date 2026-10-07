@@ -41,7 +41,7 @@ import { sanitizeErrorMessage } from './adapters/agent/contract.js';
 import { loadMatrix } from './matrix.js';
 import { classifyStop, STOP_CLASSES } from './stops.js';
 import {
-  deliverCompleted, latestStop, dormantStop, fileDeficitSignals, forecastForPaths, DEFICITS,
+  deliverCompleted, latestStop, dormantStop, fileDeficitSignals, forecastForPaths, DEFICITS, phaseOf,
 } from './events.js';
 import { taskFilesFromPlanText, mergeTaskFiles } from './plan-tasks.js';
 import { parseCapabilityLine, resolveWaveCapabilities, sdkAllowedTools, commandRefusal } from './capabilities.js';
@@ -67,6 +67,7 @@ import { planOpenCommand, PLAN_OPEN_USAGE } from './plan-open.js';
 import { planStatusCommand, PLAN_STATUS_USAGE } from './plan-status.js';
 import { checkoutCommand, CHECKOUT_USAGE } from './checkout.js';
 import { makePreparePort } from './deliver-prepare.js';
+import { makeFinishPort } from './deliver-finish.js';
 
 /** Usage line for `rad approve` (parse errors and the command table). */
 const APPROVE_USAGE = 'rad approve <feature> [--on-behalf-of <name>] [--evidence <text>] [--no-commit] [--trailer "Key: Value"]...';
@@ -1495,6 +1496,101 @@ function buildPreparePort({ ctx, sh, repoRoot, root, feature, workBranch }) {
   }
 }
 
+/** The plan doc path relative to a run root (main checkout or worktree). */
+function planRelPath(feature) {
+  return join(PLANS_DIR, `${feature}.md`);
+}
+
+/**
+ * The deliverSpine finish port: an injected ctx.finish (tests) as-is, else the
+ * real port rooted at the run root. A construction error fails closed BEFORE
+ * the spine, like a prepare-port build error.
+ *
+ * @returns {{ finish: Object } | { code: number }}
+ */
+function buildFinishPort({ ctx, sh, root, feature, workBranch }) {
+  if (ctx.finish) return { finish: ctx.finish };
+  try {
+    return { finish: makeFinishPort({ sh, root, feature, planPath: planRelPath(feature), workBranch }) };
+  } catch (err) {
+    process.stderr.write(`${err instanceof TypeError ? 'rad deliver: ' : ''}${err.message}\n`);
+    return { code: FAILED_EXIT_CODE };
+  }
+}
+
+/** Phase the event log folds to once pr-opened is recorded. */
+const DELIVERED_PHASE = 'delivered';
+/** Labels the deliver PR's issue (`<issue> <status>`). */
+const RAD_LABEL_SCRIPT = 'scripts/rad-label.sh';
+/** Issue label a delivered feature carries while its PR is in review. */
+const REVIEW_LABEL = 'review';
+
+/**
+ * Main-mode delivered rerun: re-run the finish port's afterPr rooted at the
+ * main checkout (it commits/pushes the events log and labels `review` itself).
+ * An injected ctx.finish stands in for the real port.
+ *
+ * @returns {{ ok: true } | { ok: false, reason: string }}
+ */
+async function rerunMainAfterPr({ ctx, sh, repoRoot, feature }) {
+  let finish = ctx.finish;
+  if (!finish) {
+    const planFile = join(repoRoot, planRelPath(feature));
+    if (!existsSync(planFile)) return { ok: false, reason: `no plan doc at ${planRelPath(feature)}` };
+    const workBranch = planWorkBranch(parsePlanCtx(readFileSync(planFile, 'utf8')).branch, feature);
+    finish = makeFinishPort({ sh, root: repoRoot, feature, planPath: planRelPath(feature), workBranch });
+  }
+  const res = await finish.afterPr();
+  return res.ok ? { ok: true } : { ok: false, reason: `finishing the delivered run failed: ${res.detail}` };
+}
+
+/**
+ * Worktree-mode delivered rerun: the run's commits are already on the work
+ * branch, so nothing is committed — push it (never forced), then label the
+ * plan's issue `review` (the plan read at the branch tip). No issue → no label.
+ *
+ * @returns {{ ok: true } | { ok: false, reason: string }}
+ */
+function republishDeliveredBranch({ sh, repoRoot, feature }) {
+  const branch = conventionWorkBranch(feature);
+  mainGit(sh, repoRoot, ['push', 'origin', branch]);
+  const issue = planIssueNumber(mainGit(sh, repoRoot, ['show', `${branch}:${planRelPath(feature)}`]));
+  if (issue === null) {
+    process.stdout.write('label skipped: no issue\n');
+    return { ok: true };
+  }
+  const res = sh(join(repoRoot, RAD_LABEL_SCRIPT), [String(issue), REVIEW_LABEL], { cwd: repoRoot });
+  if (res.status === 0) return { ok: true };
+  const detail = String(res.stderr || res.stdout || 'no output').trim();
+  return { ok: false, reason: `${RAD_LABEL_SCRIPT} ${issue} ${REVIEW_LABEL} exited ${res.status}: ${detail}` };
+}
+
+/**
+ * Delivered short-circuit: when the log already folds to `delivered`, skip
+ * setup/gate/prepare/waves and only finish publishing. An unreadable log is not
+ * a delivered one — it returns null and the gate (or --resume check) reports it.
+ *
+ * @returns {Promise<number|null>} the exit code, or null when not delivered
+ */
+async function deliveredShortCircuit({ ctx, sh, repoRoot, feature }) {
+  const read = readResumeHistory({ feature, repoRoot, sh });
+  if (!read.ok || phaseOf(read.history) !== DELIVERED_PHASE) return null;
+  let outcome;
+  try {
+    outcome = worktreeEnabled()
+      ? republishDeliveredBranch({ sh, repoRoot, feature })
+      : await rerunMainAfterPr({ ctx, sh, repoRoot, feature });
+  } catch (err) {
+    outcome = { ok: false, reason: sanitizeErrorMessage(err?.message ?? String(err)) };
+  }
+  if (!outcome.ok) {
+    process.stderr.write(`rad deliver: ${outcome.reason}\n`);
+    return FAILED_EXIT_CODE;
+  }
+  process.stdout.write(`rad deliver: already delivered feature=${feature}\n`);
+  return 0;
+}
+
 /**
  * Per-run context the SCRIPT_ARGS builders read. The base branch is resolved
  * lazily, once per run, only when a script needs it; the wave count is read
@@ -1632,6 +1728,12 @@ export async function deliverCommand(argv, ctx) {
     return USAGE_EXIT_CODE;
   }
 
+  // Delivered rerun: BEFORE --resume eligibility (a delivered feature has no
+  // stopped run to resume) and before setup — it never calls the spine, so
+  // nothing is appended after pr-opened.
+  const delivered = await deliveredShortCircuit({ ctx, sh, repoRoot, feature });
+  if (delivered !== null) return delivered;
+
   // --resume eligibility: BEFORE setup, so a refusal exits 2 with no worktree
   // created and no event appended. Without --resume this yields resume: null
   // and the spine call below is unchanged (AC#7 byte-for-byte).
@@ -1667,10 +1769,11 @@ export async function deliverCommand(argv, ctx) {
   const workBranch = resolveWorkBranch(setup, planCtx, feature);
   const scriptCtx = makeScriptCtx({ sh, repoRoot, root, feature, branch: workBranch, state });
   const port = buildPreparePort({ ctx, sh, repoRoot, root, feature, workBranch });
-  if (port.code !== undefined) {
+  const finishPort = port.code === undefined ? buildFinishPort({ ctx, sh, root, feature, workBranch }) : port;
+  if (finishPort.code !== undefined) {
     // Before the spine, like a setup failure: keep the worktree for inspection.
     if (worktree) preserveAfterSetupFailure(worktree, feature, root);
-    return port.code;
+    return finishPort.code;
   }
   const runHooks = makeRunHooks({
     hookShell: ctx.sh ?? spawnHook, root, hooksDir: resolveHooksDir(process.env, root, settings).dir, now,
@@ -1687,6 +1790,8 @@ export async function deliverCommand(argv, ctx) {
       runWave,
       // Sync/merge/in-progress before any wave; a stop exits via reportStop.
       prepare: port.prepare,
+      // Mark the plan complete before open-pr.sh; publish pr-opened after it.
+      finish: finishPort.finish,
       // Scripts run with cwd = root: repoRoot today, the worktree when isolated.
       // Each gets its real argv from SCRIPT_ARGS; an unknown script throws.
       sh: makeSpineScriptPort({ sh, repoRoot, root, scriptCtx }),
@@ -1721,13 +1826,19 @@ export async function deliverCommand(argv, ctx) {
   }
 
   const evidence = completionEvidence(result, state, feature);
+  // An afterPr failure comes after pr-opened: the run is delivered, so its
+  // worktree is torn down like a completed one; the exit still reports the stop.
+  const deliveredButUnpublished = result.afterPr === true;
 
-  // Worktree cleanup: complete (tear down) only on EVIDENCED success, preserve
-  // (keep for inspection) on any stop or an ok the log does not confirm.
+  // Worktree cleanup: complete (tear down) only on EVIDENCED success or a
+  // delivered run, preserve (keep for inspection) on any other stop or an ok
+  // the log does not confirm.
   if (worktree) {
-    const cleanupCode = finishWorktree({ worktree, completed: evidence.completed, sh, root, feature });
+    const completed = evidence.completed || deliveredButUnpublished;
+    const cleanupCode = finishWorktree({ worktree, completed, sh, root, feature });
     if (cleanupCode !== null) return cleanupCode;
   }
+  if (deliveredButUnpublished) return reportStop({ result, feature, worktree: null, root });
 
   if (evidence.completed) {
     // Best-effort publish (RAD_SYNC-gated): deliver recorded wave events on the

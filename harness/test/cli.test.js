@@ -561,8 +561,11 @@ const okSh = () => ({ status: 0, stdout: '', stderr: '' });
 /** No-op prepare port: these tests exercise the spine, not branch sync. */
 const noopPrepare = async () => ({ ok: true, data: {} });
 
+/** No-op finish port: these tests exercise the spine, not plan publishing. */
+const noopFinish = { beforePr: async () => ({ ok: true, data: {} }), afterPr: async () => ({ ok: true, data: {} }) };
+
 /** Run deliverCommand with the given env overrides, capturing stderr. */
-async function runDeliverCaptured({ repoRoot, runWave, sh = okSh, env = {}, args = [], prepare = noopPrepare }) {
+async function runDeliverCaptured({ repoRoot, runWave, sh = okSh, env = {}, args = [], prepare = noopPrepare, finish = noopFinish }) {
   const saved = Object.fromEntries(DELIVER_ENV_KEYS.map((k) => [k, process.env[k]]));
   for (const k of DELIVER_ENV_KEYS) delete process.env[k];
   // Worktree isolation is the default; these main-checkout tests opt out unless
@@ -573,10 +576,10 @@ async function runDeliverCaptured({ repoRoot, runWave, sh = okSh, env = {}, args
   let stderr = '';
   process.stderr.write = (chunk) => { stderr += chunk; return true; };
   try {
-    const { value: code } = await captureStdout(() =>
-      deliverCommand([DELIVER_FEATURE, ...args], { repoRoot, sh, runWave, prepare }),
+    const { value: code, stdout } = await captureStdout(() =>
+      deliverCommand([DELIVER_FEATURE, ...args], { repoRoot, sh, runWave, prepare, finish }),
     );
-    return { code, stderr };
+    return { code, stderr, stdout };
   } finally {
     process.stderr.write = originalErr;
     for (const [k, v] of Object.entries(saved)) {
@@ -675,6 +678,149 @@ test('deliver prepare — default-branch script fails → exit 1 before the spin
     assert.equal(code, 1, `expected exit 1; stderr:\n${stderr}`);
     assert.match(stderr, /cannot resolve default branch/);
     assert.ok(!readLog(logFile).some((e) => e.type === 'deliver-started'), 'spine never starts');
+  });
+});
+
+/** A finish port recording `beforePr`/`afterPr` into `order`, with per-step results. */
+function recordingFinish(order, { before = { ok: true, data: {} }, after = { ok: true, data: {} } } = {}) {
+  return {
+    beforePr: async () => { order.push('beforePr'); return before; },
+    afterPr: async () => { order.push('afterPr'); return after; },
+  };
+}
+
+/** An okSh that records `open-pr.sh` into `order`. */
+function openPrRecordingSh(order) {
+  return (file, args, opts) => {
+    if (String(file).endsWith('open-pr.sh')) order.push('open-pr');
+    return okSh(file, args, opts);
+  };
+}
+
+test('deliver finish — the injected port runs beforePr, open-pr.sh, afterPr in order', async () => {
+  await withTempRepo(async (repoRoot) => {
+    seedApprovedTwoWavePlan(repoRoot);
+    const order = [];
+    const { code, stderr } = await runDeliverCaptured({
+      repoRoot, sh: openPrRecordingSh(order), runWave: async () => ({ outcome: 'success' }), finish: recordingFinish(order),
+    });
+    assert.equal(code, 0, `expected exit 0; stderr:\n${stderr}`);
+    assert.deepEqual(order, ['beforePr', 'open-pr', 'afterPr']);
+  });
+});
+
+test('deliver finish — beforePr ok:false → exit 1 finish-failed, open-pr.sh never runs', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const { logFile } = seedApprovedTwoWavePlan(repoRoot);
+    const order = [];
+    const finish = recordingFinish(order, { before: { ok: false, detail: 'HEAD is on main' } });
+    const { code, stderr } = await runDeliverCaptured({
+      repoRoot, sh: openPrRecordingSh(order), runWave: async () => ({ outcome: 'success' }), finish,
+    });
+    assert.equal(code, 1, `expected exit 1; stderr:\n${stderr}`);
+    assert.match(stderr, /stopped=finish-failed/);
+    assert.match(stderr, /class=failed/);
+    assert.deepEqual(order, ['beforePr'], 'open-pr.sh and afterPr never run');
+    assert.ok(!readLog(logFile).some((e) => e.type === 'pr-opened'));
+  });
+});
+
+test('deliver finish — afterPr ok:false → exit 1 finish-failed, pr-opened is the last event', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const { logFile } = seedApprovedTwoWavePlan(repoRoot);
+    const finish = recordingFinish([], { after: { ok: false, detail: 'push failed: offline' } });
+    const { code, stderr } = await runDeliverCaptured({
+      repoRoot, runWave: async () => ({ outcome: 'success' }), finish,
+    });
+    assert.equal(code, 1, `expected exit 1; stderr:\n${stderr}`);
+    assert.match(stderr, /stopped=finish-failed/);
+    assert.ok(stderr.includes('push failed: offline'), stderr);
+    assert.equal(readLog(logFile).at(-1).type, 'pr-opened', 'nothing is appended after pr-opened');
+  });
+});
+
+/** Seed a plan whose log already folds to `delivered` (approved → deliver-started → pr-opened). */
+function seedDeliveredPlan(repoRoot, planText = twoWavePlanText()) {
+  const planFile = join(repoRoot, '.agents', 'plans', `${DELIVER_FEATURE}.md`);
+  mkdirSync(dirname(planFile), { recursive: true });
+  writeFileSync(planFile, planText, 'utf8');
+  const at = (type) => ({ feature: DELIVER_FEATURE, type, actor: 'dev@example.com', ts: '2026-06-16T00:00:00.000Z', data: {} });
+  return writeEventLog(repoRoot, DELIVER_FEATURE, [
+    { ...approvedEvent(DELIVER_FEATURE), data: { fingerprint: planFingerprint(planText).hash } },
+    at('deliver-started'),
+    at('pr-opened'),
+  ]);
+}
+
+/** Run a delivered-rerun case: asserts no wave runs and the log is untouched. */
+async function runDeliveredRerun(repoRoot, opts) {
+  const logFile = seedDeliveredPlan(repoRoot, opts.planText);
+  const before = readFileSync(logFile, 'utf8');
+  let waves = 0;
+  const out = await runDeliverCaptured({
+    repoRoot, runWave: async () => { waves += 1; return { outcome: 'success' }; }, ...opts,
+  });
+  assert.equal(waves, 0, 'no wave runs on a delivered rerun');
+  assert.equal(readFileSync(logFile, 'utf8'), before, 'no event is appended');
+  return out;
+}
+
+for (const [label, args] of [['', []], [' with --resume', ['--resume', '--context', 'retry']]]) {
+  test(`deliver delivered short-circuit${label} — main mode exits 0 via afterPr only`, async () => {
+    await withTempRepo(async (repoRoot) => {
+      const order = [];
+      const { code, stdout, stderr } = await runDeliveredRerun(repoRoot, { args, finish: recordingFinish(order) });
+      assert.equal(code, 0, `expected exit 0; stderr:\n${stderr}`);
+      assert.match(stdout, new RegExp(`rad deliver: already delivered feature=${DELIVER_FEATURE}`));
+      assert.deepEqual(order, ['afterPr'], 'only afterPr runs; beforePr and open-pr.sh never do');
+    });
+  });
+}
+
+/**
+ * A git/script sh for the real finish port on a delivered main checkout: HEAD on
+ * the work branch, nothing staged or changed, origin lacking the branch.
+ * `push` sets the push exit status. Records every call.
+ */
+function deliveredMainSh({ push = 0 } = {}) {
+  const calls = [];
+  const replies = {
+    'rev-parse': (args) => (args.includes('--abbrev-ref') ? `rad/${DELIVER_FEATURE}` : 'abc123'),
+  };
+  const sh = (file, args) => {
+    calls.push([String(file), ...args]);
+    if (file === 'git' && args[0] === 'ls-remote') return { status: 2, stdout: '', stderr: '' };
+    if (file === 'git' && args[0] === 'push') return { status: push, stdout: '', stderr: push ? 'remote rejected' : '' };
+    const reply = file === 'git' && replies[args[0]] ? replies[args[0]](args) : '';
+    return { status: 0, stdout: reply, stderr: '' };
+  };
+  sh.calls = calls;
+  return sh;
+}
+
+const ISSUE_PLAN_TEXT = twoWavePlanText().replace('Status: approved', 'Status: complete\nIssue: 42');
+
+test('deliver delivered short-circuit — main mode real port pushes and labels review', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const sh = deliveredMainSh();
+    const { code, stdout, stderr } = await runDeliveredRerun(repoRoot, { sh, finish: null, planText: ISSUE_PLAN_TEXT });
+    assert.equal(code, 0, `expected exit 0; stderr:\n${stderr}`);
+    assert.match(stdout, /already delivered/);
+    assert.ok(sh.calls.some((c) => c.join(' ') === `git push -q -u origin rad/${DELIVER_FEATURE}`), 'pushes the work branch');
+    const label = sh.calls.find((c) => c[0].endsWith('rad-label.sh'));
+    assert.deepEqual(label?.slice(1), ['42', 'review']);
+    assert.ok(!sh.calls.some((c) => c.includes('--force') || c.includes('-f')), 'never force-pushes');
+  });
+});
+
+test('deliver delivered short-circuit — a failed push exits 1 with the reason', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const sh = deliveredMainSh({ push: 1 });
+    const { code, stdout, stderr } = await runDeliveredRerun(repoRoot, { sh, finish: null, planText: ISSUE_PLAN_TEXT });
+    assert.equal(code, 1, `expected exit 1; stderr:\n${stderr}`);
+    assert.match(stderr, /^rad deliver: .*push failed: .*remote rejected/m);
+    assert.doesNotMatch(stdout, /already delivered/);
+    assert.ok(!sh.calls.some((c) => c[0].endsWith('rad-label.sh')), 'no label after a failed push');
   });
 });
 
@@ -2045,7 +2191,7 @@ async function runDeliverStderrOnly({ repoRoot, env }) {
   process.stderr.write = (chunk) => { stderr += chunk; return true; };
   try {
     const code = await withProcessEnv({ ...env, RAD_WORKTREE: '0' }, () =>
-      deliverCommand([DELIVER_FEATURE], { repoRoot, sh: okSh, prepare: noopPrepare }));
+      deliverCommand([DELIVER_FEATURE], { repoRoot, sh: okSh, prepare: noopPrepare, finish: noopFinish }));
     return { code, stderr };
   } finally {
     process.stderr.write = originalErr;
@@ -2887,7 +3033,7 @@ async function runAcpDeliver(repoRoot, env, args = []) {
     let stderr = '';
     process.stderr.write = (chunk) => { stderr += chunk; return true; };
     try {
-      return { code: await deliverCommand([DELIVER_FEATURE, ...args], { repoRoot, sh: okSh, prepare: noopPrepare }), stderr };
+      return { code: await deliverCommand([DELIVER_FEATURE, ...args], { repoRoot, sh: okSh, prepare: noopPrepare, finish: noopFinish }), stderr };
     } finally {
       process.stderr.write = originalErr;
     }

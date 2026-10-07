@@ -70,6 +70,9 @@ function writePlanDoc(repoRoot, feature, status = 'pending-review') {
 /** No-op prepare port: these tests stop before any branch sync. */
 const noopPrepare = async () => ({ ok: true, data: {} });
 
+/** No-op finish port: these tests exercise the spine, not plan publishing. */
+const noopFinish = { beforePr: async () => ({ ok: true, data: {} }), afterPr: async () => ({ ok: true, data: {} }) };
+
 /** A minimal mock sh that returns success for any call. */
 function mockSh(_file, _args, _opts) {
   return { status: 0, stdout: '', stderr: '' };
@@ -140,7 +143,7 @@ test('AC#3 — sdk path with missing ANTHROPIC_API_KEY exits 1 and stderr contai
 
     let code;
     try {
-      code = await withMainCheckout(() => deliverCommand([feature], { repoRoot, sh: mockSh, prepare: noopPrepare }));
+      code = await withMainCheckout(() => deliverCommand([feature], { repoRoot, sh: mockSh, prepare: noopPrepare, finish: noopFinish }));
     } finally {
       process.stderr.write = origWrite;
       if (savedKey !== undefined) process.env.ANTHROPIC_API_KEY = savedKey;
@@ -187,7 +190,7 @@ test('AC#4 — command path requires RAD_AGENT_CMD, never ANTHROPIC_API_KEY', as
 
     let code;
     try {
-      code = await withMainCheckout(() => deliverCommand([feature], { repoRoot, sh: mockSh, prepare: noopPrepare }));
+      code = await withMainCheckout(() => deliverCommand([feature], { repoRoot, sh: mockSh, prepare: noopPrepare, finish: noopFinish }));
     } finally {
       process.stderr.write = origWrite;
       if (savedKey !== undefined) process.env.ANTHROPIC_API_KEY = savedKey;
@@ -231,7 +234,7 @@ test('AC#4 — pending-review plan fails gate and runWave is never called', asyn
 
     let code;
     try {
-      code = await withMainCheckout(() => deliverCommand([feature], { repoRoot, sh: mockSh, runWave: spyRunWave, prepare: noopPrepare }));
+      code = await withMainCheckout(() => deliverCommand([feature], { repoRoot, sh: mockSh, runWave: spyRunWave, prepare: noopPrepare, finish: noopFinish }));
     } finally {
       if (saved !== undefined) {
         process.env.ANTHROPIC_API_KEY = saved;

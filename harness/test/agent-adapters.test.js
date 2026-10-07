@@ -855,6 +855,9 @@ function loggingAgent(dir, log, { probeExit, waveExit }) {
 /** No-op prepare port: these tests exercise preflight, not branch sync. */
 const noopPrepare = async () => ({ ok: true, data: {} });
 
+/** No-op finish port: these tests exercise the spine, not plan publishing. */
+const noopFinish = { beforePr: async () => ({ ok: true, data: {} }), afterPr: async () => ({ ok: true, data: {} }) };
+
 async function runDeliver(env, argv, ctx) {
   const saved = Object.fromEntries(PREFLIGHT_ENV_KEYS.map((k) => [k, process.env[k]]));
   for (const k of PREFLIGHT_ENV_KEYS) delete process.env[k];
@@ -864,7 +867,7 @@ async function runDeliver(env, argv, ctx) {
   const orig = process.stderr.write.bind(process.stderr);
   process.stderr.write = (c, ...r) => { stderr += c; return orig(c, ...r); };
   try {
-    return { code: await deliverCommand(argv, { prepare: noopPrepare, ...ctx }), stderr };
+    return { code: await deliverCommand(argv, { prepare: noopPrepare, finish: noopFinish, ...ctx }), stderr };
   } finally {
     process.stderr.write = orig;
     for (const k of PREFLIGHT_ENV_KEYS) {
