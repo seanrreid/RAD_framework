@@ -9,6 +9,7 @@ description: >
 model: claude-sonnet-4-6
 tools: Read, Bash
 roles: [architect, developer, designer]
+purpose: authority
 codex:
   sandbox_mode: read-only
 ---

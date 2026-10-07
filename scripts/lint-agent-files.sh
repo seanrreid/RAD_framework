@@ -15,6 +15,12 @@
 #   - files WITHOUT a `roles:` field are RAD-external utility agents: basic
 #     frontmatter is linted, but they are exempt from the context-tool
 #     description/model rules and the scope-map bijection.
+#   - files WITH a `roles:` field must declare `purpose:` as one of
+#     authority | context-discipline | capacity (PURPOSE_VALUES below); a
+#     missing, empty, or unlisted value is a violation.
+#   - `purpose: capacity` is provisional (the agent exists only because its
+#     read won't fit): each one prints a non-blocking advisory after Part 2.
+#     Advisories never change the exit code.
 #
 # Part 2 — scope-map sync against `agent_scope_map` in .rad/config.yml (read via
 # `rad config get agent_scope_map`, one JSON object per row):
@@ -34,6 +40,11 @@ set -euo pipefail
 
 readonly CONFIG_KEY_ABSENT_EXIT=3
 readonly SCOPE_MAP_SOURCE=".rad/config.yml agent_scope_map"
+# The ONE definition of the allowed purpose values (the generator does not
+# duplicate it). PROVISIONAL_PURPOSE draws an advisory, never a violation.
+readonly PURPOSE_VALUES="authority context-discipline capacity"
+readonly PROVISIONAL_PURPOSE=capacity
+readonly PURPOSE_VALUES_DISPLAY="${PURPOSE_VALUES// / | }"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="${1:-$SCRIPT_DIR/..}"
@@ -51,6 +62,7 @@ RAD_CLI="$ROOT/harness/cli.js"
 
 VIOLATIONS=0
 violation() { echo "✗ $1: $2"; VIOLATIONS=1; }
+ADVISORIES=""   # newline-separated advisory lines; printed, never fatal
 
 # strip_quotes — strip ONE pair of surrounding double or single quotes from
 # stdin (YAML quoted scalars, e.g. description: "MUST BE USED ...").
@@ -87,6 +99,27 @@ fm_description() {
       exit
     }
   ' | strip_quotes
+}
+
+# check_purpose <file> <frontmatter> — a roles-declaring agent must declare a
+# purpose drawn from PURPOSE_VALUES; the provisional value adds an advisory.
+check_purpose() {
+  local file="$1" purpose allowed
+  purpose=$(fm_field "$2" purpose)
+  if [[ -z "$purpose" ]]; then
+    violation "$file" "frontmatter field 'purpose' is missing or empty; agents with roles: must declare purpose: $PURPOSE_VALUES_DISPLAY (see UPGRADE.md)"
+    return
+  fi
+  for allowed in $PURPOSE_VALUES; do
+    if [[ "$purpose" == "$allowed" ]]; then
+      if [[ "$purpose" == "$PROVISIONAL_PURPOSE" ]]; then
+        ADVISORIES="${ADVISORIES}advisory: $file: purpose: $PROVISIONAL_PURPOSE is provisional (exists only because its read won't fit); revisit as context windows grow
+"
+      fi
+      return
+    fi
+  done
+  violation "$file" "purpose '$purpose' is not one of: $PURPOSE_VALUES_DISPLAY"
 }
 
 # ── Part 1: frontmatter lint over every agent file ─────────────────────────────
@@ -127,6 +160,7 @@ for file in "$AGENTS_DIR"/*.md; do
   if [[ "$HAS_ROLES" -eq 1 ]]; then
     ROLE_AGENTS="${ROLE_AGENTS}${base}
 "
+    check_purpose "$file" "$FM"
   fi
 
   # RAD-external utility agents (no roles:) are exempt from context-tool rules.
@@ -221,6 +255,11 @@ if [[ -n "$ROLE_AGENTS" ]]; then
       violation "$AGENTS_DIR/$agent.md" "declares roles: but has no row in $SCOPE_MAP_SOURCE"
     fi
   done <<< "$ROLE_AGENTS"
+fi
+
+# Advisories print whatever the result and never affect the exit code.
+if [[ -n "$ADVISORIES" ]]; then
+  printf '%s' "$ADVISORIES"
 fi
 
 if [[ "$VIOLATIONS" -ne 0 ]]; then

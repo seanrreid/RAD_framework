@@ -83,7 +83,7 @@ generates directly on the next invocation.)
 Commit everything — the generated agents are the architecture:
 
 ```bash
-git add .claude/agents/ .agents/research/ .agents/architecture/ AGENTS.md CLAUDE.md
+git add .claude/agents/ .agents/research/ .agents/architecture/ .rad/config.yml AGENTS.md CLAUDE.md
 git commit -m "chore: initialize RAD agent architecture"
 git push
 ```

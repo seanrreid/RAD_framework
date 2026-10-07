@@ -873,12 +873,12 @@ error — fail closed), `2` = usage error.
 ### lint-agent-files.sh
 
 ```
-scripts/lint-agent-files.sh [claude-md] [agents-dir]
+scripts/lint-agent-files.sh [repo-root] [agents-dir]
 ```
 
 All-PR repo-convention lint over the agent definitions. **Read-only** — it
 reports drift, never rewrites anything (reconciling scope-map drift is the
-architect's call). Two parts:
+architect's call). Three parts:
 
 - **Frontmatter lint** — every `<agents-dir>/*.md` must open with YAML
   frontmatter carrying non-empty `name`, `description`, `model`, `tools`;
@@ -888,6 +888,11 @@ architect's call). Two parts:
   Files without a `roles:` field are RAD-external utility agents — basic
   frontmatter is linted, but they are exempt from the context-tool rules and
   the scope-map bijection.
+- **Purpose** — every agent file with `roles:` must declare a non-empty
+  `purpose:` that is one of `authority`, `context-discipline` or `capacity`
+  (see [UPGRADE.md](../UPGRADE.md#agent-purpose-tags-46)). A `capacity` agent
+  passes but prints a non-blocking `advisory:` line, because capacity is
+  provisional; advisories never change the exit code.
 - **Scope-map sync** — every `agent_scope_map` row in `.rad/config.yml` (read
   via `rad config get agent_scope_map`) must have a matching agent file, and
   every agent file with `roles:` must have a row.

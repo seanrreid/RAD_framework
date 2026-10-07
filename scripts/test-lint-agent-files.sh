@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # test-lint-agent-files.sh
 # Regression tests for lint-agent-files.sh: frontmatter fields, context-tool
-# rules, roles-less utility exemption, and agent_scope_map sync. Self-contained:
+# rules, the purpose field (required on roles agents; capacity advisory),
+# roles-less utility exemption, and agent_scope_map sync. Self-contained:
 # builds synthetic repo-root fixtures in a temp dir (no git needed) — each a
 # .rad/config.yml, a copy of harness/ (minus node_modules/test; the config
 # reader), and an agents dir — and runs the REAL script against them.
@@ -53,6 +54,7 @@ description: "MUST BE USED by planner-orchestrator when mapping the lib surface.
 model: claude-haiku-4-5-20251001
 tools: Read, Grep, Glob
 roles: architect
+purpose: context-discipline
 ---
 
 # quoted-mapper
@@ -65,6 +67,7 @@ description: Owns the planning surface. Delegate here for plan work.
 model: claude-sonnet-4-6
 tools: Task
 roles: [architect]
+purpose: authority
 ---
 
 # planner-orchestrator
@@ -79,6 +82,7 @@ description: >
 model: claude-haiku-4-5
 tools: Read, Grep, Glob
 roles: [architect]
+purpose: context-discipline
 ---
 
 # code-mapper
@@ -105,6 +109,18 @@ tools: Read, Grep, Glob
 
 # utility-context
 EOF
+}
+
+# set_purpose <agent-file> <line> — replace the purpose: line (an empty <line>
+# deletes it), keeping the rest of the fixture intact.
+set_purpose() {
+  local file="$1" line="$2"
+  if [[ -z "$line" ]]; then
+    grep -v '^purpose:' "$file" > "$file.new"
+  else
+    sed "s/^purpose:.*\$/$line/" "$file" > "$file.new"
+  fi
+  mv "$file.new" "$file"
 }
 
 run_lint() {
@@ -197,5 +213,57 @@ rm "$TMP/noconfig/.rad/config.yml"
 code=$(run_lint "$TMP/noconfig")
 [[ "$code" -eq 1 ]] || { cat "$TMP/out"; fail "case 9: missing config should exit 1 (got $code)"; }
 echo "✓ case 9: missing .rad/config.yml fails closed (exit 1)"
+
+# ── Case 10: roles agent with no purpose fails, naming the allowed values ─────
+build_fixture "$TMP/nopurpose"
+set_purpose "$TMP/nopurpose/agents/planner-orchestrator.md" ""
+code=$(run_lint "$TMP/nopurpose")
+[[ "$code" -eq 1 ]] || fail "case 10: missing purpose should exit 1 (got $code)"
+grep -q "'purpose' is missing or empty" "$TMP/out" || fail "case 10: expected missing-purpose reason"
+grep -q "authority | context-discipline | capacity" "$TMP/out" || fail "case 10: expected the three allowed values"
+echo "✓ case 10: roles agent with no purpose fails (exit 1)"
+
+# ── Case 11: empty purpose: fails ──────────────────────────────────────────────
+build_fixture "$TMP/emptypurpose"
+set_purpose "$TMP/emptypurpose/agents/code-mapper.md" "purpose:"
+code=$(run_lint "$TMP/emptypurpose")
+[[ "$code" -eq 1 ]] || fail "case 11: empty purpose should exit 1 (got $code)"
+grep -q "'purpose' is missing or empty" "$TMP/out" || fail "case 11: expected missing-purpose reason"
+echo "✓ case 11: empty purpose fails (exit 1)"
+
+# ── Case 12: purpose outside the allowed set fails, naming the bad value ───────
+build_fixture "$TMP/badpurpose"
+set_purpose "$TMP/badpurpose/agents/code-mapper.md" "purpose: boundary"
+code=$(run_lint "$TMP/badpurpose")
+[[ "$code" -eq 1 ]] || fail "case 12: invalid purpose should exit 1 (got $code)"
+grep -q "purpose 'boundary' is not one of: authority | context-discipline | capacity" "$TMP/out" \
+  || fail "case 12: expected invalid-purpose reason naming 'boundary'"
+echo "✓ case 12: invalid purpose fails (exit 1)"
+
+# ── Case 13: capacity passes with a non-blocking advisory ──────────────────────
+build_fixture "$TMP/capacity"
+set_purpose "$TMP/capacity/agents/code-mapper.md" "purpose: capacity"
+code=$(run_lint "$TMP/capacity")
+[[ "$code" -eq 0 ]] || { cat "$TMP/out"; fail "case 13: capacity should exit 0 (got $code)"; }
+grep -q "^advisory: .*code-mapper\.md: purpose: capacity is provisional" "$TMP/out" \
+  || { cat "$TMP/out"; fail "case 13: expected a capacity advisory naming code-mapper.md"; }
+echo "✓ case 13: capacity passes with an advisory (exit 0)"
+
+# ── Case 14: roles-less agent without purpose is exempt ────────────────────────
+# quality-reviewer and utility-context carry no roles: and no purpose:.
+build_fixture "$TMP/rolelesspurpose"
+grep -q '^purpose:' "$TMP/rolelesspurpose/agents/utility-context.md" \
+  && fail "case 14: fixture precondition — utility-context must have no purpose"
+code=$(run_lint "$TMP/rolelesspurpose")
+[[ "$code" -eq 0 ]] || { cat "$TMP/out"; fail "case 14: roles-less agent needs no purpose (got $code)"; }
+echo "✓ case 14: roles-less agent without purpose is exempt (exit 0)"
+
+# ── Case 15: quoted purpose value passes ───────────────────────────────────────
+build_fixture "$TMP/quotedpurpose"
+set_purpose "$TMP/quotedpurpose/agents/planner-orchestrator.md" 'purpose: "authority"'
+code=$(run_lint "$TMP/quotedpurpose")
+[[ "$code" -eq 0 ]] || { cat "$TMP/out"; fail "case 15: quoted purpose should exit 0 (got $code)"; }
+grep -q "advisory:" "$TMP/out" && fail "case 15: no advisory expected without capacity"
+echo "✓ case 15: quoted purpose value passes (exit 0)"
 
 echo "ALL PASS"

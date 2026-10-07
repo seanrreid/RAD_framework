@@ -68,8 +68,8 @@ better. The comment proposed the three buckets: authority, cost, capacity.
 
 **Decisions (2026-10-06, recorded on #46).** The cost and anchoring arguments
 merge into one durable bucket, `context-discipline`. `capacity` is the only
-depreciating bucket. The deliverable is this doc, the `purpose:` field, and
-(in part 2) lint enforcement and `/rad-design` emitting the tag.
+depreciating bucket. The deliverable is this doc and the `purpose:` field;
+lint enforcement and `/rad-design` emitting the tag shipped in part 2.
 
 ---
 
