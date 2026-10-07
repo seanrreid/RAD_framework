@@ -65,6 +65,9 @@ The end-of-run steps (3b-ii) and the PR body (3b-iii) are separate plans.
    - `docs/rad-cli.md` `### rad deliver`: the prepare phase and that deliver needs a reachable remote, the exit-3 merge-conflict stop with the `--resume` flow, and the main-mode requirement to be on the work branch.
    - `harness/events.js`: the type list documents `run-prepared`.
 
+## Amendments
+- **Amendment 1 (2026-10-07, during Wave 2):** a fourth deliver test helper, `runDeliver` in `harness/test/agent-adapters.test.js:858`, answers every `sh` call with an empty success. The real prepare port therefore got an empty default branch and threw, failing its preflight tests. It now injects the same no-op `prepare` as the other helpers (5 lines, no assertion changes). File added to scope.
+
 ## Agent Scope
 Research was done through a read-only sub-agent survey of deliverCommand, the spine, stops, events, open-pr.sh, branch-publish, plan-commit, tests and evals, plus targeted greps in this session. There are no out-of-scope dependencies.
 
@@ -87,6 +90,7 @@ Research was done through a read-only sub-agent survey of deliverCommand, the sp
 | harness/test/cli.test.js | 555-600 | `runDeliverCaptured` injects a no-op `prepare` by default; one wiring case asserts the port is called |
 | harness/test/worktree.test.js | 170-260 | The deliver helper injects a no-op `prepare` |
 | harness/test/deliver.test.js | 1-60 | Inject a no-op `prepare` where deliver is called |
+| harness/test/agent-adapters.test.js | 850-870 | Amendment 1: its `runDeliver` helper injects the no-op `prepare` too |
 | harness/evals/lib/fixture.js | 100-170 | Keep the fixture compatible (clean index, on the work branch); adjust only if needed |
 | harness/evals/delivery.eval.js | 55-192 | Rework `push-check-unavailable-offline` to keep an origin |
 | docs/rad-wave-contract.md | 328-372 | Stop table rows; prepare phase note |
