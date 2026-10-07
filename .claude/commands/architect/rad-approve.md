@@ -312,11 +312,32 @@ Record {architect}'s approval of this plan?
 ```
 
 - **yes** → proceed to Step 4
-- **no** → update Status to `rejected`, commit + push to the work branch, output rejection notice, stop
+- **no** → run `node harness/cli.js plan-status "$FEATURE" rejected [--trailer "Key: Value" ...]`
+  (see [Recording a review outcome](#recording-a-review-outcome) below), then output
+  the rejection notice and stop
   (proxy mode: a `no` simply cancels — make no changes)
-- **feedback** → prompt for feedback text, append as `## Architect Feedback` section,
-  update Status to `needs-revision`, commit + push to the work branch, output revision notice, stop
-  (default mode only)
+- **feedback** → prompt for feedback text and append it to the plan file as a
+  `## Architect Feedback` section, then run
+  `node harness/cli.js plan-status "$FEATURE" needs-revision [--trailer "Key: Value" ...]`,
+  then output the revision notice and stop (default mode only)
+
+#### Recording a review outcome
+
+`rad plan-status` is architect-only. It sets the plan's `Status:` header, commits
+**only the plan file** to the work branch (subject `review: <feature> <status>`;
+body `Plan:`, `Issue:`, `Reviewed-By:`, then any `--trailer` lines), pushes the
+work branch, and labels the issue with the status. Do not run those steps by hand.
+Pass one `--trailer "Key: Value"` per attribution line your tool requires on
+commits (single-line each); pass none if it requires none.
+
+- **Exit 0** → the review is committed and pushed; output the notice and stop.
+- **Exit 1** → a publish step (commit, push, or label) failed. Report the message
+  and rerun the same command once the push can succeed — a rerun is safe and
+  resumes where it stopped.
+- **Exit 2** → refused, nothing changed (not an architect, the plan is already
+  approved, in progress or complete, the approved gate passes, wrong branch,
+  staged changes, or a bad argument). Fix the reported problem and rerun. Never
+  hand-edit the Status header to get around a refusal.
 
 ### Step 4: Record the approval (delegated to the CLI)
 
@@ -335,7 +356,7 @@ Run it from the repo root on the work-branch tip you checked out in Step 2:
 **Default mode** — architect ran the command directly:
 
 ```bash
-node harness/cli.js approve "$FEATURE"
+node harness/cli.js approve "$FEATURE" [--trailer "Key: Value" ...]
 ```
 
 **Proxy mode (`--on-behalf-of`)** — pass the approver and the required evidence:
@@ -343,15 +364,40 @@ node harness/cli.js approve "$FEATURE"
 ```bash
 node harness/cli.js approve "$FEATURE" \
   --on-behalf-of "$ON_BEHALF_OF" \
-  --evidence "$EVIDENCE"
+  --evidence "$EVIDENCE" \
+  [--trailer "Key: Value" ...]
 ```
 
-The CLI prints a single structured success line
-(`rad approve: ok feature=… status=approved approved-by=… approved-at=… proxy=…`)
-and exits 0 on success, or exits non-zero with a clear message (and writes
-nothing) on a refusal — e.g. a non-architect with no valid proxy pair, or
-`--on-behalf-of` without `--evidence`. If it exits non-zero, stop and surface its
-message; do not hand-edit the plan file to work around it.
+Pass one `--trailer "Key: Value"` per attribution line your tool requires on
+commits (single-line each); pass none if it requires none.
+
+After recording, the CLI also publishes the approval itself: it commits **only**
+the plan file and `.agents/state/$FEATURE/events.jsonl` to the work branch
+(subject `approve: <feature>`, or `approve: <feature> (re-approval)`; body
+`Plan:`, `Issue:`, `Approved-By:`, plus `Recorded-By:` and `Approval-Evidence:`
+in proxy mode, then the `--trailer` lines), pushes the work branch, and labels the
+issue `approved`. Do not run those steps by hand. The approval must reach the
+work-branch tip — `/rad-deliver` gates on it via `check-plan-approved.sh`, which
+reads `origin/rad/[feature]` first. It refuses unless HEAD is the work branch with
+nothing staged. **Never check out or commit to the default branch.**
+
+On success the CLI prints a single structured line
+(`rad approve: ok feature=… status=approved approved-by=… approved-at=… proxy=… committed=… pushed=…`,
+plus `resumed=true` when a rerun found the approval already recorded for this
+exact plan body).
+
+- **Exit 0** → the approval is committed and pushed; continue to Step 5.
+- **Exit 1** → either a refusal (authority — e.g. a non-architect with no valid
+  proxy pair, or `--on-behalf-of` without `--evidence` — or an approval blocker;
+  nothing written), or the commit, push, or label failed after recording. Report
+  the message. For a refusal, fix it as described below; for a publish failure,
+  rerun the same command once the push can succeed — a rerun is safe and resumes
+  (it finds the recorded approval and does not record a second one).
+- **Exit 2** → refused before writing, nothing changed (HEAD is not the work
+  branch, staged changes are present, or an invalid `--trailer`). Fix the
+  reported problem and rerun.
+
+Never hand-edit the plan file to work around a non-zero exit.
 
 The CLI also runs the approval-blocker check after its role checks and **refuses**
 (exit 1, writes nothing) while any blocker remains or if the check itself fails.
@@ -360,31 +406,7 @@ refusal is **final**: never hand-edit the plan's Status header or the event log 
 get around it. Fix the plan instead — answer the marker, add a justified waiver,
 or remove the path — commit it to the work branch, and re-run `/rad-approve`.
 
-### Step 5: Commit the approval to the work branch
-
-The CLI has already written the plan file (Step 4); your only job here is to
-commit and push that change. The approval must reach the work-branch tip —
-`/rad-deliver` gates on it via `check-plan-approved.sh`, which reads
-`origin/rad/[feature]` first. **Never check out or commit to the default branch.**
-
-```bash
-git add ".agents/plans/$FEATURE.md" ".agents/state/$FEATURE/events.jsonl"
-git commit -m "approve: $FEATURE
-
-Plan:  .agents/plans/$FEATURE.md
-(Status + approved event written by: node harness/cli.js approve)"
-
-git push origin "rad/$FEATURE"
-```
-
-If the project tracks plans against issues and `gh` is available, mirror the
-status label (best-effort; no-ops without `gh`):
-
-```bash
-scripts/rad-label.sh [issue-number] approved   # omit if there is no issue
-```
-
-### Step 6: Output confirmation
+### Step 5: Output confirmation
 
 **Default mode:**
 
@@ -423,9 +445,9 @@ Branch:      rad/[feature-name]
 - Default mode is architect-only — only architects listed under `roles.architect` in `.rad/config.yml` may approve directly
 - Never approve a plan with unreviewed out-of-scope dependencies
 - Never approve a plan with Status: in-progress, complete, or approved
-- Commit only the plan file to the work branch — no other files
+- The CLI makes the commit, never you: `rad approve` commits only the plan file and its event log; `rad plan-status` commits the plan file alone — no other files
 - Never commit to the default branch — the plan lands there when the deliver PR merges
-- If the architect provides feedback, set Status to needs-revision, not approved
+- If the architect provides feedback, record needs-revision with `rad plan-status`, not an approval
 - Do not delete the work branch — it carries the plan, approval, and (later) the code
 - The approval commit on the work-branch tip is the audit trail — set Approved-By and Approved-At
 - Approving a plan accepts its declared capabilities (`Capabilities:` lines). Both lines, the plan-header default and any wave-level line, are locked by the plan fingerprint, so changing either after approval requires re-approval. The capabilities check itself is advisory and never blocks approval
