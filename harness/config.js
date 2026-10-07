@@ -21,7 +21,7 @@ export const PLATFORMS = Object.freeze(['github', 'gitlab', 'bitbucket', 'forgej
 /** The only schema version this reader understands. */
 export const CONFIG_VERSION = 1;
 
-const TOP_LEVEL_KEYS = Object.freeze(['version', 'platform', 'default_branch', 'roles', 'agent_scope_map', 'capabilities', 'settings']);
+const TOP_LEVEL_KEYS = Object.freeze(['version', 'platform', 'default_branch', 'agent', 'roles', 'agent_scope_map', 'capabilities', 'settings']);
 const ROLE_KEYS = Object.freeze(['architect', 'developers', 'designers']);
 const SCOPE_ROW_KEYS = Object.freeze(['agent', 'type', 'reads', 'roles']);
 /** Keys allowed under `capabilities:` (the project-level deny list, #85). */
@@ -32,6 +32,17 @@ export const SETTINGS_KEYS = Object.freeze(['high_risk_patterns', 'hooks_dir']);
 const MALFORMED_HOOKS_DIR = /^-|[\r\n]/;
 /** high_risk_patterns is a single-line value: a line break would split it into two patterns. */
 const LINE_BREAK = /[\r\n]/;
+/** Agent adapters `agent.adapter` may name (#186 part 3a). */
+export const AGENT_ADAPTERS = Object.freeze(['command', 'sdk', 'acp']);
+/** Named agent presets — the ONLY place their adapter/command pairs are defined. */
+export const AGENT_PRESETS = Object.freeze({
+  claude: Object.freeze({ adapter: 'command', command: 'claude -p' }),
+  codex: Object.freeze({ adapter: 'command', command: 'codex exec' }),
+});
+/** Keys allowed under `agent:`, in the fixed order serializeConfig writes them. */
+const AGENT_KEYS = Object.freeze(['adapter', 'command']);
+/** Adapters that launch a process and so require `agent.command`; `sdk` must not set one. */
+const COMMAND_ADAPTERS = Object.freeze(['command', 'acp']);
 /** A bracketed value (e.g. `[your GitHub username]`) is an unfilled template placeholder. */
 const PLACEHOLDER_PREFIX = '[';
 /** Required keys `migrateFromClaudeMd` must find, by dotted name. */
@@ -143,6 +154,29 @@ export function settingsErrors(settings) {
   return errors;
 }
 
+/** Errors for `agent.command` given an already-valid adapter. */
+function agentCommandErrors(adapter, command) {
+  if (!COMMAND_ADAPTERS.includes(adapter)) {
+    return command === undefined ? [] : [`agent.command must be absent when agent.adapter is ${adapter}`];
+  }
+  if (command === undefined) return [`agent.command is required when agent.adapter is ${adapter}`];
+  if (!isNonEmptyString(command)) return ['agent.command must be a non-empty string'];
+  if (LINE_BREAK.test(command)) return ['agent.command must not contain a line break'];
+  return [];
+}
+
+/** Errors for the optional `agent:` block. Fail-closed: unknown keys and adapters are errors. */
+export function agentErrors(agent) {
+  if (agent === undefined) return [];
+  if (!isPlainObject(agent)) return ['agent must be a mapping'];
+  const errors = Object.keys(agent).filter((k) => !AGENT_KEYS.includes(k)).map((k) => `unknown key agent.${k}`);
+  if (agent.adapter === undefined) return [...errors, 'agent.adapter is required'];
+  if (!AGENT_ADAPTERS.includes(agent.adapter)) {
+    return [...errors, `agent.adapter must be one of ${AGENT_ADAPTERS.join(' | ')} (got ${JSON.stringify(agent.adapter)})`];
+  }
+  return [...errors, ...agentCommandErrors(agent.adapter, agent.command)];
+}
+
 function scalarErrors(doc) {
   const errors = [];
   if (doc.version === undefined) errors.push('version is required');
@@ -168,7 +202,7 @@ export function validateConfig(doc) {
   const norm = normalizeConfig(doc);
   const errors = Object.keys(norm).filter((k) => !TOP_LEVEL_KEYS.includes(k)).map((k) => `unknown top-level key '${k}'`);
   errors.push(...scalarErrors(norm), ...rolesErrors(norm.roles), ...capabilitiesErrors(norm.capabilities),
-    ...settingsErrors(norm.settings));
+    ...settingsErrors(norm.settings), ...agentErrors(norm.agent));
   if (norm.agent_scope_map !== undefined) {
     if (!Array.isArray(norm.agent_scope_map)) errors.push('agent_scope_map must be a list');
     else norm.agent_scope_map.forEach((row, i) => errors.push(...scopeRowErrors(row, i)));
@@ -341,8 +375,10 @@ export function serializeConfig(doc) {
     `version: ${scalar(d.version)}`,
     `platform: ${scalar(d.platform)}        # ${PLATFORMS.join(' | ')}`,
     `default_branch: ${scalar(d.default_branch)}`,
-    'roles:',
   ];
+  // Written only when present, so configs without it serialize byte-identically to before.
+  if (d.agent !== undefined) out.push(...agentLines(d.agent));
+  out.push('roles:');
   for (const key of ROLE_KEYS) out.push(`  ${key}:${blockList(d.roles?.[key], '    ')}`);
   if (d.agent_scope_map !== undefined) {
     if (d.agent_scope_map.length === 0) out.push('agent_scope_map: []');
@@ -370,6 +406,11 @@ function settingsLines(settings) {
   return ['settings:', ...set.map((k) => `  ${k}: ${scalar(settings[k])}`)];
 }
 
+/** The `agent:` block, keys in AGENT_KEYS order, unset keys omitted (sdk writes no command). */
+function agentLines(agent) {
+  return ['agent:', ...AGENT_KEYS.filter((k) => agent[k] !== undefined).map((k) => `  ${k}: ${scalar(agent[k])}`)];
+}
+
 /** Platform `rad config init` writes when none is given (never calls a host CLI). */
 export const INIT_DEFAULT_PLATFORM = 'manual';
 /** Default branch `rad config init` writes when none is given. */
@@ -379,17 +420,21 @@ export const INIT_DEFAULT_BRANCH = 'main';
  * Build a fresh config document for `rad config init`. Pure: it does not
  * validate — the caller must run validateConfig before writing.
  *
- * @param {{ platform?: string, defaultBranch?: string, architect: string }} opts
+ * `agent` is included only when given (e.g. an AGENT_PRESETS entry); it is copied, never shared.
+ *
+ * @param {{ platform?: string, defaultBranch?: string, architect: string, agent?: {adapter: string, command?: string} }} opts
  * @returns {Object}
  */
-export function buildInitConfig({ platform, defaultBranch, architect }) {
-  return {
+export function buildInitConfig({ platform, defaultBranch, architect, agent }) {
+  const doc = {
     version: CONFIG_VERSION,
     platform: platform ?? INIT_DEFAULT_PLATFORM,
     default_branch: defaultBranch ?? INIT_DEFAULT_BRANCH,
     roles: { architect: [architect], developers: [], designers: [] },
     agent_scope_map: [],
   };
+  if (agent !== undefined) doc.agent = { ...agent };
+  return doc;
 }
 
 // ---------------------------------------------------------------------------

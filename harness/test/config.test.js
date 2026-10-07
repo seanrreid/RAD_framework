@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 
 import {
   CONFIG_PATH, PLATFORMS, loadConfig, validateConfig, getConfigValue, migrateFromClaudeMd, serializeConfig,
-  settingsErrors, seedSettings, writeConfigAtomic,
+  settingsErrors, seedSettings, writeConfigAtomic, agentErrors, buildInitConfig, AGENT_ADAPTERS, AGENT_PRESETS,
 } from '../config.js';
 import { configCommand } from '../cli.js';
 
@@ -638,4 +638,78 @@ test('writeConfigAtomic — writes the exact text and leaves no temp file', () =
   writeConfigAtomic(root, BASE_TEXT);
   assert.equal(readFileSync(join(root, CONFIG_PATH), 'utf8'), BASE_TEXT);
   assert.equal(existsSync(join(root, `${CONFIG_PATH}.tmp`)), false);
+});
+
+// --- agent: block (#186 part 3a) -------------------------------------------
+
+const withAgent = (agent) => ({ ...clone(VALID), agent });
+
+test('AGENT_PRESETS and AGENT_ADAPTERS: the named presets and adapters', () => {
+  assert.deepEqual(AGENT_ADAPTERS, ['command', 'sdk', 'acp']);
+  assert.deepEqual(AGENT_PRESETS, {
+    claude: { adapter: 'command', command: 'claude -p' },
+    codex: { adapter: 'command', command: 'codex exec' },
+  });
+  for (const preset of Object.values(AGENT_PRESETS)) assert.deepEqual(agentErrors(preset), []);
+});
+
+test('validateConfig: agent accepts command, acp and sdk adapters; absent agent is fine', () => {
+  assert.deepEqual(validateConfig(withAgent({ adapter: 'command', command: 'claude -p' })), []);
+  assert.deepEqual(validateConfig(withAgent({ adapter: 'acp', command: 'gemini --acp' })), []);
+  assert.deepEqual(validateConfig(withAgent({ adapter: 'sdk' })), []);
+  assert.deepEqual(validateConfig(clone(VALID)), []);
+});
+
+test('validateConfig: agent fails closed on bad shapes', () => {
+  const cases = [
+    [{ adapter: 'command', command: 'x', model: 'y' }, /unknown key agent\.model/],
+    [{ adapter: 'bogus', command: 'x' }, /agent\.adapter must be one of command \| sdk \| acp \(got "bogus"\)/],
+    [{ command: 'x' }, /agent\.adapter is required/],
+    [{ adapter: 'command' }, /agent\.command is required when agent\.adapter is command/],
+    [{ adapter: 'acp' }, /agent\.command is required when agent\.adapter is acp/],
+    [{ adapter: 'command', command: '   ' }, /agent\.command must be a non-empty string/],
+    [{ adapter: 'command', command: 42 }, /agent\.command must be a non-empty string/],
+    [{ adapter: 'sdk', command: 'claude -p' }, /agent\.command must be absent when agent\.adapter is sdk/],
+    [{ adapter: 'command', command: 'claude -p\nrm -rf /' }, /agent\.command must not contain a line break/],
+    ['claude', /agent must be a mapping/],
+    [['command'], /agent must be a mapping/],
+    [null, /agent must be a mapping/],
+  ];
+  for (const [agent, err] of cases) {
+    const errors = validateConfig(withAgent(agent));
+    assert.ok(errors.some((e) => err.test(e)), `${JSON.stringify(agent)} → ${JSON.stringify(errors)}`);
+  }
+});
+
+test('serializeConfig: agent block round-trips through loadConfig (serialize → parse → validate → equal)', async () => {
+  for (const agent of [AGENT_PRESETS.claude, { adapter: 'acp', command: 'gemini "--acp"' }, { adapter: 'sdk' }]) {
+    const doc = withAgent({ ...agent });
+    const text = serializeConfig(doc);
+    assert.match(text, /\ndefault_branch: main\nagent:\n  adapter: /, 'agent block follows default_branch');
+    if (agent.adapter === 'sdk') assert.doesNotMatch(text, /command:/, 'sdk writes no command line');
+    const root = tempRoot();
+    writeConfig(root, text);
+    const loaded = await loadConfig(root);
+    assert.equal(loaded.ok, true, JSON.stringify(loaded.errors));
+    assert.deepEqual(loaded.doc.agent, agent);
+  }
+  assert.match(serializeConfig(withAgent(AGENT_PRESETS.claude)), /\n  command: "claude -p"\n/);
+  assert.doesNotMatch(serializeConfig(clone(VALID)), /^agent:/m, 'block omitted when unset');
+});
+
+test('getConfigValue: agent.command and agent.adapter', () => {
+  const doc = withAgent({ ...AGENT_PRESETS.codex });
+  assert.deepEqual(getConfigValue(doc, 'agent.command'), { found: true, value: 'codex exec' });
+  assert.deepEqual(getConfigValue(doc, 'agent.adapter'), { found: true, value: 'command' });
+  assert.deepEqual(getConfigValue(clone(VALID), 'agent.command'), { found: false });
+});
+
+test('buildInitConfig: includes agent only when given, as a copy', () => {
+  const without = buildInitConfig({ architect: 'a@x.com' });
+  assert.equal(Object.hasOwn(without, 'agent'), false);
+  assert.deepEqual(validateConfig(without), []);
+  const withIt = buildInitConfig({ architect: 'a@x.com', agent: AGENT_PRESETS.claude });
+  assert.deepEqual(withIt.agent, { adapter: 'command', command: 'claude -p' });
+  assert.notEqual(withIt.agent, AGENT_PRESETS.claude);
+  assert.deepEqual(validateConfig(withIt), []);
 });
