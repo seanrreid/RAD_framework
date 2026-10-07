@@ -8,6 +8,9 @@ import {
   validateTrailer,
   planWorkBranch,
   conventionWorkBranch,
+  approveCommitMessage,
+  reviewCommitMessage,
+  setPlanStatus,
 } from '../plan-commit.js';
 
 const GITHUB_URL = 'https://github.com/org/repo/issues/42';
@@ -164,4 +167,111 @@ test('planWorkBranch: missing Branch: header + process.env RAD_BRANCH_PREFIX=tea
   });
   process.env.RAD_BRANCH_PREFIX = 'team/';
   assert.equal(planWorkBranch('', 'rad-plan-open'), 'team/rad-plan-open');
+});
+
+// ── approveCommitMessage ─────────────────────────────────────────────────────
+
+const DIRECT = { feature: 'do-thing', approvedBy: 'arch' };
+const PROXY = { ...DIRECT, proxy: true, recordedBy: 'dev', evidence: 'slack 2026-10-07' };
+
+test('approveCommitMessage: no issue → Issue line omitted', () => {
+  assert.equal(approveCommitMessage(plan(), DIRECT), [
+    'approve: do-thing',
+    '',
+    'Plan: .agents/plans/do-thing.md',
+    'Approved-By: arch',
+  ].join('\n'));
+});
+
+test('approveCommitMessage: proxy adds Recorded-By and Approval-Evidence after Approved-By', () => {
+  assert.equal(approveCommitMessage(plan({ header: ['Issue: 186'] }), PROXY), [
+    'approve: do-thing',
+    '',
+    'Plan: .agents/plans/do-thing.md',
+    'Issue: 186',
+    'Approved-By: arch',
+    'Recorded-By: dev',
+    'Approval-Evidence: slack 2026-10-07',
+  ].join('\n'));
+});
+
+test('approveCommitMessage: direct mode never emits proxy lines', () => {
+  const msg = approveCommitMessage(plan(), { ...DIRECT, recordedBy: 'dev', evidence: 'x' });
+  assert.doesNotMatch(msg, /Recorded-By|Approval-Evidence/);
+});
+
+test('approveCommitMessage: re-approval subject', () => {
+  assert.match(approveCommitMessage(plan(), { ...DIRECT, reapproval: true }), /^approve: do-thing \(re-approval\)\n\n/);
+});
+
+test('approveCommitMessage: trailers follow a blank line in the given order', () => {
+  const trailers = ['Refs: #186', 'Co-Authored-By: X <y@z>'];
+  const msg = approveCommitMessage(plan(), DIRECT, trailers);
+  assert.ok(msg.endsWith('Approved-By: arch\n\nRefs: #186\nCo-Authored-By: X <y@z>'), msg);
+});
+
+test('approveCommitMessage: invalid trailer throws', () => {
+  assert.throws(() => approveCommitMessage(plan(), DIRECT, ['no colon here']), /Key: Value/);
+});
+
+test('approveCommitMessage: empty feature throws', () => {
+  assert.throws(() => approveCommitMessage(plan(), { ...DIRECT, feature: '' }), /feature/);
+  assert.throws(() => approveCommitMessage(plan(), { ...DIRECT, feature: undefined }), /feature/);
+});
+
+// ── reviewCommitMessage ──────────────────────────────────────────────────────
+
+test('reviewCommitMessage: shape with issue and trailers', () => {
+  const msg = reviewCommitMessage(plan({ header: ['Issue: 7'] }),
+    { feature: 'do-thing', status: 'changes-requested', reviewedBy: 'arch' }, ['Refs: #7']);
+  assert.equal(msg, [
+    'review: do-thing changes-requested',
+    '',
+    'Plan: .agents/plans/do-thing.md',
+    'Issue: 7',
+    'Reviewed-By: arch',
+    '',
+    'Refs: #7',
+  ].join('\n'));
+});
+
+test('reviewCommitMessage: no issue omits the line; invalid trailer and empty feature throw', () => {
+  const opts = { feature: 'do-thing', status: 'rejected', reviewedBy: 'arch' };
+  assert.doesNotMatch(reviewCommitMessage(plan(), opts), /Issue:/);
+  assert.throws(() => reviewCommitMessage(plan(), opts, ['Bad Key: v']), /trailer key/);
+  assert.throws(() => reviewCommitMessage(plan(), { ...opts, feature: '  ' }), /feature/);
+});
+
+// ── setPlanStatus ────────────────────────────────────────────────────────────
+
+test('setPlanStatus: replaces the header Status: line', () => {
+  const out = setPlanStatus(plan(), 'approved');
+  assert.match(out, /^# Plan: Do the Thing\nStatus: approved\n/);
+  assert.doesNotMatch(out, /pending-review/);
+});
+
+test('setPlanStatus: missing Status: is inserted after Author:', () => {
+  const text = '# Plan: X\nAuthor: dev\nIssue: 1\n\n## Context\nx\n';
+  assert.equal(setPlanStatus(text, 'approved'), '# Plan: X\nAuthor: dev\nStatus: approved\nIssue: 1\n\n## Context\nx\n');
+});
+
+test('setPlanStatus: no Status: and no Author: → inserted after the title', () => {
+  const text = '# Plan: X\nIssue: 1\n\n## Context\n';
+  assert.equal(setPlanStatus(text, 'rejected'), '# Plan: X\nStatus: rejected\nIssue: 1\n\n## Context\n');
+});
+
+test('setPlanStatus: Status: inside a fenced block below the header is untouched', () => {
+  const body = '\n## Example\n```md\nStatus: pending-review\n```\nStatus: draft\n';
+  const text = `# Plan: X\nAuthor: dev\n${body}`;
+  assert.equal(setPlanStatus(text, 'approved'), `# Plan: X\nAuthor: dev\nStatus: approved\n${body}`);
+});
+
+test('setPlanStatus: empty or multi-line status throws', () => {
+  assert.throws(() => setPlanStatus(plan(), ''), /non-empty/);
+  assert.throws(() => setPlanStatus(plan(), '   '), /non-empty/);
+  assert.throws(() => setPlanStatus(plan(), 'a\nb'), /single line/);
+});
+
+test('setPlanStatus: no anchor line throws', () => {
+  assert.throws(() => setPlanStatus('Issue: 1\n\n## Context\n', 'approved'), /anchor/);
 });

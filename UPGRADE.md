@@ -18,6 +18,8 @@ originally set up with the installer.
 | `ai/` | **Refreshed** — unedited guardrail files updated; locally edited ones (e.g. `slop-register.md`) kept |
 | `scripts/` | **Refreshed** — `*.sh` and `*.mjs` helpers, `scripts/lib/`, and `scripts/hooks/`; locally edited files kept |
 | `harness/` | **Refreshed** — everything except `harness/node_modules/`, which is never touched |
+| `rad approve` (in `harness/`) | **Behavior change** — `rad approve` now commits and pushes; pass `--no-commit` for the old behavior |
+| `rad plan-status` (in `harness/`) | **New** — new `rad plan-status` records a rejected or needs-revision review (see [rad CLI](docs/rad-cli.md#rad-plan-status)) |
 | `.rad/installed.json` | **Written / updated** — the install manifest (see [How upgrades handle local edits](#how-upgrades-handle-local-edits)) |
 | Preset files | **Re-applied** when a preset is recorded in `.rad/installed.json` — from its recorded source, same keep-local-edits rules as core (see [Presets on upgrade](#presets-on-upgrade)) |
 | `.rad/upgrade-pending/` | Written only when a local edit was kept — the new core version of each kept file |

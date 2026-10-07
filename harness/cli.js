@@ -7,10 +7,13 @@
  * prose retains the human-in-the-loop steps (review summary, confirmation) and
  * shells out here for the recording.
  *
- * This CLI never calls a model, never opens a PR, and never pushes a branch.
+ * This CLI never calls a model and never opens a PR. It pushes a branch only
+ * through the `approve`, `plan-open` and `plan-status` publish steps.
  *
  * Subcommands:
- *   approve <feature> [--on-behalf-of <name>] [--evidence <text>]
+ *   approve <feature> [--on-behalf-of <name>] [--evidence <text>] [--no-commit] [--trailer "Key: Value"]...
+ *   plan-open <plan-file> [--trailer "Key: Value"]...
+ *   plan-status <feature> <rejected|needs-revision> [--trailer "Key: Value"]...
  *
  * Argv parsing is hand-rolled (no runtime dep beyond js-yaml, which this file
  * does not need). Control flow is deterministic and side-effect-free except for
@@ -54,9 +57,15 @@ import {
 import { readPreset } from './preset.js';
 import { readSources, renderOutputs, planGenerate, applyGenerate } from './generate.js';
 import { mergeDeliverGateHook } from './claude-settings.js';
-import { conventionWorkBranch, planWorkBranch } from './plan-commit.js';
+import {
+  approveCommitMessage, conventionWorkBranch, planIssueNumber, planWorkBranch, validateTrailer,
+} from './plan-commit.js';
+import { publishPlanChange, requirePublishReady } from './branch-publish.js';
 import { planOpenCommand, PLAN_OPEN_USAGE } from './plan-open.js';
+import { planStatusCommand, PLAN_STATUS_USAGE } from './plan-status.js';
 
+/** Usage line for `rad approve` (parse errors and the command table). */
+const APPROVE_USAGE = 'rad approve <feature> [--on-behalf-of <name>] [--evidence <text>] [--no-commit] [--trailer "Key: Value"]...';
 /** Usage line for `rad deliver` (help, parse errors, and the command table). */
 const DELIVER_USAGE = 'rad deliver <feature> [--model <model-id>] [--resume --context <text>]';
 /** Usage line for `rad stop-status`. */
@@ -88,7 +97,7 @@ const CONFIG_USAGE = 'rad config get <key> | rad config validate | rad config se
 const SUBCOMMANDS = {
   approve: {
     summary: 'Record an architect approval (event + plan-doc Status) on the work branch.',
-    usage: 'rad approve <feature> [--on-behalf-of <name>] [--evidence <text>]',
+    usage: APPROVE_USAGE,
     // run is wired below, after the command is defined, to keep the table near
     // the top of the file while letting the implementation read top-down.
     run: (argv, ctx) => approveCommand(argv, ctx),
@@ -182,6 +191,11 @@ const SUBCOMMANDS = {
     summary: "Cut a plan's work branch, commit the plan with a derived message, push, and label its issue.",
     usage: PLAN_OPEN_USAGE,
     run: (argv, ctx) => planOpenCommand(argv, ctx),
+  },
+  'plan-status': {
+    summary: "Record a plan review (rejected or needs-revision): set its Status, commit the plan, push, and label its issue.",
+    usage: PLAN_STATUS_USAGE,
+    run: (argv, ctx) => planStatusCommand(argv, ctx),
   },
   'plan-fingerprint': {
     summary: 'Print the SHA-256 fingerprint of a plan doc body (read-only).',
@@ -333,18 +347,21 @@ export async function main(argv, opts = {}) {
 }
 
 /**
- * Hand-rolled argv parser for `approve`. Returns the positional feature and the
- * `--on-behalf-of` / `--evidence` option values (undefined when absent). Throws
- * on a flag that is missing its value or on extra positionals so malformed
- * invocations fail loudly rather than silently mis-parse.
+ * Hand-rolled argv parser for `approve`. Returns the positional feature, the
+ * `--on-behalf-of` / `--evidence` option values (undefined when absent), the
+ * `--no-commit` flag, and every `--trailer` value in order (validated by the
+ * caller). Throws on a flag that is missing its value or on extra positionals
+ * so malformed invocations fail loudly rather than silently mis-parse.
  *
  * @param {string[]} argv
- * @returns {{ feature?: string, onBehalfOf?: string, evidence?: string }}
+ * @returns {{ feature?: string, onBehalfOf?: string, evidence?: string, noCommit: boolean, trailers: string[] }}
  */
 function parseApproveArgs(argv) {
   let feature;
   let onBehalfOf;
   let evidence;
+  let noCommit = false;
+  const trailers = [];
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -356,6 +373,12 @@ function parseApproveArgs(argv) {
       evidence = argv[i + 1];
       if (evidence === undefined) throw new Error('--evidence requires a value');
       i += 1;
+    } else if (arg === '--no-commit') {
+      noCommit = true;
+    } else if (arg === '--trailer') {
+      if (argv[i + 1] === undefined) throw new Error('--trailer requires a "Key: Value" argument');
+      trailers.push(argv[i + 1]);
+      i += 1;
     } else if (arg.startsWith('--')) {
       throw new Error(`unknown option '${arg}'`);
     } else if (feature === undefined) {
@@ -365,7 +388,7 @@ function parseApproveArgs(argv) {
     }
   }
 
-  return { feature, onBehalfOf, evidence };
+  return { feature, onBehalfOf, evidence, noCommit, trailers };
 }
 
 /** True when a string is present and not whitespace-only. */
@@ -1801,13 +1824,215 @@ function checkApprovalBlockers(sh, repoRoot, planFile) {
   }
 }
 
+/** `rad approve` exit codes: 1 = refused/failed before or during recording (existing contract); 2 = publish refusal or trailer usage error. */
+const APPROVE_FAILED_EXIT = 1;
+const APPROVE_REFUSED_EXIT = 2;
+const APPROVE_VERB = 'rad approve';
+const APPROVE_LABEL_STATUS = 'approved';
+
+/** Print the usage line after a parse error; returns `code`. */
+function approveUsageError(message, code) {
+  process.stderr.write(`rad approve: ${message}\n`);
+  process.stderr.write(`Usage: ${APPROVE_USAGE}\n`);
+  return code;
+}
+
 /**
- * `approve <feature> [--on-behalf-of <name>] [--evidence <text>]`.
+ * Parse and pre-validate argv. Every trailer refusal (invalid trailer, or
+ * `--trailer` with `--no-commit`) is exit 2 and runs before any read or write.
+ *
+ * @returns {{ code: number } | { feature: string, onBehalfOf?: string, evidence?: string, noCommit: boolean, trailers: string[] }}
+ */
+function parseApproveRequest(argv) {
+  let parsed;
+  try {
+    parsed = parseApproveArgs(argv);
+  } catch (err) {
+    return { code: approveUsageError(err.message, APPROVE_FAILED_EXIT) };
+  }
+  if (parsed.noCommit && parsed.trailers.length > 0) {
+    return { code: approveUsageError('--trailer is only valid without --no-commit (there is no commit to carry it)', APPROVE_REFUSED_EXIT) };
+  }
+  for (const t of parsed.trailers) {
+    const err = validateTrailer(t);
+    if (err !== null) return { code: approveUsageError(`invalid --trailer: ${err}`, APPROVE_REFUSED_EXIT) };
+  }
+  if (!isNonEmpty(parsed.feature)) {
+    return { code: approveUsageError('a feature name is required', APPROVE_FAILED_EXIT) };
+  }
+  return parsed;
+}
+
+/** Proxy mode: --evidence is mandatory and the named approver must be an architect. */
+function resolveProxyApprover(sh, repoRoot, { onBehalfOf, evidence }, runningUser) {
+  if (!isNonEmpty(evidence)) {
+    process.stderr.write('rad approve: --on-behalf-of requires --evidence (cite where the architect approved)\n');
+    return { code: APPROVE_FAILED_EXIT };
+  }
+  const roleCheck = sh(join(repoRoot, 'scripts', 'check-role.sh'), ['architect', repoRoot, onBehalfOf], { cwd: repoRoot });
+  if (roleCheck.status !== 0) {
+    process.stderr.write(`rad approve: '${onBehalfOf}' is not a configured architect in .rad/config.yml — cannot record their approval\n`);
+    if (isNonEmpty(roleCheck.stderr)) process.stderr.write(roleCheck.stderr);
+    return { code: APPROVE_FAILED_EXIT };
+  }
+  return { approvedBy: onBehalfOf, recordedBy: runningUser, proxy: true };
+}
+
+/** Direct mode: the running user must be a configured architect. */
+function resolveDirectApprover(sh, repoRoot, runningUser) {
+  const roleCheck = sh(join(repoRoot, 'scripts', 'check-role.sh'), ['architect', repoRoot], { cwd: repoRoot });
+  if (roleCheck.status !== 0) {
+    process.stderr.write('rad approve: permission denied — direct approval requires the architect role\n');
+    if (isNonEmpty(roleCheck.stdout)) process.stderr.write(roleCheck.stdout);
+    return { code: APPROVE_FAILED_EXIT };
+  }
+  return { approvedBy: runningUser, recordedBy: runningUser, proxy: false };
+}
+
+/**
+ * Authority. approvedBy = the HUMAN architect whose judgment this is;
+ * recordedBy = whoever physically ran it. Every refusal is exit 1.
+ *
+ * @returns {{ code: number } | { approvedBy: string, recordedBy: string, proxy: boolean }}
+ */
+function resolveApprover(sh, repoRoot, req) {
+  // `--evidence` is only meaningful alongside `--on-behalf-of` (proxy mode); a
+  // direct approval carrying evidence is refused before any identity or role check.
+  if (!isNonEmpty(req.onBehalfOf) && isNonEmpty(req.evidence)) {
+    process.stderr.write('rad approve: --evidence is only valid with --on-behalf-of\n');
+    return { code: APPROVE_FAILED_EXIT };
+  }
+  const userResult = sh('git', ['config', 'user.email'], { cwd: repoRoot });
+  const runningUser = (userResult.stdout || '').trim();
+  if (!isNonEmpty(runningUser)) {
+    process.stderr.write('rad approve: cannot determine git user.email — set your git identity first\n');
+    return { code: APPROVE_FAILED_EXIT };
+  }
+  return isNonEmpty(req.onBehalfOf)
+    ? resolveProxyApprover(sh, repoRoot, req, runningUser)
+    : resolveDirectApprover(sh, repoRoot, runningUser);
+}
+
+/**
+ * The bootstrap DUAL-WRITE: (a) append the `approved` event (recordApproval
+ * validates the transition first — an illegal move such as a same-fingerprint
+ * duplicate throws and nothing is written), then (b) mirror the plan-doc header.
+ *
+ * @returns {{ code: number } | { ts: string }}
+ */
+function recordApprovalAndStatus(store, a) {
+  const ts = new Date().toISOString();
+  try {
+    store.recordApproval({
+      feature: a.feature,
+      // The event-log actor is the human identity; recordApproval freezes the
+      // verified role token into the event's `role` field at write-time.
+      actor: a.who.approvedBy,
+      recordedBy: a.who.recordedBy,
+      ts,
+      evidence: a.who.proxy ? a.evidence : undefined,
+      fingerprint: a.planHash,
+      waivers: a.blockers.waivers,
+      highRiskPattern: a.blockers.highRiskPattern,
+    });
+  } catch (err) {
+    process.stderr.write(`rad approve: cannot record approval — ${err.message}\n`);
+    return { code: APPROVE_FAILED_EXIT };
+  }
+  writePlanStatus(a.planFile, { approvedBy: a.who.approvedBy, approvedAt: ts, recordedBy: a.who.recordedBy, evidence: a.evidence, proxy: a.who.proxy });
+  return { ts };
+}
+
+/** The structured, machine-greppable success line; `suffix` carries the publish fields. */
+function printApproveOk(feature, who, ts, suffix = '') {
+  const recorded = who.proxy ? ` recorded-by=${who.recordedBy}` : '';
+  process.stdout.write(
+    `rad approve: ok feature=${feature} status=approved approved-by=${who.approvedBy}${recorded} approved-at=${ts} proxy=${who.proxy}${suffix}\n`,
+  );
+}
+
+/**
+ * Resume view of an approval already recorded for this exact plan body: the
+ * commit message's identities come from the frozen event, falling back to this
+ * run's values. Re-approval = more than one approved event in the log.
+ */
+function resumedApproval(history, latest, a) {
+  const evidence = latest.data?.evidence ?? a.evidence;
+  const who = {
+    approvedBy: latest.actor ?? a.who.approvedBy,
+    recordedBy: latest.recordedBy ?? a.who.recordedBy,
+    proxy: a.who.proxy || isNonEmpty(evidence),
+  };
+  const approvals = history.filter((e) => e && e.type === 'approved').length;
+  return { who, evidence, ts: latest.ts, reapproval: approvals > 1 };
+}
+
+/**
+ * Record the approval (or resume one already recorded for this plan body).
+ * The re-approval subject is decided from the log BEFORE the new event lands.
+ */
+function recordOrResume(store, a) {
+  let history;
+  try {
+    history = store.history(a.feature);
+  } catch (err) {
+    process.stderr.write(`rad approve: cannot read the event log — ${err.message}\n`);
+    return { code: APPROVE_FAILED_EXIT };
+  }
+  const latest = latestApprovedEvent(history);
+  if (latest?.data?.fingerprint === a.planHash) return { ...resumedApproval(history, latest, a), resumed: true };
+  const reapproval = latest !== null;
+  const rec = recordApprovalAndStatus(store, a);
+  if (rec.code !== undefined) return rec;
+  return { who: a.who, evidence: a.evidence, ts: rec.ts, reapproval, resumed: false };
+}
+
+/**
+ * Default (commit) path: refuse unless publish-ready (nothing written), record
+ * or resume, then commit the plan + event log, push (fail closed), and label.
+ */
+function approveAndPublish(sh, store, a) {
+  const refusal = requirePublishReady(sh, a.repoRoot, a.workBranch);
+  if (refusal !== null) {
+    process.stderr.write(`rad approve: refused — ${refusal}\n`);
+    return APPROVE_REFUSED_EXIT;
+  }
+  const rec = recordOrResume(store, a);
+  if (rec.code !== undefined) return rec.code;
+  const message = approveCommitMessage(a.planText, {
+    feature: a.feature, reapproval: rec.reapproval, approvedBy: rec.who.approvedBy,
+    recordedBy: rec.who.recordedBy, evidence: rec.evidence, proxy: rec.who.proxy,
+  }, a.trailers);
+  const result = publishPlanChange(sh, a.repoRoot, {
+    verb: APPROVE_VERB,
+    branch: a.workBranch,
+    paths: [`.agents/plans/${a.feature}.md`, `.agents/state/${a.feature}/events.jsonl`],
+    message,
+    issue: planIssueNumber(a.planText),
+    labelStatus: APPROVE_LABEL_STATUS,
+  });
+  if (result.code !== 0) {
+    process.stderr.write(`rad approve: ${result.message}\n`);
+    return APPROVE_FAILED_EXIT;
+  }
+  const resumed = rec.resumed ? ' resumed=true' : '';
+  printApproveOk(a.feature, rec.who, rec.ts, ` committed=${result.committed} pushed=${result.pushed}${resumed}`);
+  return 0;
+}
+
+/**
+ * `approve <feature> [--on-behalf-of <name>] [--evidence <text>] [--no-commit] [--trailer "Key: Value"]...`.
  *
  * Enforces architect authority with parity to the prose rules and, on success,
  * performs the bootstrap DUAL-WRITE: (a) appends the `approved` event via
- * recordApproval(...) AND (b) writes the plan-doc Status header. Pure git/state
- * work — no model call, no PR, no push.
+ * recordApproval(...) AND (b) writes the plan-doc Status header. No model call,
+ * no PR.
+ *
+ * By default it then publishes: commits ONLY the plan doc and the event log on
+ * the work branch, pushes (failure is exit 1, resumable by rerun), and labels
+ * the issue `approved`. A rerun whose latest approved event already covers this
+ * plan body (same fingerprint) skips recording and resumes the publish.
+ * `--no-commit` keeps the record-only flow (and its best-effort RAD_SYNC push).
  *
  * Authority:
  *   - Direct mode (no --on-behalf-of): the running git user MUST be a configured
@@ -1817,12 +2042,13 @@ function checkApprovalBlockers(sh, repoRoot, planFile) {
  *     <name>); the running user need NOT be an architect. approvedBy = <name>,
  *     recordedBy = running user.
  *
- * Attribution: the event-log `actor` is the ROLE TOKEN `architect` — that is what
- * gates.yaml's `requiredRole`/`actor-has-role` rule matches (and what the
- * git-state-store unit tests assert). The HUMAN identity (the architect whose
- * judgment it is) is preserved on the event as `recordedBy` and in the plan-doc
- * `Approved-By` header. The role trust boundary itself lives in check-role.sh,
- * which we consult above before recording.
+ * Attribution: the event-log `actor` is the human identity (approvedBy);
+ * recordApproval freezes the verified role token into the event's `role` field,
+ * which gates.yaml's requiredRole rule matches. The role trust boundary itself
+ * lives in check-role.sh, consulted before recording.
+ *
+ * Exit codes: 0 ok; 1 authority/blocker/record refusal or a failed publish step
+ * (rerun resumes); 2 publish refusal or trailer usage error (nothing written).
  *
  * @param {string[]} argv - args after `approve`
  * @param {{ repoRoot: string, sh?: typeof defaultSh }} ctx
@@ -1831,157 +2057,37 @@ function checkApprovalBlockers(sh, repoRoot, planFile) {
 export async function approveCommand(argv, ctx) {
   const { repoRoot } = ctx;
   const sh = ctx.sh ?? defaultSh;
-
-  let parsed;
-  try {
-    parsed = parseApproveArgs(argv);
-  } catch (err) {
-    process.stderr.write(`rad approve: ${err.message}\n`);
-    process.stderr.write('Usage: rad approve <feature> [--on-behalf-of <name>] [--evidence <text>]\n');
-    return 1;
-  }
-
-  const { feature, onBehalfOf, evidence } = parsed;
-
-  if (!isNonEmpty(feature)) {
-    process.stderr.write('rad approve: a feature name is required\n');
-    process.stderr.write('Usage: rad approve <feature> [--on-behalf-of <name>] [--evidence <text>]\n');
-    return 1;
-  }
-
-  const roleScript = join(repoRoot, 'scripts', 'check-role.sh');
-
+  const req = parseApproveRequest(argv);
+  if (req.code !== undefined) return req.code;
+  const { feature, evidence } = req;
   const planFile = join(repoRoot, '.agents', 'plans', `${feature}.md`);
   if (!existsSync(planFile)) {
     process.stderr.write(`rad approve: no plan doc at .agents/plans/${feature}.md\n`);
-    return 1;
+    return APPROVE_FAILED_EXIT;
   }
-
   const store = createGitStateStore({ repoRoot, sh });
-
-  // Read the plan doc once: the `Branch:` header (for the best-effort sync push)
-  // and the body fingerprint (stamped onto the approved event so the gate-read
-  // boundary can detect a post-approval edit).
   const planText = readFileSync(planFile, 'utf8');
-  // Resolve the work branch the same way deliver does: the plan doc's `Branch:`
-  // header is canonical; fall back to the RAD_BRANCH_PREFIX (default rad/)
-  // convention when absent. Used only by the best-effort RAD_SYNC push after a
-  // successful record.
+  // The plan doc's `Branch:` header is canonical; else the RAD_BRANCH_PREFIX convention.
   const workBranch = planWorkBranch(parsePlanCtx(planText).branch, feature);
   // Fingerprint of the approved plan body (mutable header excluded by construction);
-  // attested into the approved event's data so a later edit can fail the gate closed.
+  // attested into the approved event so a later edit can fail the gate closed.
   const planHash = planFingerprint(planText).hash;
-
-  // `--evidence` is only meaningful alongside `--on-behalf-of` (proxy mode); a
-  // direct approval carrying evidence is refused before any identity or role check.
-  if (!isNonEmpty(onBehalfOf) && isNonEmpty(evidence)) {
-    process.stderr.write('rad approve: --evidence is only valid with --on-behalf-of\n');
-    return 1;
-  }
-
-  // Resolve the running git user (the recorder).
-  const userResult = sh('git', ['config', 'user.email'], { cwd: repoRoot });
-  const runningUser = (userResult.stdout || '').trim();
-  if (!isNonEmpty(runningUser)) {
-    process.stderr.write('rad approve: cannot determine git user.email — set your git identity first\n');
-    return 1;
-  }
-
-  // approvedBy = the HUMAN architect whose judgment this is (plan-doc Approved-By
-  // + the event's recordedBy audit field). The event-log `actor` is always the
-  // role token `architect` (see below). recordedBy = whoever physically ran it.
-  let approvedBy;
-  let recordedBy;
-  let proxy = false;
-
-  if (isNonEmpty(onBehalfOf)) {
-    // Proxy mode: --evidence is mandatory; the named approver must be an architect.
-    proxy = true;
-    if (!isNonEmpty(evidence)) {
-      process.stderr.write('rad approve: --on-behalf-of requires --evidence (cite where the architect approved)\n');
-      return 1;
-    }
-    const roleCheck = sh(roleScript, ['architect', repoRoot, onBehalfOf], { cwd: repoRoot });
-    if (roleCheck.status !== 0) {
-      process.stderr.write(`rad approve: '${onBehalfOf}' is not a configured architect in .rad/config.yml — cannot record their approval\n`);
-      if (isNonEmpty(roleCheck.stderr)) process.stderr.write(roleCheck.stderr);
-      return 1;
-    }
-    approvedBy = onBehalfOf;
-    recordedBy = runningUser;
-  } else {
-    // Direct mode: the running user must be a configured architect.
-    if (isNonEmpty(evidence)) {
-      process.stderr.write('rad approve: --evidence is only valid with --on-behalf-of\n');
-      return 1;
-    }
-    const roleCheck = sh(roleScript, ['architect', repoRoot], { cwd: repoRoot });
-    if (roleCheck.status !== 0) {
-      process.stderr.write('rad approve: permission denied — direct approval requires the architect role\n');
-      if (isNonEmpty(roleCheck.stdout)) process.stderr.write(roleCheck.stdout);
-      return 1;
-    }
-    approvedBy = runningUser;
-    recordedBy = runningUser;
-  }
-
-  // Blocker check runs in BOTH modes, after authority is established and before
-  // any write. Only exit 0 from the script permits recording (fail-closed).
+  const who = resolveApprover(sh, repoRoot, req);
+  if (who.code !== undefined) return who.code;
+  // Blocker check runs in BOTH modes, after authority and before any write.
+  // Only exit 0 from the script permits recording (fail-closed).
   const blockers = checkApprovalBlockers(sh, repoRoot, planFile);
   if (!blockers.ok) {
     process.stderr.write(blockers.message);
-    return 1;
+    return APPROVE_FAILED_EXIT;
   }
-
-  // The event-log actor is the human identity (approvedBy); recordApproval freezes
-  // the verified role token into the event's `role` field at write-time.
-  const actor = approvedBy;
-
-  const ts = new Date().toISOString();
-
-  // Dual-write (a): append the `approved` event. recordApproval validates the
-  // transition before writing — an illegal move (e.g. already approved) throws.
-  try {
-    store.recordApproval({
-      feature,
-      actor,
-      recordedBy,
-      ts,
-      evidence: proxy ? evidence : undefined,
-      fingerprint: planHash,
-      waivers: blockers.waivers,
-      highRiskPattern: blockers.highRiskPattern,
-    });
-  } catch (err) {
-    process.stderr.write(`rad approve: cannot record approval — ${err.message}\n`);
-    return 1;
-  }
-
-  // Dual-write (b): write the plan-doc Status header fields (Approved-By carries
-  // the HUMAN architect identity, not the role token).
-  writePlanStatus(planFile, {
-    approvedBy,
-    approvedAt: ts,
-    recordedBy,
-    evidence,
-    proxy,
-  });
-
-  // Best-effort publish (RAD_SYNC-gated): the approved event has landed locally;
-  // push the work-branch tip so a deliver gate on another machine honors it.
-  // Never fails the verb (offline-fail-safe).
+  const a = { repoRoot, feature, evidence, planFile, planText, planHash, workBranch, who, blockers, trailers: req.trailers };
+  if (!req.noCommit) return approveAndPublish(sh, store, a);
+  const rec = recordApprovalAndStatus(store, a);
+  if (rec.code !== undefined) return rec.code;
+  // Record-only: best-effort RAD_SYNC publish, never fails the verb (offline-fail-safe).
   bestEffortSyncPush(repoRoot, workBranch, sh);
-
-  // Structured success line (machine-greppable single line).
-  if (proxy) {
-    process.stdout.write(
-      `rad approve: ok feature=${feature} status=approved approved-by=${approvedBy} recorded-by=${recordedBy} approved-at=${ts} proxy=true\n`,
-    );
-  } else {
-    process.stdout.write(
-      `rad approve: ok feature=${feature} status=approved approved-by=${approvedBy} approved-at=${ts} proxy=false\n`,
-    );
-  }
+  printApproveOk(feature, who, rec.ts);
   return 0;
 }
 

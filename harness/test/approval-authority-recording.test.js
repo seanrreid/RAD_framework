@@ -446,7 +446,7 @@ test('regression: RAD_LOW_RISK_PATTERNS=.* does not let a non-architect direct a
       };
 
       process.stderr.write = (chunk) => { stderr += String(chunk); return true; };
-      const code = await approveCommand([feature], { repoRoot, sh });
+      const code = await approveCommand([feature, '--no-commit'], { repoRoot, sh });
       process.stderr.write = origWrite;
 
       assert.equal(code, 1, `non-architect direct approve must fail; got ${code}`);
@@ -503,7 +503,7 @@ async function approveWithBlocker(blocker, extraArgs = []) {
       };
       process.stderr.write = (chunk) => { stderr += String(chunk); return true; };
       process.stdout.write = () => true;
-      const code = await approveCommand([feature, ...extraArgs], { repoRoot, sh });
+      const code = await approveCommand([feature, '--no-commit', ...extraArgs], { repoRoot, sh });
       process.stderr.write = origWrite;
       process.stdout.write = origOut;
       const eventsFile = join(repoRoot, '.agents', 'state', feature, 'events.jsonl');

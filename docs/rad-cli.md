@@ -5,9 +5,10 @@ It owns the pure mechanics that the `/rad-*` prose commands used to inline; the
 prose commands retain the human-in-the-loop steps and shell out here for recording
 and execution.
 
-The CLI never calls a model on its own — `rad approve` is pure git/state work;
-`rad deliver` delegates model calls to a selectable agent adapter (a spawned CLI
-agent or the Claude Agent SDK) but does not call any API itself.
+The CLI never calls a model on its own and never opens a PR — `rad approve` is
+pure git/state work; `rad deliver` delegates model calls to a selectable agent
+adapter (a spawned CLI agent or the Claude Agent SDK) but does not call any API
+itself. It pushes a branch only in `approve`, `plan-open` and `plan-status`.
 
 ---
 
@@ -42,24 +43,63 @@ Tests use the `node harness/cli.js` form so they don't depend on a global link.
 ### rad approve
 
 ```
-rad approve <feature> [--on-behalf-of <name>] [--evidence <text>]
+rad approve <feature> [--on-behalf-of <name>] [--evidence <text>] [--no-commit] [--trailer "Key: Value"]...
 ```
 
-Records an architect approval:
-- Appends an `approved` event to `.agents/state/<feature>/events.jsonl` — this
-  event is the **sole approval authority**; the gate reads it, not the doc.
-- Writes `Status: approved`, `Approved-By`, `Approved-At` headers to the plan doc.
-  These headers are a **display-only mirror** of the event for humans skimming the
-  plan; nothing gates on them.
+Records an architect approval and, by default, publishes it on the work branch:
+1. checks authority, then the approval blockers (`scripts/check-approval-blockers.sh`);
+2. refuses unless HEAD is the plan's work branch with nothing staged;
+3. appends an `approved` event to `.agents/state/<feature>/events.jsonl` — this
+   event is the **sole approval authority**; the gate reads it, not the doc — and
+   writes `Status: approved`, `Approved-By`, `Approved-At` headers to the plan doc
+   (`Recorded-By` and `Approval-Evidence` in proxy mode). These headers are a
+   **display-only mirror** of the event; nothing gates on them;
+4. commits **only** the plan doc and the event log;
+5. pushes the work branch;
+6. labels the issue `approved`.
 
-The `/rad-approve` prose command calls this after the architect confirms.
+No PR is opened and nothing is committed to the default branch. The
+`/rad-approve` prose command calls this after the architect confirms.
 
 **Authority:**
 - Direct: the running `git user.email` must be a configured architect in `.rad/config.yml` (`roles.architect`)
 - Proxy: `--on-behalf-of <name>` records an out-of-band approval; `--evidence` is
-  required and captured in the event log
+  required and captured in the event log. `<name>` must be a configured architect.
 
-**Exit codes:** 0 on success, 1 on refusal or error.
+**Derived commit message:** subject `approve: <feature>`, or
+`approve: <feature> (re-approval)` when the event log already holds an approval.
+The body carries `Plan`, `Issue` (when the plan has one) and `Approved-By`, plus
+`Recorded-By` and `Approval-Evidence` in proxy mode, followed by any `--trailer`
+lines.
+
+**`--trailer`:** repeatable; each value must be a single-line `Key: Value`. Pass
+one per attribution line your tool requires. An invalid trailer, or `--trailer`
+with `--no-commit`, is a refusal (exit 2).
+
+**Resume:** when the latest `approved` event's fingerprint matches the current
+plan body, a rerun records nothing new and resumes the publish — it commits if
+the files still have changes, pushes if origin lags, then labels. The success
+line then carries `resumed=true`. There is no rollback.
+
+**`--no-commit`:** the previous behavior — record the event and the header only,
+with no branch check, commit or label. The push is best-effort and happens only
+under `RAD_SYNC`; its failure never fails the command.
+
+**Labelling:** runs only after a successful push. The issue comes from the plan's
+`Issue:` header; without one the command prints `label skipped: no issue`.
+
+**Success line:**
+`rad approve: ok feature=<f> status=approved approved-by=<who> [recorded-by=<who>] approved-at=<ts> proxy=<bool> committed=<bool> pushed=<bool> [resumed=true]`.
+`committed`, `pushed` and `resumed` are absent under `--no-commit`.
+
+**Exit codes:**
+- **0** — recorded (or resumed), committed if needed, pushed and labelled.
+- **1** — refused for authority or blockers (nothing written), a bad argument
+  or a missing plan doc, or the commit, push or label failed after recording. A
+  publish failure is safe to rerun; the rerun resumes.
+- **2** — refused before writing, nothing changed: HEAD is not the work branch,
+  staged changes are present, an invalid `--trailer`, or `--trailer` with
+  `--no-commit`.
 
 ---
 
@@ -113,6 +153,58 @@ branch is already pushed; a rerun is safe).
 
 **Exit codes:** 0 on success; 1 when a step failed after the branch exists
 (rerun is safe); 2 on a refusal (nothing changed).
+
+---
+
+### rad plan-status
+
+```
+rad plan-status <feature> <rejected|needs-revision> [--trailer "Key: Value"]...
+```
+
+Records an architect's non-approval review of a plan: the one deterministic step
+behind the **no** and **feedback** answers in `/rad-approve`, callable from any
+coding tool. It:
+1. sets the plan doc's `Status:` header to the given status;
+2. commits **only** the plan file on its work branch with a message derived from
+   the plan;
+3. pushes the work branch;
+4. labels the issue with the status.
+
+No PR is opened and nothing is committed to the default branch. For **feedback**,
+append the `## Architect Feedback` section to the plan file first; the command
+commits it along with the header.
+
+**Derived commit message:** subject `review: <feature> <status>`. The body
+carries `Plan`, `Issue` (when the plan has one) and `Reviewed-By` (the running
+`git user.email`), followed by any `--trailer` lines.
+
+**`--trailer`:** repeatable; each value must be a single-line `Key: Value`. Pass
+one per attribution line your tool requires. An invalid trailer is a refusal.
+
+**Refusals (exit 2, nothing changed):**
+- bad argv, an invalid `--trailer`, an invalid feature name, or a status other
+  than `rejected` or `needs-revision`
+- no plan file at `.agents/plans/<feature>.md`
+- the running user is not a configured architect
+- the plan's `Status:` is `approved`, `in-progress` or `complete`
+- the `approved` gate passes (the event log records an approval)
+- HEAD is not the plan's work branch, or staged changes are present
+- no `git user.email` is set
+
+**Rerun:** if the plan already has the requested status, the run is a rerun: it
+commits only if the plan file has changes (for example, newly written feedback),
+then pushes if origin lags and labels. A push or label failure exits 1 with a
+message that a rerun is safe; the rerun resumes. There is no rollback.
+
+**Labelling:** runs only after a successful push. The issue comes from the plan's
+`Issue:` header; without one the command prints `label skipped: no issue`.
+
+**Success line:**
+`rad plan-status: ok feature=<f> status=<status> committed=<bool> pushed=<bool> issue=<n|none>`.
+
+**Exit codes:** 0 committed (if needed) and pushed; 1 a publish step failed
+(rerun resumes); 2 refused, nothing changed.
 
 ---
 
