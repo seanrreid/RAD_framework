@@ -1,7 +1,10 @@
 # Plan: Generate /rad-plan and /rad-adopt from .rad/skills (#186 part 2c)
 Created: 2026-10-07
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-10-07T15:27:57.019Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/plan-adopt-skills
 Issue: 186
 Adopted-From: https://github.com/seanrreid/RAD_framework/issues/186
