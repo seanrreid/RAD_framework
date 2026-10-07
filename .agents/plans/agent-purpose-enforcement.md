@@ -1,7 +1,7 @@
 # Plan: Enforce and Emit the Agent Purpose Tag (#46 part 2)
 Created: 2026-10-07
 Author: architect
-Status: approved
+Status: in-progress
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-10-07T12:49:41.186Z
 Recorded-By: sean@torchcodelab.com
