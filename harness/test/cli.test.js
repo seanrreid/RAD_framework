@@ -558,8 +558,11 @@ function seedApprovedTwoWavePlan(repoRoot) {
 
 const okSh = () => ({ status: 0, stdout: '', stderr: '' });
 
+/** No-op prepare port: these tests exercise the spine, not branch sync. */
+const noopPrepare = async () => ({ ok: true, data: {} });
+
 /** Run deliverCommand with the given env overrides, capturing stderr. */
-async function runDeliverCaptured({ repoRoot, runWave, sh = okSh, env = {}, args = [] }) {
+async function runDeliverCaptured({ repoRoot, runWave, sh = okSh, env = {}, args = [], prepare = noopPrepare }) {
   const saved = Object.fromEntries(DELIVER_ENV_KEYS.map((k) => [k, process.env[k]]));
   for (const k of DELIVER_ENV_KEYS) delete process.env[k];
   // Worktree isolation is the default; these main-checkout tests opt out unless
@@ -571,7 +574,7 @@ async function runDeliverCaptured({ repoRoot, runWave, sh = okSh, env = {}, args
   process.stderr.write = (chunk) => { stderr += chunk; return true; };
   try {
     const { value: code } = await captureStdout(() =>
-      deliverCommand([DELIVER_FEATURE, ...args], { repoRoot, sh, runWave }),
+      deliverCommand([DELIVER_FEATURE, ...args], { repoRoot, sh, runWave, prepare }),
     );
     return { code, stderr };
   } finally {
@@ -594,6 +597,84 @@ test('deliver AC#6 — ok with the fold confirming completion → exit 0', async
     });
     assert.equal(code, 0, `expected exit 0; stderr:\n${stderr}`);
     assert.ok(readLog(logFile).some((e) => e.type === 'pr-opened'));
+  });
+});
+
+test('deliver prepare — a provided ctx.prepare is called exactly once', async () => {
+  await withTempRepo(async (repoRoot) => {
+    seedApprovedTwoWavePlan(repoRoot);
+    let calls = 0;
+    const { code, stderr } = await runDeliverCaptured({
+      repoRoot,
+      runWave: async () => ({ outcome: 'success' }),
+      prepare: async () => { calls += 1; return { ok: true, data: {} }; },
+    });
+    assert.equal(code, 0, `expected exit 0; stderr:\n${stderr}`);
+    assert.equal(calls, 1);
+  });
+});
+
+test('deliver prepare — merge-conflict → exit 3, rendered decision on stderr, deliver-stopped recorded', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const { logFile } = seedApprovedTwoWavePlan(repoRoot);
+    let waves = 0;
+    const { code, stderr } = await runDeliverCaptured({
+      repoRoot,
+      runWave: async () => { waves += 1; return { outcome: 'success' }; },
+      prepare: async () => ({ ok: false, stopped: 'merge-conflict', detail: 'a.js', base: 'main', branch: 'rad/x' }),
+    });
+    assert.equal(code, 3, `expected exit 3; stderr:\n${stderr}`);
+    assert.match(stderr, /stopped=merge-conflict/);
+    assert.match(stderr, /class=needs-decision/);
+    assert.ok(stderr.includes('merging origin/main into rad/x conflicts (a.js)'), stderr);
+    assert.equal(waves, 0, 'no wave runs after a prepare stop');
+    const stopped = readLog(logFile).filter((e) => e.type === 'deliver-stopped');
+    assert.equal(stopped.length, 1);
+  });
+});
+
+test('deliver prepare — prepare-failed → exit 1 with class=failed', async () => {
+  await withTempRepo(async (repoRoot) => {
+    seedApprovedTwoWavePlan(repoRoot);
+    const { code, stderr } = await runDeliverCaptured({
+      repoRoot,
+      runWave: async () => ({ outcome: 'success' }),
+      prepare: async () => ({ ok: false, stopped: 'prepare-failed', detail: 'cannot reach origin', base: 'main', branch: 'rad/x' }),
+    });
+    assert.equal(code, 1, `expected exit 1; stderr:\n${stderr}`);
+    assert.match(stderr, /stopped=prepare-failed/);
+    assert.match(stderr, /class=failed/);
+  });
+});
+
+test('deliver prepare — no default branch resolves → exit 1 before the spine (missing port option)', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const { logFile } = seedApprovedTwoWavePlan(repoRoot);
+    let waves = 0;
+    const { code, stderr } = await runDeliverCaptured({
+      repoRoot,
+      runWave: async () => { waves += 1; return { outcome: 'success' }; },
+      prepare: null, // the real port; okSh yields an empty default branch
+    });
+    assert.equal(code, 1, `expected exit 1; stderr:\n${stderr}`);
+    assert.match(stderr, /makePreparePort: baseBranch is required/);
+    assert.equal(waves, 0);
+    assert.ok(!readLog(logFile).some((e) => e.type === 'deliver-started'), 'spine never starts');
+  });
+});
+
+test('deliver prepare — default-branch script fails → exit 1 before the spine', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const { logFile } = seedApprovedTwoWavePlan(repoRoot);
+    const sh = (file) => (String(file).endsWith('get-default-branch.sh')
+      ? { status: 2, stdout: '', stderr: 'boom' }
+      : { status: 0, stdout: '', stderr: '' });
+    const { code, stderr } = await runDeliverCaptured({
+      repoRoot, sh, runWave: async () => ({ outcome: 'success' }), prepare: null,
+    });
+    assert.equal(code, 1, `expected exit 1; stderr:\n${stderr}`);
+    assert.match(stderr, /cannot resolve default branch/);
+    assert.ok(!readLog(logFile).some((e) => e.type === 'deliver-started'), 'spine never starts');
   });
 });
 
@@ -1964,7 +2045,7 @@ async function runDeliverStderrOnly({ repoRoot, env }) {
   process.stderr.write = (chunk) => { stderr += chunk; return true; };
   try {
     const code = await withProcessEnv({ ...env, RAD_WORKTREE: '0' }, () =>
-      deliverCommand([DELIVER_FEATURE], { repoRoot, sh: okSh }));
+      deliverCommand([DELIVER_FEATURE], { repoRoot, sh: okSh, prepare: noopPrepare }));
     return { code, stderr };
   } finally {
     process.stderr.write = originalErr;
@@ -2806,7 +2887,7 @@ async function runAcpDeliver(repoRoot, env, args = []) {
     let stderr = '';
     process.stderr.write = (chunk) => { stderr += chunk; return true; };
     try {
-      return { code: await deliverCommand([DELIVER_FEATURE, ...args], { repoRoot, sh: okSh }), stderr };
+      return { code: await deliverCommand([DELIVER_FEATURE, ...args], { repoRoot, sh: okSh, prepare: noopPrepare }), stderr };
     } finally {
       process.stderr.write = originalErr;
     }

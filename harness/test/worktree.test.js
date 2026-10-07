@@ -236,11 +236,14 @@ function makeDeliverSh({
   return sh;
 }
 
+/** No-op prepare port: these tests exercise isolation, not branch sync. */
+const noopPrepare = async () => ({ ok: true, data: {} });
+
 /**
  * Run deliverCommand with RAD_WORKTREE forced on ('1') / off ('0' — the only
  * opt-out; unset is ON), or left UNSET when `worktree` is undefined. Restores env after.
  */
-async function runDeliver({ worktree, repoRoot, sh, runWave, env = {} }) {
+async function runDeliver({ worktree, repoRoot, sh, runWave, env = {}, prepare = noopPrepare }) {
   const names = ['RAD_WORKTREE', 'RAD_AGENT', 'ANTHROPIC_API_KEY', 'RAD_BRANCH_PREFIX'];
   const saved = Object.fromEntries(names.map((n) => [n, process.env[n]]));
   if (worktree === undefined) delete process.env.RAD_WORKTREE;
@@ -251,7 +254,7 @@ async function runDeliver({ worktree, repoRoot, sh, runWave, env = {} }) {
   delete process.env.RAD_BRANCH_PREFIX;
   Object.assign(process.env, env);
   try {
-    return await deliverCommand([FEATURE], { repoRoot, sh, runWave });
+    return await deliverCommand([FEATURE], { repoRoot, sh, runWave, prepare });
   } finally {
     for (const n of names) {
       if (saved[n] !== undefined) process.env[n] = saved[n];
