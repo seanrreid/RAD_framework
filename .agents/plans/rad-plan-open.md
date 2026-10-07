@@ -103,6 +103,7 @@ Research was done directly by the architect, plus one read-only Explore sweep of
 | harness/plan-commit.js | 1-150 | New: pure helpers (AC#1) |
 | harness/test/plan-commit.test.js | 1-150 | New: helper tests |
 | harness/plan-open.js | 1-160 | New: `planOpenCommand` |
+| harness/adapters/git-state-store.js | 97 | Amendment 1: `export` `isSafeFeature` so `plan-open` can reuse it |
 | harness/test/cli-plan-open.test.js | 1-180 | New: `plan-open` against temp repos with a bare origin |
 | harness/cli.js | 56-200 | Usage constant and `plan-open` subcommand entry |
 | harness/cli.js | 731-741 | `conventionWorkBranch` exported or reused by `planWorkBranch` |
@@ -125,6 +126,7 @@ Research was done directly by the architect, plus one read-only Explore sweep of
 - `scripts/draft-insights-plan.sh`: keeps its own shell path.
 - `scripts/rad-label.sh`, `scripts/get-default-branch.sh`, `scripts/checkout-plan.sh`: call them, don't change them.
 - `harness/gates.js` and the events writer: `plan-open` writes no events.
+- `harness/adapters/git-state-store.js` other than adding `export` to `isSafeFeature` (Amendment 1).
 
 ### Key Files
 - `harness/cli.js`:
@@ -142,7 +144,7 @@ Research was done directly by the architect, plus one read-only Explore sweep of
 - **Every git call takes an args array through `sh`,** and `ctx.sh ?? defaultSh` is injectable for tests. Never build a shell string.
 - **`plan-open` always pushes.** It doesn't read `RAD_SYNC`.
 - **Stage only the plan file.** Never `git add -A`.
-- **Write the slug regex once.** Reuse `isSafeFeature`; don't add another copy.
+- **Write the slug regex once.** Reuse `isSafeFeature`; don't add another copy. Amendment 1: it isn't exported today, so Task 2.1 adds `export` to its declaration in `git-state-store.js` and imports it. The other private copies (`git-artifact-store.js`, `digest.js`, `DIGEST_FEATURE_PATTERN` in `cli.js`) are left for a follow-up.
 - **`rad-label.sh` exits 0 even when `gh` is missing.** Don't treat its output as a failure. Only a non-zero exit (usage) is a bug.
 
 ## Program Design
@@ -215,8 +217,9 @@ Validate: AC#3 — `npm test --prefix harness` passes, and `grep -n 'rad/\${feat
 The command depends on the Wave 1 helpers.
 
 #### Task 2.1: `rad plan-open` command
-File: harness/plan-open.js:1-160, harness/test/cli-plan-open.test.js:1-180, harness/cli.js:56-200
+File: harness/plan-open.js:1-160, harness/test/cli-plan-open.test.js:1-180, harness/cli.js:56-200, harness/adapters/git-state-store.js:97
 What:
+- Amendment 1: add `export` to `isSafeFeature` in `harness/adapters/git-state-store.js` and import it for the slug check. No other change to that file.
 - Implement `planOpenCommand` per AC#4 and the call stack above. Keep each function under about 40 lines: argv, preconditions, branch-state classification, commit, push, label.
 - Register `plan-open` in `SUBCOMMANDS` with a usage constant, and route git through `mainGit`/`sh`.
 - **Tests** (temp repo with a bare origin, plus `.rad/config.yml` and copies of the scripts it calls, or a `sh` stub where the real script can't run):
