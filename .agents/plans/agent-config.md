@@ -44,7 +44,7 @@ Under the part 3 decisions recorded on #186 on 2026-10-07, both the Claude and C
    - or `--agent-cmd "<cmd>"` with an optional `--agent-adapter command|acp` (default `command`);
    - or `--agent-adapter sdk` with no command.
 
-   Combining `--agent` with `--agent-cmd`, or giving an unknown preset, is a usage error (exit 2). Without any agent flag, the written config has no `agent:` key, and the existing summary line is unchanged. With one, the summary line adds `, agent=<adapter>:<command|sdk>`.
+   Combining `--agent` with `--agent-cmd`, or giving an unknown preset, is a usage error (exit 2). Without any agent flag, the written config has no `agent:` key, and the existing summary line is unchanged. With one, the summary line adds `, agent=<adapter>:<command>`, or `, agent=sdk` for the sdk adapter (amendment 1).
 6. `install.sh` accepts `--agent <claude|codex>` and passes it to `config init` on a fresh install.
    - **Interactive (no `--yes`, no `--agent`, fresh install):** it asks for `claude`, `codex` or `skip` (default `claude`).
    - **`--yes` without `--agent`:** writes no agent.
@@ -52,6 +52,9 @@ Under the part 3 decisions recorded on #186 on 2026-10-07, both the Claude and C
    - **Validation:** an invalid `--agent` value fails before anything is written.
 7. Docs: `docs/configuration.md` documents the `agent:` schema and the precedence, `docs/rad-cli.md`'s deliver and review sections mention it, `INSTALL.md` documents `--agent`, and `UPGRADE.md` says existing projects can add `agent:` by hand, while the environment variables keep working.
 8. Tests cover the schema, the selection, deliver's exit 2 and config path, review's fallback, config init's flags, and the install flag and prompt behavior, and all existing tests pass. Where an existing test asserted the old "RAD_AGENT_CMD is required" exit 1 for an unset command with no config, it's updated to the new exit 2, and nothing else changes.
+
+## Amendments
+- **Amendment 1 (2026-10-07, during Wave 2):** Wave 2 found that `harness/test/deliver.test.js:164` reached the command path by leaving every agent variable unset, which now refuses earlier with "no agent configured" (exit 2, the intended new behavior). The test now sets `RAD_AGENT=command` explicitly; its intent (command path needs `RAD_AGENT_CMD`, never `ANTHROPIC_API_KEY`) is unchanged. File added to scope. AC#5 is clarified: an sdk agent prints `agent=sdk`, not `agent=sdk:sdk`.
 
 ## Agent Scope
 Research was done directly in this session, with a read-only sub-agent survey for part 3 overall. Files read: harness/config.js, `resolveAgent`/`agentKindFromEnv`/`deliverCommand` agent selection in harness/cli.js, `resolveReviewAgent`, `config init`, install.sh's argument parsing, prompt and config_init, the command adapter's stdin contract, configuration.md's agent section, and the test anchors. There are no out-of-scope dependencies.
@@ -76,6 +79,7 @@ Research was done directly in this session, with a read-only sub-agent survey fo
 | harness/test/agent-select.test.js | 1-1 | New: selection precedence and error tests |
 | harness/test/cli.test.js | 1690-1700 | Update `resolveAgent` call shape if its signature changes |
 | harness/test/cli.test.js | 2700-2735 | Update the missing-command case to the new exit-2 path; add a config-driven case |
+| harness/test/deliver.test.js | 160-185 | Amendment 1: the "command path requires RAD_AGENT_CMD" test sets `RAD_AGENT=command` explicitly, since an empty environment with no config now exits 2 earlier |
 | install.sh | 1-45 | Usage line and comment; parse and validate `--agent` |
 | install.sh | 150-165 | The interactive agent prompt (fresh install only, after the target prompt) |
 | install.sh | 405-420 | `config_init` passes `--agent` |
