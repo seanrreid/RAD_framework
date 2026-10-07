@@ -9,3 +9,4 @@ Executor role: architect
 | Step | Wave | Task | Status | Commit | Time |
 |------|------|------|--------|--------|------|
 | 1 | Wave 1 | Merge module | ✓ complete | aab65be | 13:31 |
+| 2 | Wave 1 | Core ships scripts/*.mjs | ✓ complete | 3221655 | 13:32 |
