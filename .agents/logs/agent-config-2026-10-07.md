@@ -14,3 +14,4 @@ Executor role: architect
 | 2.2 | 2 | config init agent flags | complete | 693991e | 2026-10-07T17:56:42Z |
 | 2.2a | 2 | sdk init summary (amendment 1) | complete | 4f93736 | 2026-10-07T18:00:02Z |
 | 3.2 | 3 | Docs | complete | f0cc33a | 2026-10-07T18:00:48Z |
+| 3.1 | 3 | install.sh --agent and the prompt | complete | e08f691 | 2026-10-07T18:02:26Z |
