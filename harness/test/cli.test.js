@@ -10,7 +10,7 @@ import { execFileSync, execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import {
-  approveCommand, gateCommand, parsePlanCtx, deliverCommand, stopStatusCommand, forecastCommand, digestCommand,
+  approveCommand, gateCommand, parsePlanCtx, deliverCommand, stopStatusCommand, forecastCommand, digestCommand, prBodyCommand,
   resolveHooksDir, makeSpineScriptPort, SCRIPT_ARG_KEYS, reviewCommand, resolveAgent, isMainModule,
   capabilitiesCommand, installCoreCommand, installPresetCommand, installStatusCommand, configCommand,
   acpCheckCommand, generateCommand,
@@ -1422,10 +1422,21 @@ test('script args — a real deliver passes each script its argv contract', asyn
     const presence = rec.argsFor('scripts/check-tests-present.sh');
     assert.ok(presence.length > 0, 'check-tests-present.sh must run');
     for (const args of presence) assert.deepEqual(args, [planPath]);
-    assert.deepEqual(rec.argsFor('scripts/open-pr.sh'), [[
-      '--title', `Deliver: ${DELIVER_FEATURE}`, '--body', 'RAD deliver: 2 wave(s) complete',
-      '--head', branch, '--no-draft', '--label', 'rad:deliver',
-    ]]);
+    const openPr = rec.argsFor('scripts/open-pr.sh');
+    assert.equal(openPr.length, 1, 'open-pr.sh runs once');
+    const [prArgs] = openPr;
+    // The seeded plan has no `# Plan:` heading, so the title falls back to the slug.
+    assert.deepEqual(prArgs.slice(0, 2), ['--title', `Deliver: ${DELIVER_FEATURE}`]);
+    assert.equal(prArgs[2], '--body');
+    assert.deepEqual(prArgs.slice(4), ['--head', branch, '--no-draft', '--label', 'rad:deliver']);
+    const body = prArgs[3];
+    assert.match(body, new RegExp(`^Plan: \`\\.agents/plans/${DELIVER_FEATURE}\\.md\``));
+    for (const section of ['## Waves', '## Commits', '## Tests to Write', '## Checks']) assert.ok(body.includes(section), `body lacks ${section}`);
+    assert.match(body, /- check-scope: passed/);
+    // Commits are listed against origin/<base> at HEAD from the run root.
+    const log = rec.calls.find((c) => c.file === 'git' && c.args[0] === 'log' && c.args.includes('--reverse'));
+    assert.deepEqual(log.args, ['log', '--reverse', '--format=%h %s', `origin/${DEFAULT_BRANCH_STUB}..HEAD`]);
+    assert.equal(log.opts.cwd, repoRoot);
     // The base branch is resolved once per run, from the run root's .rad/config.yml.
     assert.deepEqual(rec.argsFor('scripts/get-default-branch.sh'), [[repoRoot]]);
   });
@@ -3378,4 +3389,143 @@ test('generate --check — the real repo (no .rad/skills or .rad/agents yet) exi
   const repoRoot = resolve(HERE, '..', '..');
   const stdout = execFileSync(process.execPath, [CLI, 'generate', '--check'], { encoding: 'utf8', cwd: repoRoot });
   assert.equal(stdout, '');
+});
+
+// ---------------------------------------------------------------------------
+// rad pr-body — the deliver PR title + body from the branch tip (AC#4/AC#5)
+// ---------------------------------------------------------------------------
+
+const PR_BODY_FEATURE = 'pb-feat';
+const PR_BODY_BRANCH = `rad/${PR_BODY_FEATURE}`;
+const PR_BODY_PLAN = [
+  '# Plan: Shiny PR Body', '', `Branch: ${PR_BODY_BRANCH}`, '',
+  '## Tests to Write', '- covers the thing — `tests/a.test.js`', '- covers the other — tests/missing.test.js', '',
+  '### Wave 1', '', '#### Task 1.1: Touch A', 'File: src/a.js', '',
+].join('\n');
+const PR_BODY_EVENTS = [
+  approvedEvent(PR_BODY_FEATURE),
+  { feature: PR_BODY_FEATURE, type: 'wave-attempt', ts: '2026-06-15T00:01:00.000Z',
+    data: { wave: 1, outcome: 'success', tasks: [{ title: 'Touch A', status: 'complete', commit: 'abc1234' }] } },
+];
+
+function gitIn(cwd, ...args) {
+  return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+}
+
+/** Real repo: a base commit (mirrored to origin/main), then rad/pb-feat with plan, log, and a test file. */
+function seedPrBodyRepo(repoRoot, { log = PR_BODY_EVENTS.map((e) => JSON.stringify(e)).join('\n') + '\n', plan = true } = {}) {
+  gitIn(repoRoot, 'init', '-q', '-b', 'main');
+  gitIn(repoRoot, 'config', 'user.email', 't@example.com');
+  gitIn(repoRoot, 'config', 'user.name', 'T');
+  writeFileSync(join(repoRoot, 'README.md'), 'base\n');
+  gitIn(repoRoot, 'add', '.');
+  gitIn(repoRoot, 'commit', '-q', '-m', 'base');
+  gitIn(repoRoot, 'update-ref', 'refs/remotes/origin/main', 'main');
+  gitIn(repoRoot, 'checkout', '-q', '-b', PR_BODY_BRANCH);
+  if (plan) {
+    mkdirSync(join(repoRoot, '.agents', 'plans'), { recursive: true });
+    writeFileSync(join(repoRoot, '.agents', 'plans', `${PR_BODY_FEATURE}.md`), PR_BODY_PLAN);
+  }
+  mkdirSync(join(repoRoot, '.agents', 'state', PR_BODY_FEATURE), { recursive: true });
+  writeFileSync(join(repoRoot, '.agents', 'state', PR_BODY_FEATURE, 'events.jsonl'), log);
+  mkdirSync(join(repoRoot, 'tests'), { recursive: true });
+  writeFileSync(join(repoRoot, 'tests', 'a.test.js'), '// test\n');
+  gitIn(repoRoot, 'add', '.');
+  gitIn(repoRoot, 'commit', '-q', '-m', 'adopt: shiny (fixes #7)');
+  gitIn(repoRoot, 'checkout', '-q', 'main');
+}
+
+/** Real git; check-scope.sh stubbed (records the temp plan it was handed, reports one violation). */
+function prBodySh() {
+  const scope = [];
+  const sh = (file, args = [], opts = {}) => {
+    if (file === 'bash' && args[0] === 'scripts/check-scope.sh') {
+      scope.push({ args, opts, planText: readFileSync(args[1], 'utf8') });
+      return { status: 1, stdout: '  ✗ src/b.js — not in Files in Scope\n', stderr: '' };
+    }
+    if (file.endsWith('get-default-branch.sh')) return { status: 0, stdout: 'main\n', stderr: '' };
+    return defaultSh(file, args, opts);
+  };
+  return { sh, scope };
+}
+
+test('pr-body AC#4 — prints the title line then the body built from the branch tip', async () => {
+  await withTempRepo(async (repoRoot) => {
+    seedPrBodyRepo(repoRoot);
+    const { sh, scope } = prBodySh();
+    const { code, stdout, stderr } = await captureStdio(() => prBodyCommand([PR_BODY_FEATURE], { repoRoot, sh }));
+    assert.equal(code, 0, stderr);
+    const [title, blank, ...rest] = stdout.split('\n');
+    assert.equal(title, 'Deliver: Shiny PR Body');
+    assert.equal(blank, '');
+    const body = rest.join('\n');
+    assert.match(body, /^Plan: `\.agents\/plans\/pb-feat\.md`/);
+    assert.match(body, /## Waves\n\n### Wave 1\n- ✓ Touch A — abc1234/);
+    assert.match(body, /## Commits\n- [0-9a-f]+ adopt: shiny \(fixes issue 7\)\n/);
+    assert.match(body, /- ✓ tests\/a\.test\.js\n- ✗ tests\/missing\.test\.js \(missing\)/);
+    assert.match(body, /## Checks\n- check-scope: 1 violation\(s\)\n  - src\/b\.js — not in Files in Scope/);
+    // check-scope.sh got the branch-tip plan as a temp copy (since removed), the branch, and the base.
+    assert.equal(scope.length, 1);
+    const [, planFile, branch, base] = scope[0].args;
+    assert.deepEqual([basename(planFile), branch, base], [`${PR_BODY_FEATURE}.md`, PR_BODY_BRANCH, 'main']);
+    assert.equal(scope[0].planText, PR_BODY_PLAN);
+    assert.equal(scope[0].opts.cwd, repoRoot);
+    assert.equal(existsSync(dirname(planFile)), false, 'temp dir must be removed');
+  });
+});
+
+test('pr-body AC#4 — no origin/<base> → commits render unavailable, still exit 0', async () => {
+  await withTempRepo(async (repoRoot) => {
+    seedPrBodyRepo(repoRoot);
+    const { sh } = prBodySh();
+    const { code, stdout } = await captureStdio(() => prBodyCommand([PR_BODY_FEATURE, '--base', 'nope'], { repoRoot, sh }));
+    assert.equal(code, 0);
+    assert.match(stdout, /## Commits\n- \(commit list unavailable: git log .*\)/);
+  });
+});
+
+for (const [label, argv] of [
+  ['no feature', []],
+  ['unknown flag', [PR_BODY_FEATURE, '--nope']],
+  ['--branch without a value', [PR_BODY_FEATURE, '--branch']],
+  ['traversal feature name', ['../etc']],
+]) {
+  test(`pr-body AC#4 — usage error (${label}) → exit 2 with usage`, async () => {
+    await withTempRepo(async (repoRoot) => {
+      const { code, stdout, stderr } = await captureStdio(() => prBodyCommand(argv, { repoRoot, sh: () => assert.fail('sh must not run') }));
+      assert.equal(code, 2);
+      assert.equal(stdout, '');
+      assert.match(stderr, /^rad pr-body: .*\nUsage: rad pr-body <feature> \[--branch <ref>\] \[--base <ref>\]\n$/);
+    });
+  });
+}
+
+test('pr-body AC#4 — plan missing at the branch tip → exit 2 naming it', async () => {
+  await withTempRepo(async (repoRoot) => {
+    seedPrBodyRepo(repoRoot, { plan: false });
+    const { sh, scope } = prBodySh();
+    const { code, stdout, stderr } = await captureStdio(() => prBodyCommand([PR_BODY_FEATURE], { repoRoot, sh }));
+    assert.equal(code, 2);
+    assert.equal(stdout, '');
+    assert.match(stderr, /^rad pr-body: no plan at rad\/pb-feat:\.agents\/plans\/pb-feat\.md\nUsage: rad pr-body /);
+    assert.equal(scope.length, 0);
+  });
+});
+
+test('pr-body AC#4 — malformed event log at the tip → exit 1 naming the feature', async () => {
+  await withTempRepo(async (repoRoot) => {
+    seedPrBodyRepo(repoRoot, { log: '{"type":\n' });
+    const { sh, scope } = prBodySh();
+    const { code, stdout, stderr } = await captureStdio(() => prBodyCommand([PR_BODY_FEATURE], { repoRoot, sh }));
+    assert.equal(code, 1);
+    assert.equal(stdout, '');
+    assert.match(stderr, /^rad pr-body: malformed event log for pb-feat: line 1 is not valid JSON/);
+    assert.equal(scope.length, 0);
+  });
+});
+
+test('pr-body AC#4 — --help lists pr-body', () => {
+  const stdout = execFileSync(process.execPath, [CLI, '--help'], { encoding: 'utf8' });
+  assert.match(stdout, /^\s+pr-body\s+/m);
+  assert.match(stdout, /rad pr-body <feature> \[--branch <ref>\] \[--base <ref>\]/);
 });
