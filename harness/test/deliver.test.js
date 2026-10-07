@@ -156,8 +156,8 @@ test('AC#3 — sdk path with missing ANTHROPIC_API_KEY exits 1 and stderr contai
 // ---------------------------------------------------------------------------
 // (b2) Command path — AC#4
 //
-// On the default/command path, NO ANTHROPIC_API_KEY is required. With
-// RAD_AGENT_CMD unset, deliverCommand must exit 1 with a RAD_AGENT_CMD message
+// On the command path, NO ANTHROPIC_API_KEY is required. With RAD_AGENT=command
+// and RAD_AGENT_CMD unset, deliverCommand must exit 1 with a RAD_AGENT_CMD message
 // (not an API-key message). With an injected runWave, no credential is needed.
 // ---------------------------------------------------------------------------
 
@@ -170,7 +170,9 @@ test('AC#4 — command path requires RAD_AGENT_CMD, never ANTHROPIC_API_KEY', as
     const savedAgent = process.env.RAD_AGENT;
     const savedCmd = process.env.RAD_AGENT_CMD;
     delete process.env.ANTHROPIC_API_KEY;
-    delete process.env.RAD_AGENT; // default → command
+    // Explicit command path: with NOTHING in the environment (and no config
+    // agent:) deliver now refuses earlier with "no agent configured" (exit 2).
+    process.env.RAD_AGENT = 'command';
     delete process.env.RAD_AGENT_CMD;
 
     let stderrOutput = '';
@@ -187,6 +189,7 @@ test('AC#4 — command path requires RAD_AGENT_CMD, never ANTHROPIC_API_KEY', as
       process.stderr.write = origWrite;
       if (savedKey !== undefined) process.env.ANTHROPIC_API_KEY = savedKey;
       if (savedAgent !== undefined) process.env.RAD_AGENT = savedAgent;
+      else delete process.env.RAD_AGENT;
       if (savedCmd !== undefined) process.env.RAD_AGENT_CMD = savedCmd;
     }
 

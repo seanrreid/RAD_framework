@@ -27,6 +27,9 @@ template placeholder identity (any value starting with `[`, e.g.
 version: 1
 platform: github        # github | gitlab | bitbucket | forgejo | manual
 default_branch: main
+agent:                  # optional; see Agent Adapter below
+  adapter: command      # command | sdk | acp
+  command: claude -p    # required for command/acp; must be absent for sdk
 roles:
   architect:
     - you@example.com
@@ -47,6 +50,9 @@ settings:               # optional; see Settings below
 | `version` | integer | yes | Must be exactly `1` (the only schema version the reader understands). |
 | `platform` | string | yes | One of `github`, `gitlab`, `bitbucket`, `forgejo`, `manual` (mirrors `scripts/detect-platform.sh`). |
 | `default_branch` | string | yes | Non-empty. |
+| `agent` | mapping | no | The wave agent for `rad deliver` (and the review fallback for `rad review`). Only the keys `adapter`, `command`; any other key is an error (`unknown key agent.<key>`). A non-mapping value is an error (`agent must be a mapping`). Written after `default_branch`. See [Agent Adapter](#agent-adapter). |
+| `agent.adapter` | string | yes, when `agent` is present | One of `command`, `sdk`, `acp`; anything else is an error. |
+| `agent.command` | string | for `command` / `acp` | Required (non-empty, single line) when `agent.adapter` is `command` or `acp`; must be **absent** when it is `sdk`. Same meaning as `RAD_AGENT_CMD`. |
 | `roles` | mapping | yes | Only the keys `architect`, `developers`, `designers`. |
 | `roles.architect` | list of strings | yes | At least one identity; each a non-empty string and not a placeholder. |
 | `roles.developers` | list of strings | no | Absent means `[]`. Each entry a non-empty, non-placeholder string. |
@@ -161,27 +167,60 @@ approval).
 
 ### Agent Adapter
 
-`rad deliver` selects the wave-execution agent via environment variables (no
-config-file loader). All three adapters honor the provider-neutral wave contract in
-`docs/rad-wave-contract.md`.
+`rad deliver` runs each wave through one agent. All three adapters honor the
+provider-neutral wave contract in `docs/rad-wave-contract.md`. Commit the choice
+in `.rad/config.yml`:
+
+```yaml
+agent:
+  adapter: command      # command | sdk | acp
+  command: claude -p    # required for command/acp; omit for sdk
+```
+
+**Presets.** `rad config init --agent claude|codex` (and
+`install.sh --agent claude|codex`) write a preset block:
+
+| Preset | `agent.adapter` | `agent.command` |
+|--------|-----------------|-----------------|
+| `claude` | `command` | `claude -p` |
+| `codex` | `command` | `codex exec` |
+
+Anything else is written with `rad config init --agent-cmd "<cmd>"` (optionally
+with `--agent-adapter command|acp`; default `command`) or
+`--agent-adapter sdk`, or by editing the file.
+
+**Precedence is all-or-nothing.** If either `RAD_AGENT` or `RAD_AGENT_CMD` is
+set (non-blank), the environment decides **everything**, exactly as before
+`agent:` existed, and `agent:` is ignored entirely — the two sources are never
+mixed field by field. Only when neither variable is set does `agent:` apply.
+
+**No agent, no run.** With neither the environment nor `agent:` naming an agent,
+`rad deliver` exits **2** with `no agent configured — set agent: in
+.rad/config.yml (rad config init --agent claude|codex) or
+RAD_AGENT/RAD_AGENT_CMD` — before any worktree is created or event appended. An
+invalid `.rad/config.yml` with no environment agent is reported as the invalid
+config instead.
+
+The environment variables (still honored, and they win when set):
 
 ```
-RAD_AGENT:     command   # command | sdk | acp  (default: command)
+RAD_AGENT:     command   # command | sdk | acp  (default: command when only RAD_AGENT_CMD is set)
 RAD_AGENT_CMD:           # the CLI to spawn, required when RAD_AGENT=command or acp
 ```
 
-- `command` (default) — spawns an operator-configured CLI agent
-  (`RAD_AGENT_CMD`, e.g. `claude -p`, `codex exec`, `aider`). Requires **no**
+- `command` — spawns an operator-configured CLI agent (`agent.command` or
+  `RAD_AGENT_CMD`, e.g. `claude -p`, `codex exec`, `aider`). Requires **no**
   `ANTHROPIC_API_KEY`; credentials are the configured command's concern.
 - `sdk` — drives the Claude Agent SDK; requires `ANTHROPIC_API_KEY`.
-- `acp` — spawns `RAD_AGENT_CMD` as an Agent Client Protocol v1 agent under the
+- `acp` — spawns the command as an Agent Client Protocol v1 agent under the
   same allow-listed env as `command`. Requires **no** `ANTHROPIC_API_KEY`; the
   agent must already be authenticated. `{prompt}` is rejected and models are
   ignored with a warning (see the `acp` adapter section of
   `docs/rad-wave-contract.md`). Any other `RAD_AGENT` value exits 1 with
   `expected command | sdk | acp`.
 
-**Env-less auth contract (command and acp paths).** `RAD_AGENT_CMD` runs under an
+**Env-less auth contract (command and acp paths).** The agent command
+(`RAD_AGENT_CMD` or `agent.command`) runs under an
 **allow-listed** env — only `PATH HOME LANG LC_ALL TMPDIR TERM USER` are
 forwarded — so it must authenticate **without inherited env vars**: on-disk
 credentials or the OS keychain, not an env-injected token (an exported

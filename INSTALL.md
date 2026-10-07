@@ -249,8 +249,9 @@ and ask it to re-read before proceeding.
 ### 1. Review `.rad/config.yml`, then fill in AGENTS.md
 
 `.rad/config.yml` is the single source for RAD's config data: `platform`,
-`default_branch`, `roles` (architect, developers, designers), and the
-`agent_scope_map`. On a fresh install, `install.sh` writes it with
+`default_branch`, `roles` (architect, developers, designers), the optional
+`agent` (the wave agent `rad deliver` runs), and the `agent_scope_map`. On a
+fresh install, `install.sh` writes it with
 `rad config init` and prints the result for review:
 
 - `roles.architect` defaults to the installer's `git config user.email`. To use a
@@ -258,6 +259,15 @@ and ask it to re-read before proceeding.
   `node harness/cli.js config init --architect <id> --force`).
 - `platform` defaults to `manual` and `default_branch` to `main`; edit the file
   to change them.
+- `agent` is set with `./install.sh --agent claude|codex`, which writes the
+  preset (`claude` → `adapter: command`, `command: claude -p`; `codex` →
+  `command: codex exec`). Without `--agent`, a fresh **interactive** install
+  asks which agent to use — `claude`, `codex`, or `skip` (default `claude`);
+  `skip` writes no `agent:`. `--yes` without `--agent` writes none and never
+  prompts. Upgrades never prompt and never change an existing config. With no
+  `agent:` (and no `RAD_AGENT`/`RAD_AGENT_CMD` in the environment),
+  `rad deliver` refuses with exit 2; add the block to the file later (see
+  [Agent Adapter](docs/configuration.md#agent-adapter)).
 - Check the file at any time with:
   ```bash
   node harness/cli.js config validate

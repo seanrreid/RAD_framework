@@ -10,6 +10,10 @@
 #     repo's git email; no identity -> files laid down, no config, exit 1);
 #     upgrade runs `config migrate` from an old CLAUDE.md block (placeholder
 #     architect -> exit 1) and never touches an existing config
+#   - --agent: a fresh `--agent codex` writes agent.command `codex exec`; --yes
+#     with no --agent writes no agent key; `--agent bogus` exits 1 before any
+#     work; an upgrade with --agent leaves the existing config unchanged; the
+#     interactive prompt re-asks on a bad answer, and closed stdin writes no agent
 #   - framework core goes through the install manifest (.rad/installed.json):
 #     scripts/lib ships, a local edit is kept + staged (exit 1), a pre-manifest
 #     upgrade backs up then overwrites, a malformed manifest stops the install,
@@ -235,6 +239,98 @@ run_install "$USAGE_T" "$TMP/usage.out" --architect
   || bad "--architect without a value -> exited $INSTALL_RC, expected 1"
 assert_contains "$TMP/usage.out" "--architect requires a value" "--architect usage error names the flag"
 assert_not_exists "$USAGE_T/harness" "--architect usage error installs nothing"
+
+# Echoes `config get <key>` stdout in <target>; sets CONFIG_GET_RC.
+config_get() {
+  CONFIG_GET_RC=0
+  ( cd "$1" && isolated node harness/cli.js config get "$2" 2>/dev/null ) || CONFIG_GET_RC=$?
+}
+# `rad config get` exit code for a key the valid config does not carry.
+readonly CONFIG_KEY_ABSENT_RC=3
+
+# ── 4i. fresh --agent codex -> agent.command is the codex preset ────────────
+AGENT_T="$(new_repo agent-codex)"
+run_install "$AGENT_T" "$TMP/agent-codex.out" --architect "$FIXTURE_ARCHITECT" --agent codex
+[[ "$INSTALL_RC" -eq 0 ]] && ok "--agent codex -> installer exits 0" \
+  || { bad "--agent codex -> installer exited $INSTALL_RC"; cat "$TMP/agent-codex.out"; }
+[[ "$(config_get "$AGENT_T" agent.command)" == "codex exec" ]] \
+  && ok "--agent codex -> agent.command is 'codex exec'" \
+  || bad "--agent codex -> agent.command is '$(config_get "$AGENT_T" agent.command)'"
+[[ "$(config_get "$AGENT_T" agent.adapter)" == "command" ]] \
+  && ok "--agent codex -> agent.adapter is 'command'" || bad "--agent codex -> agent.adapter is not 'command'"
+assert_contains "$TMP/agent-codex.out" "Agent: codex" "--agent codex -> installer logs the agent"
+
+# ── 4j. fresh --yes with no --agent -> no agent key, no prompt ───────────────
+config_get "$MAIN" agent.adapter >/dev/null
+[[ "$CONFIG_GET_RC" -eq "$CONFIG_KEY_ABSENT_RC" ]] \
+  && ok "--yes without --agent -> config get agent.adapter exits $CONFIG_KEY_ABSENT_RC (not set)" \
+  || bad "--yes without --agent -> config get agent.adapter exited $CONFIG_GET_RC, expected $CONFIG_KEY_ABSENT_RC"
+grep -q '^agent:' "$MAIN/.rad/config.yml" && bad "--yes without --agent wrote an agent: block" \
+  || ok "--yes without --agent -> no agent: block in config"
+grep -qF "Which coding agent" "$TMP/main.out" && bad "--yes prompted for the agent" \
+  || ok "--yes -> no agent prompt"
+
+# ── 4k. --agent bogus -> usage error before any work ────────────────────────
+BOGUS_T="$(new_repo agent-bogus)"
+run_install "$BOGUS_T" "$TMP/agent-bogus.out" --architect "$FIXTURE_ARCHITECT" --agent bogus
+[[ "$INSTALL_RC" -ne 0 ]] && ok "--agent bogus -> non-zero exit ($INSTALL_RC)" \
+  || bad "--agent bogus -> installer exited 0"
+assert_contains "$TMP/agent-bogus.out" "--agent must be claude or codex, got: 'bogus'" "--agent bogus names the value"
+assert_not_exists "$BOGUS_T/.rad/config.yml" "--agent bogus -> no .rad/config.yml"
+assert_not_exists "$BOGUS_T/harness" "--agent bogus installs nothing"
+run_install "$BOGUS_T" "$TMP/agent-novalue.out" --agent
+[[ "$INSTALL_RC" -ne 0 ]] && ok "--agent without a value -> non-zero exit" \
+  || bad "--agent without a value -> installer exited 0"
+assert_contains "$TMP/agent-novalue.out" "--agent requires a value" "--agent usage error names the flag"
+
+# ── 4l. upgrade with --agent over an existing config -> unchanged ───────────
+AGENT_UP_T="$(new_repo agent-upgrade)"
+mkdir -p "$AGENT_UP_T/.rad"
+cp "$MAIN/.rad/config.yml" "$AGENT_UP_T/.rad/config.yml"
+cp "$AGENT_UP_T/.rad/config.yml" "$TMP/agent-upgrade-before.yml"
+write_old_claude_md "$AGENT_UP_T" "$MIGRATED_ARCHITECT"
+run_install "$AGENT_UP_T" "$TMP/agent-upgrade.out" --upgrade --agent claude
+[[ "$INSTALL_RC" -eq 0 ]] && ok "upgrade --agent claude -> installer exits 0" \
+  || { bad "upgrade --agent claude -> installer exited $INSTALL_RC"; cat "$TMP/agent-upgrade.out"; }
+cmp -s "$TMP/agent-upgrade-before.yml" "$AGENT_UP_T/.rad/config.yml" \
+  && ok "upgrade --agent claude leaves the existing config byte-for-byte unchanged" \
+  || bad "upgrade --agent claude changed the existing config"
+assert_contains "$TMP/agent-upgrade.out" "--agent claude ignored" "upgrade --agent -> warns it was ignored"
+
+# run_prompted <target> <output-file> [install.sh args...] < answers -> no --yes; sets INSTALL_RC.
+run_prompted() {
+  local target="$1" out="$2"
+  shift 2
+  INSTALL_RC=0
+  ( cd "$REPO_ROOT" && isolated bash install.sh --dir "$target" "$@" ) >"$out" 2>&1 || INSTALL_RC=$?
+}
+
+# ── 4m. prompt: a bad answer re-asks; the next answer is written ────────────
+PROMPT_T="$(new_repo agent-prompt)"
+printf 'bogus\ncodex\n' | run_prompted "$PROMPT_T" "$TMP/agent-prompt.out" --architect "$FIXTURE_ARCHITECT"
+[[ "$INSTALL_RC" -eq 0 ]] && ok "agent prompt -> installer exits 0" \
+  || { bad "agent prompt -> installer exited $INSTALL_RC"; cat "$TMP/agent-prompt.out"; }
+assert_contains "$TMP/agent-prompt.out" "Answer claude, codex, or skip (got: 'bogus')" "agent prompt re-asks on a bad answer"
+[[ "$(config_get "$PROMPT_T" agent.command)" == "codex exec" ]] \
+  && ok "agent prompt answer codex -> agent.command 'codex exec'" \
+  || bad "agent prompt -> agent.command is '$(config_get "$PROMPT_T" agent.command)'"
+
+# ── 4n. prompt: Enter takes the default (claude) ────────────────────────────
+DEFAULT_T="$(new_repo agent-default)"
+printf '\n' | run_prompted "$DEFAULT_T" "$TMP/agent-default.out" --architect "$FIXTURE_ARCHITECT"
+[[ "$(config_get "$DEFAULT_T" agent.command)" == "claude -p" ]] \
+  && ok "agent prompt Enter -> default agent.command 'claude -p'" \
+  || { bad "agent prompt Enter -> agent.command is '$(config_get "$DEFAULT_T" agent.command)'"; cat "$TMP/agent-default.out"; }
+
+# ── 4o. prompt: closed stdin -> no agent, install still exits 0 ──────────────
+EOF_T="$(new_repo agent-eof)"
+run_prompted "$EOF_T" "$TMP/agent-eof.out" --architect "$FIXTURE_ARCHITECT" </dev/null
+[[ "$INSTALL_RC" -eq 0 ]] && ok "agent prompt on closed stdin -> installer exits 0" \
+  || { bad "agent prompt on closed stdin -> installer exited $INSTALL_RC"; cat "$TMP/agent-eof.out"; }
+config_get "$EOF_T" agent.adapter >/dev/null
+[[ "$CONFIG_GET_RC" -eq "$CONFIG_KEY_ABSENT_RC" ]] && ok "agent prompt on closed stdin -> no agent key" \
+  || bad "agent prompt on closed stdin -> config get agent.adapter exited $CONFIG_GET_RC"
+assert_contains "$TMP/agent-eof.out" "no agent written" "agent prompt on closed stdin -> warns no agent written"
 
 # ── 5f. fresh install writes the manifest and ships scripts/lib ──────────────
 assert_exists "$MAIN/.rad/installed.json" "fresh install wrote .rad/installed.json"

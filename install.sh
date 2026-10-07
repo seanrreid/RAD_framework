@@ -8,12 +8,20 @@
 #   ./install.sh --upgrade              # update commands + skills + scripts, skip user data
 #   ./install.sh --yes                  # accept all defaults without prompting
 #   ./install.sh --architect <id>       # architect for .rad/config.yml (default: git user.email)
+#   ./install.sh --agent <claude|codex> # coding agent for deliveries (agent: in .rad/config.yml)
 #   ./install.sh --preset <dir>         # apply a team preset (files + settings), with or without --upgrade
 #
 # Fresh install writes .rad/config.yml via `harness/cli.js config init`; upgrade
 # migrates it from a pre-#87 CLAUDE.md via `config migrate` when it is absent.
 # An existing .rad/config.yml is never touched. If the config cannot be created,
 # every other file is still installed and the installer exits 1.
+#
+# Agent: --agent claude|codex is validated before any work and passed to
+# `config init`, which writes the preset `agent:` block. Without --agent or
+# --yes, a fresh install that will run `config init` asks which coding agent
+# runs deliveries (default claude; skip writes none). --yes without --agent
+# writes no agent. An upgrade, or a target that already has a config, never
+# prompts and ignores --agent (with a warning).
 #
 # Conventions: the AGENTS.md (conventions) and CLAUDE.md (`@AGENTS.md` import)
 # templates are copied only into absent paths, on install and upgrade alike. A
@@ -50,6 +58,8 @@ TARGET_DIR=""
 UPGRADE=false
 YES=false
 ARCHITECT=""
+# The --agent preset (or the prompt's answer) for `config init`; empty writes no agent.
+AGENT=""
 PLATFORM="manual"
 CONFIG_FAILED=false
 # Set by install_core when install-core kept a locally edited file; main exits 1
@@ -71,7 +81,8 @@ PRESET_FAILURE_REASON=""
 HOOKS_FAILED=false
 HOOKS_FAILURE_REASON=""
 
-readonly USAGE="Usage: ./install.sh [--dir <path>] [--upgrade] [--yes] [--architect <id>] [--preset <dir>]"
+readonly USAGE="Usage: ./install.sh [--dir <path>] [--upgrade] [--yes] [--architect <id>] [--agent <claude|codex>] [--preset <dir>]"
+readonly DEFAULT_AGENT="claude"
 readonly RAD_CONFIG=".rad/config.yml"
 readonly FALLBACK_DEFAULT_BRANCH="main"
 readonly CONVENTIONS_MOVE_HINT='Conventions stay in CLAUDE.md (read as the fallback). To move them to AGENTS.md, see UPGRADE.md "Moving conventions to AGENTS.md".'
@@ -99,6 +110,9 @@ while [[ $# -gt 0 ]]; do
     --architect)
       [[ $# -ge 2 && -n "$2" && "$2" != --* ]] || error "--architect requires a value. $USAGE"
       ARCHITECT="$2"; shift 2 ;;
+    --agent)
+      [[ $# -ge 2 && -n "$2" && "$2" != -* ]] || error "--agent requires a value. $USAGE"
+      AGENT="$2"; shift 2 ;;
     --preset)
       [[ $# -ge 2 && -n "$2" && "$2" != -* ]] || error "--preset requires a directory. $USAGE"
       [[ -d "$2" ]] || error "--preset must name an existing directory, got: '$2'. $USAGE"
@@ -112,6 +126,12 @@ done
 if [[ -n "$ARCHITECT" ]] && ! [[ "$ARCHITECT" =~ ^[^-[:space:]][^[:space:]]*$ ]]; then
   error "--architect must be a single non-flag token, got: '$ARCHITECT'. $USAGE"
 fi
+
+# The agent preset reaches node as one argv element; only the known presets pass.
+case "$AGENT" in
+  ""|claude|codex) ;;
+  *) error "--agent must be claude or codex, got: '$AGENT'. $USAGE" ;;
+esac
 
 # ── Prerequisites ─────────────────────────────────────────────────────────────
 
@@ -160,6 +180,27 @@ get_target() {
   echo "  (press Enter to use current directory)"
   read -rp "  > [$(pwd)]: " input
   TARGET_DIR="${input:-$(pwd)}"
+}
+
+# Asks which coding agent runs deliveries and sets AGENT (empty for skip).
+# Called by config_init only, so it prompts exactly when a fresh config is about
+# to be written — never on --yes, an explicit --agent, an upgrade, or an existing
+# config. Closed stdin (no terminal, no answer) writes no agent, with a warning.
+prompt_agent() {
+  [[ "$YES" == "true" || -n "$AGENT" ]] && return
+  local answer
+  while true; do
+    if ! read -rp "  Which coding agent runs deliveries? [claude/codex/skip] (default: $DEFAULT_AGENT): " answer; then
+      echo ""
+      warn "No answer (stdin closed) — no agent written; rerun config init with --agent to set one"
+      return
+    fi
+    case "${answer:-$DEFAULT_AGENT}" in
+      claude|codex) AGENT="${answer:-$DEFAULT_AGENT}"; return ;;
+      skip) return ;;
+      *) warn "Answer claude, codex, or skip (got: '$answer')" ;;
+    esac
+  done
 }
 
 validate_target() {
@@ -413,11 +454,14 @@ report_config_failure() {
 config_init() {
   local args=(config init --platform "$PLATFORM" --default-branch "$(target_default_branch)")
   [[ -n "$ARCHITECT" ]] && args+=(--architect "$ARCHITECT")
+  prompt_agent
+  [[ -n "$AGENT" ]] && args+=(--agent "$AGENT")
 
   local out
   if out=$(cd "$TARGET_DIR" && node harness/cli.js "${args[@]}" 2>&1); then
     success "$out"
     info "Architect: $(printf '%s' "$out" | sed -n 's/.*architect=\([^,]*\),.*/\1/p')"
+    if [[ -n "$AGENT" ]]; then info "Agent: $AGENT"; fi
     info "Review $RAD_CONFIG (roles, platform, default_branch) before your first plan"
   else
     report_config_failure "$out" "node harness/cli.js config init --architect <you@example.com>"
@@ -441,15 +485,24 @@ config_migrate() {
   fi
 }
 
+# --agent only feeds `config init`; say so when the config step will not run it.
+warn_agent_ignored() {
+  if [[ -n "$AGENT" ]]; then
+    warn "--agent $AGENT ignored: $RAD_CONFIG is not written by config init here; edit its agent: block instead"
+  fi
+}
+
 setup_rad_config() {
   header "RAD config ($RAD_CONFIG)"
 
   if [[ -f "$TARGET_DIR/$RAD_CONFIG" ]]; then
     success "$RAD_CONFIG already exists — kept"
+    warn_agent_ignored
     return
   fi
 
   if [[ "$UPGRADE" == "true" ]]; then
+    warn_agent_ignored
     config_migrate
   else
     config_init

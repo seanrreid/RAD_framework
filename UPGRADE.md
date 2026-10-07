@@ -459,6 +459,37 @@ work branch. See [docs/rad-cli.md](docs/rad-cli.md#rad-checkout).
 
 ---
 
+## Agent setting (#186 part 3a)
+
+`.rad/config.yml` gains an optional `agent:` block naming the wave agent
+`rad deliver` runs. `install.sh --upgrade` never prompts and never changes your
+config, so an existing config has no `agent:`. Either add it by hand:
+
+```yaml
+# Claude Code
+agent:
+  adapter: command
+  command: claude -p
+```
+
+```yaml
+# Codex
+agent:
+  adapter: command
+  command: codex exec
+```
+
+or keep exporting `RAD_AGENT`/`RAD_AGENT_CMD`. Precedence is all-or-nothing:
+if either variable is set, the environment decides everything, exactly as
+before, and `agent:` is ignored. With neither the environment nor `agent:`,
+`rad deliver` now exits 2 with `no agent configured` before creating a worktree
+or appending an event. `rad review` also falls back to `agent.command` (adapter
+`command` only) after `RAD_REVIEW_AGENT_CMD` and `RAD_AGENT_CMD`. Run
+`node harness/cli.js config validate` after editing. See
+[docs/configuration.md](docs/configuration.md#agent-adapter).
+
+---
+
 ## See also
 
 - [INSTALL.md](INSTALL.md) — first-time installation and uninstalling
