@@ -11,3 +11,4 @@ Executor role: architect
 | 1 | Wave 1 | Commit-message and status helpers | ✓ complete | 18e58ba | 14:59 |
 | 2 | Wave 1 | Shared resumable publish step | ✓ complete | b83cb7d | 14:59 |
 | 3 | Wave 2 | approve commits by default | ✓ complete | 394a165 | 11:03 |
+| 4 | Wave 2 | rad plan-status | ✓ complete | 21cafb8 | 11:04 |
