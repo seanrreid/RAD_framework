@@ -66,6 +66,7 @@ import { publishPlanChange, requirePublishReady } from './branch-publish.js';
 import { planOpenCommand, PLAN_OPEN_USAGE } from './plan-open.js';
 import { planStatusCommand, PLAN_STATUS_USAGE } from './plan-status.js';
 import { checkoutCommand, CHECKOUT_USAGE } from './checkout.js';
+import { makePreparePort } from './deliver-prepare.js';
 
 /** Usage line for `rad approve` (parse errors and the command table). */
 const APPROVE_USAGE = 'rad approve <feature> [--on-behalf-of <name>] [--evidence <text>] [--no-commit] [--trailer "Key: Value"]...';
@@ -1475,6 +1476,26 @@ function readDefaultBranch({ sh, repoRoot, root, verb = 'rad deliver' }) {
 }
 
 /**
+ * The deliverSpine prepare port: an injected ctx.prepare (tests) as-is, else
+ * the real port rooted at the run root. Resolving the default branch or a
+ * missing port option fails closed BEFORE the spine: the reason is written and
+ * `{ code: 1 }` returned.
+ *
+ * @returns {{ prepare: Function } | { code: number }}
+ */
+function buildPreparePort({ ctx, sh, repoRoot, root, feature, workBranch }) {
+  if (ctx.prepare) return { prepare: ctx.prepare };
+  try {
+    const baseBranch = readDefaultBranch({ sh, repoRoot, root });
+    const planPath = join(PLANS_DIR, `${feature}.md`);
+    return { prepare: makePreparePort({ sh, root, feature, planPath, workBranch, baseBranch }) };
+  } catch (err) {
+    process.stderr.write(`${err instanceof TypeError ? 'rad deliver: ' : ''}${err.message}\n`);
+    return { code: FAILED_EXIT_CODE };
+  }
+}
+
+/**
  * Per-run context the SCRIPT_ARGS builders read. The base branch is resolved
  * lazily, once per run, only when a script needs it; the wave count is read
  * from the same plan the spine walks.
@@ -1645,6 +1666,12 @@ export async function deliverCommand(argv, ctx) {
   const now = () => new Date().toISOString();
   const workBranch = resolveWorkBranch(setup, planCtx, feature);
   const scriptCtx = makeScriptCtx({ sh, repoRoot, root, feature, branch: workBranch, state });
+  const port = buildPreparePort({ ctx, sh, repoRoot, root, feature, workBranch });
+  if (port.code !== undefined) {
+    // Before the spine, like a setup failure: keep the worktree for inspection.
+    if (worktree) preserveAfterSetupFailure(worktree, feature, root);
+    return port.code;
+  }
   const runHooks = makeRunHooks({
     hookShell: ctx.sh ?? spawnHook, root, hooksDir: resolveHooksDir(process.env, root, settings).dir, now,
   });
@@ -1658,6 +1685,8 @@ export async function deliverCommand(argv, ctx) {
       matrix,
       gates: null,
       runWave,
+      // Sync/merge/in-progress before any wave; a stop exits via reportStop.
+      prepare: port.prepare,
       // Scripts run with cwd = root: repoRoot today, the worktree when isolated.
       // Each gets its real argv from SCRIPT_ARGS; an unknown script throws.
       sh: makeSpineScriptPort({ sh, repoRoot, root, scriptCtx }),
