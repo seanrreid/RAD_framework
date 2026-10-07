@@ -63,6 +63,59 @@ The `/rad-approve` prose command calls this after the architect confirms.
 
 ---
 
+### rad plan-open
+
+```
+rad plan-open <plan-file> [--trailer "Key: Value"]...
+```
+
+Opens a plan's work branch: the one deterministic step behind `/rad-plan` Step 5
+and `/rad-adopt` Step 7, callable from any coding tool. On a fresh run it:
+1. fetches the default branch and runs `git checkout -b <branch> origin/<default>`;
+2. stages **only** the plan file and commits it with a message derived from the plan;
+3. pushes with `push -u origin <branch>`;
+4. labels the issue `pending-review`.
+
+No PR is opened and nothing is committed to the default branch.
+
+**Derived commit message:** subject `plan: <title>`, or `adopt: <title>` when the
+plan has an `Adopted-From:` header. The body carries `Adopted-From`, `Issue`,
+`Author`, `Waves`, `Tasks` and `Out-of-scope deps`, followed by any `--trailer`
+lines.
+
+**`--trailer`:** repeatable; each value must be a single-line `Key: Value`. Pass
+one per attribution line your tool requires. An invalid trailer is a refusal.
+
+**Refusals (exit 2, nothing changed):**
+- bad argv or an invalid `--trailer`
+- the path is not `.agents/plans/<slug>.md`, or the slug is invalid
+- the `Branch:` header is missing or is not `rad/<slug>` (the prefix honors
+  `RAD_BRANCH_PREFIX`)
+- `scripts/lint-plan.sh` fails (its output is passed through)
+- uncommitted changes to tracked files
+- the branch exists only on origin
+- a local branch with commits unrelated to this plan
+- the default-branch lookup or the fetch fails
+
+**Resume:** a rerun picks up where a previous run stopped — at the commit step or
+the push step. Any failure after the branch exists exits 1 with a message that a
+rerun is safe; there is no rollback.
+
+**Labelling:** runs only after a successful push. The issue comes from the
+`Issue:` header, or is parsed from an `Adopted-From:` issue URL. Without either
+the command prints `label skipped: no issue`. A labelling failure exits 1 (the
+branch is already pushed; a rerun is safe).
+
+**Sync:** it always pushes and ignores `RAD_SYNC`.
+
+**Success line:**
+`rad plan-open: ok feature=<slug> branch=<branch> commit=<sha> issue=<N|none>`
+
+**Exit codes:** 0 on success; 1 when a step failed after the branch exists
+(rerun is safe); 2 on a refusal (nothing changed).
+
+---
+
 ### rad gate
 
 ```
