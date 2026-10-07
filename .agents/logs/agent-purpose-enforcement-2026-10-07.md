@@ -8,3 +8,5 @@ Executor role: architect
 
 | Step | Wave | Task | Status | Commit | Time |
 |------|------|------|--------|--------|------|
+| 1 | Wave 1 | Generator accepts and emits purpose | ✓ complete | 76f7da0 | 08:51 |
+| 2 | Wave 1 | Tag the reviewers and regenerate | ✓ complete | fcc2e50 | 08:51 |
