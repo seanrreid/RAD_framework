@@ -13,3 +13,4 @@ Executor role: architect
 | 3 | Wave 2 | rad install-hooks command | ✓ complete | eb5cb8d | 09:35 |
 | 4 | Wave 2 | install.sh runs install-hooks | ✓ complete | f7eee0e | 09:36 |
 | 5 | Wave 3 | Docs, CLAUDE.md claim, invariant anchor | ✓ complete | 7ef93f8 | 09:37 |
+| 6 | Wave 3 | Full-suite check | ✓ complete | — | 09:43 |
