@@ -11,3 +11,4 @@ Executor role: architect
 | 1 | 1 | 1.1 rad checkout | complete | 3fb7f69 | 2026-10-07T15:47:41Z |
 | 2 | 1 | 1.2 rad checkout tests | complete | db107e4 | 2026-10-07T15:49:00Z |
 | 3 | 2 | 2.1 rad-approve source | complete | d37207a | 2026-10-07T15:51:04Z |
+| 4 | 2 | 2.2 Fix the plan and adopt Rules line | complete | 6a49cca | 2026-10-07T15:51:16Z |
