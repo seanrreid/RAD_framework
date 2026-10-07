@@ -55,6 +55,7 @@ import { readPreset } from './preset.js';
 import { readSources, renderOutputs, planGenerate, applyGenerate } from './generate.js';
 import { mergeDeliverGateHook } from './claude-settings.js';
 import { conventionWorkBranch, planWorkBranch } from './plan-commit.js';
+import { planOpenCommand, PLAN_OPEN_USAGE } from './plan-open.js';
 
 /** Usage line for `rad deliver` (help, parse errors, and the command table). */
 const DELIVER_USAGE = 'rad deliver <feature> [--model <model-id>] [--resume --context <text>]';
@@ -176,6 +177,11 @@ const SUBCOMMANDS = {
     summary: 'Release the single-writer lock on a feature (clears the holder).',
     usage: 'rad owner-release <feature>',
     run: (argv, ctx) => ownerReleaseCommand(argv, ctx),
+  },
+  'plan-open': {
+    summary: "Cut a plan's work branch, commit the plan with a derived message, push, and label its issue.",
+    usage: PLAN_OPEN_USAGE,
+    run: (argv, ctx) => planOpenCommand(argv, ctx),
   },
   'plan-fingerprint': {
     summary: 'Print the SHA-256 fingerprint of a plan doc body (read-only).',
