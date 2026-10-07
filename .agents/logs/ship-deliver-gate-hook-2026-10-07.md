@@ -11,3 +11,4 @@ Executor role: architect
 | 1 | Wave 1 | Merge module | ✓ complete | aab65be | 13:31 |
 | 2 | Wave 1 | Core ships scripts/*.mjs | ✓ complete | 3221655 | 13:32 |
 | 3 | Wave 2 | rad install-hooks command | ✓ complete | eb5cb8d | 09:35 |
+| 4 | Wave 2 | install.sh runs install-hooks | ✓ complete | f7eee0e | 09:36 |
