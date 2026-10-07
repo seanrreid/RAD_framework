@@ -370,6 +370,44 @@ and the budgets (150 lines each; 32 KiB for `AGENTS.md`).
 
 ---
 
+## Agent purpose tags (#46)
+
+Every RAD agent now declares why its boundary exists. After upgrading,
+`scripts/lint-agent-files.sh` fails on any agent file that declares `roles:`
+but no `purpose:`, or a value outside the three below. Agents without `roles:`
+(RAD-external utility agents) are exempt.
+
+| `purpose` | Test question |
+|-----------|---------------|
+| `authority` | Would this boundary still be wanted with a perfect, free, infinite-context model? |
+| `context-discipline` | Is it here because reading everything is too expensive or too distracting? |
+| `capacity` | Is it here only because the read wouldn't fit? |
+
+Ask them in order; the first "yes" wins. `capacity` is provisional: the lint
+passes it but prints a non-blocking `advisory:` line, since larger context
+windows absorb it.
+
+To tag an agent, add one frontmatter line after `roles:`:
+
+```yaml
+roles: architect
+purpose: authority
+```
+
+For agents generated from `.rad/agents`, edit the source instead and
+regenerate, so the next generate does not overwrite your edit:
+
+```bash
+node harness/cli.js generate
+scripts/lint-agent-files.sh
+```
+
+New agents from `/rad-design` carry the tag already. See
+[docs/agent-hierarchy-audit.md](docs/agent-hierarchy-audit.md) for worked
+examples across RAD's own 27 agents.
+
+---
+
 ## See also
 
 - [INSTALL.md](INSTALL.md) — first-time installation and uninstalling
