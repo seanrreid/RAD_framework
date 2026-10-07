@@ -13,6 +13,8 @@
  *   Two narrow exceptions (#171 part 2): the .rad/skills and .rad/agents
  *   generator sources, and files under MARKED_ROOTS that carry the generated
  *   marker. Nothing else under .rad/ (config.yml, installed.json) ever ships.
+ * - Under scripts/, only top-level *.sh and *.mjs files (plus the scripts/lib
+ *   and scripts/hooks trees) are core; nested or other files never ship.
  * - Symlinks and non-regular files are skipped, never followed (#168).
  * - A malformed manifest fails closed: readManifest returns an error, never
  *   "missing", so a caller can never mistake it for a fresh install.
@@ -56,7 +58,7 @@ const SHA256_HEX = /^[0-9a-f]{64}$/;
 /** Directories whose whole subtree is core. */
 const CORE_TREES = ['.claude/commands', '.claude/skills', 'ai', 'scripts/lib', 'scripts/hooks', 'harness'];
 /** Directories where only top-level files with the given suffix are core. */
-const CORE_FLAT = [{ dir: 'scripts', suffix: '.sh' }];
+const CORE_FLAT = [{ dir: 'scripts', suffix: '.sh' }, { dir: 'scripts', suffix: '.mjs' }];
 /** `rad generate` source trees: shipped whole, so a target can regenerate. */
 const SOURCE_TREES = ['.rad/skills', '.rad/agents'];
 /** User-data roots where only files carrying the generated marker are core. */

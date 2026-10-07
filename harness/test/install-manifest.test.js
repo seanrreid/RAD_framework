@@ -24,6 +24,7 @@ const CORE_FIXTURE = {
   '.claude/skills/kickoff/SKILL.md': 'kickoff\n',
   'ai/guardrails.md': 'guardrails\n',
   'scripts/lint-plan.sh': '#!/bin/sh\necho lint\n',
+  'scripts/hook.mjs': '// hook\n',
   'scripts/lib/plan-paths.sh': '#!/bin/sh\necho paths\n',
   'scripts/hooks/post-wave/notify.sh': '#!/bin/sh\necho hook\n',
   'harness/cli.js': '// cli\n',
@@ -40,6 +41,7 @@ const NON_CORE_FIXTURE = {
   'harness/node_modules/js-yaml/index.js': '// dep\n',
   'scripts/notes.txt': 'not a script\n',
   'scripts/sub/deep.sh': '#!/bin/sh\n',
+  'scripts/sub/deep.mjs': '// nested\n',
 };
 const EXECUTABLES = ['scripts/lint-plan.sh', 'scripts/lib/plan-paths.sh', 'scripts/hooks/post-wave/notify.sh'];
 
@@ -106,6 +108,7 @@ test('listCoreFiles — real repo ships scripts/lib/plan-paths.sh and no user da
   const files = listCoreFiles(REPO_ROOT);
   assert.ok(files.includes('scripts/lib/plan-paths.sh'));
   assert.ok(files.includes('harness/cli.js'));
+  assert.ok(files.includes('scripts/deliver-gate-hook.mjs'), 'top-level scripts/*.mjs ships');
   assert.ok(!files.includes('CLAUDE.md'));
   assert.ok(!files.some((p) => p.startsWith('harness/node_modules/')), 'nothing under harness/node_modules/');
   const SHIPPED_RAD = ['.rad/skills/', '.rad/agents/'];
