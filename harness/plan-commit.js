@@ -96,13 +96,27 @@ export function countWavesTasks(text) {
   return { waves, tasks };
 }
 
-/** The `# Plan: <title>` value. A plan without one cannot name its commit. */
-function planTitle(text) {
+/**
+ * The first `# Plan: <heading>` value, or null when the plan has none. Unlike
+ * planTitle it never throws on a missing heading — callers pick a fallback.
+ *
+ * @param {string} text - full plan doc text
+ * @returns {string|null}
+ */
+export function planHeading(text) {
+  if (typeof text !== 'string') throw new TypeError('planHeading: text must be a string');
   for (const line of text.split('\n')) {
     const m = PLAN_TITLE_PATTERN.exec(line.trim());
     if (m) return m[1].trim();
   }
-  throw new Error('plan has no "# Plan: <title>" line');
+  return null;
+}
+
+/** The `# Plan: <title>` value. A plan without one cannot name its commit. */
+function planTitle(text) {
+  const heading = planHeading(text);
+  if (heading === null) throw new Error('plan has no "# Plan: <title>" line');
+  return heading;
 }
 
 /**
