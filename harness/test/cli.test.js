@@ -265,7 +265,7 @@ test('AC#2 — approve records approved event and gate passes (temp-repo fixture
       return defaultSh(file, args, opts);
     };
 
-    const code = await approveCommand([feature], { repoRoot, sh: mockSh });
+    const code = await approveCommand([feature, '--no-commit'], { repoRoot, sh: mockSh });
     assert.equal(code, 0, `approveCommand should return 0; got ${code}`);
 
     // Assert exactly one approved event in events.jsonl.

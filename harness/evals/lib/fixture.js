@@ -126,7 +126,7 @@ export function createFixture({ feature = 'demo', plan, withOrigin = true, appro
     },
     adversaryRan: () => existsSync(join(agentDir, 'ran')),
     approve: (env = {}) => {
-      const res = fx.run('node', [cli, 'approve', feature], env);
+      const res = fx.run('node', [cli, 'approve', feature, '--no-commit'], env);
       if (res.status === 0) { mustGit(root, 'add', '-A'); mustGit(root, 'commit', '-q', '-m', `approve: ${feature}`); }
       return res;
     },

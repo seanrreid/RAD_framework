@@ -420,7 +420,7 @@ test('AC#5 — bestEffortSyncPush short-circuits with RAD_SYNC unset (no sh call
     const prev = process.env.RAD_SYNC;
     delete process.env.RAD_SYNC;
     try {
-      const code = await approveCommand([feature], { repoRoot, sh: mockSh });
+      const code = await approveCommand([feature, '--no-commit'], { repoRoot, sh: mockSh });
       assert.equal(code, 0, 'approve should succeed');
     } finally {
       if (prev !== undefined) process.env.RAD_SYNC = prev;
