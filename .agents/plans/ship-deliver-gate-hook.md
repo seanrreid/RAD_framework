@@ -1,7 +1,10 @@
 # Plan: Ship the Deliver-Gate Hook to Installed Projects (#186 part 1)
 Created: 2026-10-07
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-10-07T13:30:01.299Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/ship-deliver-gate-hook
 Adopted-From: https://github.com/seanrreid/RAD_framework/issues/186
 Issue-Title: Codex parity for RAD's state-changing workflow (plan, approve, deliver)
