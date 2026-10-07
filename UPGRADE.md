@@ -14,8 +14,9 @@ originally set up with the installer.
 |------|-----------|
 | `.claude/commands/` | **Refreshed** — unedited command files updated; locally edited ones kept |
 | `.claude/skills/` | **Refreshed** — unedited RAD skills updated; locally edited ones kept |
+| `.claude/settings.json` | **Merged** — the deliver-gate hook registration is added if missing; nothing else changes (see `rad install-hooks`) |
 | `ai/` | **Refreshed** — unedited guardrail files updated; locally edited ones (e.g. `slop-register.md`) kept |
-| `scripts/` | **Refreshed** — `*.sh` helpers, `scripts/lib/`, and `scripts/hooks/`; locally edited files kept |
+| `scripts/` | **Refreshed** — `*.sh` and `*.mjs` helpers, `scripts/lib/`, and `scripts/hooks/`; locally edited files kept |
 | `harness/` | **Refreshed** — everything except `harness/node_modules/`, which is never touched |
 | `.rad/installed.json` | **Written / updated** — the install manifest (see [How upgrades handle local edits](#how-upgrades-handle-local-edits)) |
 | Preset files | **Re-applied** when a preset is recorded in `.rad/installed.json` — from its recorded source, same keep-local-edits rules as core (see [Presets on upgrade](#presets-on-upgrade)) |

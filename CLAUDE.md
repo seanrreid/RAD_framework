@@ -22,9 +22,9 @@ under `.claude/commands/`; a bare `/rad-plan` does not resolve. Use:
 
 **Deliver-gate hook.** The never-deliver-unapproved rule in `AGENTS.md` is
 ALSO deterministically enforced by a PreToolUse hook
-(`scripts/deliver-gate-hook.mjs`, registered in `.claude/settings.json`) that
-blocks an unapproved /rad-deliver Skill call fail-closed (exit 2) — not prose
-alone.
+(`scripts/deliver-gate-hook.mjs`, registered in `.claude/settings.json` by
+install) that blocks an unapproved /rad-deliver Skill call fail-closed
+(exit 2) — not prose alone.
 
 **Maintaining this file.**
 - `@AGENTS.md` is expanded only when Claude Code loads this file at session

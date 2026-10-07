@@ -228,7 +228,7 @@ the manual move. `scripts/lint-claude-md.sh` checks both files against the
 | Gap | Effect | Fixed by |
 |-----|--------|----------|
 | `quality-reviewer` and `accessibility-reviewer` are not shipped by core (`.claude/agents/` is user data in `harness/install-manifest.js`), yet `rad review` loads `.claude/agents/<reviewer>.md` | `rad review` fails in an installed project that never ran `/rad-design` | Fixed in part 2: core ships the `.rad/agents` and `.rad/skills` sources and every marked file under `.claude/agents`, `.agents/skills` and `.codex/agents` |
-| `scripts/deliver-gate-hook.mjs` and its `.claude/settings.json` registration are not shipped | Installed projects get the harness check but not the hook layer | #186 (the hook is about deliver; ships with the deliver parity work) |
+| `scripts/deliver-gate-hook.mjs` and its `.claude/settings.json` registration are not shipped | Installed projects get the harness check but not the hook layer | Fixed in #186 part 1: core ships `scripts/*.mjs`, and install merges the registration via `rad install-hooks` |
 | `scripts/lint-agent-files.sh:15-17` says reviewers have no `roles:`, but they do | Misleading comment only | Fixed in part 2 (comment corrected with the reviewer migration) |
 
 ---
