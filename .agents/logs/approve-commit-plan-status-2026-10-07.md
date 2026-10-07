@@ -13,3 +13,5 @@ Executor role: architect
 | 3 | Wave 2 | approve commits by default | ✓ complete | 394a165 | 11:03 |
 | 4 | Wave 2 | rad plan-status | ✓ complete | 21cafb8 | 11:04 |
 | 5 | Wave 2 | Update callers that relied on the no-commit default | ✓ complete | 99c6730 | 11:05 |
+| 7 | Wave 3 | /rad-approve calls the commands | ✓ complete | c31cb7f | 11:08 |
+| 8 | Wave 3 | Docs | ✓ complete | 99269e7 | 11:08 |
