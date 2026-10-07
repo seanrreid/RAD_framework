@@ -78,11 +78,27 @@ Parent Orchestrator
 **For each agent, determine:**
 - Type: `parent-orchestrator` | `role-orchestrator` | `context-tool`
 - Roles: who can invoke it (inherit from parent orchestrator for context tools)
+- Purpose: why the boundary exists — `authority` | `context-discipline` | `capacity`, plus a one-line justification
 - Model: `claude-sonnet-4-6` for orchestrators, `claude-haiku-4-5-20251001` for context tools
 - Tools: `Task` for anything that delegates, `Read, Grep, Glob` for anything that reads
 - Reads: exact directories/patterns, or "nothing — delegates only"
 - Returns: the output contract (what format, what fields, what line budget)
 - Description: what goes in the frontmatter `description:` field
+
+**Purpose rules:**
+Every agent gets exactly one `purpose`. Ask these in order; the first "yes" wins:
+
+| `purpose` | Test question |
+|---|---|
+| `authority` | Would this boundary still be wanted with a perfect, free, infinite-context model? |
+| `context-discipline` | Is it here because reading everything is too expensive or too distracting? |
+| `capacity` | Is it here only because the read wouldn't fit? |
+
+- Orchestrators that only delegate are usually `authority`
+- Mappers that return anchors are usually `context-discipline`
+- `capacity` is provisional: its justification must name the read that wouldn't fit
+- Tie-breaker between the last two: would we keep this with an infinite but costly window? Yes means `context-discipline`
+- See `docs/agent-hierarchy-audit.md` for worked examples
 
 **Role assignment rules:**
 - Parent orchestrator → `architect` only
@@ -118,6 +134,7 @@ Research: .agents/research/[slug].md
 ### [agent-name]
 - Type: [parent-orchestrator | role-orchestrator | context-tool]
 - Roles: [architect | developer | designer — comma-separated]
+- Purpose: [authority | context-discipline | capacity]: [one-line justification]
 - Model: [claude-sonnet-4-6 | claude-haiku-4-5-20251001]
 - Tools: [Task | Read, Grep, Glob]
 - Reads: [exact scope, or "nothing — delegates only"]
@@ -139,7 +156,9 @@ Research: .agents/research/[slug].md
 
 The artifact is written with `Status: draft`. Do **not** stop and ask the architect
 to re-run — present the design inline and gate here. Render the hierarchy tree, the
-Scope Map table, and the Notes section, then ask:
+Scope Map table, a Purpose table, and the Notes section, then ask. Build the Purpose
+table (agent | purpose | justification) from the `Purpose:` lines in Agent
+Definitions, and mark each `capacity` row "(provisional)".
 
 ```
 Architecture drafted: .agents/architecture/[slug].md
@@ -147,6 +166,10 @@ Architecture drafted: .agents/architecture/[slug].md
 [Agent Hierarchy tree]
 
 [Scope Map table]
+
+| Agent | Purpose | Justification |
+|-------|---------|---------------|
+| [name] | [purpose, plus "(provisional)" if capacity] | [one-line justification] |
 
 [Notes]
 
@@ -210,7 +233,10 @@ description: [description field from architecture artifact]
 model: [model from architecture artifact]
 tools: [tools from architecture artifact]
 roles: [roles from architecture artifact]
+purpose: [purpose from architecture artifact]
 ---
+
+Copy only the value. The justification stays in the architecture artifact, never in the agent file.
 
 Body sections (use exactly these headings):
 
