@@ -9,3 +9,4 @@ Executor role: architect
 | Step | Wave | Task | Status | Commit | Time |
 |------|------|------|--------|--------|------|
 | 1 | Wave 1 | Pure plan-commit helpers | ✓ complete | 2d9d890 | 10:17 |
+| 2 | Wave 1 | Issue: lint rule | ✓ complete | 1322c5b | 10:19 |
