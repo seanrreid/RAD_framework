@@ -1,7 +1,10 @@
 # Plan: agent: in .rad/config.yml, Set at Install (#186 part 3a)
 Created: 2026-10-07
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-10-07T17:48:28.708Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/agent-config
 Issue: 186
 Adopted-From: https://github.com/seanrreid/RAD_framework/issues/186
