@@ -4,6 +4,7 @@ description: MUST BE USED by ci-wiring-orchestrator when mapping existing script
 model: claude-haiku-4-5-20251001
 tools: Read, Grep, Glob
 roles: architect
+purpose: context-discipline
 ---
 
 ## Role

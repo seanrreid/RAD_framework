@@ -4,6 +4,7 @@ description: "Owns how approval authority is recorded as events. Delegate here f
 model: claude-sonnet-4-6
 tools: Task
 roles: architect
+purpose: authority
 ---
 
 ## Role

@@ -4,6 +4,7 @@ description: Owns the CI wiring: .github/workflows/ job structure, triggers, the
 model: claude-sonnet-4-6
 tools: Task
 roles: architect
+purpose: authority
 ---
 
 ## Role

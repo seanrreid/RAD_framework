@@ -4,6 +4,7 @@ description: "Top orchestrator for the approval-authority-recording feature. Del
 model: claude-sonnet-4-6
 tools: Task
 roles: architect
+purpose: authority
 ---
 
 ## Role

@@ -4,6 +4,7 @@ description: Owns the new fail-closed integrity scripts: approval-ancestry + fin
 model: claude-sonnet-4-6
 tools: Task
 roles: architect
+purpose: authority
 ---
 
 ## Role

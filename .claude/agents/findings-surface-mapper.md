@@ -4,6 +4,7 @@ description: MUST BE USED by findings-loop-orchestrator when mapping the finding
 model: claude-haiku-4-5-20251001
 tools: Read, Grep, Glob
 roles: developer
+purpose: context-discipline
 ---
 
 ## Role

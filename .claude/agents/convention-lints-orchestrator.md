@@ -4,6 +4,7 @@ description: Owns the repo-convention lints: the new agent-file frontmatter lint
 model: claude-sonnet-4-6
 tools: Task
 roles: architect
+purpose: authority
 ---
 
 ## Role

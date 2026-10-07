@@ -4,6 +4,7 @@ description: "Owns how the event log gains ownership and refuses to fold when di
 model: claude-sonnet-4-6
 tools: Task
 roles: architect
+purpose: authority
 ---
 
 ## Role

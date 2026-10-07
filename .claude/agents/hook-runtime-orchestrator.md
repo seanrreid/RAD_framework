@@ -4,6 +4,7 @@ description: "Owns the hook runner module, the operator config surface (scripts/
 model: claude-sonnet-4-6
 tools: Task
 roles: architect
+purpose: authority
 ---
 
 ## Role

@@ -4,6 +4,7 @@ description: Top orchestrator for the harness-ci feature. Delegates to ci-wiring
 model: claude-sonnet-4-6
 tools: Task
 roles: architect
+purpose: authority
 ---
 
 ## Role
