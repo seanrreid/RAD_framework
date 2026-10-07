@@ -14,3 +14,4 @@ Executor role: architect
 | 4 | Wave 2 | rad plan-open command | ✓ complete | b195e44 | 10:25 |
 | 5 | Wave 3 | /rad-plan and /rad-adopt call rad plan-open | ✓ complete | 01d9381 | 10:27 |
 | 6 | Wave 3 | Docs | ✓ complete | f1bdfeb | 10:28 |
+| 7 | Wave 3 | Full-suite check | ✓ complete | — (read-only; all checks exit 0) | 10:33 |
