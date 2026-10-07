@@ -80,6 +80,12 @@ export const STOP_TABLE = Object.freeze({
       'merging origin/{base} into {branch} conflicts ({detail}); resolve the conflict on the branch, commit, and re-run with --resume',
   }),
   'prepare-failed': Object.freeze({ class: FAILED, decision: 'prepare failed: {detail}' }),
+  // Finish phase (#186 part 3b-ii-a): the finish port's beforePr/afterPr step
+  // failed or threw. Absent `{detail}` renders as `unknown`.
+  'finish-failed': Object.freeze({
+    class: FAILED,
+    decision: 'finishing the run failed: {detail}; re-run rad deliver to finish',
+  }),
 });
 
 /** Rendering of an absent optional field — keeps the sentence readable. */

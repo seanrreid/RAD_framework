@@ -107,6 +107,29 @@ async function runPrepare({ prepare, state, feature, now }) {
   return result;
 }
 
+/** Stop key for a finish-port step that fails or THROWS (fail-closed, never
+ * swallowed: the thrown message becomes the stop's detail). */
+const FINISH_FAILED = 'finish-failed';
+
+/** The post-check before which the finish port's `beforePr` runs. */
+const FINISH_BEFORE_SCRIPT = 'open-pr.sh';
+
+/**
+ * Run ONE finish-port step (`beforePr` or `afterPr`). Returns null on
+ * `{ ok: true }`; otherwise (ok:false, a malformed result, or a throw) returns
+ * the failure `{ detail }`. Never appends — the caller decides what is recorded.
+ */
+async function runFinishStep(step) {
+  let r;
+  try {
+    r = await step();
+  } catch (err) {
+    return { detail: errorMessage(err) };
+  }
+  if (r && r.ok === true) return null;
+  return { detail: typeof r?.detail === 'string' ? r.detail : undefined };
+}
+
 /** Neutral approval-integrity port. The default injected `approvalIntact`:
  * always intact, so omitting it changes nothing (the between-wave re-check then
  * reduces to re-running the approved gate). */
@@ -604,6 +627,15 @@ function convergeOrphans({ history, wave, matrix, state, feature, now, runHooks 
  *   (`merge-conflict` = needs-decision, `prepare-failed` = failed). A port that
  *   THROWS is treated as `prepare-failed` with the error message as detail.
  *   Absent (default) runs nothing — the event sequence is byte-for-byte today's.
+ * @param {{ beforePr: () => Promise<{ ok: true, data?: Object } | { ok: false, detail: string }>, afterPr: () => Promise<{ ok: true, data?: Object } | { ok: false, detail: string }> }} [args.finish]
+ *   OPTIONAL finish port. `beforePr` runs immediately before the `open-pr.sh`
+ *   post-check; a failure (or throw) stops the run through stopRun as
+ *   `finish-failed` (failed) — open-pr.sh is NOT run and `pr-opened` is NOT
+ *   appended. `afterPr` runs after the `pr-opened` append; because `delivered`
+ *   is terminal NOTHING may be appended after it, so a failure (or throw)
+ *   returns `{ ok: false, stopped: 'finish-failed', detail, reason, afterPr: true }`
+ *   with no event. A step that THROWS uses the error message as detail.
+ *   Absent (default) runs nothing — the event sequence is byte-for-byte today's.
  * @returns {Promise<Object>} structured terminal result
  */
 export async function deliverSpine({
@@ -627,6 +659,7 @@ export async function deliverSpine({
   resume = null,
   pushGuard = false,
   prepare = null,
+  finish = null,
 }) {
   // ── DET gate: approval. The human (or proxy) decided earlier; here we ENFORCE
   // it. A blocked gate is a normal outcome — return structured, append nothing
@@ -1131,6 +1164,13 @@ export async function deliverSpine({
   // ── DET post-checks: existing bash guardrails, called by path via the injected
   // `sh`. A non-zero exit halts the spine before the PR is recorded. ──
   for (const script of POST_CHECKS) {
+    if (finish && script === FINISH_BEFORE_SCRIPT) {
+      const failure = await runFinishStep(finish.beforePr);
+      if (failure) {
+        const { detail } = failure;
+        return stopRun({ stopped: FINISH_FAILED, ok: false, detail, reason: detail }, stopCtx);
+      }
+    }
     const check = sh(`scripts/${script}`, feature);
     if (check.status !== 0) {
       return stopRun({ stopped: 'post-check', ok: false, check: script, status: check.status }, stopCtx);
@@ -1138,6 +1178,16 @@ export async function deliverSpine({
   }
 
   state.append({ feature, type: 'pr-opened', actor: 'harness', ts: now() });
+
+  // `pr-opened` moves the run to the terminal `delivered` phase: an afterPr
+  // failure is reported in the result only — appending here would throw.
+  if (finish) {
+    const failure = await runFinishStep(finish.afterPr);
+    if (failure) {
+      const { detail } = failure;
+      return { ok: false, stopped: FINISH_FAILED, detail, reason: detail, afterPr: true };
+    }
+  }
 
   return { ok: true, waves: waves.length };
 }
