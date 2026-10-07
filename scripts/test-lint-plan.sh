@@ -25,6 +25,8 @@
 #   - freshness with a missing/invalid .rad/config.yml: one advisory with reason
 #   - capability request advisory (#85): net/mcp on a Capabilities: line warns
 #     once per (scope, class); default-only lines and prose stay quiet
+#   - Issue: header (#186): absent and `Issue: 186` lint clean; `Issue: 0`,
+#     `Issue: #186` and `Issue: abc` are errors naming the value, exit 1
 # Self-contained (no external harness): writes temp fixture plans, runs the real
 # lint-plan.sh, and asserts on output/exit code. Runs under bash 3.2+ (set -u safe).
 #
@@ -1192,6 +1194,32 @@ t_capability_advisory() {
   echo "✓ CAP(c/d): default-only line and net/mcp in prose ⇒ no capability warning"
 }
 
+# Issue: header (#186). Reuses the tier fixture's header-line slot.
+ISSUE_ERROR_PREFIX="Invalid Issue value"
+t_issue_header() {
+  local base="$GREPO/.agents/plans"
+  write_tier_plan "$base/issue-absent.md" "" 1
+  ( tier_lint issue-absent.md
+    assert_out_lacks "ISSUE(a)" "$ISSUE_ERROR_PREFIX"
+    assert_code "ISSUE(a)" 0 ) || exit 1
+  echo "✓ ISSUE(a): no Issue: header ⇒ no error"
+
+  write_tier_plan "$base/issue-ok.md" "Issue: 186" 1
+  ( tier_lint issue-ok.md
+    assert_out_lacks "ISSUE(b)" "$ISSUE_ERROR_PREFIX"
+    assert_code "ISSUE(b)" 0 ) || exit 1
+  echo "✓ ISSUE(b): Issue: 186 ⇒ no error"
+
+  local bad
+  for bad in "0" "#186" "abc"; do
+    write_tier_plan "$base/issue-bad.md" "Issue: $bad" 1
+    ( tier_lint issue-bad.md
+      assert_out_has "ISSUE(c)" "✗ $ISSUE_ERROR_PREFIX: '$bad' (expected a positive issue number)"
+      assert_code "ISSUE(c)" 1 ) || exit 1
+    echo "✓ ISSUE(c): Issue: $bad ⇒ error naming the value, exit 1"
+  done
+}
+
 t_missing_task_file
 t_multi_file_task_line
 t_budget_bare_number
@@ -1225,4 +1253,5 @@ t_vague_wording_advisory
 t_vague_wording_multibyte
 t_consistency_edge_cases
 t_capability_advisory
+t_issue_header
 echo "ALL PASS"

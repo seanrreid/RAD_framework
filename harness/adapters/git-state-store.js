@@ -94,7 +94,7 @@ function defaultSh(file, args = [], opts = {}) {
  * check-plan-approved.sh), so they MUST be validated before use to prevent path
  * traversal. Mirrors the `rad/<feature>` branch grammar the scripts enforce.
  */
-function isSafeFeature(feature) {
+export function isSafeFeature(feature) {
   if (typeof feature !== 'string') return false;
   // `_architecture` is the single reserved, non-feature project log (a fixed
   // literal, NOT a loosened regex) — its events.jsonl records architecture-review

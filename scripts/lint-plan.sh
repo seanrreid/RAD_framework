@@ -55,6 +55,7 @@ AUTHOR=$(header_field "Author")
 CREATED=$(header_field "Created")
 BRANCH=$(header_field "Branch")
 ADOPTED_FROM=$(header_field "Adopted-From")
+ISSUE=$(header_field "Issue")
 
 [[ -z "$STATUS" ]]  && ERRORS+=("Missing required field: Status")
 [[ -z "$AUTHOR" ]]  && ERRORS+=("Missing required field: Author")
@@ -70,6 +71,13 @@ if [[ -z "$BRANCH" ]]; then
   WARNINGS+=("Missing Branch field — Lane B plans should record their work branch (e.g. ${PREFIX}feature-slug)")
 elif [[ "$BRANCH" != "${PREFIX}"* || ! "${BRANCH#"$PREFIX"}" =~ ^[a-z0-9][a-z0-9-]*$ ]]; then
   ERRORS+=("Invalid Branch value: '$BRANCH' (expected ${PREFIX}feature-slug, lowercase/digits/hyphens)")
+fi
+
+# Issue is optional; when present it must be a positive issue number, since
+# rad plan-open labels that issue and stamps it into the plan commit.
+ISSUE_PATTERN='^[1-9][0-9]*$'
+if [[ -n "$ISSUE" && ! "$ISSUE" =~ $ISSUE_PATTERN ]]; then
+  ERRORS+=("Invalid Issue value: '$ISSUE' (expected a positive issue number)")
 fi
 
 VALID_STATUSES="pending-review approved in-progress complete blocked rejected needs-revision"
