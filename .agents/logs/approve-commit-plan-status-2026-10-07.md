@@ -15,3 +15,4 @@ Executor role: architect
 | 5 | Wave 2 | Update callers that relied on the no-commit default | ✓ complete | 99c6730 | 11:05 |
 | 7 | Wave 3 | /rad-approve calls the commands | ✓ complete | c31cb7f | 11:08 |
 | 8 | Wave 3 | Docs | ✓ complete | 99269e7 | 11:08 |
+| 6 | Wave 3 | Real-git tests for approve and plan-status | ✓ complete | 3993a08 | 11:09 |
