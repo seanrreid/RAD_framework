@@ -255,6 +255,52 @@ export function setPlanStatus(text, status) {
 }
 
 /**
+ * The trimmed value of the plan's header `<key>:` line, or null when absent or
+ * empty. Only the header block (before the first `## `) is read.
+ *
+ * @param {string} text - full plan doc text
+ * @param {string} key
+ * @returns {string|null}
+ */
+export function planHeaderValue(text, key) {
+  if (typeof text !== 'string' || typeof key !== 'string') throw new TypeError('planHeaderValue: text and key must be strings');
+  return headerValue(text, key);
+}
+
+/**
+ * Set a header `<key>: <value>` line. Replaces the first `<key>:` line in the
+ * header block; when absent, inserts it right after the `after` key's line
+ * (else after the `# Plan:` title). Lines after the first `## ` heading are
+ * never touched.
+ *
+ * @param {string} text - full plan doc text
+ * @param {string} key
+ * @param {string} value - a single line
+ * @param {{ after?: string }} [opts]
+ * @returns {string} the new text
+ */
+export function upsertPlanHeader(text, key, value, { after = 'Status' } = {}) {
+  for (const [name, v] of [['text', text], ['key', key], ['value', value], ['after', after]]) {
+    if (typeof v !== 'string') throw new TypeError(`upsertPlanHeader: ${name} must be a string`);
+  }
+  if (!TRAILER_KEY_PATTERN.test(key)) throw new TypeError(`upsertPlanHeader: invalid key ${JSON.stringify(key)}`);
+  if (/[\r\n]/.test(value)) throw new Error(`value must be a single line: ${JSON.stringify(value)}`);
+  const lines = text.split('\n');
+  const header = lines.slice(0, headerLines(text).length);
+  const line = `${key}: ${value.trim()}`;
+  const existing = header.findIndex((l) => l.startsWith(`${key}:`));
+  if (existing !== -1) {
+    lines[existing] = line;
+    return lines.join('\n');
+  }
+  let anchor = header.findIndex((l) => l.startsWith(`${after}:`));
+  if (anchor === -1) anchor = header.findIndex((l) => PLAN_TITLE_PATTERN.test(l.trim()));
+  if (anchor === -1) throw new Error(`plan header has no "${after}:" or "# Plan:" line to anchor ${key}:`);
+  lines.splice(anchor + 1, 0, line);
+  return lines.join('\n');
+}
+
+/**
  * The work branch by convention: RAD_BRANCH_PREFIX (default rad/) + feature.
  *
  * @param {string} feature
