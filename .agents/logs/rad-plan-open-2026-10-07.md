@@ -12,3 +12,4 @@ Executor role: architect
 | 2 | Wave 1 | Issue: lint rule | ✓ complete | 1322c5b | 10:19 |
 | 3 | Wave 1 | Branch-prefix fallback fix | ✓ complete | 2b490f2 | 10:19 |
 | 4 | Wave 2 | rad plan-open command | ✓ complete | b195e44 | 10:25 |
+| 5 | Wave 3 | /rad-plan and /rad-adopt call rad plan-open | ✓ complete | 01d9381 | 10:27 |
