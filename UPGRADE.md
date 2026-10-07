@@ -427,11 +427,35 @@ The upgrade treats both commands like any other file in `.claude/commands/`:
 | unedited | replaces it with the generated version |
 | locally edited | keeps it and stages the generated version under `.rad/upgrade-pending/` |
 
-The installer copies these files; it does not run `rad generate`. If you later
-run `node harness/cli.js generate` with your own `.rad/skills/rad-plan` or
-`.rad/skills/rad-adopt` source, it refuses (exit 2, `conflict`) to overwrite a
-hand-written copy that lacks the marker line. Move your edits into the
-`.rad/skills` source, delete the old command file, then generate.
+The installer copies these files; it does not run `rad generate`. Install
+also ships the `.rad/skills/rad-plan` and `.rad/skills/rad-adopt` sources to
+every project, so any project can hit this: if you kept a locally edited
+command file and later run `node harness/cli.js generate`, it refuses (exit 2,
+`conflict`) to overwrite a hand-written copy that lacks the marker line. Move
+your edits into the `.rad/skills` source, delete the old command file, then
+generate.
+
+---
+
+## Generated rad-approve and the rad checkout verb (#186 part 2d)
+
+`.claude/commands/architect/rad-approve.md` is now generated, the same way as
+rad-plan and rad-adopt, from `.rad/skills/rad-approve/SKILL.md`. One shared body
+serves both assistants, and the same source generates the Codex skill
+`.agents/skills/rad-approve/SKILL.md`. The source sets `codex_implicit: false`,
+so the Codex skill also gets `agents/openai.yaml` with
+`allow_implicit_invocation: false`: Codex never invokes `rad-approve` on its
+own, only when you call it by name.
+
+The upgrade and the `generate` conflict work as described for rad-plan and
+rad-adopt above. Install ships the `.rad/skills/rad-approve` source to every
+project. If you edited your copy of the command, move your edits into that
+source, delete the old command file, then generate.
+
+A new verb, `rad checkout <feature>`, checks out a plan's work branch at its
+remote tip and confirms the plan file is there. It wraps
+`scripts/checkout-plan.sh`, never pushes, and is how `rad-approve` lands on the
+work branch. See [docs/rad-cli.md](docs/rad-cli.md#rad-checkout).
 
 ---
 

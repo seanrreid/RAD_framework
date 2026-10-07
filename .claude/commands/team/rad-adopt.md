@@ -292,8 +292,9 @@ The architect runs rad-approve [feature-slug] to unblock execution.
 ## Rules
 
 - Only call agents available to your role (check `node harness/cli.js config get agent_scope_map`)
-- Do not read files directly — delegate research to a sub-agent if your tool can
-  run one, otherwise do it inline; either way keep only a bounded summary
+- Keep raw file contents out of your working context — delegate research to a
+  sub-agent if your tool can run one, otherwise run it inline with the same caps;
+  either way keep only the bounded summary
 - Do not write any code in this phase
 - Cap research at 10 tool calls — split if more is needed
 - Every plan must have at least 2 non-goals and at least 1 acceptance criterion

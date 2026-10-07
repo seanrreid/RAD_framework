@@ -46,7 +46,7 @@ Columns:
 
 | Tool | Claude path | Codex path | Source | Body | Deps | State | Status |
 |------|-------------|------------|--------|------|------|-------|--------|
-| rad-approve | `.claude/commands/architect/rad-approve.md` | `.agents/skills/rad-approve/SKILL.md` | `.rad/skills/rad-approve/SKILL.md` | wrapper | `$ARGUMENTS` | yes | planned: parity issue #186 |
+| rad-approve | `.claude/commands/architect/rad-approve.md` | `.agents/skills/rad-approve/SKILL.md` (+ `agents/openai.yaml`, `codex_implicit: false`) | `.rad/skills/rad-approve/SKILL.md` | as-is | `$ARGUMENTS` | yes | generated (#186 part 2d) |
 | rad-design | `.claude/commands/architect/rad-design.md` | `.agents/skills/rad-design/SKILL.md` | `.rad/skills/rad-design/SKILL.md` | wrapper | sub-agent, `$ARGUMENTS` | yes | planned: parity issue #186 |
 | rad-epic-decompose | `.claude/commands/architect/rad-epic-decompose.md` | `.agents/skills/rad-epic-decompose/SKILL.md` | `.rad/skills/rad-epic-decompose/SKILL.md` | as-is | `$ARGUMENTS`, `gh` | artifact | planned: parity issue #186 |
 | rad-insights | `.claude/commands/shared/rad-insights.md` | `.agents/skills/rad-insights/SKILL.md` | `.rad/skills/rad-insights/SKILL.md` | wrapper | `$ARGUMENTS`, `$1/$2` | yes (`--draft-plans` only) | planned: parity issue #186 |

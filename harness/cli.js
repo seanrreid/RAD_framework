@@ -14,6 +14,7 @@
  *   approve <feature> [--on-behalf-of <name>] [--evidence <text>] [--no-commit] [--trailer "Key: Value"]...
  *   plan-open <plan-file> [--trailer "Key: Value"]...
  *   plan-status <feature> <rejected|needs-revision> [--trailer "Key: Value"]...
+ *   checkout <feature | .agents/plans/<feature>.md>
  *
  * Argv parsing is hand-rolled (no runtime dep beyond js-yaml, which this file
  * does not need). Control flow is deterministic and side-effect-free except for
@@ -63,6 +64,7 @@ import {
 import { publishPlanChange, requirePublishReady } from './branch-publish.js';
 import { planOpenCommand, PLAN_OPEN_USAGE } from './plan-open.js';
 import { planStatusCommand, PLAN_STATUS_USAGE } from './plan-status.js';
+import { checkoutCommand, CHECKOUT_USAGE } from './checkout.js';
 
 /** Usage line for `rad approve` (parse errors and the command table). */
 const APPROVE_USAGE = 'rad approve <feature> [--on-behalf-of <name>] [--evidence <text>] [--no-commit] [--trailer "Key: Value"]...';
@@ -196,6 +198,11 @@ const SUBCOMMANDS = {
     summary: "Record a plan review (rejected or needs-revision): set its Status, commit the plan, push, and label its issue.",
     usage: PLAN_STATUS_USAGE,
     run: (argv, ctx) => planStatusCommand(argv, ctx),
+  },
+  checkout: {
+    summary: "Check out a plan's work branch at its remote tip.",
+    usage: CHECKOUT_USAGE,
+    run: (argv, ctx) => checkoutCommand(argv, ctx),
   },
   'plan-fingerprint': {
     summary: 'Print the SHA-256 fingerprint of a plan doc body (read-only).',
