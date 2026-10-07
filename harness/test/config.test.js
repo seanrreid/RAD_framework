@@ -379,6 +379,84 @@ test('rad config init: unknown flag or a flag missing its value → exit 2 usage
   assert.equal(existsSync(join(root, CONFIG_PATH)), false);
 });
 
+// --- rad config init agent flags (#186 part 3a, AC#5) -----------------------
+
+const INIT_BASE = ['init', '--architect', 'lead@x.com'];
+const INIT_SUMMARY = 'rad config init: wrote .rad/config.yml (architect=lead@x.com, platform=manual, default_branch=main';
+
+/** Run init with `flags`, assert success, the summary suffix and the written agent: block. */
+async function assertInitAgent(flags, agent, suffix) {
+  const root = tempRoot();
+  const r = await runConfig([...INIT_BASE, ...flags], root);
+  assert.equal(r.code, 0, `${flags.join(' ')}: ${r.stderr}`);
+  assert.equal(r.stdout, `${INIT_SUMMARY}${suffix})\n`);
+  const loaded = await loadConfig(root);
+  assert.equal(loaded.ok, true, JSON.stringify(loaded.errors));
+  assert.deepEqual(loaded.doc.agent, agent);
+  assert.equal((await runConfig(['validate'], root)).code, 0);
+  return root;
+}
+
+test('rad config init --agent: each preset writes its AGENT_PRESETS block and names it in the summary', async () => {
+  for (const [name, preset] of Object.entries(AGENT_PRESETS)) {
+    const root = await assertInitAgent(['--agent', name], preset, `, agent=command:${preset.command}`);
+    assert.equal((await runConfig(['get', 'agent.command'], root)).stdout, `${preset.command}\n`);
+  }
+});
+
+test('rad config init --agent-cmd: a custom command (default command adapter) and acp', async () => {
+  const root = await assertInitAgent(['--agent-cmd', 'my-agent --run'], { adapter: 'command', command: 'my-agent --run' },
+    ', agent=command:my-agent --run');
+  assert.equal((await runConfig(['get', 'agent.command'], root)).stdout, 'my-agent --run\n');
+  await assertInitAgent(['--agent-cmd', 'agent --acp', '--agent-adapter', 'acp'], { adapter: 'acp', command: 'agent --acp' },
+    ', agent=acp:agent --acp');
+  await assertInitAgent(['--agent-adapter', 'command', '--agent-cmd', 'x'], { adapter: 'command', command: 'x' },
+    ', agent=command:x');
+});
+
+test('rad config init --agent-adapter sdk: writes { adapter: sdk } with no command', async () => {
+  await assertInitAgent(['--agent-adapter', 'sdk'], { adapter: 'sdk' }, ', agent=sdk:sdk');
+});
+
+test('rad config init: without agent flags the summary is unchanged and no agent: key is written', async () => {
+  const root = tempRoot();
+  const r = await runConfig(INIT_BASE, root);
+  assert.equal(r.stdout, `${INIT_SUMMARY})\n`);
+  assert.equal('agent' in (await loadConfig(root)).doc, false);
+  assert.doesNotMatch(readFileSync(join(root, CONFIG_PATH), 'utf8'), /^agent:/m);
+});
+
+test('rad config init: contradictory or incomplete agent flags → exit 2 usage, nothing written', async () => {
+  const cases = [
+    { argv: ['--agent', 'gemini'], err: /unknown --agent 'gemini' \(expected claude \| codex\)/ },
+    { argv: ['--agent', 'claude', '--agent-cmd', 'x'], err: /--agent cannot be combined/ },
+    { argv: ['--agent', 'claude', '--agent-adapter', 'sdk'], err: /--agent cannot be combined/ },
+    { argv: ['--agent-adapter', 'sdk', '--agent-cmd', 'x'], err: /sdk takes no --agent-cmd/ },
+    { argv: ['--agent-adapter', 'command'], err: /--agent-adapter command requires --agent-cmd/ },
+    { argv: ['--agent-adapter', 'acp'], err: /--agent-adapter acp requires --agent-cmd/ },
+    { argv: ['--agent-adapter', 'grpc', '--agent-cmd', 'x'], err: /unknown --agent-adapter 'grpc' \(expected command \| sdk \| acp\)/ },
+    { argv: ['--agent'], err: /--agent requires a value/ },
+    { argv: ['--agent-cmd'], err: /--agent-cmd requires a value/ },
+    { argv: ['--agent-adapter'], err: /--agent-adapter requires a value/ },
+  ];
+  for (const { argv, err } of cases) {
+    const root = tempRoot();
+    const r = await runConfig([...INIT_BASE, ...argv], root);
+    assert.equal(r.code, 2, `${argv.join(' ')}: ${r.stderr}`);
+    assert.match(r.stderr, err);
+    assert.match(r.stderr, /Usage: .*rad config init .*--agent <claude\|codex>/);
+    assert.equal(existsSync(join(root, CONFIG_PATH)), false, `nothing written for ${argv.join(' ')}`);
+  }
+});
+
+test('rad config init: an empty --agent-cmd is a value, rejected by validation (exit 1, nothing written)', async () => {
+  const root = tempRoot();
+  const r = await runConfig([...INIT_BASE, '--agent-cmd', ''], root);
+  assert.equal(r.code, 1, r.stderr);
+  assert.match(r.stderr, /agent\.command must be a non-empty string/);
+  assert.equal(existsSync(join(root, CONFIG_PATH)), false);
+});
+
 // --- capabilities.deny (#85) -------------------------------------------------
 
 const withCaps = (capabilities) => ({ ...clone(VALID), capabilities });

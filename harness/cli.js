@@ -49,7 +49,7 @@ import { gatherDigestInputs, buildDigest, renderDigest } from './digest.js';
 import { buildReviewPrompt, parseFindings } from './review.js';
 import {
   CONFIG_PATH, SETTINGS_KEYS, loadConfig, getConfigValue, migrateFromClaudeMd, serializeConfig, validateConfig,
-  buildInitConfig, seedSettings, writeConfigAtomic,
+  buildInitConfig, seedSettings, writeConfigAtomic, AGENT_ADAPTERS, AGENT_PRESETS,
 } from './config.js';
 import {
   MANIFEST_PATH, PENDING_DIR, UNKNOWN_RAD_VERSION, CORE_LAYER, PRESET_LAYER, PRESET_NEEDS_CORE_ERROR,
@@ -95,7 +95,8 @@ const ACP_CHECK_USAGE = 'rad acp-check --cmd "<agent>" [--timeout <seconds>]';
 const GENERATE_USAGE = 'rad generate [--check] [--root <dir>]';
 /** Usage line for `rad config`. */
 const CONFIG_USAGE = 'rad config get <key> | rad config validate | rad config settings'
-  + ' | rad config migrate [--from <path>] [--force] | rad config init [--architect <id>] [--platform <p>] [--default-branch <b>] [--force]';
+  + ' | rad config migrate [--from <path>] [--force] | rad config init [--architect <id>] [--platform <p>] [--default-branch <b>]'
+  + ' [--agent <claude|codex> | --agent-cmd <cmd> [--agent-adapter <command|acp>] | --agent-adapter sdk] [--force]';
 
 const SUBCOMMANDS = {
   approve: {
@@ -3250,11 +3251,19 @@ async function configMigrate(args, repoRoot) {
 /** `rad config init` flags that take a value, mapped to their parsed option key. */
 const INIT_VALUE_FLAGS = Object.freeze({
   '--architect': 'architect', '--platform': 'platform', '--default-branch': 'defaultBranch',
+  '--agent': 'agentPreset', '--agent-cmd': 'agentCmd', '--agent-adapter': 'agentAdapter',
 });
+/** The adapter `--agent-cmd` writes when `--agent-adapter` is not given. */
+const INIT_DEFAULT_AGENT_ADAPTER = 'command';
+/** The one adapter that takes no command. */
+const INIT_SDK_ADAPTER = 'sdk';
 
-/** Parse `init [--architect <id>] [--platform <p>] [--default-branch <b>] [--force]`; throws on malformed argv. */
+/** Parse `init [--architect <id>] [--platform <p>] [--default-branch <b>] [agent flags] [--force]`; throws on malformed argv. */
 function parseInitArgs(args) {
-  const out = { architect: undefined, platform: undefined, defaultBranch: undefined, force: false };
+  const out = {
+    architect: undefined, platform: undefined, defaultBranch: undefined,
+    agentPreset: undefined, agentCmd: undefined, agentAdapter: undefined, force: false,
+  };
   for (let i = 0; i < args.length; i += 1) {
     const key = INIT_VALUE_FLAGS[args[i]];
     if (args[i] === '--force') out.force = true;
@@ -3267,6 +3276,44 @@ function parseInitArgs(args) {
     } else throw new Error(`unknown argument '${args[i]}'`);
   }
   return out;
+}
+
+/** The `agent:` block a named preset writes — copied from AGENT_PRESETS, never redefined. Throws on an unknown name. */
+function initAgentPreset(opts) {
+  if (opts.agentCmd !== undefined || opts.agentAdapter !== undefined) {
+    throw new Error('--agent cannot be combined with --agent-cmd or --agent-adapter');
+  }
+  if (!Object.hasOwn(AGENT_PRESETS, opts.agentPreset)) {
+    throw new Error(`unknown --agent '${opts.agentPreset}' (expected ${Object.keys(AGENT_PRESETS).join(' | ')})`);
+  }
+  return { ...AGENT_PRESETS[opts.agentPreset] };
+}
+
+/**
+ * Resolve the init agent flags to an `agent:` block, or undefined when none is
+ * given. Throws (a usage error) on any contradictory or incomplete combination;
+ * the block is still validated by validateConfig before anything is written.
+ *
+ * @returns {{ adapter: string, command?: string } | undefined}
+ */
+function resolveInitAgent(opts) {
+  if (opts.agentPreset !== undefined) return initAgentPreset(opts);
+  if (opts.agentCmd === undefined && opts.agentAdapter === undefined) return undefined;
+  const adapter = opts.agentAdapter ?? INIT_DEFAULT_AGENT_ADAPTER;
+  if (!AGENT_ADAPTERS.includes(adapter)) {
+    throw new Error(`unknown --agent-adapter '${adapter}' (expected ${AGENT_ADAPTERS.join(' | ')})`);
+  }
+  if (adapter === INIT_SDK_ADAPTER) {
+    if (opts.agentCmd !== undefined) throw new Error('--agent-adapter sdk takes no --agent-cmd');
+    return { adapter };
+  }
+  if (opts.agentCmd === undefined) throw new Error(`--agent-adapter ${adapter} requires --agent-cmd`);
+  return { adapter, command: opts.agentCmd };
+}
+
+/** The init summary suffix: `, agent=<adapter>:<command or sdk>` when an agent was set, else ''. */
+function initAgentSummary(agent) {
+  return agent === undefined ? '' : `, agent=${agent.adapter}:${agent.command ?? INIT_SDK_ADAPTER}`;
 }
 
 /**
@@ -3298,8 +3345,10 @@ function resolveInitArchitect(opts, repoRoot) {
 
 async function configInit(args, repoRoot) {
   let opts;
+  let agent;
   try {
     opts = parseInitArgs(args);
+    agent = resolveInitAgent(opts);
   } catch (err) {
     return configUsage(`init: ${err.message}`);
   }
@@ -3310,7 +3359,8 @@ async function configInit(args, repoRoot) {
   }
   const resolved = resolveInitArchitect(opts, repoRoot);
   if (resolved.code !== undefined) return resolved.code;
-  const doc = buildInitConfig({ ...opts, architect: resolved.architect });
+  const { platform, defaultBranch } = opts;
+  const doc = buildInitConfig({ platform, defaultBranch, architect: resolved.architect, agent });
   const errors = validateConfig(doc);
   if (errors.length) {
     process.stderr.write('rad config init: refusing to write an invalid config:\n');
@@ -3320,7 +3370,7 @@ async function configInit(args, repoRoot) {
   mkdirSync(dirname(target), { recursive: true });
   writeFileSync(target, serializeConfig(doc));
   process.stdout.write(`rad config init: wrote ${CONFIG_PATH} (architect=${doc.roles.architect[0]}, `
-    + `platform=${doc.platform}, default_branch=${doc.default_branch})\n`);
+    + `platform=${doc.platform}, default_branch=${doc.default_branch}${initAgentSummary(doc.agent)})\n`);
   return 0;
 }
 
@@ -3335,7 +3385,7 @@ const CONFIG_ACTIONS = {
 
 /**
  * `config get <key> | validate | migrate [--from <path>] [--force]
- *  | init [--architect <id>] [--platform <p>] [--default-branch <b>] [--force]`.
+ *  | init [--architect <id>] [--platform <p>] [--default-branch <b>] [agent flags] [--force]`.
  *
  * get: prints the value (lists one item per line; scope-map rows as compact
  * JSON) — exit 0; absent key → 3; missing/invalid config → 1; bad argv → 2.
@@ -3344,8 +3394,9 @@ const CONFIG_ACTIONS = {
  * stdout; bad argv → 2. migrate: writes .rad/config.yml
  * from CLAUDE.md (never edits it); refuses to overwrite without --force.
  * init: writes a fresh validated config (architect = --architect, else the
- * repo's git user.email; platform default manual, default_branch default main)
- * — exit 0 written; 1 no identity / invalid value / exists without --force;
+ * repo's git user.email; platform default manual, default_branch default main;
+ * `agent:` only from --agent <preset>, or --agent-cmd [--agent-adapter], or
+ * --agent-adapter sdk) — exit 0 written; 1 no identity / invalid value / exists without --force;
  * 2 bad argv. Nothing is written on any failure.
  *
  * @param {string[]} argv - args after `config`
