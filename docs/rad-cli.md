@@ -9,6 +9,7 @@ The CLI never calls a model on its own and never opens a PR — `rad approve` is
 pure git/state work; `rad deliver` delegates model calls to a selectable agent
 adapter (a spawned CLI agent or the Claude Agent SDK) but does not call any API
 itself. It pushes a branch only in `approve`, `plan-open` and `plan-status`.
+`checkout` switches the checked-out branch but never pushes.
 
 ---
 
@@ -205,6 +206,48 @@ message that a rerun is safe; the rerun resumes. There is no rollback.
 
 **Exit codes:** 0 committed (if needed) and pushed; 1 a publish step failed
 (rerun resumes); 2 refused, nothing changed.
+
+---
+
+### rad checkout
+
+```
+rad checkout <feature | .agents/plans/<feature>.md>
+```
+
+Checks out a plan's work branch at its remote tip. This is how `/rad-approve`
+gets onto the work branch before it reviews the plan, and any coding tool can
+call it. It wraps `scripts/checkout-plan.sh` and adds no git logic of its own.
+It:
+1. resolves the branch from the feature name by convention (`rad/<feature>`,
+   honoring `RAD_BRANCH_PREFIX`). It never reads a local plan header, because
+   the plan is not on the default branch before checkout;
+2. runs `scripts/checkout-plan.sh <branch>`, which fetches the branch from
+   origin, checks it out and fast-forwards it to the remote tip;
+3. confirms that `.agents/plans/<feature>.md` exists at the branch tip.
+
+It changes the checked-out branch but commits nothing and never pushes.
+
+**Argument:** `<feature>`, `<feature>.md` or `.agents/plans/<feature>.md`.
+`--help` / `-h` prints the usage line and exits 0.
+
+**Refusals (exit 2, before any git call):**
+- an unknown option, or not exactly one argument
+- an argument in none of the accepted shapes
+- an invalid feature name (expected `/^[a-z0-9][a-z0-9-]*$/`; the reserved
+  `_architecture` slug is refused)
+
+**Failures (exit 1):**
+- `scripts/checkout-plan.sh` failed (an invalid branch name, a branch missing on
+  origin, or a local branch that has diverged); its output is passed through
+- the branch checked out, but the plan file is missing at its tip
+- `git rev-parse HEAD` failed
+
+**Success line:**
+`rad checkout: ok feature=<f> branch=<branch> head=<sha> plan=.agents/plans/<f>.md`
+
+**Exit codes:** 0 on the branch at its remote tip with the plan present; 1 the
+checkout script failed or the plan is missing; 2 refused before any git call.
 
 ---
 
