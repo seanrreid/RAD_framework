@@ -25,7 +25,9 @@ import { fileURLToPath } from 'node:url';
 import { basename, dirname, join, resolve } from 'node:path';
 import {
   readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync, realpathSync, statSync, lstatSync, renameSync,
+  mkdtempSync, rmSync,
 } from 'node:fs';
+import { tmpdir } from 'node:os';
 import process from 'node:process';
 import { spawnSync, execFileSync } from 'node:child_process';
 
@@ -45,7 +47,8 @@ import {
 } from './events.js';
 import { taskFilesFromPlanText, mergeTaskFiles } from './plan-tasks.js';
 import { parseCapabilityLine, resolveWaveCapabilities, sdkAllowedTools, commandRefusal } from './capabilities.js';
-import { gatherDigestInputs, buildDigest, renderDigest } from './digest.js';
+import { gatherDigestInputs, buildDigest, renderDigest, readScope } from './digest.js';
+import { buildPrBody, testsToWritePaths } from './pr-body.js';
 import { buildReviewPrompt, parseFindings } from './review.js';
 import {
   CONFIG_PATH, SETTINGS_KEYS, loadConfig, getConfigValue, migrateFromClaudeMd, serializeConfig, validateConfig,
@@ -79,6 +82,8 @@ const STOP_STATUS_USAGE = 'rad stop-status <feature> [--stdin]';
 const FORECAST_USAGE = 'rad forecast <plan>';
 /** Usage line for `rad digest`. */
 const DIGEST_USAGE = 'rad digest <feature> [--branch <ref>] [--base <ref>]';
+/** Usage line for `rad pr-body`. */
+const PR_BODY_USAGE = 'rad pr-body <feature> [--branch <ref>] [--base <ref>]';
 /** Usage line for `rad review`. */
 const REVIEW_USAGE = 'rad review <reviewer> [--base <ref>]';
 /** Usage line for `rad capabilities`. */
@@ -137,6 +142,11 @@ const SUBCOMMANDS = {
     summary: "Ranked, read-only review digest for a feature's deliver PR (Gate 2 aid).",
     usage: DIGEST_USAGE,
     run: (argv, ctx) => digestCommand(argv, ctx),
+  },
+  'pr-body': {
+    summary: "Print the deliver PR title and body built from a feature's branch tip (read-only).",
+    usage: PR_BODY_USAGE,
+    run: (argv, ctx) => prBodyCommand(argv, ctx),
   },
   review: {
     summary: 'Run one reviewer agent through the review lane (RAD_REVIEW_AGENT_CMD, else RAD_AGENT_CMD).',
@@ -290,13 +300,10 @@ const SCRIPT_ARGS = Object.freeze({
   'scripts/check-scope.sh': (c) => [c.planPath, c.branch, ...c.baseArgs()],
   'scripts/check-tests-present.sh': (c) => [c.planPath],
   'scripts/check-verify.sh': (_c, command) => [command],
-  'scripts/open-pr.sh': (c) => [
-    '--title', `Deliver: ${c.feature}`,
-    '--body', `RAD deliver: ${c.waveCount()} wave(s) complete`,
-    '--head', c.branch,
-    '--no-draft',
-    '--label', DELIVER_PR_LABEL,
-  ],
+  'scripts/open-pr.sh': (c) => {
+    const { title, body } = c.prBody();
+    return ['--title', title, '--body', body, '--head', c.branch, '--no-draft', '--label', DELIVER_PR_LABEL];
+  },
   'scripts/default-tip.sh': (c) => [PUSH_GUARD_REMOTE, ...c.baseArgs()],
 });
 
@@ -784,14 +791,14 @@ function branchTipApprovedGate({ feature, branch, repoRoot, sh }) {
  *
  * @returns {{ ok: true, history: Object[] } | { ok: false, reason: string }}
  */
-function readBranchTipHistory({ feature, branch, repoRoot, sh }) {
+function readBranchTipHistory({ feature, branch, repoRoot, sh, parse = parseEventsJsonl }) {
   const logPath = `.agents/state/${feature}/events.jsonl`;
   const res = sh('git', ['show', `${branch}:${logPath}`], { cwd: repoRoot });
   if (res.status !== 0) {
     const detail = sanitizeErrorMessage(String(res.stderr ?? '').trim());
     return { ok: false, reason: `no event log at ${branch}:${logPath}` + (detail ? ` (${detail})` : '') };
   }
-  return { ok: true, history: parseEventsJsonl(String(res.stdout ?? '')) };
+  return { ok: true, history: parse(String(res.stdout ?? '')) };
 }
 
 /**
@@ -1598,16 +1605,46 @@ async function deliveredShortCircuit({ ctx, sh, repoRoot, feature }) {
  */
 function makeScriptCtx({ sh, repoRoot, root, feature, branch, state }) {
   let base;
+  const resolveBase = () => {
+    if (base === undefined) base = readDefaultBranch({ sh, repoRoot, root });
+    return base;
+  };
   return {
     feature,
     branch,
     planPath: join(root, '.agents', 'plans', `${feature}.md`),
-    baseArgs: () => {
-      if (base === undefined) base = readDefaultBranch({ sh, repoRoot, root });
-      return base === '' ? [] : [base];
-    },
+    baseArgs: () => (resolveBase() === '' ? [] : [base]),
     waveCount: () => (state.plan(feature)?.waves ?? []).length,
+    prBody: () => deliverPrBody({ sh, root, feature, state, resolveBase }),
   };
+}
+
+/**
+ * The deliver PR's title + body, gathered at open-pr time from the run root:
+ * the plan doc, the feature history, commits and test presence at HEAD. The
+ * spine only reaches open-pr after check-scope.sh exits 0, so scope is passed.
+ * A failing source renders as unavailable; buildPrBody's own throws surface.
+ */
+function deliverPrBody({ sh, root, feature, state, resolveBase }) {
+  const planPath = planRelPath(feature);
+  const plan = prBodySource(() => readFileSync(join(root, planPath), 'utf8'));
+  return buildPrBody({
+    feature,
+    planPath,
+    planText: typeof plan === 'string' ? plan : '',
+    history: deliverPrHistory(state, feature),
+    ...gatherPrBodyRefInputs({ sh, cwd: root, ref: 'HEAD', resolveBase, plan }),
+    scope: { passed: true },
+  });
+}
+
+/** The feature history for the PR body; an unreadable one is reported on stderr and rendered empty. */
+function deliverPrHistory(state, feature) {
+  const history = prBodySource(() => state.history(feature));
+  if (Array.isArray(history)) return history;
+  const reason = history?.unavailable ?? 'history is not an array';
+  process.stderr.write(`rad deliver: PR body has no wave history (${reason})\n`);
+  return [];
 }
 
 /**
@@ -2951,6 +2988,141 @@ export async function digestCommand(argv, ctx) {
   }
   const inputs = await gatherDigestInputs({ repoRoot, sh, feature, branch, base });
   process.stdout.write(renderDigest(buildDigest(inputs)));
+  return 0;
+}
+
+/** `git log` format for the PR body's commit list: one `<hash> <subject>` line per commit. */
+const PR_BODY_LOG_FORMAT = '--format=%h %s';
+/** Remote whose default-branch tip bounds the PR body's commit range. */
+const PR_BODY_REMOTE = 'origin';
+/** mkdtemp prefix for the branch-tip plan copy `rad pr-body` hands check-scope.sh. */
+const PR_BODY_TMP_PREFIX = 'rad-pr-body-';
+
+/** Run one PR-body source; a throw becomes `{ unavailable: reason }` so that section shows why. */
+function prBodySource(fn) {
+  try {
+    return fn();
+  } catch (err) {
+    return { unavailable: err?.message ?? String(err) };
+  }
+}
+
+/** `<hash> <subject>` → { hash, subject } (a subject-less line keeps an empty subject). */
+function parsePrLogLine(line) {
+  const at = line.indexOf(' ');
+  return at === -1 ? { hash: line, subject: '' } : { hash: line.slice(0, at), subject: line.slice(at + 1) };
+}
+
+/** Commits on `ref` not on origin/<base>, oldest first. No base → throws (rendered unavailable). */
+function readPrCommits({ sh, cwd, ref, base }) {
+  if (!isNonEmpty(base)) throw new Error('no base branch resolved');
+  const out = mainGit(sh, cwd, ['log', '--reverse', PR_BODY_LOG_FORMAT, `${PR_BODY_REMOTE}/${base}..${ref}`]);
+  return out.split('\n').filter((line) => line.trim() !== '').map(parsePrLogLine);
+}
+
+/** Each `## Tests to Write` path with whether it exists at `ref`; unresolvable items pass through. */
+function readPrTests({ sh, cwd, ref, planText }) {
+  return testsToWritePaths(planText).map((item) => {
+    if (!('path' in item)) return item;
+    const res = sh('git', ['cat-file', '-e', `${ref}:${item.path}`], { cwd });
+    return { path: item.path, present: res.status === 0 };
+  });
+}
+
+/**
+ * The PR-body inputs read at a git ref — 'HEAD' in a deliver run, the work
+ * branch in `rad pr-body`. `plan` is the plan text or `{ unavailable }`;
+ * `resolveBase` may throw (the commit list then renders unavailable).
+ */
+function gatherPrBodyRefInputs({ sh, cwd, ref, resolveBase, plan }) {
+  const tests = typeof plan === 'string'
+    ? prBodySource(() => readPrTests({ sh, cwd, ref, planText: plan }))
+    : { unavailable: `plan unreadable (${plan.unavailable})` };
+  return { commits: prBodySource(() => readPrCommits({ sh, cwd, ref, base: resolveBase() })), tests };
+}
+
+/**
+ * check-scope.sh over the branch-tip plan: the text is written to a fresh temp
+ * dir (always removed) since the plan may differ from the working tree's.
+ */
+function branchTipScope({ sh, repoRoot, feature, planText, branch, base }) {
+  const dir = mkdtempSync(join(tmpdir(), PR_BODY_TMP_PREFIX));
+  try {
+    const planFile = join(dir, `${feature}.md`);
+    writeFileSync(planFile, planText, 'utf8');
+    const { passed, violations } = readScope(sh, repoRoot, planFile, branch, base);
+    if (passed) return { passed: true };
+    return { passed: false, violations: violations.map((v) => `${v.path} — ${v.detail}`) };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/**
+ * The branch-tip event log, strictly parsed: malformed → throws (exit 1);
+ * missing → reported on stderr and rendered as an empty history.
+ */
+function readPrBodyHistory({ feature, branch, repoRoot, sh }) {
+  let tip;
+  try {
+    tip = readBranchTipHistory({ feature, branch, repoRoot, sh, parse: parseEventsJsonlStrict });
+  } catch (err) {
+    throw new Error(`malformed event log for ${feature}: ${err.message.replace(/^malformed event log: /, '')}`);
+  }
+  if (tip.ok) return tip.history;
+  process.stderr.write(`rad pr-body: ${tip.reason}; waves render empty\n`);
+  return [];
+}
+
+/**
+ * `pr-body <feature> [--branch <ref>] [--base <ref>]` — read-only: prints the
+ * deliver PR title and body as `rad deliver` would build them, sourced from the
+ * work-branch tip. Branch defaults to `rad/<feature>`; base to
+ * get-default-branch.sh output (else `main`). Bad argv or no plan at the tip →
+ * exit 2; malformed event log or base-resolution failure → exit 1. No fetch;
+ * the only write is a temp plan copy for check-scope.sh, always removed.
+ *
+ * @param {string[]} argv - args after `pr-body`
+ * @param {{ repoRoot: string, sh?: typeof defaultSh }} ctx
+ * @returns {Promise<number>}
+ */
+export async function prBodyCommand(argv, ctx) {
+  const { repoRoot } = ctx;
+  const sh = ctx.sh ?? defaultSh;
+  let args;
+  try {
+    args = parseDigestArgs(argv);
+  } catch (err) {
+    process.stderr.write(`rad pr-body: ${err.message}\nUsage: ${PR_BODY_USAGE}\n`);
+    return USAGE_EXIT_CODE;
+  }
+  const { feature } = args;
+  const branch = args.branch ?? conventionWorkBranch(feature);
+  const planPath = planRelPath(feature);
+  const shown = sh('git', ['show', `${branch}:${planPath}`], { cwd: repoRoot });
+  if (shown.status !== 0) {
+    process.stderr.write(`rad pr-body: no plan at ${branch}:${planPath}\nUsage: ${PR_BODY_USAGE}\n`);
+    return USAGE_EXIT_CODE;
+  }
+  const planText = String(shown.stdout ?? '');
+  let history;
+  let base;
+  try {
+    history = readPrBodyHistory({ feature, branch, repoRoot, sh });
+    base = args.base ?? (readDefaultBranch({ sh, repoRoot, root: repoRoot, verb: 'rad pr-body' }) || DIGEST_FALLBACK_BASE);
+  } catch (err) {
+    process.stderr.write(`rad pr-body: ${err.message.replace(/^rad pr-body: /, '')}\n`);
+    return FAILED_EXIT_CODE;
+  }
+  const { title, body } = buildPrBody({
+    feature,
+    planPath,
+    planText,
+    history,
+    ...gatherPrBodyRefInputs({ sh, cwd: repoRoot, ref: branch, resolveBase: () => base, plan: planText }),
+    scope: prBodySource(() => branchTipScope({ sh, repoRoot, feature, planText, branch, base })),
+  });
+  process.stdout.write(`${title}\n\n${body}`);
   return 0;
 }
 

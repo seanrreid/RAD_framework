@@ -62,7 +62,8 @@ function runSh(sh, script, args, cwd) {
   return lines(res.stdout);
 }
 
-function readScope(sh, repoRoot, planRel, branch, base) {
+/** check-scope.sh for `planRel` (exit 0 → passed, 1 → violations parsed; any other exit throws). */
+export function readScope(sh, repoRoot, planRel, branch, base) {
   const res = sh('bash', ['scripts/check-scope.sh', planRel, branch, ...(base ? [base] : [])], { cwd: repoRoot });
   if (res.status !== SCOPE_EXIT.PASSED && res.status !== SCOPE_EXIT.VIOLATION) {
     throw new Error(`check-scope.sh exit ${res.status}: ${(res.stderr || res.stdout || '').trim()}`);
