@@ -135,9 +135,10 @@ defineCases([
     id: 'push-check-unavailable-offline',
     invariant: 'no-direct-push-to-default',
     adversary: 'in-scope-commit',
-    fixture: { withOrigin: false },
-    // No origin: open-pr.sh's push fails, so exit 0 is unreachable; assert the
-    // guard recorded its blind spot and did NOT demote the wave.
+    // Origin stays reachable (the prepare fetch and push need it); only the
+    // default-tip read fails. Assert the guard recorded its blind spot and did
+    // NOT demote the wave.
+    fixture: { tipUnavailable: true },
     act: (fx) => fx.deliver(),
     assert: (fx, result) => {
       const types = typesOf(result.events);
