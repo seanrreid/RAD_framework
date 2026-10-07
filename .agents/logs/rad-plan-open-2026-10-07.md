@@ -11,3 +11,4 @@ Executor role: architect
 | 1 | Wave 1 | Pure plan-commit helpers | ✓ complete | 2d9d890 | 10:17 |
 | 2 | Wave 1 | Issue: lint rule | ✓ complete | 1322c5b | 10:19 |
 | 3 | Wave 1 | Branch-prefix fallback fix | ✓ complete | 2b490f2 | 10:19 |
+| 4 | Wave 2 | rad plan-open command | ✓ complete | b195e44 | 10:25 |
