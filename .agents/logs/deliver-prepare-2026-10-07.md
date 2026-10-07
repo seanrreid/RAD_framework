@@ -12,3 +12,4 @@ Executor role: architect
 | 1.2 | 1 | The real prepare port | complete | 7f97321 | 2026-10-07T18:48:42Z |
 | 2.1 | 2 | CLI wiring | complete | 9b3fe14 | 2026-10-07T18:52:45Z |
 | 2.2 | 2 | Evals | complete | d16723e | 2026-10-07T18:57:21Z |
+| 3.1 | 3 | Docs | complete | 87c49f0 | 2026-10-07T19:01:28Z |
