@@ -178,6 +178,7 @@ Created: [date]
 Author: [role — developer | designer]
 Status: pending-review
 Branch: rad/[feature-slug]
+Issue: [issue number — omit when the plan has no issue]
 
 ## Context
 [2–3 sentences: what exists today and what needs to change]
@@ -324,6 +325,7 @@ Author: [role — developer | designer]
 Status: pending-review
 Branch: rad/[feature-slug]
 Tier: light
+Issue: [issue number — omit when the plan has no issue]
 
 ## Context
 [1–2 sentences: what exists today and what needs to change]
@@ -388,34 +390,28 @@ reason and continue. The forecast never blocks planning.
 ### Step 5: Cut the work branch and commit the plan
 
 Cut `rad/[feature-slug]` from the project default branch and commit the plan doc
-to it. **No PR is opened, and nothing is committed to the default branch.**
+to it with one command. **No PR is opened, and nothing is committed to the
+default branch.**
 
 ```bash
-BASE=$(scripts/get-default-branch.sh)
-
-# Cut the work branch from the latest default branch
-git fetch origin "$BASE"
-git checkout -b "rad/[feature-slug]" "origin/$BASE"
-
-# Stage only the plan file
-git add .agents/plans/[feature-slug].md
-git commit -m "plan: [feature name]
-
-Author: [role]
-Waves: [N]
-Tasks: [total task count]
-Out-of-scope deps: [yes/no]"
-
-# Publish the branch tip — /rad-approve reads the plan from origin/rad/[feature-slug]
-git push -u origin "rad/[feature-slug]"
+node harness/cli.js plan-open .agents/plans/[feature-slug].md [--trailer "Key: Value" ...]
 ```
 
-If the project tracks plans against issues and `gh` is available, mirror the
-status label (best-effort; no-ops without `gh`):
+Pass one `--trailer "Key: Value"` per attribution line your tool requires on
+commits (single-line each); pass none if it requires none.
 
-```bash
-scripts/rad-label.sh [issue-number] pending-review   # omit if there is no issue
-```
+The command fetches the default branch, cuts `rad/[feature-slug]` from it, stages
+only the plan file, commits it with a message it derives from the plan (title,
+`Author`, `Issue`, `Waves`, `Tasks`, `Out-of-scope deps`), pushes the branch, and
+then labels the plan's `Issue:` `pending-review` itself. Do not run those steps by
+hand.
+
+- **Exit 0** → the branch is pushed; continue to Step 6.
+- **Exit 1** → the plan is committed locally but not pushed (or labelling failed).
+  Report the message to the author and rerun the same command once the push can
+  succeed — a rerun is safe and resumes where it stopped.
+- **Exit 2** → nothing changed. Fix the reported problem (lint error, `Branch:`
+  header, uncommitted changes, an existing branch) and rerun.
 
 ### Step 6: Output summary
 

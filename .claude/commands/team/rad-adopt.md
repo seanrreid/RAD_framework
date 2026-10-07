@@ -117,7 +117,7 @@ into two adopt commands with narrower scope each.
 
 ### Step 5: Generate the wave-structured plan
 
-Use the same structure as `/rad-plan`, with two additions to the header:
+Use the same structure as `/rad-plan`, with these additions to the header:
 
 ```markdown
 # Plan: [Feature Name]
@@ -125,6 +125,7 @@ Created: [date]
 Author: [role — architect | developer | designer]
 Status: pending-review
 Branch: rad/[feature-slug]
+Issue: [issue number when the source is an issue — omit otherwise]
 Adopted-From: [issue URL or description]
 Issue-Title: [original issue title, if fetched]
 
@@ -228,7 +229,7 @@ plan's `Branch:` header.
 ### Step 6b: Lint the plan
 
 ```bash
-scripts/lint-plan.sh .agents/plans/[feature-name].md
+scripts/lint-plan.sh .agents/plans/[feature-slug].md
 ```
 
 Fix any errors before committing. For adopted plans, `lint-plan.sh` also
@@ -237,7 +238,7 @@ verifies `## Issue Gaps` is non-empty. Warnings should be reviewed but do not bl
 Then run the plan-time forecast over the files the plan declares:
 
 ```bash
-node harness/cli.js forecast .agents/plans/[feature-name].md
+node harness/cli.js forecast .agents/plans/[feature-slug].md
 ```
 
 Show every `forecast:` line (and the summary line) to the author as an
@@ -249,25 +250,29 @@ reason and continue. The forecast never blocks planning.
 ### Step 7: Cut the work branch and commit the plan
 
 Cut `rad/[feature-slug]` from the project default branch and commit the plan doc
-to it. **No PR is opened, and nothing is committed to the default branch.**
+to it with one command. **No PR is opened, and nothing is committed to the
+default branch.**
 
 ```bash
-BASE=$(scripts/get-default-branch.sh)
-git fetch origin "$BASE"
-git checkout -b "rad/[feature-slug]" "origin/$BASE"
-
-git add .agents/plans/[feature-slug].md
-git commit -m "adopt: [feature name]
-
-Adopted-From: [issue URL or short description]
-Author: [role]
-Waves: [N]
-Tasks: [total task count]
-Out-of-scope deps: [yes/no]"
-
-git push -u origin "rad/[feature-slug]"
-scripts/rad-label.sh [issue-number] pending-review   # omit if there is no issue
+node harness/cli.js plan-open .agents/plans/[feature-slug].md [--trailer "Key: Value" ...]
 ```
+
+Pass one `--trailer "Key: Value"` per attribution line your tool requires on
+commits (single-line each); pass none if it requires none.
+
+The command fetches the default branch, cuts `rad/[feature-slug]` from it, stages
+only the plan file, commits it with a message it derives from the plan (an
+`adopt:` subject because of `Adopted-From:`, plus `Adopted-From`, `Issue`,
+`Author`, `Waves`, `Tasks`, `Out-of-scope deps`), pushes the branch, and then
+labels the issue `pending-review` itself (from `Issue:`, or from an
+`Adopted-From:` issue URL). Do not run those steps by hand.
+
+- **Exit 0** → the branch is pushed; continue to Step 8.
+- **Exit 1** → the plan is committed locally but not pushed (or labelling failed).
+  Report the message to the author and rerun the same command once the push can
+  succeed — a rerun is safe and resumes where it stopped.
+- **Exit 2** → nothing changed. Fix the reported problem (lint error, `Branch:`
+  header, uncommitted changes, an existing branch) and rerun.
 
 ### Step 8: Output summary
 
