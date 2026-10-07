@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import process from 'node:process';
 import {
   planIssueNumber,
   countWavesTasks,
@@ -151,4 +152,16 @@ test('planWorkBranch: no header honors RAD_BRANCH_PREFIX', () => {
 test('planWorkBranch: no header and no prefix → default rad/', () => {
   assert.equal(planWorkBranch('  ', 'feat', {}), 'rad/feat');
   assert.equal(conventionWorkBranch('feat', { RAD_BRANCH_PREFIX: '' }), 'rad/feat');
+});
+
+// resolveWorkBranch / approveCommand in cli.js call planWorkBranch with no env,
+// so the fallback must read RAD_BRANCH_PREFIX from process.env (never `rad/`).
+test('planWorkBranch: missing Branch: header + process.env RAD_BRANCH_PREFIX=team/ → team/<feature>', (t) => {
+  const saved = process.env.RAD_BRANCH_PREFIX;
+  t.after(() => {
+    if (saved === undefined) delete process.env.RAD_BRANCH_PREFIX;
+    else process.env.RAD_BRANCH_PREFIX = saved;
+  });
+  process.env.RAD_BRANCH_PREFIX = 'team/';
+  assert.equal(planWorkBranch('', 'rad-plan-open'), 'team/rad-plan-open');
 });

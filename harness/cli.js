@@ -54,6 +54,7 @@ import {
 import { readPreset } from './preset.js';
 import { readSources, renderOutputs, planGenerate, applyGenerate } from './generate.js';
 import { mergeDeliverGateHook } from './claude-settings.js';
+import { conventionWorkBranch, planWorkBranch } from './plan-commit.js';
 
 /** Usage line for `rad deliver` (help, parse errors, and the command table). */
 const DELIVER_USAGE = 'rad deliver <feature> [--model <model-id>] [--resume --context <text>]';
@@ -724,21 +725,8 @@ async function preflightExitCode(cmd, repoRoot, kind = 'command') {
   return 1;
 }
 
-/**
- * Default work-branch prefix. RAD_BRANCH_PREFIX (non-empty) overrides it, the
- * same convention scripts/checkout-plan.sh and git-sync.sh follow.
- */
-const DEFAULT_BRANCH_PREFIX = 'rad/';
 /** The gate every deliver run must pass before any wave executes. */
 const APPROVED_GATE = 'approved';
-
-/** The work branch by convention: RAD_BRANCH_PREFIX (default rad/) + feature. */
-function conventionWorkBranch(feature) {
-  const prefix = isNonEmpty(process.env.RAD_BRANCH_PREFIX)
-    ? process.env.RAD_BRANCH_PREFIX
-    : DEFAULT_BRANCH_PREFIX;
-  return `${prefix}${feature}`;
-}
 
 /**
  * Evaluate the approved gate over the work-branch TIP's event log, read through
@@ -1394,10 +1382,10 @@ async function loadDeliverSettings(repoRoot) {
 
 /**
  * The work branch for a run: the isolated branch in worktree mode, else the
- * plan's `Branch:` header, else the `rad/<feature>` convention.
+ * plan's `Branch:` header, else the RAD_BRANCH_PREFIX (default rad/) convention.
  */
 function resolveWorkBranch(setup, planCtx, feature) {
-  return setup.workBranch ?? (isNonEmpty(planCtx.branch) ? planCtx.branch : `rad/${feature}`);
+  return setup.workBranch ?? planWorkBranch(planCtx.branch, feature);
 }
 
 /**
@@ -1870,10 +1858,10 @@ export async function approveCommand(argv, ctx) {
   // boundary can detect a post-approval edit).
   const planText = readFileSync(planFile, 'utf8');
   // Resolve the work branch the same way deliver does: the plan doc's `Branch:`
-  // header is canonical; fall back to the rad/<feature> convention when absent.
-  // Used only by the best-effort RAD_SYNC push after a successful record.
-  const planBranch = parsePlanCtx(planText).branch;
-  const workBranch = isNonEmpty(planBranch) ? planBranch : `rad/${feature}`;
+  // header is canonical; fall back to the RAD_BRANCH_PREFIX (default rad/)
+  // convention when absent. Used only by the best-effort RAD_SYNC push after a
+  // successful record.
+  const workBranch = planWorkBranch(parsePlanCtx(planText).branch, feature);
   // Fingerprint of the approved plan body (mutable header excluded by construction);
   // attested into the approved event's data so a later edit can fail the gate closed.
   const planHash = planFingerprint(planText).hash;
