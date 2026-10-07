@@ -1,7 +1,8 @@
 # Plan: Generate /rad-plan and /rad-adopt from .rad/skills (#186 part 2c)
 Created: 2026-10-07
 Author: architect
-Status: in-progress
+Status: complete
+Completed-At: 2026-10-07T15:37:32Z
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-10-07T15:27:57.019Z
 Recorded-By: sean@torchcodelab.com
