@@ -11,3 +11,4 @@ Executor role: architect
 | 1 | Wave 1 | Generator accepts and emits purpose | ✓ complete | 76f7da0 | 08:51 |
 | 2 | Wave 1 | Tag the reviewers and regenerate | ✓ complete | fcc2e50 | 08:51 |
 | 3 | Wave 2 | Lint the purpose field | ✓ complete | 92e3d01 | 08:53 |
+| 4 | Wave 3 | /rad-design emits Purpose | ✓ complete | 083b93a | 08:55 |
