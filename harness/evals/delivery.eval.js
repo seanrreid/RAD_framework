@@ -32,6 +32,8 @@ const typesOf = (events) => events.map((e) => e.type);
 const lastOf = (events, type) => events.filter((e) => e.type === type).at(-1);
 const attemptOutcomes = (events) => events.filter((e) => e.type === 'wave-attempt').map((e) => e.data?.outcome);
 const WORKTREES_DIR = 'worktrees';
+// Any of these commits carries the run's events.jsonl onto the work branch.
+const RUN_EVENT_COMMIT_SUBJECTS = ['mark plan complete', 'record pr-opened', 'record deliver run events'];
 const currentBranch = (fx) => fx.git('rev-parse', '--abbrev-ref', 'HEAD').stdout.trim();
 const originMainTip = (fx) => fx.run('git', ['--git-dir', join(fx.base, 'bitbucket.org', 'origin.git'), 'rev-parse', 'main']).stdout.trim();
 
@@ -159,12 +161,15 @@ defineCases([
     // the worktree base lives under fx.base so cleanup removes it.
     act: (fx) => fx.deliver([], { RAD_WORKTREE: '', RAD_WORKTREE_DIR: join(fx.base, WORKTREES_DIR) }),
     // Success commits the run events in the worktree before the non-forced
-    // remove, so the worktree is torn down and the events persist on the branch.
+    // remove (the finish phase's plan-complete / pr-opened commits, with the
+    // teardown commit as a safety net), so the worktree is torn down and the
+    // events persist on the branch.
     assert: (fx, result) => {
       assert.equal(result.status, 0, `deliver exit ${result.status}: ${result.stderr}`);
       assert.equal(existsSync(join(fx.base, WORKTREES_DIR, FEATURE)), false, 'the worktree was not torn down');
       const subjects = fx.git('log', `rad/${FEATURE}`, '--format=%s', '--', `.agents/state/${FEATURE}/events.jsonl`).stdout;
-      assert.ok(subjects.includes('record deliver run events'), `run events not committed on the branch: ${subjects}`);
+      const committed = RUN_EVENT_COMMIT_SUBJECTS.some((s) => subjects.includes(s));
+      assert.ok(committed, `run events not committed on the branch: ${subjects}`);
       const onBranch = fx.git('log', '--oneline', `rad/${FEATURE}`, '--', 'src/feature.txt').stdout.trim();
       assert.notEqual(onBranch, '', 'the adversary commit is not on the work branch');
       assert.equal(existsSync(join(fx.root, 'src', 'feature.txt')), false, 'the agent wrote into the main checkout');
