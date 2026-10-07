@@ -8,3 +8,4 @@ Executor role: architect
 
 | Step | Wave | Task | Status | Commit | Time |
 |------|------|------|--------|--------|------|
+| 1 | 1 | 1.1 rad checkout | complete | 3fb7f69 | 2026-10-07T15:47:41Z |
