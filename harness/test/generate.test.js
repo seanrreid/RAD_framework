@@ -26,6 +26,7 @@ name: helper
 description: Helps with things.
 model: claude-sonnet-4-6
 tools: Read, Bash
+purpose: authority
 roles: [architect, developer]
 codex:
   sandbox_mode: read-only
@@ -116,17 +117,18 @@ test('skill: codex_implicit: false emits agents/openai.yaml with the policy', as
   });
 });
 
-test('agent: Claude file keeps frontmatter order minus codex:, TOML has sandbox_mode and never model', async () => {
+test('agent: Claude file keeps frontmatter order minus codex: (purpose after roles), TOML has sandbox_mode and never model or purpose', async () => {
   await withRoot({ '.rad/agents/helper.md': AGENT }, async (root) => {
     const out = await generated(root);
     const src = '.rad/agents/helper.md';
     assert.equal(out['.claude/agents/helper.md'],
       '---\nname: helper\ndescription: "Helps with things."\nmodel: claude-sonnet-4-6\ntools: Read, Bash\n'
-      + `roles: [architect, developer]\n---\n<!-- ${GENERATED_MARKER} (source: ${src}) -->\n\nYou are a helper.\n`);
+      + `roles: [architect, developer]\npurpose: authority\n---\n<!-- ${GENERATED_MARKER} (source: ${src}) -->\n\nYou are a helper.\n`);
     const toml = out['.codex/agents/helper.toml'];
     assert.equal(toml, `# ${GENERATED_MARKER} (source: ${src})\nname = "helper"\ndescription = "Helps with things."\n`
       + "sandbox_mode = \"read-only\"\ndeveloper_instructions = '''\nYou are a helper.\n'''\n");
     assert.doesNotMatch(toml, /model/);
+    assert.doesNotMatch(toml, /purpose/);
     assert.deepEqual(parseMiniToml(toml), {
       name: 'helper', description: 'Helps with things.', sandbox_mode: 'read-only', developer_instructions: 'You are a helper.\n',
     });
@@ -140,6 +142,20 @@ test('agent: without codex.sandbox_mode the TOML omits it; quotes in description
     assert.match(out['.claude/agents/plain.md'], /\ntools: Read, Grep\n---\n/);
     const toml = parseMiniToml(out['.codex/agents/plain.toml']);
     assert.deepEqual(toml, { name: 'plain', description: 'Say "hi" \\ there', developer_instructions: "It's fine, '' too.\n" });
+  });
+});
+
+test('agent: without roles, purpose follows tools; without purpose the output is unchanged', async () => {
+  const fm = 'name: lone\ndescription: d\nmodel: m\ntools: Read';
+  await withRoot({ '.rad/agents/lone.md': agentSource(`${fm}\npurpose: "  context  "`) }, async (root) => {
+    const out = await generated(root);
+    assert.match(out['.claude/agents/lone.md'], /\ntools: Read\npurpose: context\n---\n/);
+    assert.doesNotMatch(out['.codex/agents/lone.toml'], /purpose/);
+  });
+  await withRoot({ '.rad/agents/lone.md': agentSource(fm) }, async (root) => {
+    const out = await generated(root);
+    assert.match(out['.claude/agents/lone.md'], /\ntools: Read\n---\n/);
+    assert.doesNotMatch(out['.claude/agents/lone.md'], /purpose/);
   });
 });
 
@@ -189,6 +205,10 @@ test('errors: unknown targets and unknown keys', async () => {
   await assertSourceError({ '.rad/agents/x.md': agentSource('name: x\ndescription: d\nmodel: m\ntools: Read\ncodex: {model: o3}') },
     /unknown target codex\.model/);
   await assertSourceError({ '.rad/agents/x.md': agentSource('name: x\ndescription: d\ntools: Read') }, /x\.md: missing model/);
+  for (const purpose of ['', '""', '"  "', 'null', '[a]', '3']) {
+    await assertSourceError({ '.rad/agents/x.md': agentSource(`name: x\ndescription: d\nmodel: m\ntools: Read\npurpose: ${purpose}`) },
+      /^\.rad\/agents\/x\.md: purpose must be a non-empty string$/m);
+  }
 });
 
 test('errors: an unknown {{token}} names the file it came from', async () => {

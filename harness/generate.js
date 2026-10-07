@@ -50,7 +50,7 @@ const NAME_RE = /^[a-z0-9][a-z0-9-]*$/;
 const COMMAND_PREFIX = 'command:';
 const SKILL_TARGET_KEYS = Object.freeze(['claude', 'codex', 'codex_implicit']);
 const SKILL_KEYS = Object.freeze(['name', 'description', 'targets']);
-const AGENT_KEYS = Object.freeze(['name', 'description', 'model', 'tools', 'roles', 'codex']);
+const AGENT_KEYS = Object.freeze(['name', 'description', 'model', 'tools', 'roles', 'purpose', 'codex']);
 const AGENT_REQUIRED = Object.freeze(['name', 'description', 'model', 'tools']);
 const SANDBOX_MODES = Object.freeze(['read-only', 'workspace-write']);
 /** Sequence that cannot appear inside a TOML multi-line literal string. */
@@ -179,7 +179,10 @@ async function readSkill(root, name) {
   return { skill: { name, description: description.trim(), targets: targets.value, body: fm.body, overrides: over.overrides, source: rel } };
 }
 
-/** Errors in an agent's Claude fields (model, tools, roles) and codex mapping. */
+/**
+ * Errors in an agent's Claude fields (model, tools, roles, purpose) and codex mapping.
+ * purpose is only type-checked here; scripts/lint-agent-files.sh is the single authority on its values.
+ */
 function agentFieldErrors(rel, data) {
   const errors = AGENT_REQUIRED.filter((k) => k !== 'name' && k !== 'description' && data[k] === undefined).map((k) => `${rel}: missing ${k}`);
   if (data.model !== undefined && !isNonEmptyString(data.model)) errors.push(`${rel}: model must be a non-empty string`);
@@ -190,6 +193,7 @@ function agentFieldErrors(rel, data) {
   if (data.roles !== undefined && !(Array.isArray(data.roles) && data.roles.every(isNonEmptyString))) {
     errors.push(`${rel}: roles must be a list of strings`);
   }
+  if (data.purpose !== undefined && !isNonEmptyString(data.purpose)) errors.push(`${rel}: purpose must be a non-empty string`);
   if (data.codex === undefined) return errors;
   if (!isPlainObject(data.codex)) return [...errors, `${rel}: codex must be a mapping`];
   errors.push(...Object.keys(data.codex).filter((k) => k !== 'sandbox_mode').map((k) => `${rel}: unknown target codex.${k}`));
@@ -213,7 +217,7 @@ async function readAgent(root, file) {
   return {
     agent: {
       name: data.name, description: data.description.trim(), model: data.model.trim(), tools,
-      roles: data.roles, sandboxMode: data.codex?.sandbox_mode, body: fm.body, source: rel,
+      roles: data.roles, purpose: data.purpose?.trim(), sandboxMode: data.codex?.sandbox_mode, body: fm.body, source: rel,
     },
   };
 }
@@ -313,10 +317,11 @@ function renderSkill(skill) {
   return errors.length ? { errors } : { outputs };
 }
 
-/** The Claude agent file: frontmatter in stable key order (name, description, model, tools, roles). */
+/** The Claude agent file: frontmatter in stable key order (name, description, model, tools, roles, purpose). */
 function renderClaudeAgent(agent) {
   const fm = [`name: ${agent.name}`, `description: ${JSON.stringify(agent.description)}`, `model: ${yamlScalar(agent.model)}`, `tools: ${yamlScalar(agent.tools)}`];
   if (agent.roles !== undefined) fm.push(`roles: [${agent.roles.map(yamlScalar).join(', ')}]`);
+  if (agent.purpose !== undefined) fm.push(`purpose: ${yamlScalar(agent.purpose)}`);
   return renderMarkdown(fm, agent.source, agent.body);
 }
 
