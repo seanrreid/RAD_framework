@@ -75,6 +75,38 @@ function stopRun(result, { state, feature, now }) {
   return result;
 }
 
+/** Stop key a THROWING prepare port is converted to (fail-closed, never swallowed:
+ * the thrown message becomes the stop's detail). */
+const PREPARE_FAILED = 'prepare-failed';
+
+/** Prepare-result fields copied onto the stop result for decision placeholders. */
+const PREPARE_STOP_KEYS = ['base', 'branch'];
+
+/**
+ * Run the OPTIONAL prepare port (sync/merge/in-progress) once, before any wave.
+ * Success appends the audit-only `run-prepared` with the port's data and
+ * returns null; a failure (or a throw) returns the stop result for stopRun.
+ */
+async function runPrepare({ prepare, state, feature, now }) {
+  let r;
+  try {
+    r = await prepare();
+  } catch (err) {
+    r = { ok: false, stopped: PREPARE_FAILED, detail: errorMessage(err) };
+  }
+  if (r && r.ok === true) {
+    state.append({ feature, type: 'run-prepared', actor: 'harness', ts: now(), data: r.data });
+    return null;
+  }
+  const result = { stopped: r?.stopped, ok: false, detail: r?.detail };
+  // Carried as deliver-stopped `detail` by stopRun when non-empty.
+  if (typeof r?.detail === 'string') result.reason = r.detail;
+  for (const key of PREPARE_STOP_KEYS) {
+    if (r?.[key] !== undefined && r[key] !== null) result[key] = r[key];
+  }
+  return result;
+}
+
 /** Neutral approval-integrity port. The default injected `approvalIntact`:
  * always intact, so omitting it changes nothing (the between-wave re-check then
  * reduces to re-running the approved gate). */
@@ -564,6 +596,14 @@ function convergeOrphans({ history, wave, matrix, state, feature, now, runHooks 
  *   overrides any presence/Verify/scope demotion or post-wave veto. A failed read
  *   appends an audit-only `push-check-unavailable` and does not demote. False
  *   never calls the script — the event sequence is byte-for-byte today's.
+ * @param {() => Promise<{ ok: true, data: { base: string, merged: boolean, fastForwarded: boolean, committed: boolean, pushed: boolean } } | { ok: false, stopped: ('merge-conflict'|'prepare-failed'), detail: string, base?: string, branch?: string }>} [args.prepare]
+ *   OPTIONAL prepare port (sync, merge origin/<base>, in-progress commit). Run
+ *   ONCE after `deliver-started`, any `run-resumed`, and the hook pre-flight, and
+ *   BEFORE orphan convergence and the first wave. `ok` appends an audit-only
+ *   `run-prepared` carrying `data`; otherwise the run stops through stopRun
+ *   (`merge-conflict` = needs-decision, `prepare-failed` = failed). A port that
+ *   THROWS is treated as `prepare-failed` with the error message as detail.
+ *   Absent (default) runs nothing — the event sequence is byte-for-byte today's.
  * @returns {Promise<Object>} structured terminal result
  */
 export async function deliverSpine({
@@ -586,6 +626,7 @@ export async function deliverSpine({
   maxFailedAttempts = null,
   resume = null,
   pushGuard = false,
+  prepare = null,
 }) {
   // ── DET gate: approval. The human (or proxy) decided earlier; here we ENFORCE
   // it. A blocked gate is a normal outcome — return structured, append nothing
@@ -607,6 +648,14 @@ export async function deliverSpine({
   // dir is a silent no-op (default NOOP_PREFLIGHT): nothing to validate, nothing
   // changes. A malformed dir is allowed to throw to the caller. ──
   hookPreflight();
+
+  // ── Prepare (sync/merge/in-progress). OPTIONAL injected port: absent changes
+  // nothing. Runs before orphan convergence and every wave, so a conflict stops
+  // the run before any agent touches the branch. ──
+  if (prepare) {
+    const prepStop = await runPrepare({ prepare, state, feature, now });
+    if (prepStop) return stopRun(prepStop, stopCtx);
+  }
 
   const plan = state.plan(feature);
   const waves = (plan && plan.waves) || [];

@@ -21,7 +21,14 @@
  *   'hook-observed' | 'hook-veto' | 'hook-failed' | 'done' |
  *   'owner-claimed' | 'owner-released' | 'architecture-approved' |
  *   'capture-failed' | 'wave-started' | 'deliver-stopped' | 'run-resumed' |
- *   'push-check-unavailable'.
+ *   'push-check-unavailable' | 'run-prepared'.
+ *   `run-prepared` is the eighth AUDIT-ONLY event: when the deliver spine is
+ *   given a `prepare` port and it succeeds, the spine appends it after
+ *   `deliver-started` (and any `run-resumed`) and before the first wave. Its
+ *   `data` is `{ base, merged, fastForwarded, committed, pushed }` — the default
+ *   branch merged from and what the prepare step did. It carries NO authority
+ *   (never a gate, never an outcome) and establishes NO phase (absent from
+ *   PHASE_BY_TYPE), so a history with it folds identically to one without it.
  *   `push-check-unavailable` is the seventh AUDIT-ONLY event: when the deliver
  *   spine's push guard is on and either default-branch tip read around a wave
  *   (scripts/default-tip.sh) fails, it appends `{ wave, attempt, status }` —
@@ -190,6 +197,8 @@ const PHASE_BY_TYPE = {
   // context a resume answered with, and must never move a feature's phase.
   // `push-check-unavailable` is audit-only too: it records that the push guard
   // could not read the default tip, and must never move a feature's phase.
+  // `run-prepared` is audit-only as well: it records what the prepare step did
+  // (merge/commit/push), and must never move a feature's phase.
 };
 
 /** Phase ordering — earliest first; later phases dominate in the fold. */

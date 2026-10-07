@@ -71,6 +71,15 @@ export const STOP_TABLE = Object.freeze({
     decision: 'the plan changed since approval (or approval no longer holds); re-approve before re-running',
   }),
   gate: Object.freeze({ class: NEEDS_DECISION, decision: 'plan not approved; run /rad-approve' }),
+  // Prepare phase (#186 part 3b-i). A merge conflict needs a human to resolve it
+  // on the branch; any other prepare failure (fetch, push, commit) is FAILED.
+  // Absent `{base}`/`{branch}`/`{detail}` render as `unknown` (see render()).
+  'merge-conflict': Object.freeze({
+    class: NEEDS_DECISION,
+    decision:
+      'merging origin/{base} into {branch} conflicts ({detail}); resolve the conflict on the branch, commit, and re-run with --resume',
+  }),
+  'prepare-failed': Object.freeze({ class: FAILED, decision: 'prepare failed: {detail}' }),
 });
 
 /** Rendering of an absent optional field — keeps the sentence readable. */
