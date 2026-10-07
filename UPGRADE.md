@@ -411,6 +411,30 @@ examples across RAD's own 27 agents.
 
 ---
 
+## Generated rad-plan and rad-adopt (#186 part 2c)
+
+`.claude/commands/team/rad-plan.md` and `.claude/commands/team/rad-adopt.md`
+are now generated, each starting with a marker line, from
+`.rad/skills/rad-plan/SKILL.md` and `.rad/skills/rad-adopt/SKILL.md`. One
+tool-neutral body serves both assistants (no `codex.md` override), and the same
+sources generate the Codex skills `.agents/skills/rad-plan/SKILL.md` and
+`.agents/skills/rad-adopt/SKILL.md`.
+
+The upgrade treats both commands like any other file in `.claude/commands/`:
+
+| Your copy of the command | `install.sh --upgrade` does |
+|--------------------------|-----------------------------|
+| unedited | replaces it with the generated version |
+| locally edited | keeps it and stages the generated version under `.rad/upgrade-pending/` |
+
+The installer copies these files; it does not run `rad generate`. If you later
+run `node harness/cli.js generate` with your own `.rad/skills/rad-plan` or
+`.rad/skills/rad-adopt` source, it refuses (exit 2, `conflict`) to overwrite a
+hand-written copy that lacks the marker line. Move your edits into the
+`.rad/skills` source, delete the old command file, then generate.
+
+---
+
 ## See also
 
 - [INSTALL.md](INSTALL.md) — first-time installation and uninstalling
