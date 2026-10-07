@@ -9,3 +9,4 @@ Executor role: architect
 | Step | Wave | Task | Status | Commit | Time |
 |------|------|------|--------|--------|------|
 | 1.2 | 1 | selectAgent | complete | 6817077 | 2026-10-07T17:49:45Z |
+| 1.1 | 1 | agent schema, presets and init config | complete | be9c8c4 | 2026-10-07T17:50:24Z |
