@@ -19,7 +19,9 @@
 
 import { fileURLToPath } from 'node:url';
 import { basename, dirname, join, resolve } from 'node:path';
-import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync, realpathSync, statSync } from 'node:fs';
+import {
+  readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync, realpathSync, statSync, lstatSync, renameSync,
+} from 'node:fs';
 import process from 'node:process';
 import { spawnSync, execFileSync } from 'node:child_process';
 
@@ -51,6 +53,7 @@ import {
 } from './install-manifest.js';
 import { readPreset } from './preset.js';
 import { readSources, renderOutputs, planGenerate, applyGenerate } from './generate.js';
+import { mergeDeliverGateHook } from './claude-settings.js';
 
 /** Usage line for `rad deliver` (help, parse errors, and the command table). */
 const DELIVER_USAGE = 'rad deliver <feature> [--model <model-id>] [--resume --context <text>]';
@@ -68,6 +71,8 @@ const CAPABILITIES_USAGE = 'rad capabilities <feature> [--plan <path>]';
 const INSTALL_CORE_USAGE = 'rad install-core --source <dir> [--target <dir>]';
 /** Usage line for `rad install-preset`. */
 const INSTALL_PRESET_USAGE = 'rad install-preset (--source <dir> | --reapply) [--target <dir>]';
+/** Usage line for `rad install-hooks`. */
+const INSTALL_HOOKS_USAGE = 'rad install-hooks [--target <dir>]';
 /** Usage line for `rad install-status`. */
 const INSTALL_STATUS_USAGE = 'rad install-status [--target <dir>]';
 /** Usage line for `rad acp-check`. */
@@ -140,6 +145,11 @@ const SUBCOMMANDS = {
     summary: 'Install or upgrade a preset over an installed core and seed its settings, never overwriting local edits.',
     usage: INSTALL_PRESET_USAGE,
     run: (argv, ctx) => installPresetCommand(argv, ctx),
+  },
+  'install-hooks': {
+    summary: "Register the deliver-gate hook in a target's .claude/settings.json, never overwriting existing settings.",
+    usage: INSTALL_HOOKS_USAGE,
+    run: (argv, ctx) => installHooksCommand(argv, ctx),
   },
   'install-status': {
     summary: 'Report core files that drifted from .rad/installed.json (read-only).',
@@ -3370,6 +3380,82 @@ export async function installCoreCommand(argv, ctx) {
     process.stdout.write(`${line}\n`);
   }
   return plan.actions.some((a) => a.action === 'keep' || a.action === 'deleted') ? FAILED_EXIT_CODE : 0;
+}
+
+/** Report-line prefix of `rad install-hooks`. */
+const INSTALL_HOOKS_PREFIX = 'rad install-hooks';
+/** Target-relative Claude Code project settings file install-hooks merges into. */
+const CLAUDE_SETTINGS_PATH = '.claude/settings.json';
+/** Target-relative hook script the registration runs; it must exist before it is registered. */
+const DELIVER_GATE_HOOK_SCRIPT = 'scripts/deliver-gate-hook.mjs';
+
+/**
+ * The current settings text for install-hooks: { text } (null when absent) or
+ * { error }. Refuses a missing hook script (registering it would fail every
+ * Skill call) and a settings path that is a symlink, directory, or other
+ * non-regular file (lstat: a link is never followed).
+ */
+function readHookSettings(targetRoot) {
+  const script = join(targetRoot, DELIVER_GATE_HOOK_SCRIPT);
+  if (!existsSync(script) || !lstatSync(script).isFile()) {
+    return { error: `${DELIVER_GATE_HOOK_SCRIPT} is missing or not a regular file; install core first; nothing written` };
+  }
+  const settingsPath = join(targetRoot, CLAUDE_SETTINGS_PATH);
+  let stat;
+  try {
+    stat = lstatSync(settingsPath);
+  } catch (err) {
+    if (err.code === 'ENOENT') return { text: null };
+    return { error: `${CLAUDE_SETTINGS_PATH}: cannot stat (${err.code ?? err.message}); nothing written` };
+  }
+  if (!stat.isFile()) return { error: `${CLAUDE_SETTINGS_PATH} is not a regular file (symlink or directory); nothing written` };
+  return { text: readFileSync(settingsPath, 'utf8') };
+}
+
+/** Write settings text atomically: a temp file in the same directory, then rename over the target. */
+function writeHookSettingsAtomic(targetRoot, text) {
+  const settingsPath = join(targetRoot, CLAUDE_SETTINGS_PATH);
+  mkdirSync(dirname(settingsPath), { recursive: true });
+  const tmp = `${settingsPath}.tmp-${process.pid}`;
+  writeFileSync(tmp, text);
+  renameSync(tmp, settingsPath);
+}
+
+/**
+ * `install-hooks [--target <dir>]` — register the deliver-gate PreToolUse hook
+ * in <target>/.claude/settings.json (#186). Created/added are written
+ * atomically; present writes nothing. Target defaults to the CLI's repo root.
+ *
+ * Exit 0 created/added/present; 2 bad argv, a missing hook script, a
+ * non-regular settings path, or settings the merge cannot handle (nothing
+ * written: fail closed, existing settings are never overwritten).
+ *
+ * @param {string[]} argv - args after `install-hooks`
+ * @param {{ repoRoot: string }} ctx
+ * @returns {Promise<number>}
+ */
+export async function installHooksCommand(argv, ctx) {
+  let flags;
+  try {
+    flags = parseInstallFlags(argv, ['--target']);
+  } catch (err) {
+    process.stderr.write(`${INSTALL_HOOKS_PREFIX}: ${err.message}\nUsage: ${INSTALL_HOOKS_USAGE}\n`);
+    return USAGE_EXIT_CODE;
+  }
+  const targetRoot = flags.target ? resolve(flags.target) : ctx.repoRoot;
+  const current = readHookSettings(targetRoot);
+  if (current.error) {
+    process.stderr.write(`${INSTALL_HOOKS_PREFIX}: ${current.error}\n`);
+    return USAGE_EXIT_CODE;
+  }
+  const merged = mergeDeliverGateHook(current.text);
+  if (merged.error) {
+    process.stderr.write(`${INSTALL_HOOKS_PREFIX}: ${CLAUDE_SETTINGS_PATH}: ${merged.error}; nothing written\n`);
+    return USAGE_EXIT_CODE;
+  }
+  if (merged.status !== 'present') writeHookSettingsAtomic(targetRoot, merged.text);
+  process.stdout.write(`${INSTALL_HOOKS_PREFIX}: ${merged.status} ${CLAUDE_SETTINGS_PATH}\n`);
+  return 0;
 }
 
 /** The boolean flag that re-applies the recorded preset (parseInstallFlags only takes value flags). */
