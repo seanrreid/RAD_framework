@@ -1,7 +1,7 @@
 # Plan: `rad plan-open`: Deterministic Plan Branch, Commit and Push (#186 part 2a)
 Created: 2026-10-07
 Author: architect
-Status: approved
+Status: in-progress
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-10-07T14:21:43.944Z
 Recorded-By: sean@torchcodelab.com
