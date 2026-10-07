@@ -2,6 +2,9 @@
  * plan-commit.js — pure helpers behind `rad plan-open`: the plan's issue
  * number, its derived commit message, trailer validation, and the work branch.
  *
+ * Also the approve/review commit messages and the header `Status:` rewrite
+ * behind `rad approve` and `rad plan-status`.
+ *
  * No I/O. The only ambient read is RAD_BRANCH_PREFIX in conventionWorkBranch,
  * and callers may pass their own env instead.
  */
@@ -148,10 +151,7 @@ export function validateTrailer(s) {
  * @returns {string}
  */
 export function planCommitMessage(text, trailers = []) {
-  for (const t of trailers) {
-    const err = validateTrailer(t);
-    if (err !== null) throw new Error(err);
-  }
+  requireValidTrailers(trailers);
   const adoptedFrom = headerValue(text, 'Adopted-From');
   const issue = planIssueNumber(text);
   const { waves, tasks } = countWavesTasks(text);
@@ -164,9 +164,94 @@ export function planCommitMessage(text, trailers = []) {
     `Tasks: ${tasks}`,
     `Out-of-scope deps: ${hasOutOfScopeDeps(text) ? 'yes' : 'no'}`,
   ];
+  return joinMessage(subject, body, trailers);
+}
+
+/** Throw on the first invalid trailer — trailers are never dropped. */
+function requireValidTrailers(trailers) {
+  for (const t of trailers) {
+    const err = validateTrailer(t);
+    if (err !== null) throw new Error(err);
+  }
+}
+
+/** Subject, body lines, then trailers — the same section layout as planCommitMessage. */
+function joinMessage(subject, body, trailers) {
   const sections = [subject, body.join('\n')];
   if (trailers.length > 0) sections.push(trailers.join('\n'));
   return sections.join('\n\n');
+}
+
+/** The `Plan:` and optional `Issue:` body lines shared by approve/review messages. */
+function planRefLines(text, feature) {
+  if (!isNonEmpty(feature)) throw new Error('feature is required');
+  const issue = planIssueNumber(text);
+  return [`Plan: .agents/plans/${feature}.md`, ...(issue === null ? [] : [`Issue: ${issue}`])];
+}
+
+/**
+ * The approval commit message. Subject `approve: <feature>` (suffixed
+ * ` (re-approval)` when reapproval); body Plan, Issue (omitted when null),
+ * Approved-By, and in proxy mode Recorded-By + Approval-Evidence; then trailers.
+ *
+ * @param {string} text - full plan doc text
+ * @param {{ feature: string, reapproval?: boolean, approvedBy: string,
+ *           recordedBy?: string, evidence?: string, proxy?: boolean }} opts
+ * @param {string[]} [trailers]
+ * @returns {string}
+ */
+export function approveCommitMessage(text, { feature, reapproval, approvedBy, recordedBy, evidence, proxy }, trailers = []) {
+  requireValidTrailers(trailers);
+  const body = [
+    ...planRefLines(text, feature),
+    `Approved-By: ${approvedBy}`,
+    ...(proxy ? [`Recorded-By: ${recordedBy}`, `Approval-Evidence: ${evidence}`] : []),
+  ];
+  const subject = `approve: ${feature}${reapproval ? ' (re-approval)' : ''}`;
+  return joinMessage(subject, body, trailers);
+}
+
+/**
+ * The review commit message: subject `review: <feature> <status>`; body Plan,
+ * Issue (omitted when null), Reviewed-By; then trailers.
+ *
+ * @param {string} text - full plan doc text
+ * @param {{ feature: string, status: string, reviewedBy: string }} opts
+ * @param {string[]} [trailers]
+ * @returns {string}
+ */
+export function reviewCommitMessage(text, { feature, status, reviewedBy }, trailers = []) {
+  requireValidTrailers(trailers);
+  const body = [...planRefLines(text, feature), `Reviewed-By: ${reviewedBy}`];
+  return joinMessage(`review: ${feature} ${status}`, body, trailers);
+}
+
+/**
+ * Set the plan's header `Status:`. Replaces the first `Status:` line in the
+ * header block; when absent, inserts one after `Author:` (else after the
+ * `# Plan:` title). Lines after the first `## ` heading are never touched.
+ *
+ * @param {string} text - full plan doc text
+ * @param {string} status
+ * @returns {string} the new text
+ */
+export function setPlanStatus(text, status) {
+  if (!isNonEmpty(status)) throw new Error('status must be non-empty');
+  if (/[\r\n]/.test(status)) throw new Error(`status must be a single line: ${JSON.stringify(status)}`);
+  const lines = text.split('\n');
+  const headerEnd = headerLines(text).length;
+  const statusLine = `Status: ${status.trim()}`;
+  const header = lines.slice(0, headerEnd);
+  const existing = header.findIndex((l) => l.startsWith('Status:'));
+  if (existing !== -1) {
+    lines[existing] = statusLine;
+    return lines.join('\n');
+  }
+  let anchor = header.findIndex((l) => l.startsWith('Author:'));
+  if (anchor === -1) anchor = header.findIndex((l) => PLAN_TITLE_PATTERN.test(l.trim()));
+  if (anchor === -1) throw new Error('plan header has no "Author:" or "# Plan:" line to anchor Status:');
+  lines.splice(anchor + 1, 0, statusLine);
+  return lines.join('\n');
 }
 
 /**
