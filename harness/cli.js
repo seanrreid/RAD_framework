@@ -3311,9 +3311,10 @@ function resolveInitAgent(opts) {
   return { adapter, command: opts.agentCmd };
 }
 
-/** The init summary suffix: `, agent=<adapter>:<command or sdk>` when an agent was set, else ''. */
+/** The init summary suffix: `, agent=<adapter>:<command>` (`, agent=sdk` for the commandless sdk adapter) when an agent was set, else ''. */
 function initAgentSummary(agent) {
-  return agent === undefined ? '' : `, agent=${agent.adapter}:${agent.command ?? INIT_SDK_ADAPTER}`;
+  if (agent === undefined) return '';
+  return agent.command === undefined ? `, agent=${agent.adapter}` : `, agent=${agent.adapter}:${agent.command}`;
 }
 
 /**

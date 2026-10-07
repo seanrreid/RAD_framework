@@ -415,7 +415,7 @@ test('rad config init --agent-cmd: a custom command (default command adapter) an
 });
 
 test('rad config init --agent-adapter sdk: writes { adapter: sdk } with no command', async () => {
-  await assertInitAgent(['--agent-adapter', 'sdk'], { adapter: 'sdk' }, ', agent=sdk:sdk');
+  await assertInitAgent(['--agent-adapter', 'sdk'], { adapter: 'sdk' }, ', agent=sdk');
 });
 
 test('rad config init: without agent flags the summary is unchanged and no agent: key is written', async () => {
