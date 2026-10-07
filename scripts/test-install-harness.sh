@@ -437,7 +437,7 @@ assert_not_exists "$NOCFG_T/$PRESET_EXT" "no config -> no preset file written"
 # ── 7. the generated read-only slice ships (#171 part 2) ────────────────────
 # A stable line from quality-reviewer's body, proving rad review read the agent.
 readonly REVIEWER_BODY_LINE="Universal code quality review agent."
-readonly SLICE_SKILLS=(quality-review accessibility-review rad-status rad-review)
+readonly SLICE_SKILLS=(quality-review accessibility-review rad-status rad-review rad-plan rad-adopt)
 
 # 7a. fresh install: generated outputs (marked), sources, no internal agents
 for r in quality-reviewer accessibility-reviewer; do
