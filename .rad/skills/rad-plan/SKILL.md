@@ -441,9 +441,9 @@ Run rad-deliver .agents/plans/[feature-slug].md once approved.
 ## Rules
 
 - Only call agents available to your role (check `node harness/cli.js config get agent_scope_map`)
-- Do not read files directly — delegate all research to a sub-agent if your tool
-  can run one, otherwise run it inline with the same caps; either way keep only
-  the `RESEARCH_SUMMARY` block
+- Keep raw file contents out of your working context — delegate research to a
+  sub-agent if your tool can run one, otherwise run it inline with the same caps;
+  either way keep only the bounded summary (`RESEARCH_SUMMARY`)
 - Do not write any code in this phase
 - Research is one sub-agent call — do not spawn multiple research agents
 - Cap the sub-agent at 10 searches — split the plan if the feature needs more
