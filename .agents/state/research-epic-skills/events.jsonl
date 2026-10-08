@@ -13,3 +13,4 @@
 {"feature":"research-epic-skills","type":"wave-started","actor":"harness","ts":"2026-10-08T17:37:06.418Z","data":{"wave":4,"attempt":1}}
 {"feature":"research-epic-skills","type":"wave-attempt","actor":"harness","ts":"2026-10-08T17:38:36.209Z","data":{"wave":4,"attempt":1,"outcome":"success","tasks":[{"title":"Registry tests and portability","status":"done_with_concerns","commit":"7d35053","concern":"Also updated the #186 Parity summary row in rad-tool-portability.md so it matches the updated rows (outside the task's listed edits)","error":"—"}]}}
 {"feature":"research-epic-skills","type":"wave-complete","actor":"harness","ts":"2026-10-08T17:38:36.211Z","data":{"wave":4}}
+{"feature":"research-epic-skills","type":"pr-opened","actor":"harness","ts":"2026-10-08T17:38:46.861Z"}
