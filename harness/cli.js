@@ -1288,13 +1288,32 @@ function preserveAfterSetupFailure(worktree, feature, root) {
 /** `git diff --cached --quiet` exit status meaning "staged changes exist". */
 const GIT_DIFF_HAS_CHANGES = 1;
 
+/** Where the run's execution logs live, relative to the run root. */
+const EXECUTION_LOG_DIR = join('.agents', 'logs');
+
 /**
- * Commit the run-state the spine wrote inside the worktree so it persists on
- * the work branch and the NON-forced lifecycle remove sees a clean tree.
+ * The run's execution logs (`.agents/logs/<feature>-*.md`) under `root`, as
+ * explicit root-relative paths in sorted order — never a glob handed to git.
+ * A missing logs directory means no logs: [].
+ */
+function executionLogPaths(root, feature) {
+  const dir = join(root, EXECUTION_LOG_DIR);
+  if (!existsSync(dir)) return [];
+  const prefix = `${feature}-`;
+  return readdirSync(dir)
+    .filter((name) => name.startsWith(prefix) && name.endsWith('.md'))
+    .sort()
+    .map((name) => `.agents/logs/${name}`);
+}
+
+/**
+ * Commit the run-state the spine wrote, plus the run's execution logs, inside
+ * the worktree so they persist on the work branch and the NON-forced lifecycle
+ * remove sees a clean tree.
  * Commits only when something is staged. Any git failure throws.
  */
 function commitRunEvents({ sh, root, feature }) {
-  mainGit(sh, root, ['add', '--', `.agents/state/${feature}/`]);
+  mainGit(sh, root, ['add', '--', `.agents/state/${feature}/`, ...executionLogPaths(root, feature)]);
   const staged = sh('git', ['diff', '--cached', '--quiet'], { cwd: root });
   if (staged.status === 0) return;
   if (staged.status !== GIT_DIFF_HAS_CHANGES) {
@@ -1308,22 +1327,23 @@ function commitRunEvents({ sh, root, feature }) {
 const STOP_COMMIT_SUBJECT = (feature) => `deliver(${feature}): record stopped run`;
 
 /**
- * On a stop, commit ONLY the feature's events.jsonl to the work branch (the
- * pathspec keeps partial code and the untracked marker out). No push. Nothing
+ * On a stop, commit ONLY the feature's events.jsonl and execution logs to the
+ * work branch (the pathspec keeps partial code and the untracked marker out). No push. Nothing
  * staged → no commit. A git failure is reported, never thrown: the stop's exit
  * code and the preserve still stand.
  */
 function commitStopEvents({ sh, root, feature }) {
   const eventsPath = `.agents/state/${feature}/events.jsonl`;
   try {
-    mainGit(sh, root, ['add', '--', eventsPath]);
-    const staged = sh('git', ['diff', '--cached', '--quiet', '--', eventsPath], { cwd: root });
+    const paths = [eventsPath, ...executionLogPaths(root, feature)];
+    mainGit(sh, root, ['add', '--', ...paths]);
+    const staged = sh('git', ['diff', '--cached', '--quiet', '--', ...paths], { cwd: root });
     if (staged.status === 0) return;
     if (staged.status !== GIT_DIFF_HAS_CHANGES) {
       const detail = String(staged.stderr || staged.stdout || 'no output').trim();
       throw new Error(`git diff --cached --quiet exited ${staged.status}: ${detail}`);
     }
-    mainGit(sh, root, ['commit', '-m', STOP_COMMIT_SUBJECT(feature), '--', eventsPath]);
+    mainGit(sh, root, ['commit', '-m', STOP_COMMIT_SUBJECT(feature), '--', ...paths]);
   } catch (err) {
     const safe = sanitizeErrorMessage(err?.message ?? String(err));
     process.stderr.write(`rad deliver: could not commit the stopped run's events — ${safe}\n`);
