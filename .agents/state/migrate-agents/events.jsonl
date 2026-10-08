@@ -12,3 +12,11 @@
 {"feature":"migrate-agents","type":"wave-failed","actor":"harness","ts":"2026-10-08T19:13:33.287Z","data":{"wave":3,"action":"abort"}}
 {"feature":"migrate-agents","type":"deliver-stopped","actor":"harness","ts":"2026-10-08T19:13:33.291Z","data":{"class":"failed","reason":"fail-scope","decision":"wave 3: fail-scope — the work is wrong for the plan; fix the plan or the code and re-run","wave":3,"action":"abort","outcome":"fail-scope"}}
 {"feature":"migrate-agents","type":"approved","actor":"sean@torchcodelab.com","role":"architect","ts":"2026-10-08T19:14:43.470Z","recordedBy":"sean@torchcodelab.com","data":{"fingerprint":"2fdbb227543ffec2ae495eaa9aa770d7bc34e7ebb2dd5485c9b35b8140b6cf71"}}
+{"feature":"migrate-agents","type":"deliver-started","actor":"harness","ts":"2026-10-08T19:15:08.553Z"}
+{"feature":"migrate-agents","type":"run-prepared","actor":"harness","ts":"2026-10-08T19:15:16.708Z","data":{"base":"main","merged":false,"fastForwarded":false,"committed":true,"pushed":true}}
+{"feature":"migrate-agents","type":"wave-started","actor":"harness","ts":"2026-10-08T19:15:16.770Z","data":{"wave":3,"attempt":1}}
+{"feature":"migrate-agents","type":"wave-attempt","actor":"harness","ts":"2026-10-08T19:18:23.911Z","data":{"wave":3,"attempt":1,"outcome":"success","tasks":[{"title":"Move and regenerate the 27 agents","status":"done_with_concerns","commit":"78d137b","concern":"Amendment 1 said 21 sources had a scalar `roles`, but all 27 did; the same format-only rule was applied to all 27, and every parsed field and body still matches the original","error":"—"}]}}
+{"feature":"migrate-agents","type":"wave-complete","actor":"harness","ts":"2026-10-08T19:18:23.919Z","data":{"wave":3}}
+{"feature":"migrate-agents","type":"wave-started","actor":"harness","ts":"2026-10-08T19:18:23.929Z","data":{"wave":4,"attempt":1}}
+{"feature":"migrate-agents","type":"wave-attempt","actor":"harness","ts":"2026-10-08T19:19:23.178Z","data":{"wave":4,"attempt":1,"outcome":"success","tasks":[{"title":"Docs: where agents live","status":"complete","commit":"2625b22","concern":"—","error":"—"}]}}
+{"feature":"migrate-agents","type":"wave-complete","actor":"harness","ts":"2026-10-08T19:19:23.181Z","data":{"wave":4}}
