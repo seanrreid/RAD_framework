@@ -504,6 +504,10 @@ the operator's decision attached (flags and the ordered eligibility table:
   Resume grants no authority — anyone may resume.
 - **Not a wave attempt.** `run-resumed` does not count toward
   `RAD_MAX_FAILED_ATTEMPTS` (the counter already resets at `deliver-stopped`).
+- **Worktree mode.** A stop commits only its event log to the work branch
+  (locally, `deliver(<feature>): record stopped run`) so `--resume` sees it at the
+  branch tip, and `--resume` reactivates and runs in this feature's preserved
+  worktree, keeping its uncommitted partial work.
 
 Without `--resume` the event sequence and prompts are byte-for-byte unchanged.
 
