@@ -14,3 +14,4 @@
 {"feature":"deliver-docs-sweep","type":"wave-started","actor":"harness","ts":"2026-10-08T16:28:16.993Z","data":{"wave":2,"attempt":1}}
 {"feature":"deliver-docs-sweep","type":"wave-attempt","actor":"harness","ts":"2026-10-08T16:29:17.662Z","data":{"wave":2,"attempt":1,"outcome":"success","tasks":[{"title":"Code comments","status":"done_with_concerns","commit":"4ef3143","concern":"Validation limited to operator's scoped set (generate --check, lint-invariants, spine/agent-contract tests); full test/eval/scripts suites deferred to operator","error":"—"}]}}
 {"feature":"deliver-docs-sweep","type":"wave-complete","actor":"harness","ts":"2026-10-08T16:29:17.663Z","data":{"wave":2}}
+{"feature":"deliver-docs-sweep","type":"pr-opened","actor":"harness","ts":"2026-10-08T16:29:29.982Z"}
