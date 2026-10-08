@@ -10,3 +10,4 @@
 {"feature":"resume-stash-and-log-publish","type":"wave-started","actor":"harness","ts":"2026-10-08T18:18:06.479Z","data":{"wave":3,"attempt":1}}
 {"feature":"resume-stash-and-log-publish","type":"wave-attempt","actor":"harness","ts":"2026-10-08T18:18:42.850Z","data":{"wave":3,"attempt":1,"outcome":"success","tasks":[{"title":"Docs","status":"complete","commit":"60a5e28","concern":"—","error":"—"}]}}
 {"feature":"resume-stash-and-log-publish","type":"wave-complete","actor":"harness","ts":"2026-10-08T18:18:42.852Z","data":{"wave":3}}
+{"feature":"resume-stash-and-log-publish","type":"pr-opened","actor":"harness","ts":"2026-10-08T18:19:01.936Z"}
