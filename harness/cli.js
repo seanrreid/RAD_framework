@@ -45,7 +45,7 @@ import { classifyStop, STOP_CLASSES } from './stops.js';
 import {
   deliverCompleted, latestStop, dormantStop, fileDeficitSignals, forecastForPaths, DEFICITS, phaseOf,
 } from './events.js';
-import { taskFilesFromPlanText, mergeTaskFiles, taskFilesByWave } from './plan-tasks.js';
+import { taskFilesFromPlanText, mergeTaskFiles, taskFilesByWave, taskBlocksByWave } from './plan-tasks.js';
 import { parseCapabilityLine, resolveWaveCapabilities, sdkAllowedTools, commandRefusal } from './capabilities.js';
 import { gatherDigestInputs, buildDigest, renderDigest, readScope } from './digest.js';
 import { buildPrBody, testsToWritePaths } from './pr-body.js';
@@ -701,6 +701,7 @@ function parseUnpromisedTests(text, testsByWave) {
  * @returns {{ branch: string, acceptanceCriteria: string[], waveModels: Record<number, string>, waveVerify: Record<number, string>,
  *   planCapabilities: string[]|undefined, waveCapabilities: Record<number, string[]>, capabilityErrors: string[],
  *   waveNumbers: number[], testsByWave: Record<number, string[]>, unpromisedTests: string[],
+ *   waveTasks: Record<number, { type: string, tasks: object[] }>,
  *   executionNotes: { doNotTouch: string[], keyFiles: string[], reminders: string[] } }}
  */
 export function parsePlanCtx(text) {
@@ -747,6 +748,9 @@ export function parsePlanCtx(text) {
     waveVerify: parseWaveVerify(text),
     testsByWave,
     unpromisedTests: parseUnpromisedTests(text, testsByWave),
+    // Per-wave `#### Task N.M:` blocks (taskBlocksByWave), handed to runWave
+    // so each wave's prompt carries its tasks.
+    waveTasks: Object.fromEntries(taskBlocksByWave(text)),
     ...parseCapabilities(text),
     executionNotes: { doNotTouch, keyFiles, reminders },
   };
@@ -843,18 +847,36 @@ function readBranchTipHistory({ feature, branch, repoRoot, sh, parse = parseEven
 
 /**
  * Read + parse the plan doc under `root` into planCtx. Writes the operator
- * message and returns null when the doc is absent.
+ * message and returns `{ code: 1 }` when the doc is absent, or
+ * `{ code: USAGE_EXIT_CODE }` when any plan wave has no task blocks.
  */
 function loadPlanCtx(root, feature) {
   const planFile = join(root, '.agents', 'plans', `${feature}.md`);
   if (!existsSync(planFile)) {
     process.stderr.write(`rad deliver: no plan doc at .agents/plans/${feature}.md\n`);
-    return null;
+    return { code: 1 };
   }
   const planCtx = parsePlanCtx(readFileSync(planFile, 'utf8'));
+  const taskless = tasklessWaves(planCtx);
+  if (taskless.length > 0) {
+    for (const n of taskless) process.stderr.write(`${taskRefusalMessage(n)}\n`);
+    return { code: USAGE_EXIT_CODE };
+  }
   planCtx.feature = feature;
   planCtx.executionLog = `.agents/logs/${feature}-${new Date().toISOString().slice(0, 10)}.md`;
   return planCtx;
+}
+
+/** The refusal line for a plan wave that declares no task blocks (one line per wave). */
+const taskRefusalMessage = (n) =>
+  `rad deliver: wave ${n} has no tasks in the plan — each wave needs '#### Task N.M: <title>' blocks with File:/What:/Validate: lines`;
+
+/**
+ * Plan wave numbers whose waveTasks entry is missing or has no tasks. Fail
+ * closed: such a wave would otherwise be sent to the agent with an empty Tasks block.
+ */
+function tasklessWaves({ waveNumbers, waveTasks }) {
+  return waveNumbers.filter((n) => !(waveTasks[n]?.tasks?.length > 0));
 }
 
 /**
@@ -1063,7 +1085,7 @@ async function buildRunWave(agent, { model, root, planCtx }) {
  */
 async function setupMainRun({ ctx, feature, model, selection, repoRoot, sh }) {
   const planCtx = loadPlanCtx(repoRoot, feature);
-  if (!planCtx) return { code: 1 };
+  if (planCtx.code !== undefined) return planCtx;
   const state = createGitStateStore({ repoRoot, sh });
   // Gate check: approved status must be established before any wave execution.
   const g = await state.gate(feature, APPROVED_GATE);
@@ -1347,7 +1369,8 @@ async function setupWorktreeRun({ ctx, feature, model, selection, repoRoot, sh, 
   const { root, worktree, workBranch } = prepared;
   const planCtx = loadPlanCtx(root, feature);
   // A capability refusal after create preserves the worktree, like a preflight failure.
-  const refused = planCtx ? await checkCapabilities({ planCtx, root, agent }) : { code: 1 };
+  // A missing plan doc (exit 1) or task-less wave (exit 2) preserves it too.
+  const refused = planCtx.code !== undefined ? planCtx : await checkCapabilities({ planCtx, root, agent });
   const built = refused ?? await buildRunWave(agent, { model, root, planCtx });
   if (built.code !== undefined) {
     preserveAfterSetupFailure(worktree, feature, root);
@@ -1983,6 +2006,9 @@ export async function deliverCommand(argv, ctx) {
       // Empty for a plan that declares none, which leaves the spine's behavior
       // and its event sequence unchanged.
       waveVerify: planCtx.waveVerify,
+      // Per-wave { type, tasks } from the plan's task blocks; the spine folds
+      // them onto each wave it hands runWave, so every prompt lists its tasks.
+      waveTasks: planCtx.waveTasks,
       // Per-wave promised test files (parseTestsByWave): the presence gate after
       // wave k checks only waves <= k's promises; {} skips the gate entirely.
       testsByWave: planCtx.testsByWave,

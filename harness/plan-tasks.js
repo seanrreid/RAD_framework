@@ -85,3 +85,84 @@ export function taskFilesByWave(text) {
   }
   return byWave;
 }
+
+// A wave with no `parallel`/`sequential` word in its heading runs sequentially.
+export const DEFAULT_WAVE_TYPE = 'sequential';
+// The wave type word, matched case-insensitively anywhere after the wave number.
+const WAVE_TYPE_WORD = /\b(parallel|sequential)\b/i;
+// Field labels that open a task's prose fields and its file list.
+const FILE_LABEL = 'File:';
+const PROSE_LABELS = { 'What:': 'what', 'Validate:': 'validate' };
+// Headings that end the current task (and any open What:/Validate: field).
+const TASK_END_PREFIXES = ['#### ', '### ', '## '];
+
+/** `### Wave 2 — Parallel` -> 'parallel'; no type word -> DEFAULT_WAVE_TYPE. */
+function waveTypeFrom(line, matched) {
+  const word = line.slice(matched.length).match(WAVE_TYPE_WORD);
+  return word ? word[1].toLowerCase() : DEFAULT_WAVE_TYPE;
+}
+
+/** The prose field key a line opens ('what' | 'validate'), or null. */
+function proseLabelOf(line) {
+  const label = Object.keys(PROSE_LABELS).find((l) => line.startsWith(l));
+  return label ? { key: PROSE_LABELS[label], rest: line.slice(label.length) } : null;
+}
+
+/** Fold one in-task body line into `cursor` ({ task, field, filesSeen }). */
+function applyTaskLine(cursor, line) {
+  if (line.startsWith(FILE_LABEL)) {
+    if (!cursor.filesSeen) cursor.task.files = parseFileLine(line);
+    cursor.filesSeen = true;
+    cursor.field = null;
+    return;
+  }
+  const prose = proseLabelOf(line);
+  if (prose) {
+    cursor.field = prose.key;
+    cursor.task[prose.key] = [prose.rest];
+    return;
+  }
+  if (cursor.field) cursor.task[cursor.field].push(line);
+}
+
+/** Join a field's collected lines (or '' when the field never appeared), trimmed. */
+function finishTask(task) {
+  return { ...task, what: task.what.join('\n').trim(), validate: task.validate.join('\n').trim() };
+}
+
+/**
+ * Wave number -> { type, tasks } where each task is { title, files, what,
+ * validate } for a `#### Task N.M:` block under that `### Wave N` heading.
+ * files = the task's first File: line (else []); What:/Validate: run to the next
+ * field label or `## `/`### `/`#### ` heading, trimmed with line breaks kept;
+ * a missing field is ''. Tasks before any wave heading are ignored; a wave with
+ * no tasks maps to { type, tasks: [] }. Fails closed: non-string input throws.
+ */
+export function taskBlocksByWave(text) {
+  if (typeof text !== 'string') {
+    throw new TypeError(`taskBlocksByWave: expected plan text string, got ${text === null ? 'null' : typeof text}`);
+  }
+  const byWave = new Map();
+  let wave = null;
+  let cursor = null;
+  for (const line of text.split('\n')) {
+    const waveHeader = line.match(WAVE_HEADER);
+    if (waveHeader) {
+      wave = { type: waveTypeFrom(line, waveHeader[0]), tasks: [] };
+      byWave.set(Number(waveHeader[1]), wave);
+      cursor = null;
+      continue;
+    }
+    const taskHeader = line.match(TASK_HEADER);
+    if (taskHeader) {
+      const task = { title: taskHeader[1], files: [], what: [], validate: [] };
+      if (wave) wave.tasks.push(task);
+      cursor = wave ? { task, field: null, filesSeen: false } : null;
+      continue;
+    }
+    if (TASK_END_PREFIXES.some((p) => line.startsWith(p))) { cursor = null; continue; }
+    if (cursor) applyTaskLine(cursor, line);
+  }
+  for (const w of byWave.values()) w.tasks = w.tasks.map(finishTask);
+  return byWave;
+}

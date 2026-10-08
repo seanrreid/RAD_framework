@@ -222,6 +222,7 @@ function writeApprovedPlan(root, feature) {
       '',
       '### Wave 1',
       '',
+      '#### Task 1.1: Task A',
       '- [ ] Task A',
     ].join('\n'),
     'utf8',

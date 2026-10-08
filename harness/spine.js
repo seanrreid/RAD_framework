@@ -677,6 +677,20 @@ function convergeOrphans({ history, wave, matrix, state, feature, now, runHooks 
 }
 
 /**
+ * The wave object handed to `runWave`. A wave that already carries `tasks`
+ * (the synthetic end-of-run test wave) is passed unchanged; otherwise the
+ * plan's parsed task block for `wave.n` (from `waveTasks`) is attached as
+ * `type` + `tasks`, keeping every other field. No entry → `wave` unchanged.
+ * Only the agent sees this object — events and gates keep using `wave`.
+ */
+function waveForAgent(wave, waveTasks) {
+  if (wave.tasks) return wave;
+  const entry = waveTasks[wave.n];
+  if (!entry) return wave;
+  return { ...wave, type: entry.type, tasks: entry.tasks };
+}
+
+/**
  * Run ONE wave (a plan wave, or the synthetic end-of-run test wave) through the
  * per-wave body: approval re-check, token budget, resume verify, orphan
  * convergence, the bounded attempt loop (hooks, runWave, presence/Verify/scope
@@ -689,7 +703,7 @@ async function runOneWave(wave, loop) {
   const {
     state, feature, now, matrix, runWave, sh, maxAttempts, tokenBudget, waveVerify, waveModels,
     waveCapabilities, runHooks, approvalIntact, maxFailedAttempts, resume, pushGuard, testsByWave,
-    waves, completed, history, stopCtx,
+    waveTasks, waves, completed, history, stopCtx,
   } = loop;
 
   // Approval re-check fires before EVERY wave — the run's first included —
@@ -796,7 +810,7 @@ async function runOneWave(wave, loop) {
       loop.operatorContextPending = false;
     }
     const tipBefore = pushGuard ? sh(PUSH_GUARD_SCRIPT, feature) : null;
-    const result = await runWave(wave, attemptCtx);
+    const result = await runWave(waveForAgent(wave, waveTasks), attemptCtx);
     const tipAfter = pushGuard ? sh(PUSH_GUARD_SCRIPT, feature) : null;
     if (pushGuard) {
       recordPushCheckUnavailable({ state, feature, now, wave, attempt, before: tipBefore, after: tipAfter });
@@ -1217,6 +1231,14 @@ async function runOneWave(wave, loop) {
  *   `missing(paths)`: anything still missing stops the run as `tests-missing`
  *   (fail closed, also when the port throws or returns a non-array). The result's
  *   `waves` stays the plan's wave count. Null/absent (default) changes nothing.
+ * @param {Record<number, { type: string, tasks: Array<{ title: string, files: string, what: string, validate: string }> }>} [args.waveTasks]
+ *   OPTIONAL per-wave task blocks, keyed by wave number (parsed by cli.js from
+ *   the plan via taskBlocksByWave and passed through, as waveVerify is). On the
+ *   runWave call only, a plan wave with an entry is passed as
+ *   `{ ...wave, type, tasks }` so the agent's prompt lists its tasks; a wave that
+ *   already has `tasks` (the synthetic test wave) or has no entry is passed
+ *   unchanged. Events and every other call are unaffected. Absent (default `{}`)
+ *   passes each wave exactly as before.
  * @returns {Promise<Object>} structured terminal result
  */
 export async function deliverSpine({
@@ -1243,6 +1265,7 @@ export async function deliverSpine({
   finish = null,
   testsByWave = null,
   testWave = null,
+  waveTasks = {},
 }) {
   // ── DET gate: approval. The human (or proxy) decided earlier; here we ENFORCE
   // it. A blocked gate is a normal outcome — return structured, append nothing
@@ -1319,7 +1342,7 @@ export async function deliverSpine({
   const loop = {
     state, feature, now, matrix, runWave, sh, maxAttempts, tokenBudget, waveVerify, waveModels,
     waveCapabilities, runHooks, approvalIntact, maxFailedAttempts, resume, pushGuard, testsByWave,
-    waves, completed, history, stopCtx,
+    waveTasks, waves, completed, history, stopCtx,
     resumeVerified, spent, failedAttempts, operatorContextPending,
   };
 

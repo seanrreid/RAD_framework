@@ -254,6 +254,19 @@ agent. It is the same template the `/rad-deliver` prose command uses, containing
 - one block per task (title, file(s), what, validate);
 - the per-task workflow and the required return format.
 
+The tasks come from the plan doc. `rad deliver` parses each
+`### Wave N — <parallel|sequential>` heading (the wave type; a heading with
+neither word is `sequential`) and the `#### Task N.M: <title>` blocks under it,
+taking the first `File:` line and the full (possibly multi-line) `What:` and
+`Validate:` fields. The spine attaches `{ type, tasks }` to the wave it hands
+the adapter, and `buildWavePrompt` renders one block per task from them. The
+synthetic end-of-run test wave builds its own tasks (one per missing test file).
+
+A plan wave with no parseable `#### Task N.M: <title>` block is refused before
+any wave runs: `rad deliver` prints one line per such wave —
+`rad deliver: wave N has no tasks in the plan — each wave needs '#### Task N.M: <title>' blocks with File:/What:/Validate: lines`
+— and exits `2`. (A missing plan doc still exits `1`.)
+
 The prompt instructs the agent to end its response with **exactly one**
 `WAVE_RESULT` block and nothing after it.
 
