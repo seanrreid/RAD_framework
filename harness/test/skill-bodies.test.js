@@ -14,6 +14,7 @@ const REPO_ROOT = fileURLToPath(new URL('../../', import.meta.url));
 // Skills whose generated Codex bodies must be tool-neutral. Later parts extend this list.
 const TOOL_NEUTRAL_SKILLS = [
   'rad-plan', 'rad-adopt', 'rad-approve', 'rad-deliver', 'rad-research', 'rad-epic-decompose',
+  'rad-design',
 ];
 
 // Claude-only syntax, Claude tool names, and raw state-changing commands that
@@ -42,17 +43,20 @@ const REQUIRED_COMMANDS = {
   'rad-deliver': [DELIVER_CALL],
   'rad-research': ['.agents/research/'],
   'rad-epic-decompose': ['scripts/fetch-epic.sh', 'node harness/cli.js label'],
+  'rad-design': ['node harness/cli.js architecture-approve', 'node harness/cli.js generate', '.rad/agents/'],
 };
 
 // Skills whose Codex openai.yaml must keep implicit invocation off.
-const EXPLICIT_ONLY_SKILLS = ['rad-approve', 'rad-deliver', 'rad-epic-decompose'];
+const EXPLICIT_ONLY_SKILLS = ['rad-approve', 'rad-deliver', 'rad-epic-decompose', 'rad-design'];
 
 // The exit-3 resume contract the rad-deliver body must spell out.
 const RESUME_FLAGS = '--resume --context';
 const STOP_AND_ASK = /STOP and ask the user/;
 
 // Claude command role directory per skill; skills not listed are team commands.
-const CLAUDE_COMMAND_ROLE = { 'rad-approve': 'architect', 'rad-epic-decompose': 'architect' };
+const CLAUDE_COMMAND_ROLE = {
+  'rad-approve': 'architect', 'rad-epic-decompose': 'architect', 'rad-design': 'architect',
+};
 const DEFAULT_COMMAND_ROLE = 'team';
 
 const codexBodyPath = (skill) => join('.agents', 'skills', skill, 'SKILL.md');

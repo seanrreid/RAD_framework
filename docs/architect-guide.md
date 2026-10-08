@@ -63,9 +63,10 @@ Reads the research artifact and writes an architecture draft to
 
 Review the draft inline. `/rad-design` presents the hierarchy and asks to
 **approve / edit / cancel** — one invocation, no separate re-run:
-- **approve** — flips `Status: draft → approved` and, in the same run, generates
-  all `.claude/agents/*.md` files in parallel and prints the `agent_scope_map:`
-  block to paste into `.rad/config.yml`.
+- **approve** — flips `Status: draft → approved` and, in the same run, writes
+  the `.rad/agents/*.md` sources, runs `rad generate` (`node harness/cli.js
+  generate`) to render `.claude/agents/` and `.codex/agents/` from them, and
+  prints the `agent_scope_map:` block to paste into `.rad/config.yml`.
 - **edit** — adjust role assignments, tighten scope boundaries, add constraints;
   the draft is revised and re-presented.
 - **cancel** — leave it as a draft and stop; re-run `/rad-design [slug]` later to
@@ -90,7 +91,7 @@ See `docs/configuration.md` for the full schema.
 ### 4. Commit and push
 
 ```bash
-git add .claude/agents/ .agents/research/ .agents/architecture/ .rad/config.yml
+git add .rad/agents/ .claude/agents/ .codex/agents/ .agents/research/ .agents/architecture/ .rad/config.yml
 git commit -m "chore: initialize RAD agent architecture"
 git push
 ```
@@ -133,16 +134,21 @@ needs adjustment but the research is still accurate:
 - Adding a new domain that doesn't fit existing agents
 - Onboarding a new role type with different access needs
 
-Re-running `/rad-design` on an approved architecture artifact regenerates the
-agent files. Review the diff carefully before committing — existing plans
+Re-running `/rad-design` on an approved architecture artifact rewrites the
+`.rad/agents` sources and runs `rad generate`. Review the diff carefully before committing — existing plans
 reference current agent scopes.
 
 ### Updating individual agents
 
 For smaller changes (adjusting scope, adding a tool, changing a description),
-edit `.claude/agents/[name].md` directly. Commit with:
+edit the source `.rad/agents/[name].md`, then run `rad generate`. Never edit
+`.claude/agents/` or `.codex/agents/` directly — they are generated, and
+`generate --check` flags hand edits. Commit the source and the generated files
+together:
 
 ```bash
+node harness/cli.js generate
+git add .rad/agents/ .claude/agents/ .codex/agents/
 git commit -m "chore(agents): [what changed and why]"
 ```
 

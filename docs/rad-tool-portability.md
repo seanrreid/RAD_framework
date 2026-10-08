@@ -48,7 +48,7 @@ Columns:
 | Tool | Claude path | Codex path | Source | Body | Deps | State | Status |
 |------|-------------|------------|--------|------|------|-------|--------|
 | rad-approve | `.claude/commands/architect/rad-approve.md` | `.agents/skills/rad-approve/SKILL.md` (+ `agents/openai.yaml`, `codex_implicit: false`) | `.rad/skills/rad-approve/SKILL.md` | as-is | `$ARGUMENTS` | yes | generated (#186 part 2d) |
-| rad-design | `.claude/commands/architect/rad-design.md` | `.agents/skills/rad-design/SKILL.md` | `.rad/skills/rad-design/SKILL.md` | wrapper | sub-agent, `$ARGUMENTS` | yes | planned: parity issue #186 |
+| rad-design | `.claude/commands/architect/rad-design.md` | `.agents/skills/rad-design/SKILL.md` (+ `agents/openai.yaml`, `codex_implicit: false`) | `.rad/skills/rad-design/SKILL.md` | as-is | rad CLI, `$ARGUMENTS` | yes | generated (#186 part 3f) |
 | rad-epic-decompose | `.claude/commands/architect/rad-epic-decompose.md` | `.agents/skills/rad-epic-decompose/SKILL.md` (+ `agents/openai.yaml`, `codex_implicit: false`) | `.rad/skills/rad-epic-decompose/SKILL.md` | as-is | rad CLI, `$ARGUMENTS`, `gh` | artifact | generated (#186 part 3e) |
 | rad-insights | `.claude/commands/shared/rad-insights.md` | `.agents/skills/rad-insights/SKILL.md` | `.rad/skills/rad-insights/SKILL.md` | wrapper | `$ARGUMENTS`, `$1/$2` | yes (`--draft-plans` only) | planned: parity issue #186 |
 | rad-status | `.claude/commands/shared/rad-status.md` | `.agents/skills/rad-status/SKILL.md` | `.rad/skills/rad-status/SKILL.md` | as-is | none | no | generated (#171 part 2) |
@@ -73,7 +73,7 @@ Columns:
 |------|-------------|------------|--------|------|------|-------|--------|
 | quality-reviewer | `.claude/agents/quality-reviewer.md` | `.codex/agents/quality-reviewer.toml` | `.rad/agents/quality-reviewer.md` | as-is | none (tools: Read, Bash) | no | generated (#171 part 2) |
 | accessibility-reviewer | `.claude/agents/accessibility-reviewer.md` | `.codex/agents/accessibility-reviewer.toml` | `.rad/agents/accessibility-reviewer.md` | as-is | none (tools: Read, Bash) | no | generated (#171 part 2) |
-| 27 orchestrator and mapper agents | `.claude/agents/*-orchestrator.md`, `*-mapper.md` | none | none | n/a | n/a | n/a | not shipped, not ported (RAD-repo-internal, produced by `/rad-design` for this repo's own features) |
+| 27 orchestrator and mapper agents | `.claude/agents/*-orchestrator.md`, `*-mapper.md` | none | none | n/a | n/a | n/a | not shipped, not ported (RAD-repo-internal, produced by `/rad-design` for this repo's own features); migration to `.rad/agents` sources planned in #186 part 3f-ii |
 
 ### Why the borderline rows landed where they did
 
@@ -130,8 +130,9 @@ Body, written once. {{args}} marks where the user's text goes.
 ### Agents: `.rad/agents/<name>.md`
 
 Claude agent frontmatter (`name`, `description`, `model`, `tools`, optional
-`roles`) plus an optional `codex:` mapping with `sandbox_mode`
-(`read-only` | `workspace-write`). The body may not contain `'''`, a
+`roles`, optional `purpose`) plus an optional `codex:` mapping with
+`codex.sandbox_mode` (`read-only` | `workspace-write`). `purpose` is
+type-checked by `rad generate`; `scripts/lint-agent-files.sh` owns its values. The body may not contain `'''`, a
 control character other than tab and LF, or any `{{...}}` token.
 
 ---
