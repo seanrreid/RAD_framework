@@ -1,7 +1,7 @@
 # Plan: Resume a Stopped Run in Worktree Mode (#210)
 Created: 2026-10-08
 Author: architect
-Status: approved
+Status: in-progress
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-10-08T15:22:57.752Z
 Recorded-By: sean@torchcodelab.com
