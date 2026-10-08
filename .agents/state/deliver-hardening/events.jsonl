@@ -10,3 +10,4 @@
 {"feature":"deliver-hardening","type":"wave-started","actor":"harness","ts":"2026-10-08T16:53:51.653Z","data":{"wave":3,"attempt":1}}
 {"feature":"deliver-hardening","type":"wave-attempt","actor":"harness","ts":"2026-10-08T16:56:05.140Z","data":{"wave":3,"attempt":1,"outcome":"success","tasks":[{"title":"stop-status reads the branch tip, and the docs","status":"done_with_concerns","commit":"835ce78","concern":"Existing test \"stop-status AC#9 — dormant needs-decision stop in the feature log\" now runs under RAD_WORKTREE=0 (setup only, assertions unchanged), since worktree mode is the default","error":"—"}]}}
 {"feature":"deliver-hardening","type":"wave-complete","actor":"harness","ts":"2026-10-08T16:56:05.140Z","data":{"wave":3}}
+{"feature":"deliver-hardening","type":"pr-opened","actor":"harness","ts":"2026-10-08T16:56:16.791Z"}
