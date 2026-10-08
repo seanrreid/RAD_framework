@@ -22,7 +22,7 @@ the protected default branch except that final reviewed merge.
 ## Core ideas
 
 **1. Artifacts, not memory.** Each phase writes a file you can read, review, and
-diff: research notes, an architecture map, a plan, an execution log, a findings
+diff: research notes, an architecture map, a plan, an event log, a findings
 log. The process is auditable because the trail is on disk, not in a chat history.
 
 **2. One branch per feature, cradle-to-grave.** `rad/[feature]` is cut from the
@@ -103,14 +103,19 @@ and pushes to the **branch** — never the default branch.
 > `Recorded-By` (whoever ran it) — the split is the integrity of the gate.
 
 ### Phase 4 — Deliver (team)
-`/rad-deliver .agents/plans/[feature].md`:
-- validates the `Branch:` header and that the plan is `approved` (reading the
-  branch tip — it will **not** run an unapproved plan),
-- works on the existing `rad/[feature]` branch (never cuts a new one),
-- executes each wave in a fresh sub-agent context, committing per task and writing
-  an execution log to `.agents/logs/`,
-- caps retries at 2 per task and escalates on the third failure,
+`/rad-deliver [feature]` (`$rad-deliver` in Codex) runs
+`node harness/cli.js deliver <feature>`, which:
+- refuses unless an `approved` event is in the plan's event log at the
+  `rad/[feature]` branch tip — it will **not** run an unapproved plan,
+- works on the existing `rad/[feature]` branch (never cuts a new one), merging the
+  default branch in first (never rebasing),
+- runs each wave as one call to the configured `agent:` (e.g. `claude -p` or
+  `codex exec`), in an isolated worktree by default,
+- leaves retries and stops to the harness (`harness/spine.js`,
+  `harness/matrix.yaml`) and records the run in the event log,
 - runs the scope and test gates, then opens the **one** deliver PR.
+
+See [`rad deliver`](rad-cli.md#rad-deliver) for the full lifecycle.
 
 ### Phase 5 — Self-review (team, before asking the architect)
 `/rad-review` runs on the branch before you request architect review:
@@ -134,7 +139,7 @@ merge is the only thing that writes to the protected branch.
 | Research notes | `.agents/research/` | `/rad-research` |
 | Architecture + scope map | `.agents/architecture/`, `CLAUDE.md`, `.claude/agents/` | `/rad-design` |
 | Plan (the contract) | `.agents/plans/[feature].md` (on its `rad/` branch) | `/rad-plan`, `/rad-adopt` |
-| Execution log | `.agents/logs/[feature]-[date].md` | `/rad-deliver` |
+| Event log (record of a run) | `.agents/state/[feature]/events.jsonl` | `/rad-approve`, `rad deliver` |
 | Review findings | `.agents/findings.jsonl` | `/rad-review` |
 
 While a feature is in flight, its plan and log live **only on the `rad/[feature]`
@@ -215,7 +220,7 @@ tests pass; execution-based verification is tracked as issue #89.
 /rad-approve fix-login-timeout --on-behalf-of "Sam Lee" --evidence "Slack #eng 2026-05-29: 'approved'"
 
 # 3. Execute the plan wave by wave; opens the single deliver PR
-/rad-deliver .agents/plans/fix-login-timeout.md
+/rad-deliver fix-login-timeout
 
 # 4. Self-review before asking the architect
 /rad-review
@@ -235,8 +240,9 @@ branch only changes when that final PR merges.
   a mandatory `## Issue Gaps` section recording any assumptions.
 - **The architect is a bottleneck?** Use `--on-behalf-of` to record a real
   out-of-band approval (never to self-approve).
-- **A task fails repeatedly?** `/rad-deliver` retries twice, then stops with a
-  structured escalation rather than pushing through.
+- **A task fails repeatedly?** The harness retries per its rules, then stops
+  rather than pushing through. Exit `3` means it needs your decision; exit `1`
+  means fix and re-run. See [`rad deliver`](rad-cli.md#rad-deliver).
 - **Adopting RAD on an existing repo?** See [apply-to-existing.md](apply-to-existing.md).
 - **Different git platform?** See [platform-support.md](platform-support.md) — the
   approval gate is platform-agnostic; only the deliver PR uses a platform CLI.
