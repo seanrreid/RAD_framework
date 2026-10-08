@@ -1,7 +1,10 @@
 # Plan: Resume Merges Around Partial Work; Execution Log Pushed and Matched Exactly (#216, #220)
 Created: 2026-10-08
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-10-08T18:13:56.090Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/resume-stash-and-log-publish
 Issue: 216
 Adopted-From: https://github.com/seanrreid/RAD_framework/issues/216
