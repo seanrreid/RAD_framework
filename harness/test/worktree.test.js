@@ -316,7 +316,7 @@ const noopFinish = { beforePr: async () => ({ ok: true, data: {} }), afterPr: as
  * Run deliverCommand with RAD_WORKTREE forced on ('1') / off ('0' — the only
  * opt-out; unset is ON), or left UNSET when `worktree` is undefined. Restores env after.
  */
-async function runDeliver({ worktree, repoRoot, sh, runWave, env = {}, prepare = noopPrepare, finish = noopFinish }) {
+async function runDeliver({ worktree, repoRoot, sh, runWave, env = {}, prepare = noopPrepare, finish = noopFinish, args = [] }) {
   const names = ['RAD_WORKTREE', 'RAD_AGENT', 'ANTHROPIC_API_KEY', 'RAD_BRANCH_PREFIX'];
   const saved = Object.fromEntries(names.map((n) => [n, process.env[n]]));
   if (worktree === undefined) delete process.env.RAD_WORKTREE;
@@ -327,7 +327,7 @@ async function runDeliver({ worktree, repoRoot, sh, runWave, env = {}, prepare =
   delete process.env.RAD_BRANCH_PREFIX;
   Object.assign(process.env, env);
   try {
-    return await deliverCommand([FEATURE], { repoRoot, sh, runWave, prepare, finish });
+    return await deliverCommand([FEATURE, ...args], { repoRoot, sh, runWave, prepare, finish });
   } finally {
     for (const n of names) {
       if (saved[n] !== undefined) process.env[n] = saved[n];
@@ -880,3 +880,126 @@ for (const [name, opts, reason] of [
     });
   });
 }
+
+// ---------------------------------------------------------------------------
+// REUSE ON RESUME — `--resume` reuses THIS feature's preserved worktree when
+// it is the one holder of the work branch; anything else is today's refusal
+// (#210 AC#3–AC#5). The holder is a real temp dir so readMarker/reactivate run.
+// ---------------------------------------------------------------------------
+
+const RESUME_ARGS = ['--resume', '--context', 'raise the cap'];
+const RESUMER = 'resumer@example.com';
+const HELD_REFUSAL = `rad/${FEATURE} is already checked out in another worktree`;
+/** A branch-tip log: approved, then a needs-decision stop (resume-eligible). */
+const STOPPED_TIP_JSONL = APPROVED_EVENTS_JSONL + JSON.stringify({
+  feature: FEATURE, type: 'deliver-stopped', actor: 'harness', ts: '2026-01-02T00:00:00.000Z',
+  data: { class: 'needs-decision', reason: 'failed-attempt-cap', decision: 'raise the cap', wave: 1 },
+}) + '\n';
+
+/** `git worktree list --porcelain` with the main checkout on main and `holders` on the work branch. */
+function porcelainHolding(repoRoot, holders) {
+  const blocks = [[`worktree ${repoRoot}`, 'HEAD abc', 'branch refs/heads/main']];
+  for (const dir of holders) blocks.push([`worktree ${dir}`, 'HEAD def', `branch refs/heads/rad/${FEATURE}`]);
+  return blocks.map((b) => b.join('\n')).join('\n\n') + '\n';
+}
+
+function writeMarker(dir, marker) {
+  writeFileSync(join(dir, '.rad-worktree.json'), `${JSON.stringify(marker, null, 2)}\n`);
+}
+
+function readMarkerFile(dir) {
+  return readFileSync(join(dir, '.rad-worktree.json'), 'utf8');
+}
+
+/** makeDeliverSh plus `git config user.email` (resume records recordedBy); keeps the recorders. */
+function makeResumeSh(opts) {
+  const base = makeDeliverSh({ branchEvents: STOPPED_TIP_JSONL, ...opts });
+  const sh = (file, args, o) => (file === 'git' && args[0] === 'config'
+    ? { status: 0, stdout: `${RESUMER}\n`, stderr: '' }
+    : base(file, args, o));
+  return Object.assign(sh, base);
+}
+
+test('deliver --resume: this feature\'s preserved worktree holding the branch is reused — no create', async () => {
+  await withTempDirs(async (repoRoot, worktreeDir) => {
+    writeApprovedPlan(worktreeDir, FEATURE);
+    writeMarker(worktreeDir, { feature: FEATURE, branch: `rad/${FEATURE}`, status: 'preserved' });
+    const sh = makeResumeSh({ worktreePath: '/must-not-be-created', worktreeList: porcelainHolding(repoRoot, [worktreeDir]) });
+
+    const { code, stderr } = await runCaptured({
+      worktree: undefined, repoRoot, sh, args: RESUME_ARGS, runWave: async () => ({ outcome: 'success' }),
+    });
+
+    assert.equal(code, 0, stderr);
+    assert.ok(!sh.lifecycle.some((c) => c.cmd === 'create'), 'a reused worktree is never re-created');
+    assert.ok(stderr.includes(`rad deliver: resuming in the preserved worktree ${worktreeDir}`), stderr);
+    assert.equal(JSON.parse(readMarkerFile(worktreeDir)).status, 'active', 'reactivate flipped the marker');
+    assert.ok(sh.spineCwds.length > 0 && sh.spineCwds.every((cwd) => cwd === worktreeDir), 'spine rooted at the reused dir');
+    assert.deepEqual(sh.lifecycle.find((c) => c.cmd === 'remove').args, ['remove', FEATURE, worktreeDir]);
+    assert.ok(existsSync(join(worktreeDir, EVENTS_LOG_REL)));
+    assert.ok(!existsSync(join(repoRoot, '.agents')), 'nothing written under repoRoot');
+  });
+});
+
+test('deliver --resume: a reused worktree that stops again is preserved at that dir', async () => {
+  await withTempDirs(async (repoRoot, worktreeDir) => {
+    writeApprovedPlan(worktreeDir, FEATURE);
+    writeMarker(worktreeDir, { feature: FEATURE, status: 'preserved' });
+    const sh = makeResumeSh({ worktreeList: porcelainHolding(repoRoot, [worktreeDir]) });
+
+    const { code } = await runCaptured({ worktree: undefined, repoRoot, sh, args: RESUME_ARGS, runWave: stoppedWave });
+
+    assert.equal(code, 1);
+    assert.deepEqual(sh.lifecycle.map((c) => c.args), [['preserve', FEATURE, worktreeDir]]);
+  });
+});
+
+for (const { name, marker, holders } of [
+  { name: 'an active marker', marker: { feature: FEATURE, status: 'active' }, holders: 1 },
+  { name: 'another feature\'s marker', marker: { feature: 'other-feature', status: 'preserved' }, holders: 1 },
+  { name: 'no marker', marker: null, holders: 1 },
+  { name: 'a malformed marker', marker: '{ not json', holders: 1 },
+  { name: 'two holders', marker: { feature: FEATURE, status: 'preserved' }, holders: 2 },
+]) {
+  test(`deliver --resume: ${name} → exit 2 with today's refusal, nothing created or reactivated`, async () => {
+    await withTempDirs(async (repoRoot, worktreeDir) => {
+      writeApprovedPlan(worktreeDir, FEATURE);
+      if (typeof marker === 'string') writeFileSync(join(worktreeDir, '.rad-worktree.json'), marker);
+      else if (marker) writeMarker(worktreeDir, marker);
+      const before = marker ? readMarkerFile(worktreeDir) : null;
+      const dirs = holders === 2 ? [worktreeDir, '/elsewhere/wt'] : [worktreeDir];
+      const sh = makeResumeSh({ worktreeList: porcelainHolding(repoRoot, dirs) });
+      let called = false;
+
+      const { code, stderr } = await runCaptured({
+        worktree: undefined, repoRoot, sh, args: RESUME_ARGS,
+        runWave: async () => { called = true; return { outcome: 'success' }; },
+      });
+
+      assert.equal(code, 2, stderr);
+      assert.ok(stderr.includes(HELD_REFUSAL), stderr);
+      assert.ok(stderr.includes(dirs.join(', ')), stderr);
+      assert.equal(sh.lifecycle.length, 0, 'no lifecycle call');
+      assert.equal(called, false);
+      if (marker) assert.equal(readMarkerFile(worktreeDir), before, 'marker untouched');
+    });
+  });
+}
+
+test('deliver: no --resume while this feature\'s preserved worktree holds the branch → exit 2 as today', async () => {
+  await withTempDirs(async (repoRoot, worktreeDir) => {
+    writeApprovedPlan(worktreeDir, FEATURE);
+    writeMarker(worktreeDir, { feature: FEATURE, status: 'preserved' });
+    const before = readMarkerFile(worktreeDir);
+    const sh = makeDeliverSh({ worktreeList: porcelainHolding(repoRoot, [worktreeDir]) });
+
+    const { code, stderr } = await runCaptured({
+      worktree: undefined, repoRoot, sh, runWave: async () => ({ outcome: 'success' }),
+    });
+
+    assert.equal(code, 2);
+    assert.ok(stderr.includes(HELD_REFUSAL), stderr);
+    assert.equal(sh.lifecycle.length, 0);
+    assert.equal(readMarkerFile(worktreeDir), before, 'never reactivated without --resume');
+  });
+});

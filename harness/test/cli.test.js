@@ -1150,6 +1150,31 @@ test('deliver --resume AC#4 — worktree mode: a failed stop on the branch tip i
   });
 });
 
+test('deliver --resume AC#4 — worktree mode: a needs-decision stop on the branch tip is eligible and reaches setup', async () => {
+  await withTempRepo(async (repoRoot) => {
+    seedApprovedTwoWavePlan(repoRoot);
+    const stopped = {
+      feature: DELIVER_FEATURE, type: 'deliver-stopped', actor: 'harness', ts: '2026-09-29T00:00:00.000Z',
+      data: { class: 'needs-decision', reason: 'failed-attempt-cap', decision: 'raise the cap', wave: 1 },
+    };
+    const tipLog = [approvedEvent(DELIVER_FEATURE), stopped].map((e) => JSON.stringify(e)).join('\n') + '\n';
+    const seen = [];
+    const { stderr } = await runDeliverCaptured({
+      repoRoot,
+      env: { RAD_WORKTREE: '1' },
+      args: ['--resume', '--context', 'go'],
+      sh: branchTipSh(tipLog, seen),
+      runWave: async () => ({ outcome: 'success' }),
+    });
+    assert.doesNotMatch(stderr, /nothing to resume|cannot resume|cannot read the event log/);
+    assert.ok(
+      seen.some((c) => c[0] === 'git' && c[1] === 'worktree' && c[2] === 'list'),
+      `setup inspected the worktrees holding the branch; stderr:\n${stderr}`,
+    );
+    assert.ok(seen.some((c) => String(c[0]).endsWith('worktree-lifecycle.sh') && c[1] === 'create'), 'nothing holds the branch → create as today');
+  });
+});
+
 // ---------------------------------------------------------------------------
 // rad stop-status (AC#9) — read-only dormant-stop report.
 // ---------------------------------------------------------------------------

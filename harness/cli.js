@@ -34,7 +34,7 @@ import { spawnSync, execFileSync } from 'node:child_process';
 import { createGitStateStore, defaultSh } from './adapters/git-state-store.js';
 import { evaluateGate } from './gates.js';
 import { planFingerprint } from './plan-fingerprint.js';
-import { makeWorktreeLifecycle } from './adapters/worktree.js';
+import { makeWorktreeLifecycle, STATUS_PRESERVED } from './adapters/worktree.js';
 import { deliverSpine } from './spine.js';
 import { createHookRunner } from './hook-runner.js';
 import { createCommandAdapter, probeCommand, runCommandPrompt } from './adapters/agent/command.js';
@@ -1164,16 +1164,59 @@ function ensureBranchFree({ workBranch, repoRoot, sh }) {
 }
 
 /**
+ * On --resume: the one worktree holding the work branch, when its marker says
+ * it is THIS feature's preserved worktree; otherwise null (the caller then
+ * refuses exactly as without --resume). Exact match only — fail closed: no
+ * holder, two holders, no marker, an active marker, another feature's marker,
+ * or a malformed marker are all "not reusable".
+ *
+ * @returns {string|null} the reusable worktree dir
+ */
+function findReusableWorktree({ feature, workBranch, repoRoot, sh, worktree }) {
+  const holders = worktreesOnBranch(mainGit(sh, repoRoot, ['worktree', 'list', '--porcelain']), workBranch);
+  if (holders.length !== 1) return null;
+  const [holder] = holders;
+  let marker;
+  try {
+    marker = worktree.readMarker(holder);
+  } catch (err) {
+    const safe = sanitizeErrorMessage(err?.message ?? String(err));
+    process.stderr.write(`rad deliver: cannot reuse the worktree at ${holder} — ${safe}\n`);
+    return null;
+  }
+  const reusable = marker !== null && marker.feature === feature && marker.status === STATUS_PRESERVED;
+  return reusable ? holder : null;
+}
+
+/**
+ * Reactivate a preserved worktree as this run's root. The returned lifecycle
+ * port pins preserve/complete to that dir, so teardown targets the reused
+ * worktree rather than the script's default location.
+ */
+function reuseWorktree({ dir, worktree, workBranch }) {
+  worktree.reactivate(dir);
+  process.stderr.write(`rad deliver: resuming in the preserved worktree ${dir}\n`);
+  const pinned = {
+    ...worktree,
+    preserve: (feature) => worktree.preserve(feature, dir),
+    complete: (feature) => worktree.complete(feature, dir),
+  };
+  return { root: dir, worktree: pinned, workBranch };
+}
+
+/**
  * Gate on the work-branch tip, then create the worktree on that branch. Under
  * Lane B the plan and its approval events exist ONLY on the work branch, so the
  * gate reads the branch tip (never the main checkout) and fails BEFORE any
  * worktree is created. `git worktree add` cannot check out a branch held
  * elsewhere, so ensureBranchFree resolves that first; a create failure is
- * exit 1 and never falls back to the main checkout.
+ * exit 1 and never falls back to the main checkout. On --resume, this
+ * feature's preserved worktree holding the branch is reused instead.
+ * A reuse failure (reactivate throws) is reported like a create failure.
  *
  * @returns {{ root: string, worktree: object, workBranch: string } | { code: number }}
  */
-function prepareWorktreeRoot({ feature, repoRoot, sh }) {
+function prepareWorktreeRoot({ feature, repoRoot, sh, resume = null }) {
   const workBranch = conventionWorkBranch(feature);
   const g = branchTipApprovedGate({ feature, branch: workBranch, repoRoot, sh });
   if (!g.passed) {
@@ -1187,6 +1230,10 @@ function prepareWorktreeRoot({ feature, repoRoot, sh }) {
     now: () => new Date().toISOString(),
   });
   try {
+    const reusable = resume
+      ? findReusableWorktree({ feature, workBranch, repoRoot, sh, worktree })
+      : null;
+    if (reusable) return reuseWorktree({ dir: reusable, worktree, workBranch });
     const blocked = ensureBranchFree({ workBranch, repoRoot, sh });
     if (blocked) return blocked;
     return { root: worktree.create(feature, workBranch), worktree, workBranch };
@@ -1292,10 +1339,10 @@ function finishWorktree({ worktree, completed, sh, root, feature }) {
  * worktree, so events are read and written on the work branch and the main
  * checkout is never modified. A failure after create preserves the worktree.
  */
-async function setupWorktreeRun({ ctx, feature, model, selection, repoRoot, sh }) {
+async function setupWorktreeRun({ ctx, feature, model, selection, repoRoot, sh, resume = null }) {
   const agent = resolveAgent(ctx, selection);
   if (agent.code !== undefined) return agent;
-  const prepared = prepareWorktreeRoot({ feature, repoRoot, sh });
+  const prepared = prepareWorktreeRoot({ feature, repoRoot, sh, resume });
   if (prepared.code !== undefined) return prepared;
   const { root, worktree, workBranch } = prepared;
   const planCtx = loadPlanCtx(root, feature);
@@ -1886,7 +1933,7 @@ export async function deliverCommand(argv, ctx) {
   // script itself, so we just let it flow through the environment.
   const setupOpts = { ctx, feature, model, selection, repoRoot, sh };
   const setup = worktreeEnabled()
-    ? await setupWorktreeRun(setupOpts)
+    ? await setupWorktreeRun({ ...setupOpts, resume })
     : await setupMainRun(setupOpts);
   if (setup.code !== undefined) return setup.code;
   const { root, planCtx, state, runWave, worktree } = setup;
