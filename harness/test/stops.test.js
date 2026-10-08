@@ -91,6 +91,18 @@ test('resume-verify → failed (a promised test file is missing)', () => {
   assert.match(r.decision, /^resume verify: /);
 });
 
+test('tests-missing → failed, decision lists the missing paths', () => {
+  assert.deepEqual(
+    classifyStop({ stopped: 'tests-missing', ok: false, detail: 'a.test.js, b.test.js', reason: 'a.test.js, b.test.js' }),
+    {
+      class: FAILED,
+      reason: 'tests-missing',
+      decision:
+        'test files still missing after the test wave: a.test.js, b.test.js; write them on the branch and re-run rad deliver',
+    },
+  );
+});
+
 test('token-budget → needs-decision', () => {
   assert.deepEqual(
     classifyStop({ stopped: 'token-budget', ok: false, wave: 2, spent: 1500, budget: 1000 }),
@@ -158,6 +170,7 @@ test('every spine terminal shape classifies to exactly one known class', () => {
     { stopped: 'matrix', ok: false, wave: 1, action: 'abort', outcome: 'fail-scope' },
     { stopped: 'budget', ok: false, wave: 1 },
     { stopped: 'post-check', ok: false, check: 'open-pr.sh', status: 2 },
+    { stopped: 'tests-missing', ok: false, detail: 'a.test.js', reason: 'a.test.js' },
   ];
   const classes = new Set(Object.values(STOP_CLASSES));
   for (const t of terminals) {

@@ -141,6 +141,31 @@ test('waves: numeric order, unknown status rendered as a word', () => {
   assert.match(waves, /^- \[blocked_code\] two — abc1234$/m);
 });
 
+test('waves: a wave-started kind tests marks that wave only; no kind or another kind renders unchanged', () => {
+  const testStarted = (wave) => ({ type: 'wave-started', data: { wave, attempt: 1, kind: 'tests' } });
+  const otherKind = { type: 'wave-started', data: { wave: 2, attempt: 2, kind: 'other' } };
+  const history = [
+    started(1), attempt(1, 'success', [task('impl')]),
+    started(2), otherKind, attempt(2, 'success', [task('more')]),
+    testStarted(3), attempt(3, 'success', [task('tests', 'complete', 'def5678')]),
+  ];
+  assert.equal(section(buildPrBody(input({ history })).body, '## Waves'), [
+    '## Waves', '', '### Wave 1', '- ✓ impl — abc1234', '',
+    '### Wave 2', '- ✓ more — abc1234', '',
+    '### Wave 3 (test wave)', '- ✓ tests — def5678',
+  ].join('\n'));
+});
+
+test('waves: a test wave with no passing attempt keeps the marker; kind on wave-attempt alone does not mark', () => {
+  const history = [
+    { type: 'wave-started', data: { wave: 1, attempt: 1, kind: 'tests' } },
+    { type: 'wave-attempt', data: { wave: 2, attempt: 1, outcome: 'success', kind: 'tests', tasks: [task('x')] } },
+  ];
+  const waves = section(buildPrBody(input({ history })).body, '## Waves');
+  assert.match(waves, /^### Wave 1 \(test wave\)\n- \(no passing attempt recorded\)$/m);
+  assert.match(waves, /^### Wave 2$/m);
+});
+
 test('waves: concern shown when set, hidden when the default dash', () => {
   const history = [attempt(1, 'success', [task('a', 'complete', 'c1'), task('b', 'done_with_concerns', 'c2', 'slow')])];
   const waves = section(buildPrBody(input({ history })).body, '## Waves');

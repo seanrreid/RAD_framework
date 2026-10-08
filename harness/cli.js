@@ -680,12 +680,27 @@ function parseTestsByWave(text) {
 }
 
 /**
+ * Resolved `## Tests to Write` paths that no wave's task promises (absent from
+ * every testsByWave list): the end-of-run test wave's candidates. Plan order,
+ * de-duplicated; unresolvable items are excluded (they name no file).
+ *
+ * @param {string} text - full plan doc text
+ * @param {Record<number, string[]>} testsByWave - parseTestsByWave(text)
+ * @returns {string[]}
+ */
+function parseUnpromisedTests(text, testsByWave) {
+  const promised = new Set(Object.values(testsByWave).flat());
+  const resolved = testsToWritePaths(text).filter((t) => 'path' in t).map((t) => t.path);
+  return [...new Set(resolved)].filter((p) => !promised.has(p));
+}
+
+/**
  * Parse a plan doc text to extract the planCtx fields needed by runWave.
  *
  * @param {string} text - full plan doc text
  * @returns {{ branch: string, acceptanceCriteria: string[], waveModels: Record<number, string>, waveVerify: Record<number, string>,
  *   planCapabilities: string[]|undefined, waveCapabilities: Record<number, string[]>, capabilityErrors: string[],
- *   waveNumbers: number[], testsByWave: Record<number, string[]>,
+ *   waveNumbers: number[], testsByWave: Record<number, string[]>, unpromisedTests: string[],
  *   executionNotes: { doNotTouch: string[], keyFiles: string[], reminders: string[] } }}
  */
 export function parsePlanCtx(text) {
@@ -724,12 +739,14 @@ export function parsePlanCtx(text) {
     .filter((l) => l.startsWith('- '))
     .map((l) => l.slice(2));
 
+  const testsByWave = parseTestsByWave(text);
   return {
     branch,
     acceptanceCriteria: acLines,
     waveModels: parseWaveModels(text),
     waveVerify: parseWaveVerify(text),
-    testsByWave: parseTestsByWave(text),
+    testsByWave,
+    unpromisedTests: parseUnpromisedTests(text, testsByWave),
     ...parseCapabilities(text),
     executionNotes: { doNotTouch, keyFiles, reminders },
   };
@@ -900,14 +917,14 @@ async function loadCapabilityDeny(root) {
  * @param {{ planCtx: object, root: string, planLabel: string }} opts - planLabel names the plan in messages
  * @returns {Promise<{ ok: true, byWave: object } | { ok: false, error: string, configInvalid?: true }>}
  */
-async function resolvePlanCapabilities({ planCtx, root, planLabel }) {
+async function resolvePlanCapabilities({ planCtx, root, planLabel, waves = planCtx.waveNumbers }) {
   if (planCtx.capabilityErrors.length > 0) {
     return { ok: false, error: `malformed Capabilities: line in ${planLabel}: ${planCtx.capabilityErrors.join('; ')}` };
   }
   const deny = await loadCapabilityDeny(root);
   if (!deny.ok) return { ok: false, error: deny.error, configInvalid: true };
   return resolveWaveCapabilities({
-    waves: planCtx.waveNumbers,
+    waves,
     planCapabilities: planCtx.planCapabilities,
     waveCapabilities: planCtx.waveCapabilities,
     deny: deny.deny,
@@ -927,6 +944,20 @@ function sdkCapabilityRefusal(waveEffective) {
 }
 
 /**
+ * The plan's wave numbers plus the end-of-run test wave's (max + 1) when the
+ * plan lists unpromised Tests-to-Write files. The test wave has no Capabilities:
+ * line of its own, so it resolves from the plan-level line and deny list; left
+ * out, an adapter would treat it as unconstrained and WIDEN a constrained plan.
+ *
+ * @param {{ waveNumbers: number[], unpromisedTests?: string[] }} planCtx
+ * @returns {number[]}
+ */
+function wavesWithTestWave(planCtx) {
+  if (!planCtx.unpromisedTests?.length) return planCtx.waveNumbers;
+  return [...planCtx.waveNumbers, Math.max(0, ...planCtx.waveNumbers) + 1];
+}
+
+/**
  * Resolve every wave's effective capabilities (#85) and check the selected
  * adapter can honour them. On success sets planCtx.waveEffective (wave number
  * -> effective classes, constrained waves only) and returns null; otherwise
@@ -936,7 +967,7 @@ function sdkCapabilityRefusal(waveEffective) {
  */
 async function capabilityRefusal({ planCtx, root, agent }) {
   const resolved = await resolvePlanCapabilities({
-    planCtx, root, planLabel: `.agents/plans/${planCtx.feature}.md`,
+    planCtx, root, planLabel: `.agents/plans/${planCtx.feature}.md`, waves: wavesWithTestWave(planCtx),
   });
   if (!resolved.ok) return resolved.error;
   const waveEffective = {};
@@ -1332,6 +1363,20 @@ function maxFailedAttemptsFromEnv() {
 function latestApprovedEvent(history) {
   const approvals = (Array.isArray(history) ? history : []).filter((e) => e && e.type === 'approved');
   return approvals.length > 0 ? approvals[approvals.length - 1] : null;
+}
+
+/**
+ * The spine's `testWave` port for the end-of-run test wave: the unpromised
+ * Tests-to-Write paths and a `missing` check against the run root. No
+ * unpromised paths → null, so the spine runs exactly as before.
+ *
+ * @param {string[]} unpromisedTests - planCtx.unpromisedTests
+ * @param {string} root - the run root (repoRoot, or the worktree when isolated)
+ * @returns {{ paths: string[], missing: (paths: string[]) => string[] } | null}
+ */
+function endOfRunTestWave(unpromisedTests, root) {
+  if (unpromisedTests.length === 0) return null;
+  return { paths: unpromisedTests, missing: (paths) => paths.filter((p) => !existsSync(join(root, p))) };
 }
 
 /**
@@ -1866,6 +1911,11 @@ export async function deliverCommand(argv, ctx) {
       // Per-wave promised test files (parseTestsByWave): the presence gate after
       // wave k checks only waves <= k's promises; {} skips the gate entirely.
       testsByWave: planCtx.testsByWave,
+      // Unpromised Tests-to-Write files: when any is missing after the plan
+      // waves, the spine runs one synthetic test wave N+1 (default model and
+      // plan-level capabilities — it has no per-wave entry) and then stops
+      // tests-missing on any file still absent. None → null: today's run.
+      testWave: endOfRunTestWave(planCtx.unpromisedTests, root),
       // Per-wave `Model:` ids (parseWaveModels — the sole Model: parser), recorded
       // on each wave-started. Empty for a plan that declares none.
       waveModels: planCtx.waveModels,
