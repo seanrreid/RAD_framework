@@ -229,6 +229,7 @@ credentials or the OS keychain, not an env-injected token (an exported
 ```
 RAD_AGENT_PREFLIGHT: off   # exactly `off` skips the startup probe; unset/anything else runs it
 RAD_AGENT_PREFLIGHT_TIMEOUT_SECONDS: <positive integer>   # probe deadline (default 60)
+RAD_WAVE_TIMEOUT_SECONDS: <positive integer>   # per-wave deadline (default 600)
 ```
 
 Before Wave 1, `rad deliver` runs a **startup preflight** on the command path: it
@@ -244,7 +245,13 @@ and `session/new`, no prompt and no model cost), and a failure exits 1 with
 `RAD_AGENT_PREFLIGHT_TIMEOUT_SECONDS` sets the probe deadline (default **60**); a
 malformed value (non-numeric, zero, negative) is a hard error — **exit 2**, never
 a silent fall back. It is not validated when `RAD_AGENT_PREFLIGHT=off`, since no
-probe runs. If your
+probe runs.
+`RAD_WAVE_TIMEOUT_SECONDS` sets each wave's wall-clock deadline on the command
+and acp paths (default **600**); a wave that runs past it ends as
+`fail-timeout`. The SDK path ignores it. Unset or empty keeps the default; a
+malformed value (non-integer, zero, negative, whitespace) makes `rad deliver`
+**exit 2** before any wave or event, with `rad deliver: RAD_WAVE_TIMEOUT_SECONDS
+must be a positive integer (got '<raw>')`. If your
 agent genuinely needs an env-injected credential, configure a **wrapper script**
 as `RAD_AGENT_CMD` that loads the secret itself and execs the agent — keeping
 re-injection an explicit operator act (the allow-list is deliberately not

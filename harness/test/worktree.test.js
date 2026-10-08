@@ -682,6 +682,85 @@ test('deliver: stop-events commit fails → reason printed, still preserved, exi
   });
 });
 
+// ---------------------------------------------------------------------------
+// EXECUTION LOG (#218) — the run's `.agents/logs/<feature>-*.md` files are
+// committed with its events, named explicitly (no globs, no -A).
+// ---------------------------------------------------------------------------
+
+const EXEC_LOG_PATH = `.agents/logs/${FEATURE}-2026-10-08.md`;
+
+/** Write the agent's execution log plus decoys that must never be staged. */
+function writeExecutionLogs(root) {
+  const logsDir = join(root, '.agents', 'logs');
+  mkdirSync(logsDir, { recursive: true });
+  writeFileSync(join(root, EXEC_LOG_PATH), '| 1 | Wave 1 | Task A | ✓ complete |\n', 'utf8');
+  writeFileSync(join(logsDir, 'other-feature-2026-10-08.md'), 'not ours\n', 'utf8');
+  writeFileSync(join(logsDir, `${FEATURE}-2026-10-08.txt`), 'not markdown\n', 'utf8');
+}
+
+test('deliver: #218 success with an execution log → log added with the run events, committed, then remove', async () => {
+  await withTempDirs(async (repoRoot, worktreeDir) => {
+    writeApprovedPlan(worktreeDir, FEATURE);
+    writeExecutionLogs(worktreeDir);
+    const sh = makeDeliverSh({ worktreePath: worktreeDir });
+
+    const code = await runDeliver({ worktree: undefined, repoRoot, sh, runWave: async () => ({ outcome: 'success' }) });
+
+    assert.equal(code, 0);
+    assert.deepEqual(sh.order.slice(-4), ['git add', 'git diff', 'git commit', 'lifecycle remove']);
+    assert.deepEqual(sh.runEventCalls.map((c) => c.args), [
+      ['add', '--', `.agents/state/${FEATURE}/`, EXEC_LOG_PATH],
+      ['diff', '--cached', '--quiet'],
+      ['commit', '-m', RUN_EVENTS_SUBJECT],
+    ]);
+  });
+});
+
+test('deliver: #218 stop with an execution log → events + log added, diffed and committed by pathspec', async () => {
+  await withTempDirs(async (repoRoot, worktreeDir) => {
+    writeApprovedPlan(worktreeDir, FEATURE);
+    writeExecutionLogs(worktreeDir);
+    const sh = makeDeliverSh({ worktreePath: worktreeDir });
+
+    const code = await runDeliver({ worktree: undefined, repoRoot, sh, runWave: stoppedWave });
+
+    assert.equal(code, 1, 'the stop keeps its exit code');
+    assert.deepEqual(sh.order.slice(-4), ['git add', 'git diff', 'git commit', 'lifecycle preserve']);
+    assert.deepEqual(sh.runEventCalls.map((c) => c.args), [
+      ['add', '--', STOP_EVENTS_PATH, EXEC_LOG_PATH],
+      ['diff', '--cached', '--quiet', '--', STOP_EVENTS_PATH, EXEC_LOG_PATH],
+      ['commit', '-m', STOP_SUBJECT, '--', STOP_EVENTS_PATH, EXEC_LOG_PATH],
+    ]);
+  });
+});
+
+for (const { name, runWave, code, calls } of [
+  {
+    name: 'success', runWave: async () => ({ outcome: 'success' }), code: 0,
+    calls: [['add', '--', `.agents/state/${FEATURE}/`], ['diff', '--cached', '--quiet'], ['commit', '-m', RUN_EVENTS_SUBJECT]],
+  },
+  {
+    name: 'stop', runWave: stoppedWave, code: 1,
+    calls: [
+      ['add', '--', STOP_EVENTS_PATH],
+      ['diff', '--cached', '--quiet', '--', STOP_EVENTS_PATH],
+      ['commit', '-m', STOP_SUBJECT, '--', STOP_EVENTS_PATH],
+    ],
+  },
+]) {
+  test(`deliver: #218 ${name} with a logs directory but no log for this feature → git calls unchanged`, async () => {
+    await withTempDirs(async (repoRoot, worktreeDir) => {
+      writeApprovedPlan(worktreeDir, FEATURE);
+      writeExecutionLogs(worktreeDir);
+      rmSync(join(worktreeDir, EXEC_LOG_PATH));
+      const sh = makeDeliverSh({ worktreePath: worktreeDir });
+
+      assert.equal(await runDeliver({ worktree: undefined, repoRoot, sh, runWave }), code);
+      assert.deepEqual(sh.runEventCalls.map((c) => c.args), calls);
+    });
+  });
+}
+
 test('deliver: main checkout on the work branch + clean → checkout <default>, then create', async () => {
   await withTempDirs(async (repoRoot, worktreeDir) => {
     writeApprovedPlan(worktreeDir, FEATURE);
