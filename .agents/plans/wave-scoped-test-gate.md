@@ -1,7 +1,7 @@
 # Plan: Wave-Scoped Test Presence Gate (#186 part 3c-i)
 Created: 2026-10-08
 Author: architect
-Status: approved
+Status: in-progress
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-10-08T13:01:39.097Z
 Recorded-By: sean@torchcodelab.com
