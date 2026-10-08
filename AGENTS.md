@@ -116,7 +116,7 @@ architect review (self-protected paths; not configurable).
 ```
 Architect:  /rad-epic-decompose → Gate 0: shapes a GitHub epic into per-child stories, writes .agents/epics/ (no plans, no commit)
 Anyone:     /rad-research → consumes PRD/issue, writes .agents/research/
-Architect:  /rad-design   → drafts + generates .claude/agents/ boundaries
+Architect:  /rad-design   → drafts agent sources (.rad/agents shipped, .rad/agents-internal repo-internal); rad generate writes .claude/agents + .codex/agents
 Team:       /rad-plan     → cuts rad/[feature] branch, commits plan (no PR)
 Team:       /rad-plan --light → same, condensed single-wave plan for small low-risk changes (Tier: light)
 Team:       /rad-adopt    → same as /rad-plan but sourced from a pre-existing issue

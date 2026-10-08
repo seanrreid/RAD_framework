@@ -10,7 +10,7 @@ It sits *before* the rest of the loop:
 ```
 Architect:  /rad-epic-decompose → Gate 0: shapes a GitHub epic into per-child stories
 Anyone:     /rad-research        → consumes a PRD/issue, writes .agents/research/
-Architect:  /rad-design          → drafts + generates .claude/agents/ boundaries
+Architect:  /rad-design          → drafts agent sources (.rad/agents shipped, .rad/agents-internal repo-internal); rad generate writes .claude/agents + .codex/agents
 Team:       /rad-plan            → cuts rad/[feature] branch, commits plan
 Architect:  /rad-approve         → Gate 1: records approval on the branch tip
 Team:       /rad-deliver         → wave execution, opens the deliver PR (Gate 2)

@@ -131,7 +131,9 @@ the boundary.
 **Architect-only misclassification**: an agent marked `architect` that a
 developer actually needs for routine work. Demote it to `developer`.
 
-Fix issues in the `.claude/agents/*.md` files directly. This week of solo
+Fix issues in the agent sources — `.rad/agents/*.md` (shipped) or
+`.rad/agents-internal/*.md` (repo-internal, never shipped) — then run
+`rad generate`, which writes `.claude/agents/` and `.codex/agents/`. This week of solo
 validation is the highest-leverage time investment in the whole migration.
 
 ### Step 5: Write an accurate AGENTS.md

@@ -73,7 +73,7 @@ Columns:
 |------|-------------|------------|--------|------|------|-------|--------|
 | quality-reviewer | `.claude/agents/quality-reviewer.md` | `.codex/agents/quality-reviewer.toml` | `.rad/agents/quality-reviewer.md` | as-is | none (tools: Read, Bash) | no | generated (#171 part 2) |
 | accessibility-reviewer | `.claude/agents/accessibility-reviewer.md` | `.codex/agents/accessibility-reviewer.toml` | `.rad/agents/accessibility-reviewer.md` | as-is | none (tools: Read, Bash) | no | generated (#171 part 2) |
-| 27 orchestrator and mapper agents | `.claude/agents/*-orchestrator.md`, `*-mapper.md` | none | none | n/a | n/a | n/a | not shipped, not ported (RAD-repo-internal, produced by `/rad-design` for this repo's own features); migration to `.rad/agents` sources planned in #186 part 3f-ii |
+| 27 orchestrator and mapper agents | `.claude/agents/*-orchestrator.md`, `*-mapper.md` | `.codex/agents/*-orchestrator.toml`, `*-mapper.toml` | `.rad/agents-internal/<name>.md` | as-is | none (tools: Task, or Read, Grep, Glob) | no | generated (#186 part 3f-ii), internal: .rad/agents-internal, not shipped |
 
 ### Why the borderline rows landed where they did
 
@@ -127,7 +127,13 @@ Body, written once. {{args}} marks where the user's text goes.
   for one target. Any other file in the directory is an error.
 - Unknown frontmatter keys and unknown target values are errors.
 
-### Agents: `.rad/agents/<name>.md`
+### Agents: `.rad/agents/<name>.md` and `.rad/agents-internal/<name>.md`
+
+`.rad/agents/` holds shipped agents; `.rad/agents-internal/` holds this repo's
+own agents (produced by `/rad-design` for RAD's features). Both use the same
+format and are read by `rad generate`; a name may appear in only one. Generated
+files from internal sources are marked with their `.rad/agents-internal/`
+source, so `harness/install-manifest.js` never ships them.
 
 Claude agent frontmatter (`name`, `description`, `model`, `tools`, optional
 `roles`, optional `purpose`) plus an optional `codex:` mapping with
@@ -145,7 +151,7 @@ control character other than tab and LF, or any `{{...}}` token.
 | skill, `claude: skill` | Claude | `.claude/skills/<name>/SKILL.md` |
 | skill, `codex: skill` | Codex | `.agents/skills/<name>/SKILL.md` (frontmatter `name`, `description`) |
 | skill, `codex_implicit: false` | Codex | `.agents/skills/<name>/agents/openai.yaml` with `policy.allow_implicit_invocation: false` |
-| agent | Claude | `.claude/agents/<name>.md`: frontmatter minus `codex:`, plus the body |
+| agent (`.rad/agents` or `.rad/agents-internal`) | Claude | `.claude/agents/<name>.md`: frontmatter minus `codex:`, plus the body |
 | agent | Codex | `.codex/agents/<name>.toml`: `name`, `description`, `developer_instructions` as a `'''...'''` literal, `sandbox_mode` when given. `model` is never written: Claude model ids mean nothing to Codex, and the parent session's model is inherited |
 
 Every output carries a marker naming its source: an HTML comment right

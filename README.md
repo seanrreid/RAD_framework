@@ -35,7 +35,9 @@ ARCHITECT / TEAM                   TEAM
   Draft agent hierarchy            /rad-adopt [issue or description]
   Write .agents/architecture/        Same as /rad-plan, sourced from
   [architect reviews + approves]     a pre-existing issue or description
-  Generate .claude/agents/ files
+  Write .rad/agents/ sources
+  rad generate → .claude/agents/,
+    .codex/agents/
 
                     ── Gate 1 ──
                     /rad-approve (architect)
