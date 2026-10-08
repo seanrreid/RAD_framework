@@ -8,7 +8,10 @@
  * Edge cases named: already up to date (second run), main ahead, remote work
  * branch ahead, local/remote diverged, conflicting change on main, no origin
  * remote, wrong branch, staged change, Status written once then idempotent,
- * plan without Issue:, work branch not yet on origin.
+ * plan without Issue:, work branch not yet on origin; partial tracked work
+ * merged around non-conflictingly, partial work conflicting with main, merge
+ * conflict with partial work stashed, untracked-only partial file, no partial
+ * work (no stash call).
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -125,6 +128,9 @@ const head = (root, ref = 'HEAD') => git(root, ['rev-parse', ref]).stdout;
 const remoteHead = (origin, branch = BRANCH) => git(origin, ['rev-parse', `refs/heads/${branch}`]).stdout;
 const readPlan = (root) => readFileSync(join(root, PLAN_REL), 'utf8');
 const isAncestor = (cwd, a, b) => git(cwd, ['merge-base', '--is-ancestor', a, b]).status === 0;
+const stashCalls = (calls) => calls.filter((c) => c.file === 'git' && c.args[0] === 'stash');
+const stashList = (root) => git(root, ['stash', 'list', '--format=%gs']).stdout;
+const STASH_SUBJECT = /rad deliver: partial work before merging origin\/main$/;
 
 function assertStopped(result, stopped, detail) {
   assert.equal(result.ok, false, JSON.stringify(result));
@@ -162,13 +168,80 @@ test('already up to date: a second run makes no commit, merge or push, labels on
 test('main ahead: merges origin/main and pushes the merge (AC#4)', async () => {
   await withRepo(async ({ root, origin, upstream }) => {
     upstream(BASE, 'main.txt', 'from main\n');
-    const { result } = await prepare(root);
+    const { result, calls } = await prepare(root);
     assert.equal(result.ok, true, JSON.stringify(result));
     assert.equal(result.data.merged, true);
+    assert.equal('stashed' in result.data, false);
+    assert.deepEqual(stashCalls(calls), []);
     assert.equal(result.data.pushed, true);
     assert.equal(readFileSync(join(root, 'main.txt'), 'utf8'), 'from main\n');
     assert.equal(remoteHead(origin), head(root));
     assert.ok(isAncestor(origin, `refs/heads/${BASE}`, `refs/heads/${BRANCH}`));
+  });
+});
+
+test('partial tracked work, main touching the same file cleanly: merges, restores, stashed: true', async () => {
+  await withRepo(async ({ root, origin, upstream }) => {
+    upstream(BASE, 'multi.txt', 'a\nb\nc\nd\ne\n');
+    git(root, ['fetch', '-q', 'origin', BASE]);
+    git(root, ['merge', '-q', '--no-edit', `origin/${BASE}`]);
+    upstream(BASE, 'multi.txt', 'A\nb\nc\nd\ne\n');
+    writeFileSync(join(root, 'multi.txt'), 'a\nb\nc\nd\nE\n');
+    const { result, calls } = await prepare(root);
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(result.data.merged, true);
+    assert.equal(result.data.stashed, true);
+    assert.equal(readFileSync(join(root, 'multi.txt'), 'utf8'), 'A\nb\nc\nd\nE\n');
+    assert.equal(stashList(root), '');
+    const push = stashCalls(calls).find((c) => c.args[1] === 'push');
+    assert.deepEqual(push.args, ['stash', 'push', '-q', '-m', 'rad deliver: partial work before merging origin/main']);
+    assert.equal(remoteHead(origin), head(root));
+  });
+});
+
+test('partial work conflicting with main: merge-conflict, stash kept, tree clean, HEAD is the merge', async () => {
+  await withRepo(async ({ root, upstream }) => {
+    upstream(BASE, 'seed.txt', 'main side\n');
+    writeFileSync(join(root, 'seed.txt'), 'partial\n');
+    const { result } = await prepare(root);
+    assertStopped(result, 'merge-conflict',
+      /^partial work conflicts with origin\/main in seed\.txt; it is kept in git stash \(stash@\{0\}\)$/);
+    assert.match(stashList(root), STASH_SUBJECT);
+    assert.match(git(root, ['stash', 'show', '-p']).stdout, /\+partial/);
+    assert.equal(git(root, ['status', '--porcelain']).stdout, '');
+    assert.ok(isAncestor(root, `origin/${BASE}`, 'HEAD'));
+    assert.equal(git(root, ['rev-parse', '-q', '--verify', 'HEAD^2']).status, 0);
+    assert.equal(readFileSync(join(root, 'seed.txt'), 'utf8'), 'main side\n');
+  });
+});
+
+test('merge conflict with partial work stashed: aborted, partial work restored, merge-conflict', async () => {
+  await withRepo(async ({ root, upstream }) => {
+    writeFileSync(join(root, 'seed.txt'), 'branch side\n');
+    git(root, ['commit', '-q', '-am', 'branch edit']);
+    upstream(BASE, 'seed.txt', 'main side\n');
+    const partial = `${readPlan(root)}partial line\n`;
+    writeFileSync(join(root, PLAN_REL), partial);
+    const before = head(root);
+    const { result } = await prepare(root);
+    assertStopped(result, 'merge-conflict', /^seed\.txt$/);
+    assert.equal(head(root), before);
+    assert.equal(stashList(root), '');
+    assert.equal(readPlan(root), partial);
+    assert.equal(git(root, ['status', '--porcelain']).stdout, `M ${PLAN_REL}`);
+  });
+});
+
+test('untracked-only partial file: no stash, merges as before', async () => {
+  await withRepo(async ({ root, upstream }) => {
+    upstream(BASE, 'main.txt', 'from main\n');
+    writeFileSync(join(root, 'scratch.txt'), 'untracked\n');
+    const { result, calls } = await prepare(root);
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(result.data.merged, true);
+    assert.equal('stashed' in result.data, false);
+    assert.deepEqual(stashCalls(calls), []);
+    assert.equal(readFileSync(join(root, 'scratch.txt'), 'utf8'), 'untracked\n');
   });
 });
 
