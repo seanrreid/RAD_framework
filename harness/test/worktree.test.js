@@ -86,6 +86,76 @@ test('adapter: AC#5 — a non-zero status on remove (marker missing) is surfaced
   );
 });
 
+test('adapter: preserve(feature, dir) and complete(feature, dir) pass the explicit dir', () => {
+  const sh = makeFakeSh();
+  const lifecycle = makeWorktreeLifecycle({ sh, now: () => 't0' });
+
+  lifecycle.preserve('demo', '/tmp/kept/demo');
+  lifecycle.complete('demo', '/tmp/kept/demo');
+
+  assert.deepEqual(sh.calls.map((c) => c.args), [
+    ['preserve', 'demo', '/tmp/kept/demo'],
+    ['remove', 'demo', '/tmp/kept/demo'],
+  ]);
+});
+
+/** A temp worktree dir holding `markerText` as its .rad-worktree.json (none when null). */
+function makeMarkerDir(markerText) {
+  const dir = mkdtempSync(join(tmpdir(), 'rad-marker-'));
+  if (markerText !== null) writeFileSync(join(dir, '.rad-worktree.json'), markerText);
+  return dir;
+}
+
+const markerJson = (status) =>
+  JSON.stringify({ feature: 'demo', branch: 'rad/demo', createdAt: 't0', status }, null, 2);
+
+test('adapter: reactivate(dir) rewrites a preserved marker to active and returns dir', () => {
+  const dir = makeMarkerDir(markerJson('preserved'));
+  const sh = makeFakeSh();
+  try {
+    const got = makeWorktreeLifecycle({ sh, now: () => 't0' }).reactivate(dir);
+
+    assert.equal(got, dir);
+    const marker = JSON.parse(readFileSync(join(dir, '.rad-worktree.json'), 'utf8'));
+    assert.deepEqual(marker, { feature: 'demo', branch: 'rad/demo', createdAt: 't0', status: 'active' });
+    assert.equal(sh.calls.length, 0, 'reactivate is file I/O, not a script call');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+for (const [name, markerText, pattern] of [
+  ['missing', null, /no \.rad-worktree\.json/],
+  ['malformed', '{ not json', /malformed \.rad-worktree\.json/],
+  ['not preserved', markerJson('active'), /status is 'active', not 'preserved'/],
+]) {
+  test(`adapter: reactivate(dir) throws on a ${name} marker and leaves it untouched`, () => {
+    const dir = makeMarkerDir(markerText);
+    try {
+      const lifecycle = makeWorktreeLifecycle({ sh: makeFakeSh(), now: () => 't0' });
+      assert.throws(() => lifecycle.reactivate(dir), pattern);
+      const path = join(dir, '.rad-worktree.json');
+      assert.equal(existsSync(path) ? readFileSync(path, 'utf8') : null, markerText);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+}
+
+test('adapter: readMarker(dir) returns the parsed marker, or null when there is none', () => {
+  const withMarker = makeMarkerDir(markerJson('preserved'));
+  const without = makeMarkerDir(null);
+  try {
+    const lifecycle = makeWorktreeLifecycle({ sh: makeFakeSh(), now: () => 't0' });
+    assert.equal(lifecycle.readMarker(withMarker).status, 'preserved');
+    assert.equal(lifecycle.readMarker(withMarker).feature, 'demo');
+    assert.equal(lifecycle.readMarker(without), null);
+  } finally {
+    rmSync(withMarker, { recursive: true, force: true });
+    rmSync(without, { recursive: true, force: true });
+  }
+});
+
 // ---------------------------------------------------------------------------
 // DELIVER PATH — harness/cli.js deliverCommand exercised with injected fakes
 //
