@@ -20,3 +20,4 @@
 {"feature":"migrate-agents","type":"wave-started","actor":"harness","ts":"2026-10-08T19:18:23.929Z","data":{"wave":4,"attempt":1}}
 {"feature":"migrate-agents","type":"wave-attempt","actor":"harness","ts":"2026-10-08T19:19:23.178Z","data":{"wave":4,"attempt":1,"outcome":"success","tasks":[{"title":"Docs: where agents live","status":"complete","commit":"2625b22","concern":"—","error":"—"}]}}
 {"feature":"migrate-agents","type":"wave-complete","actor":"harness","ts":"2026-10-08T19:19:23.181Z","data":{"wave":4}}
+{"feature":"migrate-agents","type":"pr-opened","actor":"harness","ts":"2026-10-08T19:19:35.746Z"}
