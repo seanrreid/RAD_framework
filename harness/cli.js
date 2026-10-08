@@ -245,6 +245,13 @@ const AGENT_KINDS = ['command', 'sdk', 'acp'];
  * in scripts/check-verify.sh: a typo must never silently restore the default.
  */
 const PREFLIGHT_TIMEOUT_ENV = 'RAD_AGENT_PREFLIGHT_TIMEOUT_SECONDS';
+/**
+ * Env var overriding the per-wave wall-clock deadline of the command and acp
+ * adapters, in whole seconds (#211). Same parsing rules as
+ * PREFLIGHT_TIMEOUT_ENV; unset or empty keeps the adapter default (600 s).
+ * The SDK adapter ignores it.
+ */
+const WAVE_TIMEOUT_ENV = 'RAD_WAVE_TIMEOUT_SECONDS';
 const POSITIVE_INTEGER_PATTERN = /^[1-9][0-9]*$/;
 /** Exit code for a malformed deliver configuration value. */
 const USAGE_EXIT_CODE = 2;
@@ -757,16 +764,23 @@ export function parsePlanCtx(text) {
 }
 
 /**
- * Parse RAD_AGENT_PREFLIGHT_TIMEOUT_SECONDS. Unset/empty → `timeoutMs`
- * undefined (probeCommand's default applies); malformed → `{ ok: false }`.
+ * Parse a whole-seconds timeout env var (PREFLIGHT_TIMEOUT_ENV or
+ * WAVE_TIMEOUT_ENV). Unset/empty → `timeoutMs` undefined (the adapter's
+ * default applies); malformed → `{ ok: false }`.
  *
+ * @param {string} envName
  * @returns {{ ok: true, timeoutMs?: number } | { ok: false, raw: string }}
  */
-function preflightTimeoutFromEnv() {
-  const raw = process.env[PREFLIGHT_TIMEOUT_ENV];
+function timeoutFromEnv(envName) {
+  const raw = process.env[envName];
   if (raw === undefined || raw === '') return { ok: true };
   if (!POSITIVE_INTEGER_PATTERN.test(raw)) return { ok: false, raw };
   return { ok: true, timeoutMs: Number(raw) * 1000 };
+}
+
+/** Write the exit-2 usage message for a malformed timeout env var. */
+function reportMalformedTimeout(envName, raw) {
+  process.stderr.write(`rad deliver: ${envName} must be a positive integer (got '${raw}')\n`);
 }
 
 /**
@@ -797,11 +811,9 @@ const PREFLIGHT_PROBES = {
  */
 async function preflightExitCode(cmd, repoRoot, kind = 'command') {
   if (process.env.RAD_AGENT_PREFLIGHT === PREFLIGHT_OFF) return null;
-  const timeout = preflightTimeoutFromEnv();
+  const timeout = timeoutFromEnv(PREFLIGHT_TIMEOUT_ENV);
   if (!timeout.ok) {
-    process.stderr.write(
-      `rad deliver: ${PREFLIGHT_TIMEOUT_ENV} must be a positive integer (got '${timeout.raw}')\n`,
-    );
+    reportMalformedTimeout(PREFLIGHT_TIMEOUT_ENV, timeout.raw);
     return USAGE_EXIT_CODE;
   }
   const { probe, failure } = PREFLIGHT_PROBES[kind];
@@ -1032,15 +1044,20 @@ async function checkCapabilities(opts) {
  * `model` and warns once per run itself (ACP v1 has no stable model selector).
  * createAcpAdapter rejects a `{prompt}` placeholder at construction; that is
  * an operator config error, reported as exit 1 before any event is appended.
+ * A malformed RAD_WAVE_TIMEOUT_SECONDS is exit 2, also before any event.
  *
  * @returns {{ adapter: Function } | { code: number }}
  */
 function buildCmdAdapter(agent, { model, root }) {
-  if (agent.kind !== 'acp') {
-    return { adapter: createCommandAdapter({ cmd: agent.cmd, repoRoot: root, model }) };
+  const timeout = timeoutFromEnv(WAVE_TIMEOUT_ENV);
+  if (!timeout.ok) {
+    reportMalformedTimeout(WAVE_TIMEOUT_ENV, timeout.raw);
+    return { code: USAGE_EXIT_CODE };
   }
+  const opts = { cmd: agent.cmd, repoRoot: root, model, timeoutMs: timeout.timeoutMs };
+  if (agent.kind !== 'acp') return { adapter: createCommandAdapter(opts) };
   try {
-    return { adapter: createAcpAdapter({ cmd: agent.cmd, repoRoot: root, model }) };
+    return { adapter: createAcpAdapter(opts) };
   } catch (err) {
     process.stderr.write(`rad deliver: ${err.message}\n`);
     return { code: 1 };

@@ -693,6 +693,7 @@ validation.)
 | `RAD_AGENT_CMD` | any command string | — | the CLI to spawn (command and acp paths) |
 | `RAD_AGENT_PREFLIGHT` | `off` | — (probe runs) | exactly `off` skips the command- and acp-path startup preflight |
 | `RAD_AGENT_PREFLIGHT_TIMEOUT_SECONDS` | positive integer | `60` | preflight probe deadline; malformed exits 2 |
+| `RAD_WAVE_TIMEOUT_SECONDS` | positive integer | `600` | per-wave wall-clock deadline for the command and acp adapters (the SDK path ignores it); malformed exits 2 before any wave or event |
 | `RAD_TOKEN_BUDGET` | positive integer | — | per-deliver cumulative token ceiling (cost breaker) |
 | `RAD_REVIEW_AGENT_CMD` | any command string | — (falls back to `RAD_AGENT_CMD`, then `agent.command`) | review-lane CLI for [`rad review`](#rad-review) and `/rad-review`; not used by `rad deliver` |
 
@@ -820,7 +821,7 @@ column as the first `FAIL` line. See [rad acp-check](#rad-acp-check).
 |------|---------|
 | `0` | complete (evidenced by the `deliverCompleted` fold) |
 | `1` | failed — credential/selection or preflight failure, a `failed` stop, or completion not evidenced (an unknown option or missing feature also exits `1`) |
-| `2` | usage / config error — every `--resume` refusal (including `--context` with no value), malformed `RAD_MAX_FAILED_ATTEMPTS` / `RAD_AGENT_PREFLIGHT_TIMEOUT_SECONDS` |
+| `2` | usage / config error — every `--resume` refusal (including `--context` with no value), malformed `RAD_MAX_FAILED_ATTEMPTS` / `RAD_AGENT_PREFLIGHT_TIMEOUT_SECONDS` / `RAD_WAVE_TIMEOUT_SECONDS` |
 | `3` | needs a human decision — a `needs-decision` stop, e.g. `merge-conflict` (see [Resuming a stopped run](#resuming-a-stopped-run)) |
 
 See the Stop contract in [`rad-wave-contract.md`](./rad-wave-contract.md#stop-contract)

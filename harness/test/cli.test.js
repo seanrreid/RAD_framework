@@ -3097,6 +3097,7 @@ const FAKE_ACP_AGENT = join(HERE, 'fixtures', 'acp', 'fake-agent.mjs');
 const ACP_ENV_BASE = {
   RAD_AGENT: 'acp', RAD_AGENT_CMD: undefined, RAD_AGENT_PREFLIGHT: undefined,
   RAD_AGENT_PREFLIGHT_TIMEOUT_SECONDS: undefined, ANTHROPIC_API_KEY: undefined,
+  RAD_WAVE_TIMEOUT_SECONDS: undefined,
 };
 const ACP_MODEL_WARNING = /acp adapter: model '[^']+' ignored/g;
 
@@ -3792,4 +3793,79 @@ test('deliver #213 — runWave receives waves carrying their tasks; the built pr
     assert.ok(prompt.includes('Validate: widget parser rejects empty input'), prompt);
     assert.ok(prompt.includes('File: src/widget.js'), prompt);
   });
+});
+
+// ---------------------------------------------------------------------------
+// rad deliver — RAD_WAVE_TIMEOUT_SECONDS (#211): the per-wave deadline for the
+// command and acp adapters. Valid → the wave is killed at that deadline;
+// unset/empty → the adapter default; malformed → exit 2 before any event.
+// ---------------------------------------------------------------------------
+
+const WAVE_TIMEOUT_MALFORMED = ['0', '-3', '1.5', 'abc', ' 5', '10s'];
+
+test('deliver — malformed RAD_WAVE_TIMEOUT_SECONDS → exit 2 naming it, no events, no spawn', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const logFile = seedOneWaveAcpPlan(repoRoot);
+    const trace = join(repoRoot, 'trace.txt');
+    for (const kind of ['acp', 'command']) {
+      for (const bad of WAVE_TIMEOUT_MALFORMED) {
+        const { code, stderr } = await runAcpDeliver(repoRoot, {
+          RAD_AGENT: kind, RAD_AGENT_CMD: fakeAcpCmd('complete', trace), RAD_WAVE_TIMEOUT_SECONDS: bad,
+        });
+        assert.equal(code, 2, `${kind} timeout=${bad}: ${stderr}`);
+        assert.ok(
+          stderr.includes(`rad deliver: RAD_WAVE_TIMEOUT_SECONDS must be a positive integer (got '${bad}')`),
+          stderr,
+        );
+      }
+    }
+    assert.equal(tracedCalls(trace, 'initialize'), 0, 'neither the preflight nor a wave spawned');
+    assert.deepEqual(readLog(logFile).map((e) => e.type), ['approved'], 'no event appended');
+  });
+});
+
+test('deliver acp — RAD_WAVE_TIMEOUT_SECONDS reaches the adapter: a hanging wave times out at 1s', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const logFile = seedOneWaveAcpPlan(repoRoot);
+    const trace = join(repoRoot, 'trace.txt');
+    const started = Date.now();
+    const { code, stderr } = await runAcpDeliver(repoRoot, {
+      RAD_AGENT_CMD: fakeAcpCmd('hang', trace), RAD_AGENT_PREFLIGHT: 'off', RAD_WAVE_TIMEOUT_SECONDS: '1',
+    });
+    assert.equal(code, 3, stderr);
+    assert.match(stderr, /fail-timeout/);
+    assert.ok(Date.now() - started < 60_000, 'the 1s deadline, not the 600s default, ended the wave');
+    assert.equal(tracedCalls(trace, 'session/prompt'), 1, 'the wave ran');
+    const types = readLog(logFile).map((e) => e.type);
+    assert.ok(!types.includes('wave-complete'), types.join(','));
+  });
+});
+
+test('deliver command — RAD_WAVE_TIMEOUT_SECONDS reaches the adapter: a sleeping wave times out at 1s', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const logFile = seedOneWaveAcpPlan(repoRoot);
+    const started = Date.now();
+    const { code, stderr } = await runAcpDeliver(repoRoot, {
+      RAD_AGENT: 'command', RAD_AGENT_CMD: 'sleep 30', RAD_AGENT_PREFLIGHT: 'off', RAD_WAVE_TIMEOUT_SECONDS: '1',
+    });
+    assert.equal(code, 3, stderr);
+    assert.match(stderr, /fail-timeout/);
+    assert.ok(Date.now() - started < 20_000, 'the 1s deadline, not the 600s default, ended the wave');
+    const types = readLog(logFile).map((e) => e.type);
+    assert.ok(!types.includes('wave-complete'), types.join(','));
+  });
+});
+
+test('deliver acp — unset or empty RAD_WAVE_TIMEOUT_SECONDS keeps the default; the run completes', async () => {
+  for (const unset of [undefined, '']) {
+    await withTempRepo(async (repoRoot) => {
+      const logFile = seedOneWaveAcpPlan(repoRoot);
+      const trace = join(repoRoot, 'trace.txt');
+      const { code, stderr } = await runAcpDeliver(repoRoot, {
+        RAD_AGENT_CMD: fakeAcpCmd('complete', trace), RAD_WAVE_TIMEOUT_SECONDS: unset,
+      });
+      assert.equal(code, 0, stderr);
+      assert.ok(readLog(logFile).map((e) => e.type).includes('wave-complete'));
+    });
+  }
 });
