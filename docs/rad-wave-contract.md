@@ -366,6 +366,7 @@ plan — re-running unchanged cannot succeed).
 | `budget` (maxAttempts) | `failed` | `budget` | `{wave} exhausted its attempts` |
 | `post-check` | `failed` | `post-check` | `post-check {check} exited {status}` |
 | `resume-verify` | `failed` | `resume-verify` | `resume verify: a test file promised by an already-completed wave is missing; restore it and re-run` |
+| `tests-missing` | `failed` | `tests-missing` | `test files still missing after the test wave: {detail}; write them on the branch and re-run rad deliver` |
 | `token-budget` | `needs-decision` | `token-budget` | `token budget {budget} reached (spent {spent}); raise RAD_TOKEN_BUDGET or stop` |
 | `failed-attempt-cap` | `needs-decision` | `failed-attempt-cap` | `{failed} failed attempts reached RAD_MAX_FAILED_ATTEMPTS={cap}; raise the cap, re-plan, or stop` |
 | `approval-changed` | `needs-decision` | `approval-changed` | `the plan changed since approval (or approval no longer holds); re-approve before re-running` |
@@ -440,7 +441,7 @@ After each successful wave, before the next one starts, the spine runs:
   Resume-verify uses the same rule: it checks the union promised by the
   already-completed waves only, and is skipped when that union is empty.
   `## Tests to Write` files that no wave promises are not checked during the
-  waves; checking them at the end of the run is a follow-up.
+  waves; they are handled at the end of the run by the [test wave](#test-wave).
 - **Approval re-check** — the gate fold plus the plan fingerprint compared to the
   approved one. A lapsed approval or an edited plan stops with `approval-changed`.
   An `approved` event recorded during a run (after its latest `deliver-started`)
@@ -451,6 +452,28 @@ After each successful wave, before the next one starts, the spine runs:
   `fail-scope`, which the matrix routes to `abort`.
 
 The end-of-run post-checks are retained unchanged.
+
+### Test wave
+
+`## Tests to Write` files that no wave promises (no task lists them on its
+`File:` line) are handled at the end of the run. After the last plan wave, if any
+of them is missing in the run root, `rad deliver` runs **one** extra wave N+1
+(N = the highest plan wave) through the normal wave machinery — approval
+re-check, budget, hooks, retries and the matrix, the doom loop, the per-wave
+gate, and `--resume`. It has one task per missing file, its `wave-started`
+events carry `kind: 'tests'`, it uses the default model, and it inherits the
+plan-level `Capabilities:` line and deny list. It runs at most once: a completed
+test wave is not re-run on resume.
+
+**Final guard.** Whenever the plan has unpromised test files (including on
+resume), the spine re-checks them after the plan waves and any test wave, before
+the approval-during-run guard and the post-checks. Anything still missing stops
+with `tests-missing` (class `failed`, exit `1`); a check that throws also stops
+fail-closed. Write the files on the branch and re-run `rad deliver`.
+
+The result's `waves=` count stays the plan's wave count. The PR body renders the
+test wave as `### Wave N (test wave)`. A plan whose `## Tests to Write` files are
+all promised behaves exactly as before.
 
 ### `RAD_MAX_FAILED_ATTEMPTS`
 
