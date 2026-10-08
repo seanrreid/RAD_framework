@@ -1,7 +1,7 @@
 # Plan: End-of-Run Test Wave and tests-missing Stop (#186 part 3c-ii)
 Created: 2026-10-08
 Author: architect
-Status: approved
+Status: in-progress
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-10-08T13:43:32.882Z
 Recorded-By: sean@torchcodelab.com
