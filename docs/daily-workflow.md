@@ -9,7 +9,7 @@ Architect:  /rad-design [slug]            ← once per project setup
 Developer:  /rad-plan [feature]    ← cuts rad/[feature] branch, commits plan (no PR)
 Architect:  /rad-approve [feature] ← Gate 1: records approval on the branch tip (no PR)
 
-Developer:  /rad-deliver [plan]    ← wave execution on rad/[feature], opens the deliver PR
+Developer:  /rad-deliver [feature] ← runs `rad deliver`: waves on rad/[feature], opens the deliver PR
 Developer:  /rad-review            ← self-review before requesting architect review
 Architect:  [reviews deliver PR]   ← Gate 2: implementation approval
 Architect:  [merges deliver PR]    ← plan doc + code reach the default branch; feature ships
@@ -210,33 +210,38 @@ This records `Approved-By` and `Recorded-By` separately so the proxy is auditabl
 ## Executing the plan (developer or designer)
 
 ```
-/rad-deliver .agents/plans/add-skeleton-loading.md
+/rad-deliver add-skeleton-loading
 ```
 
-This checks the plan's approved status at the `rad/[feature]` branch tip, then
-executes the plan wave by wave on that same branch (no new branch is cut). Each
-wave runs in a fresh sub-agent context — the orchestrator only carries
-`WAVE_RESULT` summaries forward, not file contents. Each task gets its own
-commit. Each completed step is logged in `.agents/logs/`. When all waves
-complete, it opens the single deliver PR (`rad:deliver` label) from
-`rad/[feature]` to the default branch — carrying both the plan doc and the code.
+The skill (`/team:rad-deliver` in Claude Code, `$rad-deliver` in Codex) runs
+`node harness/cli.js deliver <feature>`, and that one command does the whole
+job:
 
-**During execution:**
-- Between waves, the orchestrator outputs a completion summary — review it
-  before the next wave starts
-- If a wave fails, stop and fix before continuing — don't push through
-- Context rot is rare because wave sub-agents keep main context lean, but can
-  still happen during repeated correction loops. If it does: start a new Claude
-  Code session and re-run `/rad-deliver` with the same plan file — it resumes
-  from the execution log.
+1. **Gate.** It refuses unless an `approved` event is in the plan's event log at
+   the `rad/[feature]` branch tip.
+2. **Prepare.** It fetches, fast-forwards, and merges the default branch into
+   `rad/[feature]` (it never rebases or force-pushes), then marks the plan in
+   progress. It needs a reachable `origin`.
+3. **Waves.** Each wave is one call to the agent configured as `agent:` in
+   `.rad/config.yml` (e.g. `claude -p` or `codex exec`), in an isolated git
+   worktree by default (opt out with `RAD_WORKTREE=0`). After each wave, a test
+   gate checks the test files promised so far. Unpromised Tests-to-Write files
+   get one end-of-run test wave.
+4. **Finish.** It marks the plan `complete`, commits, pushes, labels `review`,
+   and opens the single deliver PR from `rad/[feature]` to the default branch —
+   carrying both the plan doc and the code.
 
-**Worktree isolation (CLI only).** The headless `rad deliver` CLI
-(`node harness/cli.js deliver <feature>`) isolates every run into a git worktree
-by default — opt out with `RAD_WORKTREE=0`. If the work branch is checked out in
-your main checkout and it is clean, the CLI switches it to the default branch and
-continues; if it is dirty, the CLI stops (exit 2) and tells you to commit or stash
-first. The `/rad-deliver` skill is unchanged: it runs in the checkout you invoke
-it from. See `docs/rad-cli.md` for the full lifecycle.
+Delivery needs `agent:` set (`rad config init --agent claude|codex`); without it
+the command exits 2.
+
+**During execution:** retries, stop rules, the token budget, hooks and the
+doom-loop breaker are harness behavior (`harness/spine.js`,
+`harness/matrix.yaml`), not something you steer wave by wave. The run's record is
+the event log, `.agents/state/[feature]/events.jsonl`. The skill reports the
+exit code: `0` delivered, `1` failed, `2` usage or config problem, `3` needs a
+decision. On exit 3 it stops and asks you; you answer, and it resumes with
+`--resume --context "<your answer>"`. See [`rad deliver`](rad-cli.md#rad-deliver)
+for the full lifecycle.
 
 ---
 
@@ -276,14 +281,14 @@ job appends the ranked `rad digest` output to its job summary (Actions → the
 run → Summary): **Look here** lists what to inspect, highest-risk first (scope
 violations, approval integrity, high-risk paths, self-protected paths, …), and
 **Evidence** shows which checks passed or were unavailable. Run
-`node harness/cli.js digest <feature>` locally for the same view. A skill-delivered
-feature always shows "completion not evidenced" — confirm against the execution log.
+`node harness/cli.js digest <feature>` locally for the same view. Its run items
+(retries, stops, completion) come from the feature's event log.
 
 Standard code review, plus RAD-specific checks:
 - [ ] Review digest read (job summary) — every **Look here** item accounted for
 - [ ] Self-review was run (check for `/rad-review` output in PR comments)
 - [ ] All changes are within the plan's declared scope
-- [ ] Execution log looks clean — no surprise retries or failures
+- [ ] Digest run items look clean — no surprise retries or stops
 - [ ] Tests are present and test behavior, not implementation
 
 Merge when satisfied. The feature ships.
@@ -304,21 +309,26 @@ The contributor updates `.agents/plans/[feature].md` directly and pushes to
 the `rad/[feature]` branch. The architect re-reviews and runs `/rad-approve`
 when satisfied.
 
-**A task fails during /rad-deliver:**
-Do not retry more than twice. On the third failure, stop. Tell the architect
-(the deliver PR may not exist yet). The architect decides whether to update
-the plan on the `rad/[feature]` branch or take over the blocked task.
+**A /rad-deliver run fails (exit 1):**
+The harness has already retried per its rules, so don't retry by hand. Tell the
+architect (the deliver PR may not exist yet), with the `rad deliver: failed …`
+line. The architect decides whether to update the plan on the `rad/[feature]`
+branch or take over the blocked task; then re-run `/rad-deliver`.
+
+**A /rad-deliver run needs a decision (exit 3):**
+The skill stops and shows you the decision. Answer it, and the run resumes with
+`--resume --context "<your answer>"`. See
+[Resuming a stopped run](rad-cli.md#resuming-a-stopped-run).
 
 **Out-of-scope dependency discovered mid-execution:**
 Stop execution. Describe the dependency to the architect (comment on the
 deliver PR if it is already open). The architect either expands the plan or
 handles the dependency separately.
 
-**Context gets noisy during execution:**
-Wave sub-agents keep the orchestrator's context lean during normal execution.
-If noise does accumulate (usually from repeated correction loops on a failing
-task), start a new Claude Code session and run
-`/rad-deliver .agents/plans/[feature].md` again — it resumes from the execution log.
+**A run stops partway:**
+Each wave runs in its own agent call, so the calling session's context stays
+small. The run's state lives in the event log, not in the session: after a fix,
+re-run `/rad-deliver [feature]` from any session.
 
 ---
 
