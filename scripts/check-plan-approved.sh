@@ -11,7 +11,7 @@
 # "approved" without a matching approved event does NOT pass (AC#2).
 #
 # Resolution order mirrors the old plan-doc logic so the gate works pre-checkout
-# (AC#3 — /rad-deliver Step 2 runs this BEFORE checkout, so the log is read from
+# (AC#3 — the deliver-gate hook runs this BEFORE checkout, so the log is read from
 # the branch tip): origin/<work-branch> tip, then origin/<base> (merged), then the
 # local working tree. A missing log at every ref fails CLOSED — absence never
 # passes the gate.

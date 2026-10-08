@@ -490,6 +490,20 @@ or appending an event. `rad review` also falls back to `agent.command` (adapter
 
 ---
 
+## rad-deliver runs rad deliver (#186 part 3d)
+
+The prose `/team:rad-deliver` command is gone. `/team:rad-deliver` (and the
+Codex `$rad-deliver` skill) is now generated from `.rad/skills/rad-deliver/SKILL.md`
+and just runs `node harness/cli.js deliver <feature>`, so **set `agent:` before
+running `/team:rad-deliver`** — add the block by hand as in
+[Agent setting](#agent-setting-186-part-3a) above (a fresh install writes it with
+`install.sh --agent claude|codex` or `rad config init --agent claude|codex`).
+Without it, delivery exits 2 with `no agent configured`. The upgrade handles a locally
+edited `rad-deliver.md` like any other file in `.claude/commands/`. See
+[`rad deliver`](docs/rad-cli.md#rad-deliver).
+
+---
+
 ## See also
 
 - [INSTALL.md](INSTALL.md) — first-time installation and uninstalling

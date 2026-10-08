@@ -121,7 +121,7 @@ Team:       /rad-plan     → cuts rad/[feature] branch, commits plan (no PR)
 Team:       /rad-plan --light → same, condensed single-wave plan for small low-risk changes (Tier: light)
 Team:       /rad-adopt    → same as /rad-plan but sourced from a pre-existing issue
 Architect:  /rad-approve  → records approval on the branch tip (Gate 1, no PR)
-Team:       /rad-deliver  → wave execution on the same branch, opens the deliver PR (Gate 2)
+Team:       /rad-deliver  → runs `rad deliver`: waves via the configured `agent:` on the same branch, opens the deliver PR (Gate 2)
 Architect:  PR review     → merge the rad/[feature] branch to default_branch
 ```
 

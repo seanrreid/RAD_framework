@@ -342,8 +342,8 @@ export function createGitStateStore({
    * TRANSITIONAL NOTE — doc-Status authority (check-plan-approved.sh):
    *   The branch-tip doc-Status check (scripts/check-plan-approved.sh) is a
    *   complementary guardrail that was previously performed here at read-time.
-   *   It is now the responsibility of the PROSE /rad-deliver Step 2
-   *   (Decision 2 endpoint) — see docs/daily-workflow.md. It must NOT be
+   *   It is now run by the Claude deliver-gate hook
+   *   (scripts/deliver-gate-hook.mjs) before /team:rad-deliver. It must NOT be
    *   re-introduced into this function; doing so would couple the pure gate
    *   fold to external filesystem/git state.
    *

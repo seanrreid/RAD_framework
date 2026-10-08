@@ -281,7 +281,7 @@ value (non-numeric, zero, negative) is a hard error — **exit 2** before any ev
 `rad deliver` exits **0** complete, **1** failed, **2** usage/config, **3** needs a
 human decision (see the Stop contract in `docs/rad-wave-contract.md`).
 
-When set, `/rad-deliver` (the harness spine) sums each wave's recorded token usage
+When set, `rad deliver` (the harness spine) sums each wave's recorded token usage
 and, before starting the next wave, stops gracefully once the running total reaches
 or exceeds the budget — a structured `stopped: token-budget` terminal (no throw),
 recorded as a `wave-failed` event with `reason: token-budget`. Unset/0/non-numeric
@@ -426,8 +426,9 @@ produces a **byte-identical** event sequence to a run without the feature.
 
 **Not a sandbox.** Classes are enforced at the tool level only. `shell` subsumes
 `net` and `fs_write` — an agent with `Bash` can still reach the network and write
-files. The `/rad-deliver` skill path (the prose command run inside an interactive
-session) is not restricted at all; enforcement lives in `rad deliver`.
+files. Enforcement lives in `rad deliver`; the `/rad-deliver` skill only runs that
+command, so its waves get the same enforcement (the calling session itself is not
+restricted).
 
 **Review surfaces.** `scripts/lint-plan.sh` warns (never errors) once per scope and
 class when a `Capabilities:` line requests `net` or `mcp`:
@@ -467,10 +468,9 @@ spine are rooted at the worktree — so events are written in the worktree (on t
 branch) and the main tree is left unmodified. This is what makes Lane B plans (plan +
 approval only on the work branch) deliverable under isolation.
 
-The `/rad-deliver` **skill** path is unchanged: it runs wave sub-agents in the checkout
-it is invoked from. The `RAD_WORKTREE=0` opt-out and the skill path are recorded as
-unguarded bypasses of the `deliver-runs-isolated` invariant. See `docs/rad-cli.md` for
-the full lifecycle.
+The `/rad-deliver` **skill** only runs `rad deliver`, so the same isolation applies to
+it. The `RAD_WORKTREE=0` opt-out is recorded as the one unguarded bypass of the
+`deliver-runs-isolated` invariant. See `docs/rad-cli.md` for the full lifecycle.
 
 ### Portable Sync
 
@@ -549,7 +549,7 @@ deliberately no env var.
 
 ### Wave-Lifecycle Hooks
 
-OPTIONAL and backward-compatible — absent, `/rad-deliver` behaves exactly as
+OPTIONAL and backward-compatible — absent, `rad deliver` behaves exactly as
 before. Operator-supplied scripts the deliver spine fires at fixed points in the
 wave loop, for policy, notification, or observation.
 

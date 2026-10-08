@@ -73,7 +73,7 @@ your-project/
 │       │   ├── rad-research.md       → /rad-research
 │       │   ├── rad-plan.md           → /rad-plan
 │       │   ├── rad-adopt.md          → /rad-adopt
-│       │   ├── rad-deliver.md        → /rad-deliver
+│       │   ├── rad-deliver.md        → /rad-deliver (generated from .rad/skills/)
 │       │   └── rad-review.md         → /rad-review
 │       └── shared/
 │           ├── rad-status.md         → /rad-status
@@ -85,7 +85,7 @@ your-project/
 │   ├── research/                     ← /rad-research output
 │   ├── architecture/                 ← /rad-design drafts
 │   ├── plans/                        ← /rad-plan output
-│   ├── logs/                         ← /rad-deliver execution logs
+│   ├── logs/                         ← optional wave execution logs (nothing gates on them)
 │   └── findings/                     ← /rad-review findings log
 ├── ai/                               ← guardrail pack (see below)
 ├── harness/                          ← `rad` CLI (harness/cli.js)
@@ -159,7 +159,7 @@ are documented in [docs/rad-cli.md](docs/rad-cli.md#install-commands).
 
 ## Guardrail Pack
 
-RAD ships a guardrail pack in `ai/` that gives every wave sub-agent a consistent
+RAD ships a guardrail pack in `ai/` that gives every wave agent a consistent
 set of coding rules. The pack is treated as framework code — it is refreshed on
 install and upgrade, the same as `.claude/commands/` and `scripts/`, and local
 edits to it are kept the same way.
@@ -217,7 +217,7 @@ Remove entries when the codebase changes and the rule no longer applies.
 
 ### Extension loading protocol
 
-Wave sub-agents follow the smallest-relevant-set principle:
+Wave agents follow the smallest-relevant-set principle:
 
 1. Always load `ai/guardrails.md` as the baseline.
 2. List the file paths to be touched in the wave.
@@ -266,7 +266,8 @@ fresh install, `install.sh` writes it with
   `skip` writes no `agent:`. `--yes` without `--agent` writes none and never
   prompts. Upgrades never prompt and never change an existing config. With no
   `agent:` (and no `RAD_AGENT`/`RAD_AGENT_CMD` in the environment),
-  `rad deliver` refuses with exit 2; add the block to the file later (see
+  `rad deliver` — and so `/rad-deliver`, which runs it — refuses with exit 2;
+  add the block to the file later (see
   [Agent Adapter](docs/configuration.md#agent-adapter)).
 - Check the file at any time with:
   ```bash

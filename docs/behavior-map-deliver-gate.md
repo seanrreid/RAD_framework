@@ -36,15 +36,14 @@ function owns it. That is the condition this format exists to fix.
 
 ```
  user: /rad-deliver <slug>
+   │      the generated skill (.rad/skills/rad-deliver/SKILL.md)
+   │      runs `node harness/cli.js deliver <slug>`
    │
    ├─(1) PreToolUse hook ──────── scripts/deliver-gate-hook.mjs
    │      matcher "Skill"          .claude/settings.json:8-19
    │      BLOCK = exit 2           deny-by-default on any error path
    │
-   ├─(2) prose Step 2 ─────────── .claude/commands/team/rad-deliver.md:53-62
-   │      (same script, again)
-   │
-   │        both call ↓
+   │        calls ↓
    │      scripts/check-plan-approved.sh
    │        ├─ optional RAD_SYNC fetch of the branch tip     :78-80
    │        ├─ resolve events.jsonl: origin/rad/<f> →
@@ -55,10 +54,14 @@ function owns it. That is the condition this format exists to fix.
    │                                   └─ harness/gates.js evaluateGate :77-122
    │                                      rule from harness/gates.yaml  :19-23
    │
-   ├─(3) deliver verb ─────────── harness/cli.js:401-608
-   │      builds the ports: runWave (RAD_AGENT adapter), sh, now,
-   │      state store, matrix, waveVerify, tokenBudget, worktree
-   │      then calls deliverSpine                            cli.js:544
+   ├─(2) rad deliver tip gate ─── harness/cli.js:821-825, called :1178
+   │      branchTipApprovedGate: evaluateGate over the rad/<f> tip's log,
+   │      before any worktree is created; not passed → exit 1
+   │
+   ├─(3) deliver verb ─────────── harness/cli.js:1771-1980
+   │      builds the ports: runWave (RAD_AGENT / `agent:` adapter), sh,
+   │      now, state store, matrix, waveVerify, tokenBudget, worktree
+   │      then calls deliverSpine                            cli.js:1889
    │
    └─(4) deliverSpine ─────────── harness/spine.js:317-773
           ├─ gate re-check, in-process                       :335-338
@@ -211,9 +214,9 @@ it:
 | # | Site | When | On failure |
 |---|------|------|-----------|
 | 1 | `deliver-gate-hook.mjs` | PreToolUse, before the skill body runs | `exit 2` — tool call denied |
-| 2 | `rad-deliver.md:53-62` | Prose Step 2, inside the skill | Print and stop |
+| 2 | `cli.js:821-825` (`branchTipApprovedGate`) | `rad deliver`'s gate on the `rad/<feature>` tip, before any worktree | `exit 1` — "gate not passed" |
 | 3 | `check-plan-approved.sh:101-130` | Fingerprint tripwire, before the role gate | `exit 1` — "plan modified after approval" |
-| 4 | `gates.js:77-122` | The fold itself, via `rad gate --stdin` | Non-zero exit → sites 1–3 fail |
+| 4 | `gates.js:77-122` | The fold itself, via `rad gate --stdin` (sites 1, 3) or in-process (site 2) | A failing fold → sites 1–3 fail |
 | 5 | `spine.js:335-338` | In-process, first statement of the spine | `{ stopped:'gate' }` — structured, no events, `runWave` never called |
 | 6 | `check-approval-integrity.sh` | CI, at the deliver PR head | Job fails, merge blocked |
 
@@ -251,7 +254,7 @@ comment before editing the script.
 ```
 .claude/settings.json:8-19                  hook registration (matcher: Skill)
 scripts/deliver-gate-hook.mjs:1-125         PreToolUse deny
-.claude/commands/team/rad-deliver.md:53-62  prose Step 2
+harness/cli.js:821-825                      rad deliver's branch-tip gate
 scripts/check-plan-approved.sh:47-135       ref resolution, fingerprint, gate call
 scripts/check-approval-integrity.sh:1-36    CI ancestry + authenticity + gate
 harness/gates.yaml:19-23                    the rule

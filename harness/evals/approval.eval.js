@@ -346,7 +346,7 @@ function linkCheckout(fx) {
   return link;
 }
 
-/** Run check-plan-approved.sh by its path through the link, as /rad-deliver Step 2 does from a checkout. */
+/** Run check-plan-approved.sh by its path through the link, as the deliver-gate hook does from a checkout. */
 function runGateScript(link, feature) {
   // Explicit base skips the default-branch lookup so only the guard + passed=true layers are under test; lookup failure is covered in scripts/test-check-plan-approved.sh.
   const res = spawnSync(join(link, 'scripts', 'check-plan-approved.sh'), [`rad/${feature}`, 'main'],

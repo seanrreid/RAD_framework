@@ -122,14 +122,20 @@ approval on the branch tip.
 ### Step 4: Execute the plan
 
 ```
-/rad-deliver .agents/plans/[your-feature].md
+/rad-deliver [your-feature]
 ```
 
-This runs on your `rad/[feature]` branch (gating on the approved status at the
-branch tip), wave by wave. Watch for failures — if a task fails twice, stop and
-flag it to the architect rather than pushing through. When the waves complete,
-it opens the single deliver PR (`rad:deliver`) from `rad/[feature]` to the
-default branch — this is the one PR in the workflow.
+The skill runs `node harness/cli.js deliver [your-feature]`. It gates on the
+`approved` event at the `rad/[feature]` branch tip, then runs the plan wave by
+wave, each wave as one call to the agent set as `agent:` in `.rad/config.yml`.
+Delivery needs `agent:` set — install writes it (`install.sh --agent
+claude|codex` or `rad config init --agent claude|codex`); if it's missing, the
+command exits 2 and the block can be added by hand (see
+[Agent Adapter](configuration.md#agent-adapter)). Retries and stops are handled by the harness. On
+exit 3 the skill stops and asks you for a decision; on exit 1, flag it to the
+architect rather than pushing through. When the waves complete, it opens the
+single deliver PR (`rad:deliver`) from `rad/[feature]` to the default branch —
+this is the one PR in the workflow. See [`rad deliver`](rad-cli.md#rad-deliver).
 
 ### Step 5: Self-review
 
@@ -170,7 +176,7 @@ faster than fixing a scope violation in review.
 ## Common mistakes
 
 **Running /rad-deliver before the plan is approved.**
-`/rad-deliver` gates on the approved status at the `rad/[feature]` branch tip
+`/rad-deliver` gates on the `approved` event at the `rad/[feature]` branch tip
 and will stop you with an error. Wait for `/rad-approve`.
 
 **Reading files directly during planning.**

@@ -44,13 +44,13 @@ ARCHITECT / TEAM                   TEAM
                     branch tip and pushes it. No PR — approval
                     lives in the event log on the branch
 
-                                   /rad-deliver [plan-file]
+                                   /rad-deliver [feature]
+                                     Runs `rad deliver`, which:
                                      Gates on the approved event (`rad gate`)
-                                     Runs on the existing rad/[feature] branch
-                                     Each wave → fresh sub-agent context
-                                     Orchestrator carries only WAVE_RESULT
-                                     Atomic commit per task
-                                     Execution log appended per step
+                                     Merges the default branch into rad/[feature]
+                                     Each wave → one call to the `agent:`
+                                     Retries + stops live in the harness
+                                     Records the run in the event log
                                      Opens the single deliver PR
 
                     ── Gate 2 ──
@@ -105,7 +105,7 @@ RAD delegates heavy context work to sub-agents so main sessions stay lean:
 | `/rad-research` URL input | Haiku sub-agent: fetches and summarizes spec URL | Bounded `SPEC_SUMMARY` block |
 | `/rad-design` file generation | Parallel Haiku sub-agents: one per agent file | Completion confirmations |
 | `/rad-plan` research | Explore sub-agent: searches codebase, returns `RESEARCH_SUMMARY` | The summary block (~20 lines) |
-| `/rad-deliver` per wave | Wave sub-agent: loads files, implements, validates, commits | `WAVE_RESULT` block per wave |
+| `/rad-deliver` per wave | `rad deliver` runs one configured-agent call per wave (e.g. `claude -p`): loads files, implements, validates, commits | The command's exit code and result lines |
 | `/rad-review` | quality-reviewer + accessibility-reviewer agents | Finding summaries |
 
 The plan linter enforces a **context budget** on the Files in Scope table:
@@ -164,7 +164,7 @@ your-project/
 │       │   ├── rad-research.md       → /rad-research  (team)
 │       │   ├── rad-plan.md           → /rad-plan      (team)
 │       │   ├── rad-adopt.md          → /rad-adopt     (team)
-│       │   ├── rad-deliver.md        → /rad-deliver   (team)
+│       │   ├── rad-deliver.md        → /rad-deliver   (team; generated from .rad/skills/)
 │       │   ├── rad-review.md         → /rad-review    (team)
 │       │   ├── accessibility-review.md → /accessibility-review (team)
 │       │   └── quality-review.md     → /quality-review (team)
@@ -180,7 +180,7 @@ your-project/
 │   ├── epics/                        ← epic shaping stories (/rad-epic-decompose, runtime)
 │   ├── plans/                        ← plan artifacts (Gate 1)
 │   ├── state/<feature>/events.jsonl  ← append-only event log — the gate authority (runtime)
-│   ├── logs/                         ← execution logs per plan
+│   ├── logs/                         ← optional execution logs (nothing gates on them)
 │   ├── findings.jsonl                ← append-only review findings log (written by /rad-review)
 │   └── findings/README.md            ← findings log schema and query reference
 └── scripts/

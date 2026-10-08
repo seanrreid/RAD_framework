@@ -135,8 +135,10 @@ Contrast the two:
 The PreToolUse gate **reuses the existing approval gate**
 (`scripts/check-plan-approved.sh`) and adds **no new authority** — it only
 deterministically enforces, at the tool boundary, the same approved-event gate
-the spine already honors. It is not one of the six lifecycle points and is not
-configured under `RAD_HOOKS_DIR`.
+the spine already honors. The skill only runs `rad deliver`, which gates on the
+`approved` event first, so this hook is an extra Claude Code layer on top of that
+gate. It is not one of the six lifecycle points and is not configured under
+`RAD_HOOKS_DIR`.
 
 ## Backward-compatibility guarantee
 

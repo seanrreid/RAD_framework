@@ -1,9 +1,9 @@
 /**
  * The rad-deliver spine — deterministic control flow over the ports.
  *
- * This is the migration target of `.claude/commands/team/rad-deliver.md`: the
- * prose DET steps (approval gate → deliver-started → per-wave loop → post-checks
- * → pr-opened) collapse into one pure control-flow function. It mirrors the
+ * `rad deliver` runs this: the deterministic steps (approval gate →
+ * deliver-started → per-wave loop → post-checks → pr-opened) live in one pure
+ * control-flow function. It mirrors the
  * `## rad-deliver as a harness spine` example in docs/harness-state-store.md.
  *
  * Everything probabilistic or side-effecting is INJECTED, so the function is

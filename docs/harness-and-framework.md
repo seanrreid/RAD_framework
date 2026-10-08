@@ -173,7 +173,9 @@ you slot a feature into RAD's gates and RAD owns the lifecycle.
 - **Slash commands** (`.claude/commands/`) — `/rad-research`, `/rad-design`,
   `/rad-plan`, `/rad-adopt`, `/rad-approve`, `/rad-deliver`, `/rad-review`. Prose,
   not code; they orchestrate the human + sub-agent steps and call into the harness
-  CLI for the load-bearing transitions.
+  CLI for the load-bearing transitions. `/rad-deliver` is the thinnest: it is
+  generated from `.rad/skills/rad-deliver/SKILL.md` and just runs
+  `node harness/cli.js deliver` ([`docs/rad-cli.md`](rad-cli.md#rad-deliver)).
 - **Roles and scope** (`CLAUDE.md` → Role Assignments, Agent Scope Map) — who may
   do what, and which agent may touch which files.
 - **Workflow and conventions** — one `rad/[feature]` branch cradle-to-grave, two
@@ -233,7 +235,7 @@ each signal up in a single data table, `PROMPT_SURFACE_MAP`:
 
 | Signal | Prompt surface |
 |---|---|
-| `fail-protocol` | `harness/adapters/agent/contract.js` `buildWavePrompt` return-format block (prose mirror in `.claude/commands/team/rad-deliver.md`) |
+| `fail-protocol` | `harness/adapters/agent/contract.js` `buildWavePrompt` return-format block |
 | `fail-scope` | `.claude/commands/team/rad-plan.md` plan template, `## Files in Scope` guidance |
 | `blocked_spec`, `blocked_intent` | `.claude/commands/team/rad-plan.md` task template (`What:` / `Validate:`) and wave rules |
 
