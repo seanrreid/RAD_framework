@@ -1,7 +1,7 @@
 # Plan: Shared rad-design Skill That Authors .rad/agents Sources (#186 part 3f-i)
 Created: 2026-10-08
 Author: architect
-Status: approved
+Status: in-progress
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-10-08T18:33:29.669Z
 Recorded-By: sean@torchcodelab.com
