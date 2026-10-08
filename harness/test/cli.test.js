@@ -1483,6 +1483,10 @@ test('script args — check-tests-present.sh: string arg → [planPath]; array a
 test('script args — a real deliver scopes check-tests-present.sh to the promising wave via --only', async () => {
   await withTempRepo(async (repoRoot) => {
     seedApprovedTwoWavePlan(repoRoot, promisingTwoWavePlanText());
+    // The orphan (unpromised) file already exists, so no end-of-run test wave
+    // runs and only the plan waves' presence gates are observed here.
+    mkdirSync(dirname(join(repoRoot, ORPHAN_TEST)), { recursive: true });
+    writeFileSync(join(repoRoot, ORPHAN_TEST), '', 'utf8');
     const rec = recordingSh();
     const { code, stderr } = await runDeliverCaptured({
       repoRoot, sh: rec.sh, runWave: async () => ({ outcome: 'success' }),
@@ -3581,4 +3585,95 @@ test('pr-body AC#4 — --help lists pr-body', () => {
   const stdout = execFileSync(process.execPath, [CLI, '--help'], { encoding: 'utf8' });
   assert.match(stdout, /^\s+pr-body\s+/m);
   assert.match(stdout, /rad pr-body <feature> \[--branch <ref>\] \[--base <ref>\]/);
+});
+
+// ---------------------------------------------------------------------------
+// End-of-run test wave wiring (#186 3c-ii, AC#4 + AC#6): parsePlanCtx
+// unpromisedTests and the testWave port passed to deliverSpine.
+// ---------------------------------------------------------------------------
+
+test('parsePlanCtx — unpromisedTests: promised excluded, unpromised included, unresolvable excluded, deduped in plan order', () => {
+  const second = 'harness/test/second-orphan.test.js';
+  const text = promisingTwoWavePlanText()
+    + `\n- second orphan — ${second}\n- orphan again — ${ORPHAN_TEST}\n`;
+  assert.deepEqual(parsePlanCtx(text).unpromisedTests, [ORPHAN_TEST, second]);
+});
+
+test('parsePlanCtx — unpromisedTests: no Tests-to-Write section → []', () => {
+  assert.deepEqual(parsePlanCtx(twoWavePlanText()).unpromisedTests, []);
+  assert.deepEqual(parsePlanCtx('').unpromisedTests, []);
+});
+
+/** runWave recording each wave; on the test wave optionally writes its files. */
+function testWaveRecorder(repoRoot, { writeTests }) {
+  const calls = [];
+  const runWave = async (wave) => {
+    calls.push({ n: wave.n, kind: wave.kind });
+    if (wave.kind === 'tests' && writeTests) {
+      for (const task of wave.tasks) {
+        for (const file of task.files) {
+          mkdirSync(dirname(join(repoRoot, file)), { recursive: true });
+          writeFileSync(join(repoRoot, file), '', 'utf8');
+        }
+      }
+    }
+    return { outcome: 'success' };
+  };
+  return { calls, runWave };
+}
+
+const startedWaves = (logFile) => readLog(logFile).filter((e) => e.type === 'wave-started').map((e) => e.data);
+
+test('deliver test wave — a missing unpromised test file runs wave N+1 once; the agent writes it → exit 0', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const { logFile } = seedApprovedTwoWavePlan(repoRoot, promisingTwoWavePlanText());
+    const rec = testWaveRecorder(repoRoot, { writeTests: true });
+    const { code, stderr } = await runDeliverCaptured({ repoRoot, sh: recordingSh().sh, runWave: rec.runWave });
+    assert.equal(code, 0, `expected exit 0; stderr:\n${stderr}`);
+    assert.deepEqual(rec.calls.filter((c) => c.kind === 'tests'), [{ n: 3, kind: 'tests' }]);
+    assert.ok(existsSync(join(repoRoot, ORPHAN_TEST)));
+    const testStarts = startedWaves(logFile).filter((d) => d.kind === 'tests');
+    assert.equal(testStarts.length, 1);
+    assert.equal(testStarts[0].wave, 3);
+  });
+});
+
+test('deliver test wave — the test wave leaves the file missing → exit 1 stopped=tests-missing', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const { logFile } = seedApprovedTwoWavePlan(repoRoot, promisingTwoWavePlanText());
+    const rec = testWaveRecorder(repoRoot, { writeTests: false });
+    const { code, stderr } = await runDeliverCaptured({ repoRoot, sh: recordingSh().sh, runWave: rec.runWave });
+    // The mocked presence gate passes, so the spine's final guard (not the
+    // matrix) is what stops the run.
+    assert.equal(code, 1, `expected exit 1; stderr:\n${stderr}`);
+    assert.match(stderr, /stopped=tests-missing/);
+    assert.match(stderr, new RegExp(`detail="${ORPHAN_TEST.replace(/\./g, '\\.')}"`));
+    assert.equal(rec.calls.filter((c) => c.kind === 'tests').length, 1);
+    const stopped = readLog(logFile).filter((e) => e.type === 'deliver-stopped');
+    assert.equal(stopped.length, 1);
+  });
+});
+
+test('deliver test wave — no unpromised Tests-to-Write file → no test wave runs', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const { logFile } = seedApprovedTwoWavePlan(repoRoot);
+    const rec = testWaveRecorder(repoRoot, { writeTests: true });
+    const { code, stderr } = await runDeliverCaptured({ repoRoot, runWave: rec.runWave });
+    assert.equal(code, 0, `expected exit 0; stderr:\n${stderr}`);
+    assert.deepEqual(rec.calls.map((c) => c.n), [1, 2]);
+    assert.ok(startedWaves(logFile).every((d) => d.kind === undefined));
+  });
+});
+
+test('deliver test wave — a plan-level Capabilities: line also constrains the test wave', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const text = promisingTwoWavePlanText().replace('## Waves', 'Capabilities: fs_read, fs_write\n\n## Waves');
+    const { logFile } = seedApprovedTwoWavePlan(repoRoot, text);
+    const rec = testWaveRecorder(repoRoot, { writeTests: true });
+    const { code, stderr } = await runDeliverCaptured({ repoRoot, sh: recordingSh().sh, runWave: rec.runWave });
+    assert.equal(code, 0, `expected exit 0; stderr:\n${stderr}`);
+    const testStart = startedWaves(logFile).find((d) => d.kind === 'tests');
+    assert.deepEqual(testStart.capabilities, startedWaves(logFile).find((d) => d.wave === 1).capabilities);
+    assert.ok(Array.isArray(testStart.capabilities), 'the test wave records its effective capabilities');
+  });
 });
