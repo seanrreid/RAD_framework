@@ -69,6 +69,13 @@ The user decided on 2026-10-08:
    - docs/rad-tool-portability.md: the 27-agent row (~76) reads `generated (#186 part 3f-ii), internal: .rad/agents-internal, not shipped`, the agent-source spec mentions the internal dir, and the output mapping (~148) is updated.
    - `bash scripts/lint-claude-md.sh` passes.
 
+## Amendments
+- **Amendment 1 (2026-10-08, after Wave 3 stopped `blocked_spec`):** `generate`'s stricter frontmatter parser rejected all 27 moved sources. 21 have a scalar `roles` (for example `roles: architect`), which needs a list, and 6 have descriptions that don't parse as YAML. The user approved **format-only normalization** in the moved sources:
+  - turn a scalar `roles` value into a one-item list with the same value (`roles: [architect]`);
+  - quote, or use a folded block scalar for, any description that fails to parse, keeping the text identical.
+
+  No other change is allowed. For each changed source, the parsed `roles` and `description` must equal the original values (description compared after whitespace folding). The commit message lists every normalized file and which field changed. Content changes are still forbidden: if a source still fails `generate` after normalization, report `blocked_spec`.
+
 ## Agent Scope
 Research came from listing the 27 unmarked agents and their tools, reading generate.js agent collection (`AGENTS_DIR`, `readAgent`, `collect`, `readSources`, `markerLine`), generated-marker.js, install-manifest.js `SOURCE_TREES`/`MARKED_ROOTS`/`walkMarked`/`listCoreFiles`, test-install-harness.sh:551, and the docs that mention `.claude/agents`. There are no out-of-scope dependencies.
 
@@ -196,7 +203,7 @@ Research came from listing the 27 unmarked agents and their tools, reading gener
 - **Waves run under the 10-minute agent limit.** Validate with the targeted commands only; the reviewer runs the full suites.
 - **No `agents-internal` dir means byte-identical generate output and manifest file set.**
 - **Fail closed in the manifest:** a marked file is shipped only on a proven shipped source.
-- **The migration is a move:** one shell loop of `git mv`, a small script for the 11 `codex` keys, then one `generate`. If `generate` rejects a source, report `blocked_spec` rather than changing content.
+- **The migration is a move:** one shell loop of `git mv`, a small script for the 11 `codex` keys, then one `generate`. If `generate` rejects a source, apply only Amendment 1's format-only normalization; anything beyond that is `blocked_spec`.
 
 ## Program Design
 ```js
@@ -229,7 +236,7 @@ Validate: AC#3, AC#6 — `node --test harness/test/install-manifest.test.js` pas
 
 #### Task 3.1: Move and regenerate the 27 agents
 File: .rad/agents/quality-reviewer.md:1-20, scripts/lint-agent-files.sh:40-130, scripts/test-install-harness.sh:530-560
-What: Write AC#4 and AC#5. Find the unmarked `.claude/agents/*.md` files, `git mv` each to `.rad/agents-internal/`, add the `codex` key to the 11 Read/Grep/Glob mappers, run `node harness/cli.js generate`, and stage the moves plus the generated `.claude/agents` and `.codex/agents` files. Compare each regenerated file's fields and body with the original (`git show HEAD:<path>`), and record renderer-only differences in the commit message.
+What: Write AC#4 and AC#5. Find the unmarked `.claude/agents/*.md` files, `git mv` each to `.rad/agents-internal/`, add the `codex` key to the 11 Read/Grep/Glob mappers, apply Amendment 1's format-only normalization (scalar `roles` to a one-item list, and quoting for descriptions that don't parse), run `node harness/cli.js generate`, and stage the moves plus the generated `.claude/agents` and `.codex/agents` files. Compare each regenerated file's fields and body with the original (`git show HEAD:<path>`), and record renderer-only differences in the commit message.
 Validate: AC#4, AC#5 — `node harness/cli.js generate --check` exits 0; `bash scripts/lint-agent-files.sh` passes; `node harness/cli.js config validate` passes; `bash scripts/test-install-harness.sh` passes
 
 ### Wave 4 — sequential
