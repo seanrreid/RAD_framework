@@ -9,7 +9,9 @@
  * Edge cases named: rerun with nothing new (label only), existing
  * Completed-At kept, no events log yet, plan without Issue:, wrong branch,
  * staged change, unreachable origin, bad options; upsertPlanHeader replace,
- * insert after Status, no Status (after title), non-string arguments.
+ * insert after Status, no Status (after title), non-string arguments;
+ * executionLogPaths: missing logs dir, a prefix-sharing feature's log, a
+ * non-date name, a regex-special feature name; no log leaves paths unchanged.
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -19,7 +21,7 @@ import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 
 import { defaultSh } from '../adapters/git-state-store.js';
-import { makeFinishPort } from '../deliver-finish.js';
+import { executionLogPaths, makeFinishPort } from '../deliver-finish.js';
 import { upsertPlanHeader } from '../plan-commit.js';
 
 const SLUG = 'demo';
@@ -277,4 +279,70 @@ test('upsertPlanHeader rejects non-string arguments and multi-line values', () =
   assert.throws(() => upsertPlanHeader('# Plan: X\n', 'K', undefined), TypeError);
   assert.throws(() => upsertPlanHeader('# Plan: X\n', 'K', 'a\nb'), /single line/);
   assert.throws(() => upsertPlanHeader('no title\n', 'K', 'v'), /anchor/);
+});
+
+const LOG_REL = `.agents/logs/${SLUG}-2026-10-08.md`;
+const writeLog = (root, rel, text = '| 1 | Wave 1 | task | ✓ complete |\n') => {
+  mkdirSync(join(root, '.agents', 'logs'), { recursive: true });
+  writeFileSync(join(root, rel), text);
+};
+
+test('executionLogPaths: a missing logs directory is []', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'rad-log-paths-'));
+  try {
+    assert.deepEqual(executionLogPaths(dir, SLUG), []);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('executionLogPaths matches only <feature>-YYYY-MM-DD.md, sorted (AC#1)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'rad-log-paths-'));
+  try {
+    for (const name of [
+      `${SLUG}-2026-10-09.md`, `${SLUG}-2026-10-08.md`,
+      `${SLUG}-hardening-2026-10-08.md`, `${SLUG}-notes.md`, `${SLUG}-2026-10-08.md.bak`, `x${SLUG}-2026-10-08.md`,
+    ]) writeLog(dir, `.agents/logs/${name}`);
+    assert.deepEqual(executionLogPaths(dir, SLUG), [`.agents/logs/${SLUG}-2026-10-08.md`, `.agents/logs/${SLUG}-2026-10-09.md`]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('executionLogPaths escapes regex specials in the feature name', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'rad-log-paths-'));
+  try {
+    writeLog(dir, '.agents/logs/a.b-2026-10-08.md');
+    writeLog(dir, '.agents/logs/aXb-2026-10-08.md');
+    assert.deepEqual(executionLogPaths(dir, 'a.b'), ['.agents/logs/a.b-2026-10-08.md']);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('beforePr commits and pushes the execution log with plan + events (AC#2)', async () => {
+  await withRepo(async ({ root, origin }) => {
+    writeLog(root, LOG_REL);
+    writeLog(root, `.agents/logs/${SLUG}-hardening-2026-10-08.md`);
+    appendEvent(root, 'wave-completed');
+    const { result } = await finish(root, 'beforePr');
+    assert.deepEqual(result, { ok: true, data: { committed: true, pushed: true } });
+    assert.deepEqual(changedFiles(root), [EVENTS_REL, LOG_REL, PLAN_REL].sort());
+    assert.equal(remoteHead(origin), head(root));
+    assert.equal(git(root, ['status', '--porcelain']).stdout, `?? .agents/logs/${SLUG}-hardening-2026-10-08.md`);
+  });
+});
+
+test('afterPr commits and pushes the execution log with events (AC#2)', async () => {
+  await withRepo(async ({ root, origin }) => {
+    writeLog(root, LOG_REL);
+    await finish(root, 'beforePr');
+    appendEvent(root, 'pr-opened');
+    appendFileSync(join(root, LOG_REL), '| 2 | Finish | pr opened | ✓ complete |\n');
+    const { result } = await finish(root, 'afterPr');
+    assert.deepEqual(result, { ok: true, data: { committed: true, pushed: true } });
+    assert.deepEqual(changedFiles(root), [EVENTS_REL, LOG_REL].sort());
+    assert.equal(remoteHead(origin), head(root));
+    assert.equal(git(root, ['status', '--porcelain']).stdout, '');
+  });
 });

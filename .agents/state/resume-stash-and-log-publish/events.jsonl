@@ -1,0 +1,13 @@
+{"feature":"resume-stash-and-log-publish","type":"approved","actor":"sean@torchcodelab.com","role":"architect","ts":"2026-10-08T18:13:56.090Z","recordedBy":"sean@torchcodelab.com","data":{"fingerprint":"f880b7187a3195549d8d4cd74d294639b2351881c5b47d57f3914530bbc94a2d"}}
+{"feature":"resume-stash-and-log-publish","type":"deliver-started","actor":"harness","ts":"2026-10-08T18:14:15.133Z"}
+{"feature":"resume-stash-and-log-publish","type":"run-prepared","actor":"harness","ts":"2026-10-08T18:14:23.350Z","data":{"base":"main","merged":false,"fastForwarded":false,"committed":true,"pushed":true}}
+{"feature":"resume-stash-and-log-publish","type":"wave-started","actor":"harness","ts":"2026-10-08T18:14:23.365Z","data":{"wave":1,"attempt":1}}
+{"feature":"resume-stash-and-log-publish","type":"wave-attempt","actor":"harness","ts":"2026-10-08T18:15:58.821Z","data":{"wave":1,"attempt":1,"outcome":"success","tasks":[{"title":"Exact log match and log publish","status":"complete","commit":"b0e1d70","concern":"—","error":"—"}]}}
+{"feature":"resume-stash-and-log-publish","type":"wave-complete","actor":"harness","ts":"2026-10-08T18:15:58.822Z","data":{"wave":1}}
+{"feature":"resume-stash-and-log-publish","type":"wave-started","actor":"harness","ts":"2026-10-08T18:15:58.823Z","data":{"wave":2,"attempt":1}}
+{"feature":"resume-stash-and-log-publish","type":"wave-attempt","actor":"harness","ts":"2026-10-08T18:18:06.471Z","data":{"wave":2,"attempt":1,"outcome":"success","tasks":[{"title":"Stash, merge and restore","status":"done_with_concerns","commit":"9d96c54","concern":"When a merge is needed, a no-partial-work run makes one extra `git diff --quiet` call (the spec requires this check); calls are otherwise unchanged","error":"—"}]}}
+{"feature":"resume-stash-and-log-publish","type":"wave-complete","actor":"harness","ts":"2026-10-08T18:18:06.472Z","data":{"wave":2}}
+{"feature":"resume-stash-and-log-publish","type":"wave-started","actor":"harness","ts":"2026-10-08T18:18:06.479Z","data":{"wave":3,"attempt":1}}
+{"feature":"resume-stash-and-log-publish","type":"wave-attempt","actor":"harness","ts":"2026-10-08T18:18:42.850Z","data":{"wave":3,"attempt":1,"outcome":"success","tasks":[{"title":"Docs","status":"complete","commit":"60a5e28","concern":"—","error":"—"}]}}
+{"feature":"resume-stash-and-log-publish","type":"wave-complete","actor":"harness","ts":"2026-10-08T18:18:42.852Z","data":{"wave":3}}
+{"feature":"resume-stash-and-log-publish","type":"pr-opened","actor":"harness","ts":"2026-10-08T18:19:01.936Z"}

@@ -406,7 +406,9 @@ HEAD on the work branch with nothing staged, then: fetches `origin/<default>`
 when that is ahead (true divergence is `prepare-failed`); merges
 `origin/<default>` with `--no-edit` when HEAD lacks it — **merge, never rebase
 or force-push**; a conflicted merge is aborted, leaving the tree unchanged, and
-stops with `merge-conflict`; sets the plan's `Status: in-progress`; and commits
+stops with `merge-conflict` (tracked partial work is stashed before the merge
+and popped after it; a conflicting pop resets the tree, keeps the stash, and
+stops with `merge-conflict`); sets the plan's `Status: in-progress`; and commits
 only the plan (`deliver(<f>): begin execution`), pushes, and labels the issue
 `in-progress`. An unreachable origin is `prepare-failed`, so deliver
 **requires a reachable remote**. Each step checks before it acts, so a re-run

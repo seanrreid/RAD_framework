@@ -6,9 +6,9 @@
  * beforePr, in order: refuse unless HEAD is on the work branch with nothing
  * staged; set the plan header `Status: complete` and add `Completed-At:` right
  * after it (an existing Completed-At is kept, so a rerun keeps the first
- * completion time); then commit plan + events log, push, and label `review`
- * via publishPlanChange. afterPr: same refusal check, then commit/push/label
- * the events log alone.
+ * completion time); then commit plan + events log + execution logs, push, and
+ * label `review` via publishPlanChange. afterPr: same refusal check, then
+ * commit/push/label the events log and execution logs.
  *
  * The push is required, not gated by RAD_SYNC: the deliver PR is opened from
  * origin's work branch, so an unpushed finish commit would be missing from it.
@@ -19,7 +19,7 @@
  * an event in the spine — it comes back as `{ ok: false, detail }` for the
  * caller to report. Every git call is an args array through the injected `sh`.
  */
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { requirePublishReady, publishPlanChange } from './branch-publish.js';
@@ -31,12 +31,33 @@ const REVIEW_LABEL = 'review';
 const PUBLISH_VERB = 'rad deliver';
 const OK_EXIT = 0;
 const REQUIRED_STRINGS = ['root', 'feature', 'planPath', 'workBranch'];
+/** Where the run's execution logs live, relative to the run root. */
+const EXECUTION_LOG_DIR = '.agents/logs';
+/** The date suffix of an execution log's name: `<feature>-YYYY-MM-DD.md`. */
+const LOG_DATE_SUFFIX = String.raw`-\d{4}-\d{2}-\d{2}\.md$`;
+const REGEX_SPECIALS = /[.*+?^${}()|[\]\\]/g;
 
 /** A runtime failure; its message is the result's `detail`. */
 class FinishStop extends Error {}
 
 function eventsPath(feature) {
   return `.agents/state/${feature}/events.jsonl`;
+}
+
+/**
+ * The run's execution logs — exactly `.agents/logs/<feature>-YYYY-MM-DD.md`,
+ * so a longer feature sharing the prefix never matches — as explicit
+ * root-relative paths in sorted order, never a glob handed to git.
+ * A missing logs directory means no logs: [].
+ */
+export function executionLogPaths(root, feature) {
+  const dir = join(root, EXECUTION_LOG_DIR);
+  if (!existsSync(dir)) return [];
+  const exact = new RegExp(`^${feature.replace(REGEX_SPECIALS, '\\$&')}${LOG_DATE_SUFFIX}`);
+  return readdirSync(dir)
+    .filter((name) => exact.test(name))
+    .sort()
+    .map((name) => `${EXECUTION_LOG_DIR}/${name}`);
 }
 
 /** The commit message: subject, blank line, Plan line, Issue line (omitted when null). */
@@ -101,7 +122,8 @@ function requireReady(opts) {
 function runBeforePr(opts) {
   requireReady(opts);
   const text = markComplete(opts.root, opts.planPath);
-  const paths = presentPaths(opts.root, [opts.planPath, eventsPath(opts.feature)]);
+  const logs = executionLogPaths(opts.root, opts.feature);
+  const paths = presentPaths(opts.root, [opts.planPath, eventsPath(opts.feature), ...logs]);
   return publish(opts, paths, 'mark plan complete', text);
 }
 
@@ -110,7 +132,8 @@ function runAfterPr(opts) {
   const events = eventsPath(opts.feature);
   // pr-opened was just recorded, so a missing log is an anomaly: fail closed.
   if (!existsSync(join(opts.root, events))) throw new FinishStop(`${events} is missing; pr-opened cannot be published`);
-  return publish(opts, [events], 'record pr-opened', readPlan(opts.root, opts.planPath));
+  const paths = [events, ...executionLogPaths(opts.root, opts.feature)];
+  return publish(opts, paths, 'record pr-opened', readPlan(opts.root, opts.planPath));
 }
 
 /** Wrap a step: FinishStop becomes `{ ok: false, detail }`; anything else rethrows. */

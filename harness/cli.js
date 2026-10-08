@@ -71,7 +71,7 @@ import { planStatusCommand, PLAN_STATUS_USAGE } from './plan-status.js';
 import { checkoutCommand, CHECKOUT_USAGE } from './checkout.js';
 import { labelCommand, LABEL_USAGE } from './label.js';
 import { makePreparePort } from './deliver-prepare.js';
-import { makeFinishPort } from './deliver-finish.js';
+import { makeFinishPort, executionLogPaths } from './deliver-finish.js';
 
 /** Usage line for `rad approve` (parse errors and the command table). */
 const APPROVE_USAGE = 'rad approve <feature> [--on-behalf-of <name>] [--evidence <text>] [--no-commit] [--trailer "Key: Value"]...';
@@ -1310,24 +1310,6 @@ function preserveAfterSetupFailure(worktree, feature, root) {
 
 /** `git diff --cached --quiet` exit status meaning "staged changes exist". */
 const GIT_DIFF_HAS_CHANGES = 1;
-
-/** Where the run's execution logs live, relative to the run root. */
-const EXECUTION_LOG_DIR = join('.agents', 'logs');
-
-/**
- * The run's execution logs (`.agents/logs/<feature>-*.md`) under `root`, as
- * explicit root-relative paths in sorted order — never a glob handed to git.
- * A missing logs directory means no logs: [].
- */
-function executionLogPaths(root, feature) {
-  const dir = join(root, EXECUTION_LOG_DIR);
-  if (!existsSync(dir)) return [];
-  const prefix = `${feature}-`;
-  return readdirSync(dir)
-    .filter((name) => name.startsWith(prefix) && name.endsWith('.md'))
-    .sort()
-    .map((name) => `.agents/logs/${name}`);
-}
 
 /**
  * Commit the run-state the spine wrote, plus the run's execution logs, inside
