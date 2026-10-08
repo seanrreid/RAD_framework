@@ -1,1 +1,9 @@
 {"feature":"design-skill","type":"approved","actor":"sean@torchcodelab.com","role":"architect","ts":"2026-10-08T18:33:29.669Z","recordedBy":"sean@torchcodelab.com","data":{"fingerprint":"378d8b07a3204c080d9630a052d666c23576a7ddb598230e88a1e91b9d0cce6b"}}
+{"feature":"design-skill","type":"deliver-started","actor":"harness","ts":"2026-10-08T18:33:50.395Z"}
+{"feature":"design-skill","type":"run-prepared","actor":"harness","ts":"2026-10-08T18:33:57.484Z","data":{"base":"main","merged":false,"fastForwarded":false,"committed":true,"pushed":true}}
+{"feature":"design-skill","type":"wave-started","actor":"harness","ts":"2026-10-08T18:33:57.501Z","data":{"wave":1,"attempt":1}}
+{"feature":"design-skill","type":"wave-attempt","actor":"harness","ts":"2026-10-08T18:35:09.956Z","data":{"wave":1,"attempt":1,"outcome":"success","tasks":[{"title":"The rad-design skill","status":"done_with_concerns","commit":"126ca54","concern":"The new generate step is Step 7, so the old Steps 7 and 8 are renumbered 8 and 9 (content unchanged apart from the required Step 9 rewrite); the log file was created but not committed","error":"—"}]}}
+{"feature":"design-skill","type":"wave-complete","actor":"harness","ts":"2026-10-08T18:35:09.957Z","data":{"wave":1}}
+{"feature":"design-skill","type":"wave-started","actor":"harness","ts":"2026-10-08T18:35:09.959Z","data":{"wave":2,"attempt":1}}
+{"feature":"design-skill","type":"wave-attempt","actor":"harness","ts":"2026-10-08T18:36:34.655Z","data":{"wave":2,"attempt":1,"outcome":"success","tasks":[{"title":"Registry tests and docs","status":"done_with_concerns","commit":"6c5d13c","concern":"rad-design portability row also changed Body wrapper→as-is and added the openai.yaml note to match sibling rows (beyond AC wording)","error":"—"}]}}
+{"feature":"design-skill","type":"wave-complete","actor":"harness","ts":"2026-10-08T18:36:34.657Z","data":{"wave":2}}
