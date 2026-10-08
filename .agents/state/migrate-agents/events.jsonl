@@ -1,1 +1,13 @@
 {"feature":"migrate-agents","type":"approved","actor":"sean@torchcodelab.com","role":"architect","ts":"2026-10-08T19:08:42.652Z","recordedBy":"sean@torchcodelab.com","data":{"fingerprint":"b999784591ed7306f919ecb3fba450de4b549caf979536d100905ad8b9716102"}}
+{"feature":"migrate-agents","type":"deliver-started","actor":"harness","ts":"2026-10-08T19:09:03.979Z"}
+{"feature":"migrate-agents","type":"run-prepared","actor":"harness","ts":"2026-10-08T19:09:11.696Z","data":{"base":"main","merged":false,"fastForwarded":false,"committed":true,"pushed":true}}
+{"feature":"migrate-agents","type":"wave-started","actor":"harness","ts":"2026-10-08T19:09:11.713Z","data":{"wave":1,"attempt":1}}
+{"feature":"migrate-agents","type":"wave-attempt","actor":"harness","ts":"2026-10-08T19:10:24.516Z","data":{"wave":1,"attempt":1,"outcome":"success","tasks":[{"title":"Generate reads agents-internal","status":"complete","commit":"f780638","concern":"—","error":"—"}]}}
+{"feature":"migrate-agents","type":"wave-complete","actor":"harness","ts":"2026-10-08T19:10:24.521Z","data":{"wave":1}}
+{"feature":"migrate-agents","type":"wave-started","actor":"harness","ts":"2026-10-08T19:10:24.529Z","data":{"wave":2,"attempt":1}}
+{"feature":"migrate-agents","type":"wave-attempt","actor":"harness","ts":"2026-10-08T19:12:37.824Z","data":{"wave":2,"attempt":1,"outcome":"success","tasks":[{"title":"The manifest filters marked outputs by source","status":"complete","commit":"0da0394","concern":"—","error":"—"}]}}
+{"feature":"migrate-agents","type":"wave-complete","actor":"harness","ts":"2026-10-08T19:12:37.826Z","data":{"wave":2}}
+{"feature":"migrate-agents","type":"wave-started","actor":"harness","ts":"2026-10-08T19:12:37.830Z","data":{"wave":3,"attempt":1}}
+{"feature":"migrate-agents","type":"wave-attempt","actor":"harness","ts":"2026-10-08T19:13:33.284Z","data":{"wave":3,"attempt":1,"outcome":"fail-scope","tasks":[{"title":"Move and regenerate the 27 agents","status":"blocked_spec","commit":"—","concern":"—","error":"generate rejects all 27 moved sources — 21 have a single-value roles (needs a list), 6 have descriptions that fail YAML parsing; fixing them means changing content, which the plan forbids"}]}}
+{"feature":"migrate-agents","type":"wave-failed","actor":"harness","ts":"2026-10-08T19:13:33.287Z","data":{"wave":3,"action":"abort"}}
+{"feature":"migrate-agents","type":"deliver-stopped","actor":"harness","ts":"2026-10-08T19:13:33.291Z","data":{"class":"failed","reason":"fail-scope","decision":"wave 3: fail-scope — the work is wrong for the plan; fix the plan or the code and re-run","wave":3,"action":"abort","outcome":"fail-scope"}}
