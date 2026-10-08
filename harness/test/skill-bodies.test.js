@@ -12,7 +12,9 @@ import { GENERATED_MARKER } from '../generate.js';
 const REPO_ROOT = fileURLToPath(new URL('../../', import.meta.url));
 
 // Skills whose generated Codex bodies must be tool-neutral. Later parts extend this list.
-const TOOL_NEUTRAL_SKILLS = ['rad-plan', 'rad-adopt', 'rad-approve', 'rad-deliver'];
+const TOOL_NEUTRAL_SKILLS = [
+  'rad-plan', 'rad-adopt', 'rad-approve', 'rad-deliver', 'rad-research', 'rad-epic-decompose',
+];
 
 // Claude-only syntax, Claude tool names, and raw state-changing commands that
 // a tool-neutral body must route through the rad CLI instead.
@@ -27,7 +29,7 @@ const DELIVER_CALL = 'node harness/cli.js deliver';
 const CLAUDE_ARGS_TOKEN = '$ARGUMENTS';
 const IMPLICIT_INVOCATION_OFF = 'allow_implicit_invocation: false';
 
-// The rad CLI calls each tool-neutral Codex body must make. Every
+// The rad CLI calls (or artifact path) each tool-neutral Codex body must make. Every
 // TOOL_NEUTRAL_SKILLS entry needs one (guarded below).
 const REQUIRED_COMMANDS = {
   'rad-plan': [PLAN_OPEN_CALL],
@@ -38,17 +40,19 @@ const REQUIRED_COMMANDS = {
     'node harness/cli.js checkout',
   ],
   'rad-deliver': [DELIVER_CALL],
+  'rad-research': ['.agents/research/'],
+  'rad-epic-decompose': ['scripts/fetch-epic.sh', 'node harness/cli.js label'],
 };
 
 // Skills whose Codex openai.yaml must keep implicit invocation off.
-const EXPLICIT_ONLY_SKILLS = ['rad-approve', 'rad-deliver'];
+const EXPLICIT_ONLY_SKILLS = ['rad-approve', 'rad-deliver', 'rad-epic-decompose'];
 
 // The exit-3 resume contract the rad-deliver body must spell out.
 const RESUME_FLAGS = '--resume --context';
 const STOP_AND_ASK = /STOP and ask the user/;
 
 // Claude command role directory per skill; skills not listed are team commands.
-const CLAUDE_COMMAND_ROLE = { 'rad-approve': 'architect' };
+const CLAUDE_COMMAND_ROLE = { 'rad-approve': 'architect', 'rad-epic-decompose': 'architect' };
 const DEFAULT_COMMAND_ROLE = 'team';
 
 const codexBodyPath = (skill) => join('.agents', 'skills', skill, 'SKILL.md');

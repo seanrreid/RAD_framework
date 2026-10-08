@@ -77,8 +77,10 @@ What it does:
    and 3–5 recent `.agents/plans/*.md` (for plan shape only).
 4. **Composes the artifact** — a story section per child plus an epic-level rollup.
 5. **Writes** `.agents/epics/epic-[N]-[slug].md` with `Status: draft`.
-6. **Optionally mirrors issue labels** — only when `RAD_UPDATE_ISSUES=true`
-   (default OFF; best-effort, never fails the command).
+6. **Optionally mirrors issue labels** — only when `RAD_UPDATE_ISSUES=true`,
+   via `node harness/cli.js label [N] draft` (`rad label`) for the epic and,
+   if desired, each child (default OFF; best-effort — a non-zero exit is
+   reported and the command continues, never fails).
 7. **Prints a summary** of what was written and the next steps.
 
 ---
