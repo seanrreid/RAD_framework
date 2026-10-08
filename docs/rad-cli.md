@@ -636,6 +636,17 @@ Success records the audit-only `run-prepared` event.
   staged, or the run stops with `prepare-failed`.
 - A merge conflict aborts the merge, leaves the tree unchanged, and stops with
   `merge-conflict` (exit `3`) — see [Resuming a stopped run](#resuming-a-stopped-run).
+- **Partial work is stashed around the merge.** Only when a merge is needed and
+  the run root has tracked uncommitted changes (a resumed run's partial work),
+  prepare runs `git stash push -q -m "rad deliver: partial work before merging
+  origin/<default>"` (tracked files only — no `-u`), merges, then restores with
+  `git stash pop -q`; `run-prepared` gains `stashed: true`. A merge conflict or
+  other merge failure restores the stash before stopping as above. If the
+  restore itself conflicts, prepare runs `git reset -q --hard HEAD` (the work
+  is still in the stash) and stops with `merge-conflict`: `partial work
+  conflicts with origin/<default> in <paths>; it is kept in git stash
+  (stash@{0})`. Any other restore failure is `prepare-failed`, with the stash
+  kept. With no tracked changes, or no merge needed, nothing is stashed.
 - Failing to resolve the default branch exits `1` before the spine starts.
 
 Full contract: [Prepare phase](./rad-wave-contract.md#prepare-phase).
@@ -682,7 +693,8 @@ After the last wave, `rad deliver` runs the approval-during-run guard and
 `check-scope.sh`, then finishes in the run root:
 
 1. **beforePr** — sets the plan to `Status: complete` with `Completed-At:` (kept
-   on a rerun), commits the plan and the event log (`deliver(<f>): mark plan
+   on a rerun), commits the plan, the event log and the run's execution logs
+   (`.agents/logs/<f>-YYYY-MM-DD.md`, exact name match; `deliver(<f>): mark plan
    complete`), pushes (required in both modes; no `RAD_SYNC` gate), and labels
    the issue `review`. A failure stops with `finish-failed` (exit `1`) and the
    PR is not opened.
@@ -694,8 +706,8 @@ After the last wave, `rad deliver` runs the approval-during-run guard and
    counts as success: it prints `PR already open: <url>`, exits `0`, and creates
    nothing. A failing lookup exits non-zero and never falls through to create.
 3. **`pr-opened`** is appended — the feature is now `delivered`.
-4. **afterPr** — commits the event log (`deliver(<f>): record pr-opened`),
-   pushes, and labels `review`. Nothing is recorded after `pr-opened`, so a
+4. **afterPr** — commits the event log and the execution logs
+   (`deliver(<f>): record pr-opened`), pushes, and labels `review`. Nothing is recorded after `pr-opened`, so a
    failure here appends no event; the run exits `1` with the `finish-failed`
    decision line.
 
@@ -908,6 +920,21 @@ events are already committed there — then resume:
 ```bash
 node harness/cli.js deliver my-feature --resume --context "<what you did>"
 ```
+
+On a resumed run, prepare stashes the preserved partial work around the merge
+and restores it (see [Prepare phase](#prepare-phase)). If the restore conflicts,
+the stop's detail says the partial work is **kept in git stash**. To recover it,
+in the preserved worktree (or the main checkout in main mode):
+
+```bash
+git stash list            # find "rad deliver: partial work before merging origin/<default>"
+git stash pop             # re-apply it; resolve the conflicted paths
+git add <paths> && git commit
+node harness/cli.js deliver my-feature --resume --context "<what you did>"
+```
+
+A successful run's execution log is committed and pushed with the PR by the
+finish phase, so it reaches the default branch with the deliver PR.
 
 Eligibility is checked in this order, **before** any event is appended or any
 worktree is created. Every refusal prints `rad deliver: <reason>` and exits **2**:
