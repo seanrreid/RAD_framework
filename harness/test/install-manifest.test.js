@@ -12,7 +12,7 @@ import {
   backupStamp, installDrift, isSafeRelPath, planLayerInstall, planPresetInstall, applyPresetInstall, presetFilesRoot,
   PRESET_NEEDS_CORE_ERROR,
 } from '../install-manifest.js';
-import { GENERATED_MARKER, hasGeneratedMarker } from '../generated-marker.js';
+import { GENERATED_MARKER, generatedSource } from '../generated-marker.js';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const NOW = new Date('2026-10-05T12:34:56.789Z');
@@ -114,8 +114,9 @@ test('listCoreFiles — real repo ships scripts/lib/plan-paths.sh and no user da
   const SHIPPED_RAD = ['.rad/skills/', '.rad/agents/'];
   assert.ok(!files.some((p) => p.startsWith('.rad/') && !SHIPPED_RAD.some((d) => p.startsWith(d))), 'only .rad sources ship');
   for (const prefix of ['.agents/', '.claude/agents/', '.codex/agents/']) {
-    const unmarked = files.filter((p) => p.startsWith(prefix) && !hasGeneratedMarker(read(REPO_ROOT, p)));
-    assert.deepEqual(unmarked, [], `only marked files under ${prefix}`);
+    const unshipped = files.filter((p) => p.startsWith(prefix)
+      && !SHIPPED_RAD.some((d) => generatedSource(read(REPO_ROOT, p))?.startsWith(d)));
+    assert.deepEqual(unshipped, [], `only outputs of shipped sources under ${prefix}`);
   }
   assert.ok(!files.some((p) => /^\.claude\/settings.*\.json$/.test(p)));
 });
@@ -611,6 +612,33 @@ test('listCoreFiles — unmarked files under the new roots never ship (marker ou
       '.claude/agents/late.md', '.agents/plans/p.md']) {
       assert.ok(!files.includes(p), `${p} not shipped`);
     }
+  });
+});
+
+/** A marked output (markdown form) whose marker records `sourcePath`. */
+const markedFrom = (name, sourcePath) => `---\nname: ${name}\n---\n<!-- ${GENERATED_MARKER} (source: ${sourcePath}) -->\n`;
+/** A marked output (first-line form) whose marker records `sourcePath`. */
+const hashFrom = (name, sourcePath) => `# ${GENERATED_MARKER} (source: ${sourcePath})\nname = "${name}"\n`;
+
+test('listCoreFiles — a marked output ships only when its source lies under a shipped source tree', () => {
+  withRoots(({ source }) => {
+    const shipped = {
+      '.claude/agents/from-agents.md': markedFrom('from-agents', '.rad/agents/from-agents.md'),
+      '.agents/skills/from-skills/SKILL.md': markedFrom('from-skills', '.rad/skills/from-skills/SKILL.md'),
+      '.codex/agents/from-agents.toml': hashFrom('from-agents', '.rad/agents/from-agents.md'),
+    };
+    const internal = {
+      '.claude/agents/orchestrator.md': markedFrom('orchestrator', '.rad/agents-internal/orchestrator.md'),
+      '.codex/agents/orchestrator.toml': hashFrom('orchestrator', '.rad/agents-internal/orchestrator.md'),
+      '.claude/agents/bare-tree.md': markedFrom('bare-tree', '.rad/agents'),
+      '.claude/agents/elsewhere.md': markedFrom('elsewhere', 'docs/agents/elsewhere.md'),
+      '.claude/agents/no-source.md': `---\nname: no-source\n---\n<!-- ${GENERATED_MARKER} -->\n`,
+      '.codex/agents/no-source.toml': `# ${GENERATED_MARKER}\nname = "no-source"\n`,
+    };
+    writeTree(source, { ...shipped, ...internal });
+    const files = listCoreFiles(source);
+    for (const p of Object.keys(shipped)) assert.ok(files.includes(p), `${p} ships`);
+    for (const p of Object.keys(internal)) assert.ok(!files.includes(p), `${p} not shipped`);
   });
 });
 
