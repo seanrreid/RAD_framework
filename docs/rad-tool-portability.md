@@ -21,7 +21,7 @@ paths; part 2 migrated the read-only slice into `.rad/` sources. Rows marked
 | 1 | This doc; `harness/generate.js`; `rad generate [--check]`; CI `generated-drift`; `^\.codex/` and `^\.agents/skills/` self-protected | #171 |
 | 2 | Read-only slice migrated into `.rad/`: both reviewers, `quality-review`, `accessibility-review`, `rad-status`, a Codex-only `rad-review` (deterministic scripts plus reviewer sub-agents). Generated outputs and reviewers shipped through core, invariant added. Delivered | #171 |
 | 3 | `AGENTS.md` as the conventions source, `CLAUDE.md` importing it with `@AGENTS.md`; readers use `AGENTS.md` with a `CLAUDE.md` fallback; install scaffold and `lint-claude-md` cover both files (`config migrate` unchanged). Delivered | #171 |
-| Parity | State-changing workflow for Codex (plan, adopt, approve, deliver, design, research, epic-decompose, insights, kickoff/wrap); the deliver-gate hook shipping gap | #186 |
+| Parity | State-changing workflow for Codex (plan, adopt, approve, deliver, design, research, epic-decompose, insights, kickoff/wrap); the deliver-gate hook shipping gap. Plan, adopt, approve and deliver generated (deliver in part 3d: one shared skill that runs `rad deliver`) | #186 |
 
 ---
 
@@ -53,7 +53,7 @@ Columns:
 | rad-status | `.claude/commands/shared/rad-status.md` | `.agents/skills/rad-status/SKILL.md` | `.rad/skills/rad-status/SKILL.md` | as-is | none | no | generated (#171 part 2) |
 | rad-plan | `.claude/commands/team/rad-plan.md` | `.agents/skills/rad-plan/SKILL.md` | `.rad/skills/rad-plan/SKILL.md` | as-is | sub-agent (optional), `$ARGUMENTS` | yes | generated (#186 part 2c) |
 | rad-adopt | `.claude/commands/team/rad-adopt.md` | `.agents/skills/rad-adopt/SKILL.md` | `.rad/skills/rad-adopt/SKILL.md` | as-is | `$ARGUMENTS`, `gh` | yes | generated (#186 part 2c) |
-| rad-deliver | `.claude/commands/team/rad-deliver.md` | `.agents/skills/rad-deliver/SKILL.md` (+ `agents/openai.yaml`) | `.rad/skills/rad-deliver/SKILL.md` | wrapper | sub-agent, `$ARGUMENTS` | yes | planned: parity issue #186 |
+| rad-deliver | `.claude/commands/team/rad-deliver.md` | `.agents/skills/rad-deliver/SKILL.md` (+ `agents/openai.yaml`, `codex_implicit: false`) | `.rad/skills/rad-deliver/SKILL.md` | generated | rad CLI, `$ARGUMENTS` | yes | generated (#186 part 3d) |
 | rad-research | `.claude/commands/team/rad-research.md` | `.agents/skills/rad-research/SKILL.md` | `.rad/skills/rad-research/SKILL.md` | wrapper | sub-agent, `$ARGUMENTS` | artifact | planned: parity issue #186 |
 | rad-review | `.claude/commands/team/rad-review.md` (hand-written, not generated) | `.agents/skills/rad-review/SKILL.md` | `.rad/skills/rad-review/SKILL.md` (Codex-only, `claude: none`) | n/a (Codex only) | sub-agent, `$ARGUMENTS` | Claude: artifact (`.agents/findings.jsonl`); Codex: no | Codex generated (#171 part 2); Claude hand-written |
 | quality-review | `.claude/commands/team/quality-review.md` | `.agents/skills/quality-review/SKILL.md` | `.rad/skills/quality-review/SKILL.md` | wrapper | sub-agent, `$ARGUMENTS` | no | generated (#171 part 2) |
@@ -184,11 +184,14 @@ drift. The generator itself never creates or follows a symlink (lstat).
 
 ## Gate parity
 
-Claude's deliver gate has two layers: the harness approval check
-(`node harness/cli.js deliver` refuses without an `approved` event in
-`.agents/state/<feature>/events.jsonl`) and the `PreToolUse` hook
-`scripts/deliver-gate-hook.mjs`, which blocks an unapproved `/rad-deliver`
-Skill call.
+The deliver gate is the harness approval check for both tools:
+`node harness/cli.js deliver` refuses without an `approved` event in
+`.agents/state/<feature>/events.jsonl`. The shared `rad-deliver` skill
+(`.rad/skills/rad-deliver/SKILL.md`, generated as the Claude
+`/team:rad-deliver` command and the Codex `$rad-deliver` skill) only runs that
+command, so the same gate applies whichever tool invokes it. Claude adds an
+extra layer: the `PreToolUse` hook `scripts/deliver-gate-hook.mjs`, which
+blocks an unapproved `team:rad-deliver` Skill call before the skill runs.
 
 Codex hooks have the same shape as Claude's, but there is no matcher for
 skill calls, and Codex documents hooks as "a guardrail, not a complete
@@ -199,8 +202,9 @@ enforcement boundary". So:
 - The Codex deliver skill runs `node harness/cli.js deliver`, which checks
   approval itself, and sets `codex_implicit: false` so Codex never invokes
   it implicitly.
-- The missing hook layer is recorded as a guarded bypass in
-  `docs/invariants.yaml` when #186 lands.
+- The missing hook layer is recorded as the guarded bypass
+  `codex-no-skill-hook` under `unapproved-deliver-cannot-run` in
+  `docs/invariants.yaml` (#186 part 3d).
 
 ---
 

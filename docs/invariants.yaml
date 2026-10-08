@@ -19,6 +19,7 @@ invariants:
       - { file: scripts/check-approval-integrity.sh, symbol: "merge-base --is-ancestor", note: "CI: approval is an ancestor of the PR head" }
       - { file: scripts/deliver-gate-hook.mjs, symbol: "function block", note: "PreToolUse hook blocks an unapproved /rad-deliver (exit 2)" }
       - { file: .claude/settings.json, symbol: "deliver-gate-hook.mjs", note: "hook registration" }
+      - { file: .rad/skills/rad-deliver/SKILL.md, symbol: "node harness/cli.js deliver", note: "the shared rad-deliver skill (Claude command and Codex skill) only runs rad deliver, so the harness gate is the gate on both tools; the Claude hook is an extra layer" }
       - { file: harness/claude-settings.js, symbol: "export function mergeDeliverGateHook", note: "install merges the hook registration into an installed project's settings" }
       - { file: scripts/check-role.sh, symbol: "VALID_ROLES=" }
       - { file: scripts/detect-deliver-pr.sh, symbol: "readonly EXIT_NOT_DELIVER=3", note: "CI: deliver PRs detected by plan Branch: header, not branch prefix (#154)" }
@@ -34,6 +35,10 @@ invariants:
         surface: "RAD_BRANCH_PREFIX other than rad/"
         guarded: "yes"
         note: "CI detects deliver PRs by plan content (scripts/detect-deliver-pr.sh), independent of the branch prefix (#154)"
+      - id: codex-no-skill-hook
+        surface: "Codex $rad-deliver skill"
+        guarded: "yes"
+        note: "Codex has no skill-level PreToolUse hook; the skill only runs rad deliver, whose harness gate refuses an unapproved plan; codex_implicit: false keeps it user-invoked"
 
   - id: approval-invalidated-by-plan-change
     claim: "A deliver run stops when the approved plan has changed since approval, rather than executing an unapproved revision."
@@ -146,7 +151,7 @@ invariants:
       - { file: scripts/worktree-lifecycle.sh, symbol: "MARKER_NAME", note: "marks the isolated tree the run is rooted at" }
     bypasses:
       - { id: worktree-opt-out, surface: "RAD_WORKTREE=0", guarded: "no", note: "operator opt-out for environments where worktrees are impractical" }
-      - { id: skill-deliver-path, surface: "/rad-deliver skill (sub-agent path)", guarded: "no", note: "the skill runs wave sub-agents in the checkout it is invoked from; worktree isolation applies to the rad deliver CLI only" }
+      - { id: skill-deliver-path, surface: "/rad-deliver skill (Claude command and Codex skill)", guarded: "yes", note: "the skill no longer runs wave sub-agents itself; it only runs rad deliver, so the same worktree isolation (and the RAD_WORKTREE=0 opt-out above) applies (#186 part 3d)" }
 
   - id: resume-needs-decision-only
     claim: "A stopped deliver can be resumed only from a needs-decision stop; a failed stop cannot be resumed."
@@ -237,9 +242,9 @@ invariants:
       - { file: harness/adapters/agent/sdk.js, symbol: "allowedTools: [...allowedTools]", note: "the per-wave allow-list reaches the SDK query" }
     bypasses:
       - id: skill-path
-        surface: "the /rad-deliver skill path"
-        guarded: "no"
-        note: "runs Claude Code sub-agents with no capability restriction; only the harness deliver path enforces or refuses"
+        surface: "the /rad-deliver skill path (Claude command and Codex skill)"
+        guarded: "yes"
+        note: "the skill only runs rad deliver, so every wave goes through the configured agent adapter, which enforces the wave's Capabilities or refuses the run; it no longer dispatches unrestricted sub-agents (#186 part 3d)"
       - id: shell-subsumes
         surface: "a wave granted the shell class"
         guarded: "no"
