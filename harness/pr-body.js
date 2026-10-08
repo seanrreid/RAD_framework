@@ -14,6 +14,9 @@ export const MAX_COMMITS = 100;
 /** The `wave-attempt` outcome that marks a wave as passed (see harness/spine.js). */
 const SUCCESS_OUTCOME = 'success';
 const WAVE_EVENT_TYPES = new Set(['wave-attempt', 'wave-started']);
+/** The `wave-started` data.kind that marks rad deliver's end-of-run test wave. */
+const TEST_WAVE_KIND = 'tests';
+const TEST_WAVE_LABEL = ' (test wave)';
 /** parseWaveResult's default for an absent task field (harness/adapters/agent/contract.js). */
 const NO_VALUE = '—';
 const STATUS_ICONS = { complete: '✓', done_with_concerns: '⚠' };
@@ -91,6 +94,17 @@ function waveNumbers(history) {
   return [...waves].sort((a, b) => a - b);
 }
 
+/** Every wave number with a `wave-started` event whose data.kind is the test-wave kind. */
+function testWaveNumbers(history) {
+  const waves = new Set();
+  for (const event of history) {
+    const data = eventData(event);
+    if (event?.type !== 'wave-started' || !data || data.kind !== TEST_WAVE_KIND) continue;
+    if (Number.isInteger(data.wave)) waves.add(data.wave);
+  }
+  return waves;
+}
+
 /** The path a `## Tests to Write` item names, or null when unresolvable. */
 function itemPath(line) {
   if (!PATH_REFERENCE_RE.test(line)) return null;
@@ -136,8 +150,8 @@ function taskLine(task) {
   return `- ${icon} ${safeText(t.title)} — ${safeText(t.commit)}${suffix}`;
 }
 
-function waveBlock(wave, passing) {
-  const heading = `### Wave ${wave}`;
+function waveBlock(wave, passing, testWaves) {
+  const heading = `### Wave ${wave}${testWaves.has(wave) ? TEST_WAVE_LABEL : ''}`;
   if (!passing.has(wave)) return `${heading}\n- (no passing attempt recorded)`;
   const tasks = passing.get(wave);
   if (tasks === null || tasks.length === 0) return `${heading}\n- (no task details recorded)`;
@@ -148,7 +162,8 @@ function wavesSection(history) {
   const waves = waveNumbers(history);
   if (waves.length === 0) return '## Waves\n- (none recorded)';
   const passing = lastPassingTasks(history);
-  return ['## Waves', ...waves.map((w) => waveBlock(w, passing))].join(SECTION_SEPARATOR);
+  const testWaves = testWaveNumbers(history);
+  return ['## Waves', ...waves.map((w) => waveBlock(w, passing, testWaves))].join(SECTION_SEPARATOR);
 }
 
 function commitsSection(commits) {
