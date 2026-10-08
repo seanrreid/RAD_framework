@@ -34,7 +34,8 @@ Columns:
 - **Source**: the `.rad/` file that will own both outputs.
 - **Body**: `as-is` means one body serves both assistants (only `{{args}}`
   differs); `wrapper` means a per-assistant override body (`claude.md` /
-  `codex.md`) is needed.
+  `codex.md`) is needed; `n/a` means there is no shared body because the
+  source generates only one assistant's output.
 - **Deps**: external dependencies that do not port verbatim. `sub-agent` =
   dispatches a Claude sub-agent (Task/Agent tool); `$ARGUMENTS` = free-text
   args; `$1/$2` = positional args; `gh` = platform CLI; `MCP` = MCP tools.
@@ -53,7 +54,7 @@ Columns:
 | rad-status | `.claude/commands/shared/rad-status.md` | `.agents/skills/rad-status/SKILL.md` | `.rad/skills/rad-status/SKILL.md` | as-is | none | no | generated (#171 part 2) |
 | rad-plan | `.claude/commands/team/rad-plan.md` | `.agents/skills/rad-plan/SKILL.md` | `.rad/skills/rad-plan/SKILL.md` | as-is | sub-agent (optional), `$ARGUMENTS` | yes | generated (#186 part 2c) |
 | rad-adopt | `.claude/commands/team/rad-adopt.md` | `.agents/skills/rad-adopt/SKILL.md` | `.rad/skills/rad-adopt/SKILL.md` | as-is | `$ARGUMENTS`, `gh` | yes | generated (#186 part 2c) |
-| rad-deliver | `.claude/commands/team/rad-deliver.md` | `.agents/skills/rad-deliver/SKILL.md` (+ `agents/openai.yaml`, `codex_implicit: false`) | `.rad/skills/rad-deliver/SKILL.md` | generated | rad CLI, `$ARGUMENTS` | yes | generated (#186 part 3d) |
+| rad-deliver | `.claude/commands/team/rad-deliver.md` | `.agents/skills/rad-deliver/SKILL.md` (+ `agents/openai.yaml`, `codex_implicit: false`) | `.rad/skills/rad-deliver/SKILL.md` | as-is | rad CLI, `$ARGUMENTS` | yes | generated (#186 part 3d) |
 | rad-research | `.claude/commands/team/rad-research.md` | `.agents/skills/rad-research/SKILL.md` | `.rad/skills/rad-research/SKILL.md` | wrapper | sub-agent, `$ARGUMENTS` | artifact | planned: parity issue #186 |
 | rad-review | `.claude/commands/team/rad-review.md` (hand-written, not generated) | `.agents/skills/rad-review/SKILL.md` | `.rad/skills/rad-review/SKILL.md` (Codex-only, `claude: none`) | n/a (Codex only) | sub-agent, `$ARGUMENTS` | Claude: artifact (`.agents/findings.jsonl`); Codex: no | Codex generated (#171 part 2); Claude hand-written |
 | quality-review | `.claude/commands/team/quality-review.md` | `.agents/skills/quality-review/SKILL.md` | `.rad/skills/quality-review/SKILL.md` | wrapper | sub-agent, `$ARGUMENTS` | no | generated (#171 part 2) |
