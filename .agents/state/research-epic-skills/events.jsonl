@@ -1,1 +1,15 @@
 {"feature":"research-epic-skills","type":"approved","actor":"sean@torchcodelab.com","role":"architect","ts":"2026-10-08T17:33:51.500Z","recordedBy":"sean@torchcodelab.com","data":{"fingerprint":"38cf5e698385433eca0e6f0b56d76e956dca6681f22e8b0ad70ca7559d630ec1"}}
+{"feature":"research-epic-skills","type":"deliver-started","actor":"harness","ts":"2026-10-08T17:34:09.756Z"}
+{"feature":"research-epic-skills","type":"run-prepared","actor":"harness","ts":"2026-10-08T17:34:17.655Z","data":{"base":"main","merged":false,"fastForwarded":false,"committed":true,"pushed":true}}
+{"feature":"research-epic-skills","type":"wave-started","actor":"harness","ts":"2026-10-08T17:34:17.663Z","data":{"wave":1,"attempt":1}}
+{"feature":"research-epic-skills","type":"wave-attempt","actor":"harness","ts":"2026-10-08T17:35:31.622Z","data":{"wave":1,"attempt":1,"outcome":"success","tasks":[{"title":"The rad label command","status":"complete","commit":"0b4125d","concern":"—","error":"—"}]}}
+{"feature":"research-epic-skills","type":"wave-complete","actor":"harness","ts":"2026-10-08T17:35:31.624Z","data":{"wave":1}}
+{"feature":"research-epic-skills","type":"wave-started","actor":"harness","ts":"2026-10-08T17:35:31.626Z","data":{"wave":2,"attempt":1}}
+{"feature":"research-epic-skills","type":"wave-attempt","actor":"harness","ts":"2026-10-08T17:36:20.180Z","data":{"wave":2,"attempt":1,"outcome":"success","tasks":[{"title":"The rad-research skill","status":"done_with_concerns","commit":"fc53009","concern":"generate refuses to overwrite unmarked hand-written commands; had to git rm the old rad-research.md first — Wave 3 needs the same for rad-epic-decompose.md","error":"—"}]}}
+{"feature":"research-epic-skills","type":"wave-complete","actor":"harness","ts":"2026-10-08T17:36:20.181Z","data":{"wave":2}}
+{"feature":"research-epic-skills","type":"wave-started","actor":"harness","ts":"2026-10-08T17:36:20.185Z","data":{"wave":3,"attempt":1}}
+{"feature":"research-epic-skills","type":"wave-attempt","actor":"harness","ts":"2026-10-08T17:37:06.409Z","data":{"wave":3,"attempt":1,"outcome":"success","tasks":[{"title":"The rad-epic-decompose skill","status":"complete","commit":"e0f8989","concern":"—","error":"—"}]}}
+{"feature":"research-epic-skills","type":"wave-complete","actor":"harness","ts":"2026-10-08T17:37:06.416Z","data":{"wave":3}}
+{"feature":"research-epic-skills","type":"wave-started","actor":"harness","ts":"2026-10-08T17:37:06.418Z","data":{"wave":4,"attempt":1}}
+{"feature":"research-epic-skills","type":"wave-attempt","actor":"harness","ts":"2026-10-08T17:38:36.209Z","data":{"wave":4,"attempt":1,"outcome":"success","tasks":[{"title":"Registry tests and portability","status":"done_with_concerns","commit":"7d35053","concern":"Also updated the #186 Parity summary row in rad-tool-portability.md so it matches the updated rows (outside the task's listed edits)","error":"—"}]}}
+{"feature":"research-epic-skills","type":"wave-complete","actor":"harness","ts":"2026-10-08T17:38:36.211Z","data":{"wave":4}}
