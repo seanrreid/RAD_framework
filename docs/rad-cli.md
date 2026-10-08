@@ -581,7 +581,11 @@ rad deliver <feature> [--model <model-id>] [--resume --context <text>]
 Drives wave execution for an approved plan. Reads the plan file, constructs
 per-wave prompts, selects an **agent adapter** (see below), calls `deliverSpine`
 with the adapter's `runWave`, and streams wave output to stdout. The plan must be
-in `Status: approved` on its `rad/<feature>` branch tip.
+in `Status: approved` on its `rad/<feature>` branch tip. Every plan wave needs
+at least one `#### Task N.M: <title>` block (with `File:`/`What:`/`Validate:`
+lines); otherwise `rad deliver` refuses before any wave runs, printing
+`rad deliver: wave N has no tasks in the plan — ...` per task-less wave, and
+exits `2` (see [The wave prompt](./rad-wave-contract.md#the-wave-prompt)).
 
 #### Prepare phase
 
@@ -849,8 +853,23 @@ approved gate plus the between-wave approval and scope re-checks run unchanged.
 A `failed` stop is not resumable — fix the plan or code and plain re-run. Without
 `--resume`, the event sequence and prompts are byte-for-byte unchanged.
 
-For a `merge-conflict` stop, resolve the conflict on the work branch — in the
-preserved worktree in worktree mode, since a stop keeps it — commit, then resume:
+**Worktree mode (the default).** A stop keeps the worktree and commits ONLY the
+run's event log to the work branch, locally inside the preserved worktree, as
+`deliver(<feature>): record stopped run` (a pathspec commit: partial code and the
+untracked `.rad-worktree.json` marker stay out; nothing is pushed). The branch tip
+therefore carries the `deliver-stopped` that `--resume` reads. If that commit
+fails, `rad deliver` prints `could not commit the stopped run's events — <reason>`,
+still preserves the worktree, and exits with the stop's code. On `--resume`, after
+the approved gate, if exactly one worktree holds the work branch and its marker
+names this feature with status `preserved`, `rad deliver` reactivates it (status
+→ `active`), prints `rad deliver: resuming in the preserved worktree <dir>`, and
+runs there — keeping its uncommitted partial work. Any other holder is refused as
+`already checked out in another worktree` (exit 2); with nothing holding the
+branch a worktree is created as usual. Without `--resume` this is unchanged.
+
+For a `merge-conflict` stop, resolve the conflict and commit it in the preserved
+worktree (in main mode, on the work branch in the main checkout) — the run's
+events are already committed there — then resume:
 
 ```bash
 node harness/cli.js deliver my-feature --resume --context "<what you did>"
@@ -873,7 +892,7 @@ worktree is created. Every refusal prints `rad deliver: <reason>` and exits **2*
 
 History is read from the same source the approved gate reads: the feature's log
 in the main checkout, or `git show <branch>:.agents/state/<feature>/events.jsonl`
-when `RAD_WORKTREE` is set. `rad stop-status <feature>` shows whether a run is
+in worktree mode (the default). `rad stop-status <feature>` shows whether a run is
 resumable. See [`rad-wave-contract.md`](./rad-wave-contract.md#resuming-a-stopped-run)
 for the prompt block and cap interaction.
 
@@ -951,7 +970,10 @@ complete/preserve** lifecycle:
    doom-loop, post-check, token-budget) or throws, the worktree is **kept** and
    its marker is rewritten to `status: "preserved"` so you can inspect the
    isolated tree. The structured failure line surfaces its path as
-   `worktree=<dir>`.
+   `worktree=<dir>`. Before preserving, a run that did not complete commits
+   only its event log to the work branch, locally, as `deliver(<feature>):
+   record stopped run`, so a later `--resume` sees the stop at the branch tip
+   (see [Resuming a stopped run](#resuming-a-stopped-run)).
 
    **Exception:** an afterPr failure in the [finish phase](#finish-phase) comes
    after `pr-opened`, so the run is delivered and the worktree is torn down as
@@ -992,6 +1014,10 @@ that is already checked out elsewhere, so before creating the worktree
   stash your changes, then `git checkout <default>`). Nothing is stashed or
   discarded for you.
 - **another worktree** — exit 2; find it with `git worktree list`.
+  **Exception:** with `--resume`, when that worktree is the only holder and its
+  `.rad-worktree.json` marker names this feature with status `preserved`, it is
+  reactivated and reused instead (see
+  [Resuming a stopped run](#resuming-a-stopped-run)).
 
 If `git worktree add` itself fails, the run fails (exit 1, `worktree create
 failed`) — it never falls back to the main checkout. A preserved tree (failure or

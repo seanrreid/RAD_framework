@@ -34,7 +34,7 @@ import { spawnSync, execFileSync } from 'node:child_process';
 import { createGitStateStore, defaultSh } from './adapters/git-state-store.js';
 import { evaluateGate } from './gates.js';
 import { planFingerprint } from './plan-fingerprint.js';
-import { makeWorktreeLifecycle } from './adapters/worktree.js';
+import { makeWorktreeLifecycle, STATUS_PRESERVED } from './adapters/worktree.js';
 import { deliverSpine } from './spine.js';
 import { createHookRunner } from './hook-runner.js';
 import { createCommandAdapter, probeCommand, runCommandPrompt } from './adapters/agent/command.js';
@@ -45,7 +45,7 @@ import { classifyStop, STOP_CLASSES } from './stops.js';
 import {
   deliverCompleted, latestStop, dormantStop, fileDeficitSignals, forecastForPaths, DEFICITS, phaseOf,
 } from './events.js';
-import { taskFilesFromPlanText, mergeTaskFiles, taskFilesByWave } from './plan-tasks.js';
+import { taskFilesFromPlanText, mergeTaskFiles, taskFilesByWave, taskBlocksByWave } from './plan-tasks.js';
 import { parseCapabilityLine, resolveWaveCapabilities, sdkAllowedTools, commandRefusal } from './capabilities.js';
 import { gatherDigestInputs, buildDigest, renderDigest, readScope } from './digest.js';
 import { buildPrBody, testsToWritePaths } from './pr-body.js';
@@ -701,6 +701,7 @@ function parseUnpromisedTests(text, testsByWave) {
  * @returns {{ branch: string, acceptanceCriteria: string[], waveModels: Record<number, string>, waveVerify: Record<number, string>,
  *   planCapabilities: string[]|undefined, waveCapabilities: Record<number, string[]>, capabilityErrors: string[],
  *   waveNumbers: number[], testsByWave: Record<number, string[]>, unpromisedTests: string[],
+ *   waveTasks: Record<number, { type: string, tasks: object[] }>,
  *   executionNotes: { doNotTouch: string[], keyFiles: string[], reminders: string[] } }}
  */
 export function parsePlanCtx(text) {
@@ -747,6 +748,9 @@ export function parsePlanCtx(text) {
     waveVerify: parseWaveVerify(text),
     testsByWave,
     unpromisedTests: parseUnpromisedTests(text, testsByWave),
+    // Per-wave `#### Task N.M:` blocks (taskBlocksByWave), handed to runWave
+    // so each wave's prompt carries its tasks.
+    waveTasks: Object.fromEntries(taskBlocksByWave(text)),
     ...parseCapabilities(text),
     executionNotes: { doNotTouch, keyFiles, reminders },
   };
@@ -843,18 +847,36 @@ function readBranchTipHistory({ feature, branch, repoRoot, sh, parse = parseEven
 
 /**
  * Read + parse the plan doc under `root` into planCtx. Writes the operator
- * message and returns null when the doc is absent.
+ * message and returns `{ code: 1 }` when the doc is absent, or
+ * `{ code: USAGE_EXIT_CODE }` when any plan wave has no task blocks.
  */
 function loadPlanCtx(root, feature) {
   const planFile = join(root, '.agents', 'plans', `${feature}.md`);
   if (!existsSync(planFile)) {
     process.stderr.write(`rad deliver: no plan doc at .agents/plans/${feature}.md\n`);
-    return null;
+    return { code: 1 };
   }
   const planCtx = parsePlanCtx(readFileSync(planFile, 'utf8'));
+  const taskless = tasklessWaves(planCtx);
+  if (taskless.length > 0) {
+    for (const n of taskless) process.stderr.write(`${taskRefusalMessage(n)}\n`);
+    return { code: USAGE_EXIT_CODE };
+  }
   planCtx.feature = feature;
   planCtx.executionLog = `.agents/logs/${feature}-${new Date().toISOString().slice(0, 10)}.md`;
   return planCtx;
+}
+
+/** The refusal line for a plan wave that declares no task blocks (one line per wave). */
+const taskRefusalMessage = (n) =>
+  `rad deliver: wave ${n} has no tasks in the plan — each wave needs '#### Task N.M: <title>' blocks with File:/What:/Validate: lines`;
+
+/**
+ * Plan wave numbers whose waveTasks entry is missing or has no tasks. Fail
+ * closed: such a wave would otherwise be sent to the agent with an empty Tasks block.
+ */
+function tasklessWaves({ waveNumbers, waveTasks }) {
+  return waveNumbers.filter((n) => !(waveTasks[n]?.tasks?.length > 0));
 }
 
 /**
@@ -1063,7 +1085,7 @@ async function buildRunWave(agent, { model, root, planCtx }) {
  */
 async function setupMainRun({ ctx, feature, model, selection, repoRoot, sh }) {
   const planCtx = loadPlanCtx(repoRoot, feature);
-  if (!planCtx) return { code: 1 };
+  if (planCtx.code !== undefined) return planCtx;
   const state = createGitStateStore({ repoRoot, sh });
   // Gate check: approved status must be established before any wave execution.
   const g = await state.gate(feature, APPROVED_GATE);
@@ -1164,16 +1186,59 @@ function ensureBranchFree({ workBranch, repoRoot, sh }) {
 }
 
 /**
+ * On --resume: the one worktree holding the work branch, when its marker says
+ * it is THIS feature's preserved worktree; otherwise null (the caller then
+ * refuses exactly as without --resume). Exact match only — fail closed: no
+ * holder, two holders, no marker, an active marker, another feature's marker,
+ * or a malformed marker are all "not reusable".
+ *
+ * @returns {string|null} the reusable worktree dir
+ */
+function findReusableWorktree({ feature, workBranch, repoRoot, sh, worktree }) {
+  const holders = worktreesOnBranch(mainGit(sh, repoRoot, ['worktree', 'list', '--porcelain']), workBranch);
+  if (holders.length !== 1) return null;
+  const [holder] = holders;
+  let marker;
+  try {
+    marker = worktree.readMarker(holder);
+  } catch (err) {
+    const safe = sanitizeErrorMessage(err?.message ?? String(err));
+    process.stderr.write(`rad deliver: cannot reuse the worktree at ${holder} — ${safe}\n`);
+    return null;
+  }
+  const reusable = marker !== null && marker.feature === feature && marker.status === STATUS_PRESERVED;
+  return reusable ? holder : null;
+}
+
+/**
+ * Reactivate a preserved worktree as this run's root. The returned lifecycle
+ * port pins preserve/complete to that dir, so teardown targets the reused
+ * worktree rather than the script's default location.
+ */
+function reuseWorktree({ dir, worktree, workBranch }) {
+  worktree.reactivate(dir);
+  process.stderr.write(`rad deliver: resuming in the preserved worktree ${dir}\n`);
+  const pinned = {
+    ...worktree,
+    preserve: (feature) => worktree.preserve(feature, dir),
+    complete: (feature) => worktree.complete(feature, dir),
+  };
+  return { root: dir, worktree: pinned, workBranch };
+}
+
+/**
  * Gate on the work-branch tip, then create the worktree on that branch. Under
  * Lane B the plan and its approval events exist ONLY on the work branch, so the
  * gate reads the branch tip (never the main checkout) and fails BEFORE any
  * worktree is created. `git worktree add` cannot check out a branch held
  * elsewhere, so ensureBranchFree resolves that first; a create failure is
- * exit 1 and never falls back to the main checkout.
+ * exit 1 and never falls back to the main checkout. On --resume, this
+ * feature's preserved worktree holding the branch is reused instead.
+ * A reuse failure (reactivate throws) is reported like a create failure.
  *
  * @returns {{ root: string, worktree: object, workBranch: string } | { code: number }}
  */
-function prepareWorktreeRoot({ feature, repoRoot, sh }) {
+function prepareWorktreeRoot({ feature, repoRoot, sh, resume = null }) {
   const workBranch = conventionWorkBranch(feature);
   const g = branchTipApprovedGate({ feature, branch: workBranch, repoRoot, sh });
   if (!g.passed) {
@@ -1187,6 +1252,10 @@ function prepareWorktreeRoot({ feature, repoRoot, sh }) {
     now: () => new Date().toISOString(),
   });
   try {
+    const reusable = resume
+      ? findReusableWorktree({ feature, workBranch, repoRoot, sh, worktree })
+      : null;
+    if (reusable) return reuseWorktree({ dir: reusable, worktree, workBranch });
     const blocked = ensureBranchFree({ workBranch, repoRoot, sh });
     if (blocked) return blocked;
     return { root: worktree.create(feature, workBranch), worktree, workBranch };
@@ -1235,13 +1304,41 @@ function commitRunEvents({ sh, root, feature }) {
   mainGit(sh, root, ['commit', '-m', `deliver(${feature}): record deliver run events`]);
 }
 
+/** Commit subject for the stopped run's event log (so a later --resume is eligible). */
+const STOP_COMMIT_SUBJECT = (feature) => `deliver(${feature}): record stopped run`;
+
+/**
+ * On a stop, commit ONLY the feature's events.jsonl to the work branch (the
+ * pathspec keeps partial code and the untracked marker out). No push. Nothing
+ * staged → no commit. A git failure is reported, never thrown: the stop's exit
+ * code and the preserve still stand.
+ */
+function commitStopEvents({ sh, root, feature }) {
+  const eventsPath = `.agents/state/${feature}/events.jsonl`;
+  try {
+    mainGit(sh, root, ['add', '--', eventsPath]);
+    const staged = sh('git', ['diff', '--cached', '--quiet', '--', eventsPath], { cwd: root });
+    if (staged.status === 0) return;
+    if (staged.status !== GIT_DIFF_HAS_CHANGES) {
+      const detail = String(staged.stderr || staged.stdout || 'no output').trim();
+      throw new Error(`git diff --cached --quiet exited ${staged.status}: ${detail}`);
+    }
+    mainGit(sh, root, ['commit', '-m', STOP_COMMIT_SUBJECT(feature), '--', eventsPath]);
+  } catch (err) {
+    const safe = sanitizeErrorMessage(err?.message ?? String(err));
+    process.stderr.write(`rad deliver: could not commit the stopped run's events — ${safe}\n`);
+  }
+}
+
 /**
  * Tear down on evidenced success (after committing the run events), else
- * preserve. A commit failure preserves the worktree — never a forced remove.
+ * commit the stop's events and preserve. A commit failure preserves the
+ * worktree — never a forced remove.
  * @returns {number|null} an exit code to return, or null to continue
  */
 function finishWorktree({ worktree, completed, sh, root, feature }) {
   if (!completed) {
+    commitStopEvents({ sh, root, feature });
     worktree.preserve(feature);
     writePreservedPointer(feature, root);
     return null;
@@ -1264,15 +1361,16 @@ function finishWorktree({ worktree, completed, sh, root, feature }) {
  * worktree, so events are read and written on the work branch and the main
  * checkout is never modified. A failure after create preserves the worktree.
  */
-async function setupWorktreeRun({ ctx, feature, model, selection, repoRoot, sh }) {
+async function setupWorktreeRun({ ctx, feature, model, selection, repoRoot, sh, resume = null }) {
   const agent = resolveAgent(ctx, selection);
   if (agent.code !== undefined) return agent;
-  const prepared = prepareWorktreeRoot({ feature, repoRoot, sh });
+  const prepared = prepareWorktreeRoot({ feature, repoRoot, sh, resume });
   if (prepared.code !== undefined) return prepared;
   const { root, worktree, workBranch } = prepared;
   const planCtx = loadPlanCtx(root, feature);
   // A capability refusal after create preserves the worktree, like a preflight failure.
-  const refused = planCtx ? await checkCapabilities({ planCtx, root, agent }) : { code: 1 };
+  // A missing plan doc (exit 1) or task-less wave (exit 2) preserves it too.
+  const refused = planCtx.code !== undefined ? planCtx : await checkCapabilities({ planCtx, root, agent });
   const built = refused ?? await buildRunWave(agent, { model, root, planCtx });
   if (built.code !== undefined) {
     preserveAfterSetupFailure(worktree, feature, root);
@@ -1858,7 +1956,7 @@ export async function deliverCommand(argv, ctx) {
   // script itself, so we just let it flow through the environment.
   const setupOpts = { ctx, feature, model, selection, repoRoot, sh };
   const setup = worktreeEnabled()
-    ? await setupWorktreeRun(setupOpts)
+    ? await setupWorktreeRun({ ...setupOpts, resume })
     : await setupMainRun(setupOpts);
   if (setup.code !== undefined) return setup.code;
   const { root, planCtx, state, runWave, worktree } = setup;
@@ -1908,6 +2006,9 @@ export async function deliverCommand(argv, ctx) {
       // Empty for a plan that declares none, which leaves the spine's behavior
       // and its event sequence unchanged.
       waveVerify: planCtx.waveVerify,
+      // Per-wave { type, tasks } from the plan's task blocks; the spine folds
+      // them onto each wave it hands runWave, so every prompt lists its tasks.
+      waveTasks: planCtx.waveTasks,
       // Per-wave promised test files (parseTestsByWave): the presence gate after
       // wave k checks only waves <= k's promises; {} skips the gate entirely.
       testsByWave: planCtx.testsByWave,

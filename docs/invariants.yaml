@@ -160,6 +160,7 @@ invariants:
     enforced_by:
       - { file: harness/cli.js, symbol: "resolveResume" }
       - { file: harness/cli.js, symbol: "cannot resume a failed stop" }
+      - { file: harness/cli.js, symbol: "commitStopEvents", note: "a worktree-mode stop commits its event log so --resume sees it at the branch tip" }
       - { file: harness/stops.js, symbol: "STOP_CLASSES" }
     bypasses: []
 

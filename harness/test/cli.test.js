@@ -21,6 +21,7 @@ import { planFingerprint } from '../plan-fingerprint.js';
 import { buildInitConfig, serializeConfig, AGENT_PRESETS } from '../config.js';
 import { selectAgent, NO_AGENT_CONFIGURED } from '../agent-select.js';
 import { createGitStateStore, defaultSh } from '../adapters/git-state-store.js';
+import { buildWavePrompt } from '../adapters/agent/contract.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CLI = join(HERE, '..', 'cli.js');
@@ -533,10 +534,14 @@ function twoWavePlanText(extra = '') {
     '',
     '### Wave 1',
     '',
+    '#### Task 1.1: Task A',
+    'Validate: task A passes',
     '- [ ] Task A',
     '',
     '### Wave 2',
     '',
+    '#### Task 2.1: Task B',
+    'Validate: task B passes',
     '- [ ] Task B',
     extra,
   ].join('\n');
@@ -1147,6 +1152,31 @@ test('deliver --resume AC#4 — worktree mode: a failed stop on the branch tip i
     });
     assert.equal(code, 2, `expected exit 2; stderr:\n${stderr}`);
     assert.match(stderr, /cannot resume a failed stop \(abort-scope\): fix the scope/);
+  });
+});
+
+test('deliver --resume AC#4 — worktree mode: a needs-decision stop on the branch tip is eligible and reaches setup', async () => {
+  await withTempRepo(async (repoRoot) => {
+    seedApprovedTwoWavePlan(repoRoot);
+    const stopped = {
+      feature: DELIVER_FEATURE, type: 'deliver-stopped', actor: 'harness', ts: '2026-09-29T00:00:00.000Z',
+      data: { class: 'needs-decision', reason: 'failed-attempt-cap', decision: 'raise the cap', wave: 1 },
+    };
+    const tipLog = [approvedEvent(DELIVER_FEATURE), stopped].map((e) => JSON.stringify(e)).join('\n') + '\n';
+    const seen = [];
+    const { stderr } = await runDeliverCaptured({
+      repoRoot,
+      env: { RAD_WORKTREE: '1' },
+      args: ['--resume', '--context', 'go'],
+      sh: branchTipSh(tipLog, seen),
+      runWave: async () => ({ outcome: 'success' }),
+    });
+    assert.doesNotMatch(stderr, /nothing to resume|cannot resume|cannot read the event log/);
+    assert.ok(
+      seen.some((c) => c[0] === 'git' && c[1] === 'worktree' && c[2] === 'list'),
+      `setup inspected the worktrees holding the branch; stderr:\n${stderr}`,
+    );
+    assert.ok(seen.some((c) => String(c[0]).endsWith('worktree-lifecycle.sh') && c[1] === 'create'), 'nothing holds the branch → create as today');
   });
 });
 
@@ -2131,8 +2161,8 @@ function capabilityPlanText({ header, wave1, wave2 } = {}) {
   return [
     `# ${DELIVER_FEATURE}`, '', 'Status: approved', `Branch: rad/${DELIVER_FEATURE}`, ...line(header), '',
     '## Waves', '',
-    '### Wave 1', ...line(wave1), '', '#### Task 1.1', '- [ ] Task A', '',
-    '### Wave 2', ...line(wave2), '', '- [ ] Task B', '',
+    '### Wave 1', ...line(wave1), '', '#### Task 1.1: Task A', '- [ ] Task A', '',
+    '### Wave 2', ...line(wave2), '', '#### Task 2.1: Task B', '- [ ] Task B', '',
   ].join('\n');
 }
 
@@ -3675,5 +3705,91 @@ test('deliver test wave — a plan-level Capabilities: line also constrains the 
     const testStart = startedWaves(logFile).find((d) => d.kind === 'tests');
     assert.deepEqual(testStart.capabilities, startedWaves(logFile).find((d) => d.wave === 1).capabilities);
     assert.ok(Array.isArray(testStart.capabilities), 'the test wave records its effective capabilities');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// rad deliver — per-wave task blocks reach runWave (#213). A plan wave with no
+// `#### Task N.M:` block is refused up front (exit 2) rather than sent empty.
+// ---------------------------------------------------------------------------
+
+/** A two-wave plan whose tasks carry File:/What:/Validate: lines; `wave2Tasks` false drops wave 2's. */
+function taskedTwoWavePlanText({ wave2Tasks = true } = {}) {
+  return [
+    `# ${DELIVER_FEATURE}`, '', 'Status: approved', `Branch: rad/${DELIVER_FEATURE}`, '',
+    '## Waves', '',
+    '### Wave 1 — Parallel', '',
+    '#### Task 1.1: Parse the widget', 'File: src/widget.js:10-20', 'What: Parse it.',
+    'Validate: widget parser rejects empty input', '',
+    '### Wave 2', '',
+    ...(wave2Tasks ? ['#### Task 2.1: Wire the widget', 'File: src/cli.js', 'Validate: cli wires it'] : ['- [ ] loose prose']),
+    '',
+  ].join('\n');
+}
+
+const TASKLESS_WAVE_2 = "rad deliver: wave 2 has no tasks in the plan — each wave needs '#### Task N.M: <title>' blocks with File:/What:/Validate: lines";
+
+test('parsePlanCtx — waveTasks maps each wave to its type and task blocks', () => {
+  const { waveTasks } = parsePlanCtx(taskedTwoWavePlanText());
+  assert.deepEqual(waveTasks[1], {
+    type: 'parallel',
+    tasks: [{ title: 'Parse the widget', files: ['src/widget.js'], what: 'Parse it.', validate: 'widget parser rejects empty input' }],
+  });
+  assert.equal(waveTasks[2].type, 'sequential');
+  assert.deepEqual(waveTasks[2].tasks.map((t) => t.title), ['Wire the widget']);
+});
+
+test('parsePlanCtx — waveTasks: a task-less wave maps to empty tasks; no waves → {}', () => {
+  assert.deepEqual(parsePlanCtx(taskedTwoWavePlanText({ wave2Tasks: false })).waveTasks[2], { type: 'sequential', tasks: [] });
+  assert.deepEqual(parsePlanCtx('# no waves\n').waveTasks, {});
+});
+
+test('deliver #213 — a task-less plan wave → exit 2 naming the wave, no runWave call, no events', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const { logFile } = seedApprovedTwoWavePlan(repoRoot, taskedTwoWavePlanText({ wave2Tasks: false }));
+    let calls = 0;
+    const { code, stderr } = await runDeliverCaptured({ repoRoot, runWave: async () => { calls += 1; return { outcome: 'success' }; } });
+    assert.equal(code, 2, `expected exit 2; stderr:\n${stderr}`);
+    assert.ok(stderr.includes(TASKLESS_WAVE_2), stderr);
+    assert.doesNotMatch(stderr, /wave 1 has no tasks/, 'only the task-less wave is named');
+    assert.equal(calls, 0, 'no wave runs');
+    assert.deepEqual(readLog(logFile).map((e) => e.type), ['approved'], 'nothing appended');
+  });
+});
+
+test('deliver #213 — every wave task-less → one refusal line per wave', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const text = taskedTwoWavePlanText({ wave2Tasks: false }).replace(/#### Task 1\.1: .*\n/, '');
+    seedApprovedTwoWavePlan(repoRoot, text);
+    const { code, stderr } = await runDeliverCaptured({ repoRoot, runWave: async () => ({ outcome: 'success' }) });
+    assert.equal(code, 2);
+    assert.equal(stderr.split('\n').filter((l) => /^rad deliver: wave \d+ has no tasks/.test(l)).length, 2, stderr);
+  });
+});
+
+test('deliver #213 — a missing plan doc still exits 1', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const { code, stderr } = await runDeliverCaptured({ repoRoot, runWave: async () => ({ outcome: 'success' }) });
+    assert.equal(code, 1, `expected exit 1; stderr:\n${stderr}`);
+    assert.match(stderr, /no plan doc at \.agents\/plans\//);
+  });
+});
+
+test('deliver #213 — runWave receives waves carrying their tasks; the built prompt lists title and Validate', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const text = taskedTwoWavePlanText();
+    seedApprovedTwoWavePlan(repoRoot, text);
+    const received = [];
+    const { code, stderr } = await runDeliverCaptured({
+      repoRoot,
+      runWave: async (wave) => { received.push(wave); return { outcome: 'success' }; },
+    });
+    assert.equal(code, 0, `expected exit 0; stderr:\n${stderr}`);
+    assert.deepEqual(received.map((w) => w.tasks.length), [1, 1]);
+    assert.equal(received[0].type, 'parallel');
+    const prompt = buildWavePrompt(received[0], { ...parsePlanCtx(text), feature: DELIVER_FEATURE });
+    assert.ok(prompt.includes('### Task 1.1: Parse the widget'), prompt);
+    assert.ok(prompt.includes('Validate: widget parser rejects empty input'), prompt);
+    assert.ok(prompt.includes('File: src/widget.js'), prompt);
   });
 });
