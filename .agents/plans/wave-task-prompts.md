@@ -1,7 +1,8 @@
 # Plan: Put Each Wave's Tasks in Its Prompt (#213)
 Created: 2026-10-08
 Author: architect
-Status: approved
+Status: complete
+Completed-At: 2026-10-08T16:21:40Z
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-10-08T16:14:50.246Z
 Recorded-By: sean@torchcodelab.com
