@@ -251,6 +251,34 @@ checkout script failed or the plan is missing; 2 refused before any git call.
 
 ---
 
+### rad label
+
+```
+rad label <issue> <status>
+```
+
+Mirrors a RAD status onto a GitHub issue as its single `rad:<status>` label.
+It wraps `scripts/rad-label.sh` and adds no gh logic of its own: it runs
+`scripts/rad-label.sh <N> <status>` from the repo root, prints the script's
+output and exits with its status. Like the script, which plan-open, approve and
+deliver already call, it runs no role check. Skills use it for their optional
+issue-label step (for example `/rad-epic-decompose` Step 6).
+
+**Arguments:** `<issue>` is a positive integer; `#N` is accepted. `<status>` is
+one of `draft`, `ready`, `pending-review`, `needs-revision`, `rejected`,
+`approved`, `in-progress`, `review`, `done`. `--help` / `-h` prints the usage
+line and exits 0.
+
+**Refusals (exit 2, before any script call):** a bad issue number, an unknown
+status, or not exactly two arguments. Each prints `rad label: <reason>` and the
+usage line.
+
+**Exit codes:** 0 the script succeeded (it no-ops with exit 0 when `gh` is
+missing or unauthenticated); 1 the script failed, its output passed through;
+2 refused before any script call.
+
+---
+
 ### rad gate
 
 ```

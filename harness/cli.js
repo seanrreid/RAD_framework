@@ -69,6 +69,7 @@ import { publishPlanChange, requirePublishReady } from './branch-publish.js';
 import { planOpenCommand, PLAN_OPEN_USAGE } from './plan-open.js';
 import { planStatusCommand, PLAN_STATUS_USAGE } from './plan-status.js';
 import { checkoutCommand, CHECKOUT_USAGE } from './checkout.js';
+import { labelCommand, LABEL_USAGE } from './label.js';
 import { makePreparePort } from './deliver-prepare.js';
 import { makeFinishPort } from './deliver-finish.js';
 
@@ -217,6 +218,11 @@ const SUBCOMMANDS = {
     summary: "Check out a plan's work branch at its remote tip.",
     usage: CHECKOUT_USAGE,
     run: (argv, ctx) => checkoutCommand(argv, ctx),
+  },
+  label: {
+    summary: "Mirror a RAD status onto an issue as its rad:<status> label (wraps scripts/rad-label.sh).",
+    usage: LABEL_USAGE,
+    run: (argv, ctx) => labelCommand(argv, ctx),
   },
   'plan-fingerprint': {
     summary: 'Print the SHA-256 fingerprint of a plan doc body (read-only).',
