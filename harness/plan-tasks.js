@@ -15,6 +15,8 @@ export const LINE_SUFFIX = /:[+0-9,-]+$/;
 const PATH_SEPARATOR = /[,;]|\s\+\s/;
 // A token is kept only if it looks like a path (has a `.` or `/`).
 const PATH_LIKE = /[./]/;
+// A wave heading opens a wave scope, e.g. `### Wave 2 — Wiring`.
+export const WAVE_HEADER = /^### Wave\s+(\d+)/;
 
 /** "File: a.js:10-20; b.md (throughout)" -> ["a.js", "b.md"]; drops prose. */
 export function parseFileLine(line) {
@@ -51,4 +53,35 @@ export function taskFilesFromPlanText(text) {
     }
   }
   return taskFiles;
+}
+
+/**
+ * Wave number -> deduped File: paths of the tasks under each `### Wave N`
+ * heading. Same per-task rule as taskFilesFromPlanText (first File: line only;
+ * any other `#` line ends the task). Tasks before the first wave heading are
+ * ignored; a wave whose tasks declare no File: line maps to []. Fails closed:
+ * non-string input throws TypeError rather than yielding an empty (vacuous) map.
+ */
+export function taskFilesByWave(text) {
+  if (typeof text !== 'string') {
+    throw new TypeError(`taskFilesByWave: expected plan text string, got ${text === null ? 'null' : typeof text}`);
+  }
+  const byWave = new Map();
+  let wave = null;
+  let inTask = false;
+  for (const line of text.split('\n')) {
+    const waveHeader = line.match(WAVE_HEADER);
+    if (waveHeader) { wave = Number(waveHeader[1]); inTask = false; continue; }
+    if (TASK_HEADER.test(line)) {
+      inTask = wave !== null;
+      if (inTask && !byWave.has(wave)) byWave.set(wave, []);
+      continue;
+    }
+    if (line.startsWith('#')) { inTask = false; continue; }
+    if (inTask && line.startsWith('File:')) {
+      byWave.set(wave, [...new Set([...byWave.get(wave), ...parseFileLine(line)])]);
+      inTask = false;
+    }
+  }
+  return byWave;
 }
