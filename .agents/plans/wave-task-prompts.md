@@ -65,6 +65,9 @@ The user decided on 2026-10-08:
    - docs/rad-wave-contract.md "The wave prompt" (~245-259): the tasks come from the plan's `#### Task` blocks, and a task-less wave is refused.
    - docs/rad-cli.md `### rad deliver`: one line on the exit-2 refusal.
 
+## Amendments
+- **Amendment 1 (2026-10-08, after Wave 3):** the up-front refusal made seed plans with task-less waves fail about 75 existing tests. Task 3.1 added one `#### Task 1.1: Task A` line to the seed plan in `harness/test/deliver.test.js` (`writePlanDoc`, ~63) and `harness/test/worktree.test.js` (`writeApprovedPlan`, ~225). No assertion changes. Both files are added to Files in Scope.
+
 ## Agent Scope
 Research came from the 3c survey (the wave prompt fields, `parsePlan`'s wave shape, plan-tasks.js) and targeted greps for `loadPlanCtx`, setup, the spine's `runWave` call and `parseWaveVerify`. There are no out-of-scope dependencies.
 
@@ -85,6 +88,8 @@ Research came from the 3c survey (the wave prompt fields, `parsePlan`'s wave sha
 | harness/cli.js | 1340-1360 | `setupWorktreeRun`: refusal exit code and preserve |
 | harness/cli.js | 1975-2000 | `deliverSpine` call: pass `waveTasks` |
 | harness/test/cli.test.js | 1-1 | Append cases (AC#5) |
+| harness/test/deliver.test.js | 55-70 | Amendment 1: seed plan gains a `#### Task` block |
+| harness/test/worktree.test.js | 218-232 | Amendment 1: seed plan gains a `#### Task` block |
 | docs/rad-wave-contract.md | 240-262 | The wave prompt |
 | docs/rad-cli.md | 560-620 | Deliver: the refusal |
 
