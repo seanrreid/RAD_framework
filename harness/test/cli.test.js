@@ -543,10 +543,9 @@ function twoWavePlanText(extra = '') {
 }
 
 /** Seed the plan doc and an approved event carrying its body fingerprint. */
-function seedApprovedTwoWavePlan(repoRoot) {
+function seedApprovedTwoWavePlan(repoRoot, text = twoWavePlanText()) {
   const planFile = join(repoRoot, '.agents', 'plans', `${DELIVER_FEATURE}.md`);
   mkdirSync(dirname(planFile), { recursive: true });
-  const text = twoWavePlanText();
   writeFileSync(planFile, text, 'utf8');
   const event = {
     ...approvedEvent(DELIVER_FEATURE),
@@ -1419,9 +1418,9 @@ test('script args — a real deliver passes each script its argv contract', asyn
     const scope = rec.argsFor('scripts/check-scope.sh');
     assert.ok(scope.length > 0, 'check-scope.sh must run');
     for (const args of scope) assert.deepEqual(args, [planPath, branch, DEFAULT_BRANCH_STUB]);
-    const presence = rec.argsFor('scripts/check-tests-present.sh');
-    assert.ok(presence.length > 0, 'check-tests-present.sh must run');
-    for (const args of presence) assert.deepEqual(args, [planPath]);
+    // The seeded plan promises no Tests-to-Write file in any wave → testsByWave
+    // is {} → the wave-scoped presence gate is skipped (no script call).
+    assert.deepEqual(rec.argsFor('scripts/check-tests-present.sh'), []);
     const openPr = rec.argsFor('scripts/open-pr.sh');
     assert.equal(openPr.length, 1, 'open-pr.sh runs once');
     const [prArgs] = openPr;
@@ -1439,6 +1438,60 @@ test('script args — a real deliver passes each script its argv contract', asyn
     assert.equal(log.opts.cwd, repoRoot);
     // The base branch is resolved once per run, from the run root's .rad/config.yml.
     assert.deepEqual(rec.argsFor('scripts/get-default-branch.sh'), [[repoRoot]]);
+  });
+});
+
+/** Two-wave plan where wave 2's task promises a Tests-to-Write file and a
+ * second listed test file is promised by no wave's task. */
+const PROMISED_TEST = 'harness/test/b.test.js';
+const ORPHAN_TEST = 'harness/test/orphan.test.js';
+function promisingTwoWavePlanText() {
+  return twoWavePlanText([
+    '',
+    '#### Task 2.1: B',
+    `File: harness/b.js:10-20, ${PROMISED_TEST}`,
+    '',
+    '## Tests to Write',
+    '',
+    `- b behaves — ${PROMISED_TEST}`,
+    `- orphan — ${ORPHAN_TEST}`,
+    '- unresolvable item with no path',
+  ].join('\n'));
+}
+
+test('parsePlanCtx — testsByWave: a wave-2-promised test lands in [2]; an unpromised one in no wave', () => {
+  const ctx = parsePlanCtx(promisingTwoWavePlanText());
+  assert.deepEqual(ctx.testsByWave, { 2: [PROMISED_TEST] });
+});
+
+test('parsePlanCtx — testsByWave: no Tests-to-Write section / no File: lines → {}', () => {
+  assert.deepEqual(parsePlanCtx(twoWavePlanText()).testsByWave, {});
+  assert.deepEqual(parsePlanCtx('').testsByWave, {});
+});
+
+test('script args — check-tests-present.sh: string arg → [planPath]; array arg → --only <paths>', () => {
+  const { sh, calls } = recordingSh();
+  const port = makeSpineScriptPort({ sh, repoRoot: '/r', root: '/r', scriptCtx: { planPath: '/r/p.md' } });
+  port('scripts/check-tests-present.sh', 'feature');
+  port('scripts/check-tests-present.sh', ['a.test.js', 'b.test.js']);
+  assert.deepEqual(calls.map((c) => c.args), [
+    ['/r/p.md'],
+    ['/r/p.md', '--only', 'a.test.js', 'b.test.js'],
+  ]);
+});
+
+test('script args — a real deliver scopes check-tests-present.sh to the promising wave via --only', async () => {
+  await withTempRepo(async (repoRoot) => {
+    seedApprovedTwoWavePlan(repoRoot, promisingTwoWavePlanText());
+    const rec = recordingSh();
+    const { code, stderr } = await runDeliverCaptured({
+      repoRoot, sh: rec.sh, runWave: async () => ({ outcome: 'success' }),
+    });
+    assert.equal(code, 0, `expected exit 0; stderr:\n${stderr}`);
+    const planPath = join(repoRoot, '.agents', 'plans', `${DELIVER_FEATURE}.md`);
+    // Wave 1 promises nothing (skipped); wave 2 checks only its promise — the
+    // orphan Tests-to-Write file is never passed.
+    assert.deepEqual(rec.argsFor('scripts/check-tests-present.sh'), [[planPath, '--only', PROMISED_TEST]]);
   });
 });
 

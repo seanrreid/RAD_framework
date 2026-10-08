@@ -45,7 +45,7 @@ import { classifyStop, STOP_CLASSES } from './stops.js';
 import {
   deliverCompleted, latestStop, dormantStop, fileDeficitSignals, forecastForPaths, DEFICITS, phaseOf,
 } from './events.js';
-import { taskFilesFromPlanText, mergeTaskFiles } from './plan-tasks.js';
+import { taskFilesFromPlanText, mergeTaskFiles, taskFilesByWave } from './plan-tasks.js';
 import { parseCapabilityLine, resolveWaveCapabilities, sdkAllowedTools, commandRefusal } from './capabilities.js';
 import { gatherDigestInputs, buildDigest, renderDigest, readScope } from './digest.js';
 import { buildPrBody, testsToWritePaths } from './pr-body.js';
@@ -298,7 +298,9 @@ const DELIVER_PR_LABEL = 'rad:deliver';
  */
 const SCRIPT_ARGS = Object.freeze({
   'scripts/check-scope.sh': (c) => [c.planPath, c.branch, ...c.baseArgs()],
-  'scripts/check-tests-present.sh': (c) => [c.planPath],
+  // An array arg is the spine's wave-scoped promised set → `--only <paths>`;
+  // a string arg (the feature, unscoped spine) → the whole plan, as before.
+  'scripts/check-tests-present.sh': (c, only) => [c.planPath, ...(Array.isArray(only) ? ['--only', ...only] : [])],
   'scripts/check-verify.sh': (_c, command) => [command],
   'scripts/open-pr.sh': (c) => {
     const { title, body } = c.prBody();
@@ -659,12 +661,32 @@ function parseCapabilities(text) {
 }
 
 /**
+ * Per-wave promised test files: for each wave, its task File: paths that are
+ * also resolved `## Tests to Write` paths (exact string match). Unresolvable
+ * Tests-to-Write items match nothing; a wave promising none is omitted, so a
+ * plan with no promises yields {} and the spine skips the presence gate.
+ *
+ * @param {string} text - full plan doc text
+ * @returns {Record<number, string[]>}
+ */
+function parseTestsByWave(text) {
+  const promised = new Set(testsToWritePaths(text).filter((t) => 'path' in t).map((t) => t.path));
+  const testsByWave = {};
+  for (const [wave, paths] of taskFilesByWave(text)) {
+    const tests = paths.filter((p) => promised.has(p));
+    if (tests.length > 0) testsByWave[wave] = tests;
+  }
+  return testsByWave;
+}
+
+/**
  * Parse a plan doc text to extract the planCtx fields needed by runWave.
  *
  * @param {string} text - full plan doc text
  * @returns {{ branch: string, acceptanceCriteria: string[], waveModels: Record<number, string>, waveVerify: Record<number, string>,
  *   planCapabilities: string[]|undefined, waveCapabilities: Record<number, string[]>, capabilityErrors: string[],
- *   waveNumbers: number[], executionNotes: { doNotTouch: string[], keyFiles: string[], reminders: string[] } }}
+ *   waveNumbers: number[], testsByWave: Record<number, string[]>,
+ *   executionNotes: { doNotTouch: string[], keyFiles: string[], reminders: string[] } }}
  */
 export function parsePlanCtx(text) {
   // Branch: extract from `Branch: rad/feature` header line
@@ -707,6 +729,7 @@ export function parsePlanCtx(text) {
     acceptanceCriteria: acLines,
     waveModels: parseWaveModels(text),
     waveVerify: parseWaveVerify(text),
+    testsByWave: parseTestsByWave(text),
     ...parseCapabilities(text),
     executionNotes: { doNotTouch, keyFiles, reminders },
   };
@@ -1840,6 +1863,9 @@ export async function deliverCommand(argv, ctx) {
       // Empty for a plan that declares none, which leaves the spine's behavior
       // and its event sequence unchanged.
       waveVerify: planCtx.waveVerify,
+      // Per-wave promised test files (parseTestsByWave): the presence gate after
+      // wave k checks only waves <= k's promises; {} skips the gate entirely.
+      testsByWave: planCtx.testsByWave,
       // Per-wave `Model:` ids (parseWaveModels — the sole Model: parser), recorded
       // on each wave-started. Empty for a plan that declares none.
       waveModels: planCtx.waveModels,
