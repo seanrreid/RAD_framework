@@ -58,6 +58,13 @@ export const STOP_TABLE = Object.freeze({
     class: FAILED,
     decision: 'resume verify: a test file promised by an already-completed wave is missing; restore it and re-run',
   }),
+  // End-of-run test wave (#186 part 3c-ii): Tests-to-Write files are still
+  // missing after the synthetic test wave — deterministic, so FAILED. `{detail}`
+  // is the comma-separated list of missing paths.
+  'tests-missing': Object.freeze({
+    class: FAILED,
+    decision: 'test files still missing after the test wave: {detail}; write them on the branch and re-run rad deliver',
+  }),
   'token-budget': Object.freeze({
     class: NEEDS_DECISION,
     decision: 'token budget {budget} reached (spent {spent}); raise RAD_TOKEN_BUDGET or stop',
