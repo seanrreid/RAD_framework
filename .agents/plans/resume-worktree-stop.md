@@ -1,7 +1,10 @@
 # Plan: Resume a Stopped Run in Worktree Mode (#210)
 Created: 2026-10-08
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-10-08T15:22:57.752Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/resume-worktree-stop
 Issue: 210
 Adopted-From: https://github.com/seanrreid/RAD_framework/issues/210
