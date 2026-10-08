@@ -7,3 +7,4 @@
 {"feature":"design-skill","type":"wave-started","actor":"harness","ts":"2026-10-08T18:35:09.959Z","data":{"wave":2,"attempt":1}}
 {"feature":"design-skill","type":"wave-attempt","actor":"harness","ts":"2026-10-08T18:36:34.655Z","data":{"wave":2,"attempt":1,"outcome":"success","tasks":[{"title":"Registry tests and docs","status":"done_with_concerns","commit":"6c5d13c","concern":"rad-design portability row also changed Body wrapper→as-is and added the openai.yaml note to match sibling rows (beyond AC wording)","error":"—"}]}}
 {"feature":"design-skill","type":"wave-complete","actor":"harness","ts":"2026-10-08T18:36:34.657Z","data":{"wave":2}}
+{"feature":"design-skill","type":"pr-opened","actor":"harness","ts":"2026-10-08T18:36:44.566Z"}
