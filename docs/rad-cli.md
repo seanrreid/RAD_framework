@@ -588,6 +588,31 @@ Success records the audit-only `run-prepared` event.
 
 Full contract: [Prepare phase](./rad-wave-contract.md#prepare-phase).
 
+#### Per-wave test gate
+
+After each wave, `rad deliver` checks that the `## Tests to Write` files
+**promised** by the waves completed so far exist. A wave promises a test file
+when one of its tasks lists that exact path on its `File:` line. After wave k the
+gate checks the union promised by waves 1..k and is skipped when that union is
+empty; a missing promised file demotes the wave to `fail-tests` at that wave. On
+`--resume`, the resume verify checks only the files promised by the completed
+waves. Files no wave promises are not checked during the waves; the end-of-run
+check for them is a follow-up.
+
+The gate calls `scripts/check-tests-present.sh` with `--only`:
+
+```
+scripts/check-tests-present.sh <plan-file> [--only <path>...]
+```
+
+- Without `--only` — unchanged: every `## Tests to Write` entry is checked.
+- With `--only` — only the listed `## Tests to Write` paths are checked; every
+  other line, including unresolvable ones, is ignored. When none of the listed
+  paths is in the section it prints `(no promised tests yet)` and exits `0`.
+- `--only` with no paths, or an unknown flag, exits `2`.
+
+Full contract: [Between-wave checks](./rad-wave-contract.md#between-wave-checks).
+
 #### Finish phase
 
 After the last wave, `rad deliver` runs the approval-during-run guard and
