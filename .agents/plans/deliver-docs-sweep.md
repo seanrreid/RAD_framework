@@ -1,7 +1,8 @@
 # Plan: Docs Sweep for rad deliver as the Only Deliver Path (#186 part 3d-ii)
 Created: 2026-10-08
 Author: architect
-Status: in-progress
+Status: complete
+Completed-At: 2026-10-08T16:29:17.965Z
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-10-08T14:52:26.263Z
 Recorded-By: sean@torchcodelab.com
