@@ -624,6 +624,63 @@ test('deliver: RAD_WORKTREE="0" success → no run-events add/diff/commit calls'
   });
 });
 
+// ---------------------------------------------------------------------------
+// COMMIT ON STOP — a stopped worktree run commits ONLY its events.jsonl (by
+// pathspec) before preserve, so the branch-tip log carries the stop (#210).
+// ---------------------------------------------------------------------------
+
+const STOP_EVENTS_PATH = `.agents/state/${FEATURE}/events.jsonl`;
+const STOP_SUBJECT = `deliver(${FEATURE}): record stopped run`;
+const stoppedWave = async () => ({ outcome: 'fail-tests', summary: 'same failure' });
+
+test('deliver: stop → events.jsonl added, diffed and committed by pathspec BEFORE preserve', async () => {
+  await withTempDirs(async (repoRoot, worktreeDir) => {
+    writeApprovedPlan(worktreeDir, FEATURE);
+    const sh = makeDeliverSh({ worktreePath: worktreeDir });
+
+    const code = await runDeliver({ worktree: undefined, repoRoot, sh, runWave: stoppedWave });
+
+    assert.equal(code, 1, 'the stop keeps its exit code');
+    assert.deepEqual(sh.order.slice(-4), ['git add', 'git diff', 'git commit', 'lifecycle preserve']);
+    assert.deepEqual(sh.runEventCalls.map((c) => c.args), [
+      ['add', '--', STOP_EVENTS_PATH],
+      ['diff', '--cached', '--quiet', '--', STOP_EVENTS_PATH],
+      ['commit', '-m', STOP_SUBJECT, '--', STOP_EVENTS_PATH],
+    ]);
+    assert.ok(sh.runEventCalls.every((c) => c.cwd === worktreeDir), 'git runs in the worktree root');
+  });
+});
+
+test('deliver: stop with nothing staged → no commit call, preserve still runs', async () => {
+  await withTempDirs(async (repoRoot, worktreeDir) => {
+    writeApprovedPlan(worktreeDir, FEATURE);
+    const sh = makeDeliverSh({ worktreePath: worktreeDir, staged: false });
+
+    const code = await runDeliver({ worktree: undefined, repoRoot, sh, runWave: stoppedWave });
+
+    assert.equal(code, 1);
+    assert.deepEqual(sh.order.slice(-3), ['git add', 'git diff', 'lifecycle preserve']);
+    assert.ok(!sh.order.includes('git commit'), 'nothing staged → no commit');
+  });
+});
+
+test('deliver: stop-events commit fails → reason printed, still preserved, exits with the stop code', async () => {
+  await withTempDirs(async (repoRoot, worktreeDir) => {
+    writeApprovedPlan(worktreeDir, FEATURE);
+    const sh = makeDeliverSh({ worktreePath: worktreeDir, commitStatus: COMMIT_FAILED_STATUS });
+
+    const { code, stderr } = await runCaptured({ worktree: undefined, repoRoot, sh, runWave: stoppedWave });
+
+    assert.equal(code, 1, 'the stop code, not a new one');
+    const cmds = sh.lifecycle.map((c) => c.cmd);
+    assert.ok(cmds.includes('preserve'), 'a failed stop commit still preserves');
+    assert.ok(!cmds.includes('remove'), 'a stopped run is never removed');
+    assert.ok(stderr.includes("rad deliver: could not commit the stopped run's events — "), stderr);
+    assert.ok(stderr.includes('fatal: commit refused'), 'the git reason is surfaced');
+    assert.ok(stderr.includes(`rad deliver: worktree preserved at ${worktreeDir}`), stderr);
+  });
+});
+
 test('deliver: main checkout on the work branch + clean → checkout <default>, then create', async () => {
   await withTempDirs(async (repoRoot, worktreeDir) => {
     writeApprovedPlan(worktreeDir, FEATURE);

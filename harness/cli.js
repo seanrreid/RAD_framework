@@ -1235,13 +1235,41 @@ function commitRunEvents({ sh, root, feature }) {
   mainGit(sh, root, ['commit', '-m', `deliver(${feature}): record deliver run events`]);
 }
 
+/** Commit subject for the stopped run's event log (so a later --resume is eligible). */
+const STOP_COMMIT_SUBJECT = (feature) => `deliver(${feature}): record stopped run`;
+
+/**
+ * On a stop, commit ONLY the feature's events.jsonl to the work branch (the
+ * pathspec keeps partial code and the untracked marker out). No push. Nothing
+ * staged → no commit. A git failure is reported, never thrown: the stop's exit
+ * code and the preserve still stand.
+ */
+function commitStopEvents({ sh, root, feature }) {
+  const eventsPath = `.agents/state/${feature}/events.jsonl`;
+  try {
+    mainGit(sh, root, ['add', '--', eventsPath]);
+    const staged = sh('git', ['diff', '--cached', '--quiet', '--', eventsPath], { cwd: root });
+    if (staged.status === 0) return;
+    if (staged.status !== GIT_DIFF_HAS_CHANGES) {
+      const detail = String(staged.stderr || staged.stdout || 'no output').trim();
+      throw new Error(`git diff --cached --quiet exited ${staged.status}: ${detail}`);
+    }
+    mainGit(sh, root, ['commit', '-m', STOP_COMMIT_SUBJECT(feature), '--', eventsPath]);
+  } catch (err) {
+    const safe = sanitizeErrorMessage(err?.message ?? String(err));
+    process.stderr.write(`rad deliver: could not commit the stopped run's events — ${safe}\n`);
+  }
+}
+
 /**
  * Tear down on evidenced success (after committing the run events), else
- * preserve. A commit failure preserves the worktree — never a forced remove.
+ * commit the stop's events and preserve. A commit failure preserves the
+ * worktree — never a forced remove.
  * @returns {number|null} an exit code to return, or null to continue
  */
 function finishWorktree({ worktree, completed, sh, root, feature }) {
   if (!completed) {
+    commitStopEvents({ sh, root, feature });
     worktree.preserve(feature);
     writePreservedPointer(feature, root);
     return null;
