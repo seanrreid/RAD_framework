@@ -145,8 +145,8 @@ function renderOperatorContext(operatorContext) {
 }
 
 /**
- * Build the wave prompt string from plan state, following the exact template
- * defined in .claude/commands/team/rad-deliver.md Step 6.
+ * Build the wave prompt string from plan state. This function is the single
+ * source of the wave prompt template that `rad deliver` sends to the agent.
  *
  * @param {Object} wave - wave descriptor from the plan
  * @param {Object} planCtx - orchestrator plan context; may additionally carry the
@@ -306,7 +306,7 @@ export const VALID_TASK_STATUSES = new Set([
 /**
  * Parse the WAVE_RESULT body into a structured object.
  *
- * The format (from rad-deliver.md) is simple indented YAML-like text.
+ * The format (the WAVE_RESULT contract defined here) is simple indented YAML-like text.
  * We parse it with lightweight line scanning rather than a full YAML parser
  * so there is no extra dependency and the structure stays unambiguous.
  *
