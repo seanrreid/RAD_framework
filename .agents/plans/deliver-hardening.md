@@ -1,7 +1,7 @@
 # Plan: rad deliver Hardening — Logs, Wave Timeout, stop-status (#218, #211, #212)
 Created: 2026-10-08
 Author: architect
-Status: approved
+Status: in-progress
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-10-08T16:49:51.800Z
 Recorded-By: sean@torchcodelab.com
