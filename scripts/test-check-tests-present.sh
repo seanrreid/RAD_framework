@@ -24,12 +24,12 @@ trap 'rm -rf "$TMP"' EXIT
 fail() { echo "✗ $1"; exit 1; }
 
 run_check() {
-  # Run the real script against a fixture plan and echo its exit code without
-  # tripping set -e (this test asserts on the code).
-  local plan="$1"
+  # Run the real script against a fixture plan (plus any extra args, e.g.
+  # --only) and echo its exit code without tripping set -e (this test asserts
+  # on the code).
   local code
   set +e
-  bash "$SCRIPT" "$plan" >/dev/null 2>&1
+  bash "$SCRIPT" "$@" >/dev/null 2>&1
   code=$?
   set -e
   echo "$code"
@@ -192,5 +192,60 @@ printf '%s\n' "$out" | grep -q "No file path found" \
   || fail "A7e: an annotation with no path must be reported unresolvable, got: [$out]"
 printf '%s\n' "$out" | grep -q "✗" && fail "A7e: an annotation with no path must not be reported as a missing file"
 echo "✓ A7e: annotation with nothing before it → unresolvable (never an empty path)"
+
+# A8 (wave-scoped-test-gate AC#2): --only restricts the check to the listed
+# resolved paths; other lines (unresolvable ones included) are ignored.
+A8_PRESENT="$HERE/get-default-branch.sh"
+A8_MISSING="scripts/does-not-exist-a8.sh"
+printf '## Tests to Write\n- [ ] a — %s\n- [ ] b — `%s`\n- [ ] c with no file path\n' \
+  "$A8_PRESENT" "$A8_MISSING" > "$TMP/only.md"
+
+code=$(run_check "$TMP/only.md" --only "$A8_PRESENT")
+[[ "$code" -eq 0 ]] || fail "A8a: --only a present listed file should exit 0 (got $code)"
+echo "✓ A8a: --only listed file present → exit 0 (missing + unresolvable lines ignored)"
+
+code=$(run_check "$TMP/only.md" --only "$A8_MISSING")
+[[ "$code" -eq 1 ]] || fail "A8b: --only a missing listed file should exit 1 (got $code)"
+out=$(bash "$SCRIPT" "$TMP/only.md" --only "$A8_MISSING" 2>&1 || true)  # exit 1 asserted above
+printf '%s\n' "$out" | grep -qx "  ✗ $A8_MISSING" \
+  || fail "A8b: missing filtered file not reported, got: [$out]"
+printf '%s\n' "$out" | grep -q "No file path found" \
+  && fail "A8b: unresolvable lines must be ignored under --only, got: [$out]"
+printf '%s\n' "$out" | grep -q "✓ $A8_PRESENT" \
+  && fail "A8b: unfiltered files must not be listed as Present, got: [$out]"
+echo "✓ A8b: --only listed file missing → exit 1, only filtered files reported"
+
+code=$(run_check "$TMP/only.md" --only "scripts/not-in-tests-to-write.sh")
+[[ "$code" -eq 0 ]] || fail "A8c: --only a path not in Tests to Write should exit 0 (got $code)"
+out=$(bash "$SCRIPT" "$TMP/only.md" --only "scripts/not-in-tests-to-write.sh" 2>/dev/null)
+printf '%s\n' "$out" | grep -qx "✓ Test check passed: only (no promised tests yet)" \
+  || fail "A8c: expected 'no promised tests yet' message, got: [$out]"
+echo "✓ A8c: --only path not in Tests to Write → exit 0, 'no promised tests yet'"
+
+# An unresolvable-only section is filtered to nothing: the empty-section rule
+# (A4) does not apply under --only. The same holds for an empty section.
+code=$(run_check "$TMP/unresolvable.md" --only "$A8_PRESENT")
+[[ "$code" -eq 0 ]] || fail "A8d: --only filtering out an unresolvable line should exit 0 (got $code)"
+code=$(run_check "$TMP/empty.md" --only "$A8_PRESENT")
+[[ "$code" -eq 0 ]] || fail "A8d: --only on an empty section should exit 0, not the empty-section 1 (got $code)"
+echo "✓ A8d: --only filtering out unresolvable/empty lines → exit 0 (empty-section rule skipped)"
+
+code=$(run_check "$TMP/only.md" --only)
+[[ "$code" -eq 2 ]] || fail "A8e: --only with no paths should be a usage error, exit 2 (got $code)"
+echo "✓ A8e: --only with no paths → exit 2"
+
+code=$(run_check "$TMP/only.md" --bogus)
+[[ "$code" -eq 2 ]] || fail "A8f: unknown flag should exit 2 (got $code)"
+code=$(run_check "$TMP/only.md" extra-positional)
+[[ "$code" -eq 2 ]] || fail "A8f: extra positional should exit 2 (got $code)"
+code=$(run_check "$TMP/only.md" --only "$A8_PRESENT" --bogus)
+[[ "$code" -eq 2 ]] || fail "A8f: unknown flag after --only paths should exit 2 (got $code)"
+echo "✓ A8f: unknown flag / extra positional → exit 2"
+
+# Without --only, output is byte-identical to the single-arg form's contract.
+out=$(bash "$SCRIPT" "$TMP/present.md" 2>/dev/null)
+[[ "$out" == "$(printf '✓ Test check passed: present\n  1 test file(s) present')" ]] \
+  || fail "A8g: single-arg output changed, got: [$out]"
+echo "✓ A8g: no --only → output unchanged"
 
 echo "ALL PASS"

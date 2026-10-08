@@ -334,10 +334,49 @@ function recordPushCheckUnavailable({ state, feature, now, wave, attempt, before
 }
 
 /** Post-check guardrails, run in order after all waves. The test-PRESENCE gate
- * now runs per-wave (a promised-but-absent test file blocks AT the wave that
- * promised it, not at the end), so check-tests-present is no longer an end
- * post-check — only scope + PR remain. */
+ * now runs per-wave, so check-tests-present is no longer an end post-check —
+ * only scope + PR remain. With `testsByWave` supplied, the per-wave gate is
+ * SCOPED: after wave k it checks only the union of test files promised by plan
+ * waves n <= k, so a promised-but-absent file blocks AT the wave that promised
+ * it while a file a LATER wave promises cannot fail an earlier one. Without
+ * `testsByWave` it checks every promised file (the script's own default). */
 const POST_CHECKS = ['check-scope.sh', 'open-pr.sh'];
+
+/** The test-presence gate script, run per-wave and once on resume. */
+const TESTS_PRESENT_SCRIPT = 'scripts/check-tests-present.sh';
+
+/** The status a SKIPPED presence check reports: an empty promised set has
+ * nothing to check, so it proceeds exactly as a passing gate would. */
+const PRESENCE_SKIPPED = Object.freeze({ status: 0, skipped: true });
+
+/** De-duplicated, stable-ordered (wave order, then listed order) union of the
+ * test paths promised by the plan waves whose number satisfies `include`. A
+ * wave absent from the map (or mapped to a non-array) promises nothing. */
+function promisedUnion(testsByWave, waves, include) {
+  const seen = new Set();
+  for (const wave of waves) {
+    if (!include(wave.n)) continue;
+    const paths = testsByWave[wave.n];
+    if (!Array.isArray(paths)) continue;
+    for (const path of paths) seen.add(path);
+  }
+  return [...seen];
+}
+
+/** Union of the test paths promised by plan waves with n <= k. */
+export function promisedUpTo(testsByWave, waves, k) {
+  return promisedUnion(testsByWave, waves, (n) => n <= k);
+}
+
+/** Run the test-presence gate. Absent `testsByWave` (null) → exactly today's
+ * call, `sh(script, feature)`. Supplied → check only `promised`; an EMPTY set
+ * skips the script (no sh call) and reports a pass. A script that runs and
+ * returns non-zero is returned as-is so the caller fails closed. */
+function presenceGate({ sh, feature, testsByWave, promised }) {
+  if (testsByWave == null) return sh(TESTS_PRESENT_SCRIPT, feature);
+  if (promised.length === 0) return PRESENCE_SKIPPED;
+  return sh(TESTS_PRESENT_SCRIPT, promised);
+}
 
 /** Neutral no-op hook runner. The default injected `runHooks`: returns the same
  * empty result an absent hooks dir produces, so wiring hooks into the spine
@@ -567,7 +606,9 @@ function convergeOrphans({ history, wave, matrix, state, feature, now, runHooks 
  *   the run's first call only when `resume` is set. A runWave/adapter that
  *   IGNORES it behaves exactly as it did before it existed — the spine's control
  *   flow does not depend on the callee reading it.
- * @param {(script: string, feature: string) => { status: number }} args.sh - Bash boundary
+ * @param {(script: string, arg: (string|string[])) => { status: number }} args.sh - Bash boundary.
+ *   `arg` is the feature (or a Verify command) — except the scoped presence gate,
+ *   which passes the promised test paths as an array (cli.js turns it into `--only`).
  * @param {() => string} args.now - injected clock (ISO timestamp)
  * @param {number} [args.maxAttempts] - per-wave attempt ceiling (defaults to MAX_ATTEMPTS); injectable for tests
  * @param {number} [args.tokenBudget] - optional cumulative token ceiling; 0/null/undefined disables the breaker (no behavior change)
@@ -636,6 +677,14 @@ function convergeOrphans({ history, wave, matrix, state, feature, now, runHooks 
  *   returns `{ ok: false, stopped: 'finish-failed', detail, reason, afterPr: true }`
  *   with no event. A step that THROWS uses the error message as detail.
  *   Absent (default) runs nothing — the event sequence is byte-for-byte today's.
+ * @param {Record<number, string[]>|null} [args.testsByWave] - OPTIONAL per-wave
+ *   promised test files, keyed by wave number (computed by cli.js from the plan's
+ *   Tests-to-Write and passed through, as waveVerify is). When set, the per-wave
+ *   presence gate after wave k checks only the de-duplicated union promised by
+ *   plan waves n <= k, and resume-verify checks only the COMPLETED waves' union;
+ *   an empty union skips the script and proceeds as a pass. A non-zero gate still
+ *   demotes to `fail-tests` (fail closed). Null/absent (default) calls
+ *   `sh(check-tests-present, feature)` exactly as before.
  * @returns {Promise<Object>} structured terminal result
  */
 export async function deliverSpine({
@@ -660,6 +709,7 @@ export async function deliverSpine({
   pushGuard = false,
   prepare = null,
   finish = null,
+  testsByWave = null,
 }) {
   // ── DET gate: approval. The human (or proxy) decided earlier; here we ENFORCE
   // it. A blocked gate is a normal outcome — return structured, append nothing
@@ -760,7 +810,9 @@ export async function deliverSpine({
 
     if (completed.size > 0 && !resumeVerified) {
       resumeVerified = true; // run exactly once, before the first non-skipped wave
-      const verify = sh('scripts/check-tests-present.sh', feature);
+      const promised =
+        testsByWave == null ? null : promisedUnion(testsByWave, waves, (n) => completed.has(n));
+      const verify = presenceGate({ sh, feature, testsByWave, promised });
       if (verify.status !== 0) {
         return stopRun({ stopped: 'resume-verify', ok: false }, stopCtx);
       }
@@ -902,7 +954,8 @@ export async function deliverSpine({
           summary: `post-wave hook veto (${postVeto.hook})`,
         };
       } else if (resolveOutcome('implement', outcome, matrix).action === 'advance') {
-        const gate = sh('scripts/check-tests-present.sh', feature);
+        const promised = testsByWave == null ? null : promisedUpTo(testsByWave, waves, wave.n);
+        const gate = presenceGate({ sh, feature, testsByWave, promised });
         if (gate.status !== 0) {
           outcome = 'fail-tests';
           gateOutput = gate.stdout ?? '';

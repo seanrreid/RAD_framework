@@ -429,6 +429,18 @@ work branch (never forced) and labels `review`. Either prints
 
 After each successful wave, before the next one starts, the spine runs:
 
+- **Test-presence gate** — `scripts/check-tests-present.sh --only <path>...`,
+  scoped to the `## Tests to Write` files **promised** by the waves completed so
+  far. A wave promises a test file when one of its tasks lists that exact path on
+  its `File:` line (paths are matched after the same resolution
+  `check-tests-present.sh` applies). After wave k the gate checks the union of
+  the files promised by waves 1..k; when that union is empty the gate is skipped.
+  A promised file that is missing demotes the wave to `fail-tests` at that wave —
+  a test file created in a later wave no longer fails every earlier wave.
+  Resume-verify uses the same rule: it checks the union promised by the
+  already-completed waves only, and is skipped when that union is empty.
+  `## Tests to Write` files that no wave promises are not checked during the
+  waves; checking them at the end of the run is a follow-up.
 - **Approval re-check** — the gate fold plus the plan fingerprint compared to the
   approved one. A lapsed approval or an edited plan stops with `approval-changed`.
   An `approved` event recorded during a run (after its latest `deliver-started`)
