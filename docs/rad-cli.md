@@ -581,7 +581,11 @@ rad deliver <feature> [--model <model-id>] [--resume --context <text>]
 Drives wave execution for an approved plan. Reads the plan file, constructs
 per-wave prompts, selects an **agent adapter** (see below), calls `deliverSpine`
 with the adapter's `runWave`, and streams wave output to stdout. The plan must be
-in `Status: approved` on its `rad/<feature>` branch tip.
+in `Status: approved` on its `rad/<feature>` branch tip. Every plan wave needs
+at least one `#### Task N.M: <title>` block (with `File:`/`What:`/`Validate:`
+lines); otherwise `rad deliver` refuses before any wave runs, printing
+`rad deliver: wave N has no tasks in the plan — ...` per task-less wave, and
+exits `2` (see [The wave prompt](./rad-wave-contract.md#the-wave-prompt)).
 
 #### Prepare phase
 
