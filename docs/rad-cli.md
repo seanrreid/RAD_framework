@@ -294,6 +294,11 @@ none
 `scripts/rad-status.sh` (and `/kickoff`) use it for the **Dormant Runs (needs a
 decision)** section, with a `rad deliver <feature> --resume --context "..."` hint.
 
+Without `--stdin` it reads the same log `rad deliver --resume` does: in worktree
+mode (the default) the work branch tip's log (`git show
+<branch>:.agents/state/<feature>/events.jsonl`), so a stop recorded only on the
+work branch is still reported; with `RAD_WORKTREE=0`, the checkout's on-disk log.
+
 - `--stdin` reads a JSONL event log from standard input instead of the on-disk file.
 
 **Exit codes:** `0` with either line, `1` on a malformed log or read error, `2`
@@ -954,10 +959,9 @@ main checkout, constructs no worktree port, and binds every `check-*.sh` /
 | `RAD_WORKTREE` | `0` to opt out | — (ON) | isolate the deliver run into a git worktree |
 | `RAD_WORKTREE_DIR` | a directory path | sibling `../<repo>-rad-worktrees/<feature>` | base dir for the isolated tree |
 
-This applies to the `rad deliver` CLI only. The `/rad-deliver` skill path is
-unchanged — it runs wave sub-agents in the checkout it is invoked from. Both the
-`RAD_WORKTREE=0` opt-out and the skill path are recorded as unguarded bypasses of
-the `deliver-runs-isolated` registry invariant.
+The `/rad-deliver` skill runs `rad deliver`, so the same isolation applies to the
+skill path. Only the `RAD_WORKTREE=0` opt-out remains, recorded as an unguarded
+bypass of the `deliver-runs-isolated` registry invariant.
 
 **Lifecycle.** The run moves through a **create → active →
 complete/preserve** lifecycle:
@@ -981,6 +985,11 @@ complete/preserve** lifecycle:
    if completed (the teardown safety-net commit puts `pr-opened` on the local
    branch); the run still exits `1`. If that commit fails, the worktree is
    preserved as usual.
+
+The run's execution log (`.agents/logs/<feature>-*.md`, when the agent wrote
+one) is committed together with its event log — in the run-events commit on
+success and in the stopped-run commit before preserving — so it is never left
+untracked in the worktree.
 
 **The marker is a safety interlock.** `remove`/`preserve` refuse to act on any
 directory that does not carry a valid `.rad-worktree.json` marker for the named

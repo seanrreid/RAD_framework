@@ -1207,7 +1207,8 @@ const jsonl = (events) => events.map((e) => JSON.stringify(e)).join('\n') + '\n'
 test('stop-status AC#9 — dormant needs-decision stop in the feature log → the dormant line, exit 0', async () => {
   await withTempRepo(async (repoRoot) => {
     await seedNeedsDecisionStop(repoRoot);
-    const { value: code, stdout } = await captureStdout(() => stopStatusCommand([DELIVER_FEATURE], { repoRoot }));
+    const { value: code, stdout } = await withProcessEnv({ RAD_WORKTREE: '0' }, () =>
+      captureStdout(() => stopStatusCommand([DELIVER_FEATURE], { repoRoot })));
     assert.equal(code, 0);
     assert.match(stdout, /^dormant class=needs-decision reason=failed-attempt-cap wave=1 decision="[^"]*"\n$/);
   });
@@ -3868,4 +3869,69 @@ test('deliver acp — unset or empty RAD_WAVE_TIMEOUT_SECONDS keeps the default;
       assert.ok(readLog(logFile).map((e) => e.type).includes('wave-complete'));
     });
   }
+});
+
+// ---------------------------------------------------------------------------
+// rad stop-status reads through readResumeHistory (#212): the branch tip in
+// worktree mode, the checkout's log in main mode.
+// ---------------------------------------------------------------------------
+
+const TIP_LOG_REF = `rad/${DELIVER_FEATURE}:.agents/state/${DELIVER_FEATURE}/events.jsonl`;
+const tipStopEvent = { ...needsDecisionStopEvent, feature: DELIVER_FEATURE };
+const TIP_STOP_LINE = 'dormant class=needs-decision reason=token-budget wave=2 decision="raise RAD_TOKEN_BUDGET"\n';
+
+/** A recording sh port answering `git show <tip-log-ref>` with `tipResult`. */
+function tipLogSh(tipResult) {
+  const calls = [];
+  const sh = (cmd, args) => {
+    calls.push([cmd, ...args]);
+    if (cmd === 'git' && args[0] === 'show' && args[1] === TIP_LOG_REF) return tipResult;
+    return { status: 1, stdout: '', stderr: `unexpected call: ${cmd} ${args.join(' ')}` };
+  };
+  return { sh, calls };
+}
+
+/** Run stopStatusCommand under `RAD_WORKTREE=<worktree>`, capturing stdout and stderr. */
+async function runStopStatusIn(worktree, repoRoot, sh) {
+  const originalErr = process.stderr.write.bind(process.stderr);
+  let stderr = '';
+  process.stderr.write = (chunk) => { stderr += chunk; return true; };
+  try {
+    const { value: code, stdout } = await withProcessEnv({ RAD_WORKTREE: worktree }, () =>
+      captureStdout(() => stopStatusCommand([DELIVER_FEATURE], { repoRoot, sh })));
+    return { code, stdout, stderr };
+  } finally {
+    process.stderr.write = originalErr;
+  }
+}
+
+test('stop-status #212 — worktree mode reports a stop that exists only at the branch tip', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const { sh, calls } = tipLogSh({ status: 0, stdout: jsonl([tipStopEvent]), stderr: '' });
+    const { code, stdout } = await runStopStatusIn('1', repoRoot, sh);
+    assert.equal(code, 0);
+    assert.equal(stdout, TIP_STOP_LINE);
+    assert.deepEqual(calls, [['git', 'show', TIP_LOG_REF]]);
+  });
+});
+
+test('stop-status #212 — worktree mode with no log at the tip → exit 1 with the read failure', async () => {
+  await withTempRepo(async (repoRoot) => {
+    const { sh } = tipLogSh({ status: 128, stdout: '', stderr: 'fatal: invalid object name' });
+    const { code, stdout, stderr } = await runStopStatusIn('1', repoRoot, sh);
+    assert.equal(code, 1);
+    assert.equal(stdout, '');
+    assert.match(stderr, new RegExp(`^rad stop-status: no event log at ${TIP_LOG_REF}`));
+  });
+});
+
+test('stop-status #212 — main mode reads the checkout log, never the branch tip', async () => {
+  await withTempRepo(async (repoRoot) => {
+    writeEventLog(repoRoot, DELIVER_FEATURE, [tipStopEvent]);
+    const { sh, calls } = tipLogSh({ status: 0, stdout: '', stderr: '' });
+    const { code, stdout } = await runStopStatusIn('0', repoRoot, sh);
+    assert.equal(code, 0);
+    assert.equal(stdout, TIP_STOP_LINE);
+    assert.deepEqual(calls, []);
+  });
 });

@@ -2927,8 +2927,9 @@ function formatStopStatus(stop) {
 /**
  * `stop-status <feature> [--stdin]`.
  *
- * Read-only: folds the feature's event log (or a piped JSONL log with --stdin)
- * through dormantStop and prints exactly one line — `dormant class=... reason=...
+ * Read-only: folds the feature's event log — via readResumeHistory, so the
+ * branch tip in worktree mode and the checkout's log in main mode — (or a
+ * piped JSONL log with --stdin) through dormantStop and prints exactly one line — `dormant class=... reason=...
  * wave=... decision="..."` or `none` — exit 0. A malformed log or read error →
  * stderr, exit 1. Bad argv → usage on stderr, exit 2. Writes nothing.
  *
@@ -2953,10 +2954,11 @@ export async function stopStatusCommand(argv, ctx) {
   }
   let stop;
   try {
-    const history = stdin
-      ? parseEventsJsonlStrict(readFileSync(0, 'utf8')) // fd 0 = stdin
-      : createGitStateStore({ repoRoot, sh }).history(feature);
-    stop = dormantStop(history);
+    const read = stdin
+      ? { ok: true, history: parseEventsJsonlStrict(readFileSync(0, 'utf8')) } // fd 0 = stdin
+      : readResumeHistory({ feature, repoRoot, sh });
+    if (!read.ok) throw new Error(read.reason);
+    stop = dormantStop(read.history);
   } catch (err) {
     process.stderr.write(`rad stop-status: ${sanitizeErrorMessage(err?.message ?? String(err))}\n`);
     return 1;
