@@ -12,7 +12,7 @@ import { GENERATED_MARKER } from '../generate.js';
 const REPO_ROOT = fileURLToPath(new URL('../../', import.meta.url));
 
 // Skills whose generated Codex bodies must be tool-neutral. Later parts extend this list.
-const TOOL_NEUTRAL_SKILLS = ['rad-plan', 'rad-adopt', 'rad-approve'];
+const TOOL_NEUTRAL_SKILLS = ['rad-plan', 'rad-adopt', 'rad-approve', 'rad-deliver'];
 
 // Claude-only syntax, Claude tool names, and raw state-changing commands that
 // a tool-neutral body must route through the rad CLI instead.
@@ -23,6 +23,7 @@ const FORBIDDEN_PATTERNS = [
 ];
 
 const PLAN_OPEN_CALL = 'node harness/cli.js plan-open';
+const DELIVER_CALL = 'node harness/cli.js deliver';
 const CLAUDE_ARGS_TOKEN = '$ARGUMENTS';
 const IMPLICIT_INVOCATION_OFF = 'allow_implicit_invocation: false';
 
@@ -36,7 +37,15 @@ const REQUIRED_COMMANDS = {
     'node harness/cli.js plan-status',
     'node harness/cli.js checkout',
   ],
+  'rad-deliver': [DELIVER_CALL],
 };
+
+// Skills whose Codex openai.yaml must keep implicit invocation off.
+const EXPLICIT_ONLY_SKILLS = ['rad-approve', 'rad-deliver'];
+
+// The exit-3 resume contract the rad-deliver body must spell out.
+const RESUME_FLAGS = '--resume --context';
+const STOP_AND_ASK = /STOP and ask the user/;
 
 // Claude command role directory per skill; skills not listed are team commands.
 const CLAUDE_COMMAND_ROLE = { 'rad-approve': 'architect' };
@@ -73,10 +82,20 @@ test('every tool-neutral skill declares its required rad CLI commands', () => {
   assert.deepEqual(missing, [], 'TOOL_NEUTRAL_SKILLS entries without a REQUIRED_COMMANDS entry');
 });
 
-test('rad-approve: Codex openai.yaml disables implicit invocation', () => {
-  const relPath = codexOpenaiYamlPath('rad-approve');
-  const yaml = readGenerated(relPath);
-  assert.ok(yaml.includes(IMPLICIT_INVOCATION_OFF), `${relPath} lacks \`${IMPLICIT_INVOCATION_OFF}\``);
+for (const skill of EXPLICIT_ONLY_SKILLS) {
+  test(`${skill}: Codex openai.yaml disables implicit invocation`, () => {
+    const relPath = codexOpenaiYamlPath(skill);
+    const yaml = readGenerated(relPath);
+    assert.ok(yaml.includes(IMPLICIT_INVOCATION_OFF), `${relPath} lacks \`${IMPLICIT_INVOCATION_OFF}\``);
+  });
+}
+
+test('rad-deliver: both bodies give the resume command and say to stop and ask on exit 3', () => {
+  for (const relPath of [codexBodyPath('rad-deliver'), claudeCommandPath('rad-deliver')]) {
+    const body = readGenerated(relPath);
+    assert.ok(body.includes(RESUME_FLAGS), `${relPath} lacks \`${RESUME_FLAGS}\``);
+    assert.match(body, STOP_AND_ASK, `${relPath} lacks an explicit stop-and-ask instruction`);
+  }
 });
 
 for (const skill of TOOL_NEUTRAL_SKILLS) {
