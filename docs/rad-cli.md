@@ -560,6 +560,16 @@ exported tokens). "Verified" means a smoke run of `rad review quality-reviewer
 | aider | `aider --message {prompt}` | argv (`{prompt}`) | Needs provider credentials on disk (e.g. `.aider.conf.yml`), not exported keys. | no — aider not installed on the test machine |
 | Flue | `npx flue run src/agents/<name>.ts -m {prompt}` | argv (`{prompt}`) | Requires a Flue project defining the reviewer agent. | no — needs a Flue project |
 
+**Verified for `rad deliver`.** "Verified" here means `RAD_EVAL_LIVE_CMD="<cmd>"
+node --test harness/evals/*.eval.js` exited **0** with both live delivery cases
+(`prompt-injection-in-intake`, `read-only-question`) passing; the scripted-only
+cases report as skipped in that lane.
+
+| Agent preset | `RAD_EVAL_LIVE_CMD` | Verified |
+|--------------|---------------------|----------|
+| `claude` | `claude -p` | 2026-10-08 — exit 0, 2 live cases passed (59 skipped) |
+| `codex` | `codex exec` | 2026-10-08 — exit 0, 2 live cases passed (59 skipped) |
+
 ---
 
 ### rad deliver

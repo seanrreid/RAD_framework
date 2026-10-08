@@ -3,6 +3,9 @@
 version: 1
 platform: github        # github | gitlab | bitbucket | forgejo | manual
 default_branch: main
+agent:
+  adapter: command
+  command: claude -p
 roles:
   architect:
     - sean@torchcodelab.com
