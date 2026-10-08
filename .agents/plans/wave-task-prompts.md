@@ -1,9 +1,9 @@
 # Plan: Put Each Wave's Tasks in Its Prompt (#213)
 Created: 2026-10-08
 Author: architect
-Status: in-progress
+Status: approved
 Approved-By: sean@torchcodelab.com
-Approved-At: 2026-10-08T16:07:37.052Z
+Approved-At: 2026-10-08T16:14:50.246Z
 Recorded-By: sean@torchcodelab.com
 Branch: rad/wave-task-prompts
 Issue: 213
