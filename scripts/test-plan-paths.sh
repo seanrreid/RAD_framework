@@ -867,4 +867,21 @@ for p in .agents/plans/x.md .agents/skillset/x docs/.codex/x .agents/logs/x.md s
 done
 echo "✓ path_is_self_protected: .codex/ and .agents/skills/ protected; .agents/plans, .agents/skillset, docs/.codex not; existing set unchanged"
 
+# ── plan_last_wave_verify: last wave number + Verify presence ───────────────
+LV_PLAN="$TMP/lastverify.md"
+lv() { plan_last_wave_verify "$LV_PLAN"; }
+printf '# Plan\n## Acceptance Criteria\nVerify: not in a wave\n' > "$LV_PLAN"
+[[ -z "$(lv)" ]] || fail "plan_last_wave_verify: no waves must print nothing"
+printf '### Wave 1\nVerify: npm test\n### Wave 2\n#### Task 2.1\nFile: x\n## Risks\nVerify: after\n' > "$LV_PLAN"
+[[ "$(lv)" == "2 no" ]] || fail "plan_last_wave_verify: Verify only on an earlier wave must be '2 no', got [$(lv)]"
+printf '### Wave 1\n### Wave 2\n#### Task 2.1\n  Verify: exec bash scripts/verify-all.sh  \n' > "$LV_PLAN"
+[[ "$(lv)" == "2 yes" ]] || fail "plan_last_wave_verify: indented Verify under a #### heading must count, got [$(lv)]"
+printf '### Wave 1\nSee Verify: later in prose\nVerify:\n' > "$LV_PLAN"
+[[ "$(lv)" == "1 no" ]] || fail "plan_last_wave_verify: mid-sentence and empty Verify must not count, got [$(lv)]"
+printf '### Wave 3\nVerify: a\n### Wave 10\nx\n' > "$LV_PLAN"
+[[ "$(lv)" == "10 no" ]] || fail "plan_last_wave_verify: numeric (not lexical) last wave, got [$(lv)]"
+rc=0; plan_last_wave_verify "$TMP/does-not-exist.md" >/dev/null 2>&1 || rc=$?
+[[ "$rc" -eq 2 ]] || fail "plan_last_wave_verify: unreadable plan must exit 2, got $rc"
+echo "✓ plan_last_wave_verify: last wave + Verify yes/no; mid-sentence, empty, post-section and no-wave cases"
+
 echo "ALL PASS"

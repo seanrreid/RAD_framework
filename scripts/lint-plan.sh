@@ -367,6 +367,21 @@ while IFS= read -r path; do
   fi
 done < <(plan_scope_paths "$PLAN_FILE")
 
+# ── Last-wave Verify advisory (#236) ──────────────────────────────────────────
+# A plan touching self-protected paths whose last wave declares no `Verify:` is
+# advised to run the full suite there. WARNING only; the exit code is unaffected.
+# stderr stays visible: a read failure names its reason, then the advisory is skipped.
+LAST_WAVE_INFO=$(plan_last_wave_verify "$PLAN_FILE") || LAST_WAVE_INFO=""
+if [[ "$LAST_WAVE_INFO" == *" no" ]]; then
+  while IFS= read -r path; do
+    [[ -z "$path" ]] && continue
+    if path_is_self_protected "$path"; then
+      WARNINGS+=("last wave (${LAST_WAVE_INFO% *}) declares no Verify: and the plan touches self-protected paths ($path) — consider 'Verify: exec bash scripts/verify-all.sh' (see #236)")
+      break
+    fi
+  done < <(plan_scope_paths "$PLAN_FILE")
+fi
+
 # ── Capability request advisory ───────────────────────────────────────────────
 # A `Capabilities:` line (#85) requesting a class beyond the default set (net,
 # mcp) is surfaced for architect review: one WARNING per (scope, class), never
