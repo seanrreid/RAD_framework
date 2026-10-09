@@ -14,7 +14,7 @@ const REPO_ROOT = fileURLToPath(new URL('../../', import.meta.url));
 // Skills whose generated Codex bodies must be tool-neutral. Later parts extend this list.
 const TOOL_NEUTRAL_SKILLS = [
   'rad-plan', 'rad-adopt', 'rad-approve', 'rad-deliver', 'rad-research', 'rad-epic-decompose',
-  'rad-design',
+  'rad-design', 'wrap', 'kickoff',
 ];
 
 // Claude-only syntax, Claude tool names, and raw state-changing commands that
@@ -28,6 +28,8 @@ const FORBIDDEN_PATTERNS = [
 const PLAN_OPEN_CALL = 'node harness/cli.js plan-open';
 const DELIVER_CALL = 'node harness/cli.js deliver';
 const CLAUDE_ARGS_TOKEN = '$ARGUMENTS';
+const SOURCE_ARGS_TOKEN = '{{args}}';
+const CLAUDE_SKILL_TARGET = /^\s*claude:\s*skill\s*$/m;
 const IMPLICIT_INVOCATION_OFF = 'allow_implicit_invocation: false';
 
 // The rad CLI calls (or artifact path) each tool-neutral Codex body must make. Every
@@ -44,10 +46,12 @@ const REQUIRED_COMMANDS = {
   'rad-research': ['.agents/research/'],
   'rad-epic-decompose': ['scripts/fetch-epic.sh', 'node harness/cli.js label'],
   'rad-design': ['node harness/cli.js architecture-approve', 'node harness/cli.js generate', '.rad/agents/'],
+  wrap: ['node harness/cli.js wrap'],
+  kickoff: ['node harness/cli.js checkout'],
 };
 
 // Skills whose Codex openai.yaml must keep implicit invocation off.
-const EXPLICIT_ONLY_SKILLS = ['rad-approve', 'rad-deliver', 'rad-epic-decompose', 'rad-design'];
+const EXPLICIT_ONLY_SKILLS = ['rad-approve', 'rad-deliver', 'rad-epic-decompose', 'rad-design', 'wrap'];
 
 // The exit-3 resume contract the rad-deliver body must spell out.
 const RESUME_FLAGS = '--resume --context';
@@ -61,8 +65,13 @@ const DEFAULT_COMMAND_ROLE = 'team';
 
 const codexBodyPath = (skill) => join('.agents', 'skills', skill, 'SKILL.md');
 const codexOpenaiYamlPath = (skill) => join('.agents', 'skills', skill, 'agents', 'openai.yaml');
+const sourcePath = (skill) => join('.rad', 'skills', skill, 'SKILL.md');
+const readSource = (skill) => readFileSync(join(REPO_ROOT, sourcePath(skill)), 'utf8');
+// A `claude: skill` source generates .claude/skills/<name>/SKILL.md; the rest generate role commands.
 const claudeCommandPath = (skill) =>
-  join('.claude', 'commands', CLAUDE_COMMAND_ROLE[skill] ?? DEFAULT_COMMAND_ROLE, `${skill}.md`);
+  CLAUDE_SKILL_TARGET.test(readSource(skill))
+    ? join('.claude', 'skills', skill, 'SKILL.md')
+    : join('.claude', 'commands', CLAUDE_COMMAND_ROLE[skill] ?? DEFAULT_COMMAND_ROLE, `${skill}.md`);
 
 // Pure predicate: the forbidden patterns present in text (empty when neutral).
 function forbiddenPatternsIn(text) {
@@ -116,9 +125,11 @@ for (const skill of TOOL_NEUTRAL_SKILLS) {
     assert.deepEqual(forbiddenPatternsIn(body), [], `${codexBodyPath(skill)} contains forbidden patterns`);
   });
 
-  test(`${skill}: Claude command is generated and keeps $ARGUMENTS`, () => {
+  test(`${skill}: Claude output is generated and keeps $ARGUMENTS when its source uses {{args}}`, () => {
     const command = readGenerated(claudeCommandPath(skill));
     assert.ok(command.includes(GENERATED_MARKER), `${claudeCommandPath(skill)} lacks the generated marker`);
-    assert.ok(command.includes(CLAUDE_ARGS_TOKEN), `${claudeCommandPath(skill)} lacks ${CLAUDE_ARGS_TOKEN}`);
+    if (readSource(skill).includes(SOURCE_ARGS_TOKEN)) {
+      assert.ok(command.includes(CLAUDE_ARGS_TOKEN), `${claudeCommandPath(skill)} lacks ${CLAUDE_ARGS_TOKEN}`);
+    }
   });
 }

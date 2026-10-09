@@ -1,0 +1,13 @@
+{"feature":"wrap-kickoff-skills","type":"approved","actor":"sean@torchcodelab.com","role":"architect","ts":"2026-10-09T14:03:30.895Z","recordedBy":"sean@torchcodelab.com","data":{"fingerprint":"cdec69fd3de6aa14b2d71de662bd924725b94477d1ffb663b1e806a4e80247cd"}}
+{"feature":"wrap-kickoff-skills","type":"deliver-started","actor":"harness","ts":"2026-10-09T14:03:48.229Z"}
+{"feature":"wrap-kickoff-skills","type":"run-prepared","actor":"harness","ts":"2026-10-09T14:03:56.021Z","data":{"base":"main","merged":false,"fastForwarded":false,"committed":true,"pushed":true}}
+{"feature":"wrap-kickoff-skills","type":"wave-started","actor":"harness","ts":"2026-10-09T14:03:56.030Z","data":{"wave":1,"attempt":1}}
+{"feature":"wrap-kickoff-skills","type":"wave-attempt","actor":"harness","ts":"2026-10-09T14:06:06.166Z","data":{"wave":1,"attempt":1,"outcome":"success","tasks":[{"title":"rad wrap and the optional label","status":"complete","commit":"87d7204","concern":"—","error":"—"}]}}
+{"feature":"wrap-kickoff-skills","type":"wave-complete","actor":"harness","ts":"2026-10-09T14:06:06.167Z","data":{"wave":1}}
+{"feature":"wrap-kickoff-skills","type":"wave-started","actor":"harness","ts":"2026-10-09T14:06:06.169Z","data":{"wave":2,"attempt":1}}
+{"feature":"wrap-kickoff-skills","type":"wave-attempt","actor":"harness","ts":"2026-10-09T14:06:55.858Z","data":{"wave":2,"attempt":1,"outcome":"success","tasks":[{"title":"The wrap and kickoff skills","status":"done_with_concerns","commit":"93b2572","concern":"Wrap's publish call is a new \"Step 4a\" instead of sitting inside Step 4, because Step 4 is skipped when there's no log and Step 3 notes still need publishing; wrap's description now says \"publishes with rad wrap\" instead of \"updates plan statuses\"","error":"—"}]}}
+{"feature":"wrap-kickoff-skills","type":"wave-complete","actor":"harness","ts":"2026-10-09T14:06:55.859Z","data":{"wave":2}}
+{"feature":"wrap-kickoff-skills","type":"wave-started","actor":"harness","ts":"2026-10-09T14:06:55.860Z","data":{"wave":3,"attempt":1}}
+{"feature":"wrap-kickoff-skills","type":"wave-attempt","actor":"harness","ts":"2026-10-09T14:09:58.810Z","data":{"wave":3,"attempt":1,"outcome":"success","tasks":[{"title":"Registries and docs","status":"complete","commit":"e475a51","concern":"—","error":"—"}]}}
+{"feature":"wrap-kickoff-skills","type":"wave-complete","actor":"harness","ts":"2026-10-09T14:09:58.812Z","data":{"wave":3}}
+{"feature":"wrap-kickoff-skills","type":"pr-opened","actor":"harness","ts":"2026-10-09T14:10:09.254Z"}

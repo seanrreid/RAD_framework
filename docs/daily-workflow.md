@@ -351,8 +351,10 @@ Useful for the architect to see team progress without asking.
 For a richer start-of-session ritual, run `/kickoff`: it reads `AGENTS.md` (or `CLAUDE.md`
 if the project has no `AGENTS.md`),
 guards against working on the default branch, and reports plans by status from
-the `rad/` branch tips. At the end of a session, run `/wrap` to update any plan
-statuses that changed, append a dated progress note, and flag uncommitted work.
+the `rad/` branch tips. At the end of a session, run `/wrap`: it records a
+dated session note on the plan, publishes it with `rad wrap`, and flags
+uncommitted work. `/wrap` never changes plan status; that comes from
+`rad deliver`.
 
 ---
 

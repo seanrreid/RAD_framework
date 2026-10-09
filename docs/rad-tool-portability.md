@@ -21,7 +21,7 @@ paths; part 2 migrated the read-only slice into `.rad/` sources. Rows marked
 | 1 | This doc; `harness/generate.js`; `rad generate [--check]`; CI `generated-drift`; `^\.codex/` and `^\.agents/skills/` self-protected | #171 |
 | 2 | Read-only slice migrated into `.rad/`: both reviewers, `quality-review`, `accessibility-review`, `rad-status`, a Codex-only `rad-review` (deterministic scripts plus reviewer sub-agents). Generated outputs and reviewers shipped through core, invariant added. Delivered | #171 |
 | 3 | `AGENTS.md` as the conventions source, `CLAUDE.md` importing it with `@AGENTS.md`; readers use `AGENTS.md` with a `CLAUDE.md` fallback; install scaffold and `lint-claude-md` cover both files (`config migrate` unchanged). Delivered | #171 |
-| Parity | State-changing workflow for Codex (plan, adopt, approve, deliver, design, research, epic-decompose, insights, kickoff/wrap); the deliver-gate hook shipping gap. Plan, adopt, approve and deliver generated (deliver in part 3d: one shared skill that runs `rad deliver`); research and epic-decompose in part 3e | #186 |
+| Parity | State-changing workflow for Codex (plan, adopt, approve, deliver, design, research, epic-decompose, insights, kickoff/wrap); the deliver-gate hook shipping gap. Plan, adopt, approve and deliver generated (deliver in part 3d: one shared skill that runs `rad deliver`); research and epic-decompose in part 3e; design in part 3f; kickoff and wrap in part 4-i (wrap publishes notes through `rad wrap`) | #186 |
 
 ---
 
@@ -38,7 +38,9 @@ Columns:
   source generates only one assistant's output.
 - **Deps**: external dependencies that do not port verbatim. `sub-agent` =
   dispatches a Claude sub-agent (Task/Agent tool); `$ARGUMENTS` = free-text
-  args; `$1/$2` = positional args; `gh` = platform CLI; `MCP` = MCP tools.
+  args (written `{{args}}` in the source, the only substituted token); `$1/$2`
+  = awk field references in the wrap and insights bodies, not positional
+  arguments, so they port verbatim; `gh` = platform CLI; `MCP` = MCP tools.
 - **State**: `yes` when the tool cuts branches, commits, records approval or
   runs waves; `artifact` when it writes files under `.agents/` but never
   commits.
@@ -64,8 +66,8 @@ Columns:
 
 | Tool | Claude path | Codex path | Source | Body | Deps | State | Status |
 |------|-------------|------------|--------|------|------|-------|--------|
-| kickoff | `.claude/skills/kickoff/SKILL.md` | `.agents/skills/kickoff/SKILL.md` | `.rad/skills/kickoff/SKILL.md` | as-is | `gh` (optional) | no | planned: parity issue #186 |
-| wrap | `.claude/skills/wrap/SKILL.md` | `.agents/skills/wrap/SKILL.md` | `.rad/skills/wrap/SKILL.md` | wrapper | `$1/$2` | yes | planned: parity issue #186 |
+| kickoff | `.claude/skills/kickoff/SKILL.md` | `.agents/skills/kickoff/SKILL.md` | `.rad/skills/kickoff/SKILL.md` | as-is | rad CLI, `gh` (optional) | no | generated (#186 part 4-i) |
+| wrap | `.claude/skills/wrap/SKILL.md` | `.agents/skills/wrap/SKILL.md` (+ `agents/openai.yaml`, `codex_implicit: false`) | `.rad/skills/wrap/SKILL.md` | as-is | rad CLI | yes | generated (#186 part 4-i) |
 
 ### Agents
 
@@ -86,11 +88,16 @@ Columns:
   `.agents/findings.jsonl`, and never commits or pushes, so it belongs with
   the read-only slice. Findings recording can follow with #186.
 - **rad-insights in #186**: reading is its main job, but `--draft-plans` cuts
-  a `rad/insights-proposals-<date>` branch and commits a plan, and its
-  positional args need a Codex override body. One migration, not two.
-- **kickoff in #186**: read-only, but it is the session pair of `wrap`
-  (state-changing). They ship together so a Codex user never gets half the
-  ritual.
+  a `rad/insights-proposals-<date>` branch and commits a plan, so it ports
+  with the state-changing workflow. Its `$1/$2` are awk fields, not
+  positional args. One migration, not two.
+- **kickoff and wrap in part 4-i**: kickoff is read-only, but it is the
+  session pair of `wrap` (state-changing), so they shipped together and a
+  Codex user never gets half the ritual. One shared body serves both: wrap
+  appends its progress note, then publishes it with `rad wrap`, which commits
+  and pushes the plan and execution log by explicit path, never labels, and
+  never changes plan status (that comes from `rad deliver`). Kickoff's
+  checkout advice is `rad checkout`.
 - **rad-research and rad-epic-decompose in #186**: they never commit, but
   their artifacts feed `/rad-design` and `/rad-plan`, and `rad-research`
   dispatches sub-agents. They ported with the workflow they feed (part 3e):

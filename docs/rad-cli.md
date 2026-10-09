@@ -251,6 +251,47 @@ checkout script failed or the plan is missing; 2 refused before any git call.
 
 ---
 
+### rad wrap
+
+```
+rad wrap <feature>
+```
+
+Publishes the session notes a model wrote into a plan: the one deterministic
+step behind `/wrap`, callable from any coding tool. The model writes the
+content; this command only performs the state change. It:
+1. commits **only** the plan file plus the feature's execution logs
+   (`.agents/logs/<feature>-YYYY-MM-DD.md`, exact names, so a prefix-sharing
+   feature's log never rides along) on its work branch, when they have changes;
+2. pushes the work branch when origin lacks it or lags HEAD.
+
+It never writes the plan's content or its `Status:` — `rad deliver` owns plan
+status — and it applies **no label** (it prints `label skipped: no label
+requested`). No PR is opened.
+
+**Commit message:** subject `wrap(<feature>): session notes`, body
+`Plan: .agents/plans/<feature>.md`.
+
+**Refusals (exit 2, nothing changed):**
+- bad argv, an unknown option, or an invalid feature name (expected
+  `/^[a-z0-9][a-z0-9-]*$/`; the reserved `_architecture` slug is refused)
+- no plan file at `.agents/plans/<feature>.md`
+- the plan has no `Branch:` header
+- HEAD is not the plan's work branch, or staged changes are present
+
+**Nothing to publish:** when the paths are unchanged and origin is current, it
+makes no commit and no push, prints `rad wrap: nothing to publish`, and exits 0.
+
+**Rerun:** a push failure exits 1 with a message that a rerun is safe; the rerun
+pushes the existing commit without making a new one. There is no rollback.
+
+**Success line:** `rad wrap: ok feature=<f> committed=<bool> pushed=<bool>`.
+
+**Exit codes:** 0 published (or nothing to publish); 1 a publish step failed
+(rerun resumes); 2 refused, nothing changed.
+
+---
+
 ### rad label
 
 ```

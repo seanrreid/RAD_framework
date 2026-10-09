@@ -8,13 +8,14 @@
  * shells out here for the recording.
  *
  * This CLI never calls a model and never opens a PR. It pushes a branch only
- * through the `approve`, `plan-open` and `plan-status` publish steps.
+ * through the `approve`, `plan-open`, `plan-status` and `wrap` publish steps.
  *
  * Subcommands:
  *   approve <feature> [--on-behalf-of <name>] [--evidence <text>] [--no-commit] [--trailer "Key: Value"]...
  *   plan-open <plan-file> [--trailer "Key: Value"]...
  *   plan-status <feature> <rejected|needs-revision> [--trailer "Key: Value"]...
  *   checkout <feature | .agents/plans/<feature>.md>
+ *   wrap <feature>
  *
  * Argv parsing is hand-rolled (no runtime dep beyond js-yaml, which this file
  * does not need). Control flow is deterministic and side-effect-free except for
@@ -69,6 +70,7 @@ import { publishPlanChange, requirePublishReady } from './branch-publish.js';
 import { planOpenCommand, PLAN_OPEN_USAGE } from './plan-open.js';
 import { planStatusCommand, PLAN_STATUS_USAGE } from './plan-status.js';
 import { checkoutCommand, CHECKOUT_USAGE } from './checkout.js';
+import { wrapCommand, WRAP_USAGE } from './wrap.js';
 import { labelCommand, LABEL_USAGE } from './label.js';
 import { makePreparePort } from './deliver-prepare.js';
 import { makeFinishPort, executionLogPaths } from './deliver-finish.js';
@@ -218,6 +220,11 @@ const SUBCOMMANDS = {
     summary: "Check out a plan's work branch at its remote tip.",
     usage: CHECKOUT_USAGE,
     run: (argv, ctx) => checkoutCommand(argv, ctx),
+  },
+  wrap: {
+    summary: "Publish a plan's session notes (and its execution log) on its work branch: commit and push, no label, no status change.",
+    usage: WRAP_USAGE,
+    run: (argv, ctx) => wrapCommand(argv, ctx),
   },
   label: {
     summary: "Mirror a RAD status onto an issue as its rad:<status> label (wraps scripts/rad-label.sh).",
