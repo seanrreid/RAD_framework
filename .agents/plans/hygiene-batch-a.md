@@ -1,7 +1,7 @@
 # Plan: Hygiene Batch A: ACP Flake, Ahead-Only Checkout, Agent Audit Follow-ups (#201, #230, #192)
 Created: 2026-10-09
 Author: architect
-Status: approved
+Status: in-progress
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-10-09T17:44:33.042Z
 Recorded-By: sean@torchcodelab.com
