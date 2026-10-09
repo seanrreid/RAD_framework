@@ -663,6 +663,91 @@ This is **not** the same as `RAD_REVIEW_EVAL_CMD` (see [`evals.md`](./evals.md))
 which scores reviewer prompts against fixtures; `RAD_REVIEW_AGENT_CMD` runs a
 real review of the current branch.
 
+---
+
+### rad exercise
+
+```
+rad exercise <feature> [--check]
+```
+
+Runs the plan's `## Exercise` recipe against the delivered branch: it launches
+the built thing, lets the configured agent drive it, and prints the agent's
+`rad-findings`. It records no events, opens no PR, and has no effect on
+`rad deliver`.
+
+**The `## Exercise` block.** A section of the plan doc
+(`.agents/plans/<feature>.md`) that ends at the next `## ` heading:
+
+```
+## Exercise
+Launch: `npm start`
+Teardown: `npm run stop`
+Drive: open the app and add an item to the list
+Observe (AC#2): the item appears in the list
+Observe (AC#3): the list survives a reload
+```
+
+`Launch:` and `Teardown:` are single backticked commands. `Observe (AC#N):`
+lines tie an observation to a numbered Acceptance Criterion. The block counts as
+present only when it has at least one Observe line; otherwise the run is skipped.
+The parser never errors — it reports warnings (unknown key, Observe with no
+`(AC#N)`, an `AC#N` not in the plan, an empty `Launch:`/`Teardown:`, a block with
+no Observe lines).
+
+**`--check`.** Parses the plan doc, prints one `warning: ...` line per parser
+warning on stdout, and exits `0`. Exits `2` when the plan doc is missing or
+unreadable. It spawns nothing and creates no worktree.
+
+**Skip.** With no recipe, prints `Exercise: skipped (no recipe)` on stdout, a
+stderr summary with `status=skipped`, and exits `0`. Nothing is spawned.
+
+**Run.** In a throwaway detached worktree `exercise-<feature>` at the tip of
+`rad/<feature>` (created via `scripts/worktree-lifecycle.sh`, with its
+`node_modules` link), `Launch:` starts as the leader of its own process group.
+The agent then runs with a prompt carrying `Drive:`, each Observe line with its
+AC text, and the tail of Launch's output, and ends with a ` ```rad-findings `
+block whose findings use `reviewer: "exercise"` and `category: "behavior"`.
+After the agent returns, fails or times out, the Launch process group gets
+SIGTERM then SIGKILL after a grace period (so grandchildren do not survive),
+`Teardown:` runs, and the worktree is removed. A Teardown failure is logged to
+stderr with its exit code and never changes the command's exit code.
+
+**Resolution order.** The agent resolves exactly like [`rad review`](#rad-review):
+`RAD_REVIEW_AGENT_CMD`, then `RAD_AGENT_CMD`, then `agent.command` from
+`.rad/config.yml` (command adapter only).
+
+**Env allow-list.** `Launch:`, `Teardown:` and the agent run under the same
+allow-listed env as the `Verify:` gate and `rad review` — only
+`PATH HOME LANG LC_ALL TMPDIR TERM USER`.
+
+**Output.** On success the agent's stdout is printed verbatim and one summary line
+goes to stderr (executable basename only, never the full command string):
+
+```
+rad exercise: feature=<f> agent=<RAD_REVIEW_AGENT_CMD|RAD_AGENT_CMD|agent.command> executable=<basename> mode=<observe-only|blocking> findings=<n|none>
+```
+
+On failure the summary carries a sanitized `error="..."` and no findings are
+printed as if they were clean.
+
+**Exit codes:** `0` on success (a parsed `rad-findings` block) or a skip; `1`
+when Launch cannot start or exits non-zero before the agent returns, the agent
+fails or times out, or there is no parsable findings block; `2` on usage errors,
+no configured agent, an invalid config, or a malformed env value. The exit code
+never depends on the mode.
+
+**Knobs.** `RAD_EXERCISE_TIMEOUT_SECONDS` (default **600**) bounds the whole run
+(Launch + agent); a malformed, zero or negative value exits **2**.
+`RAD_EXERCISE_BLOCKING` accepts `1`/`true` (mode `blocking`) or
+unset/empty/`0`/`false` (mode `observe-only`); any other value exits **2**. The
+mode only labels the summary line.
+
+**Not a security sandbox: the approved plan is the control.** The recipe's
+commands run on your machine; the env allow-list and the throwaway worktree limit
+accidents, not a hostile recipe. What the recipe may run is governed by the plan
+the architect approved.
+
 #### Provider cookbook
 
 Each command must be logged in beforehand under your own account (it gets no
@@ -833,6 +918,8 @@ validation.)
 | `RAD_WAVE_TIMEOUT_SECONDS` | positive integer | `600` | per-wave wall-clock deadline for the command and acp adapters (the SDK path ignores it); malformed exits 2 before any wave or event |
 | `RAD_TOKEN_BUDGET` | positive integer | — | per-deliver cumulative token ceiling (cost breaker) |
 | `RAD_REVIEW_AGENT_CMD` | any command string | — (falls back to `RAD_AGENT_CMD`, then `agent.command`) | review-lane CLI for [`rad review`](#rad-review) and `/rad-review`; not used by `rad deliver` |
+| `RAD_EXERCISE_TIMEOUT_SECONDS` | positive integer | `600` | wall-clock bound on the whole [`rad exercise`](#rad-exercise) run (Launch + agent); malformed, zero or negative exits 2 |
+| `RAD_EXERCISE_BLOCKING` | `1` \| `true` \| `0` \| `false` \| unset | unset (`observe-only`) | labels the `rad exercise` summary `mode=blocking` or `observe-only`; never changes the exit code; any other value exits 2 |
 
 **Per-path credential requirements:**
 
@@ -960,6 +1047,10 @@ column as the first `FAIL` line. See [rad acp-check](#rad-acp-check).
 | `1` | failed — credential/selection or preflight failure, a `failed` stop, or completion not evidenced (an unknown option or missing feature also exits `1`) |
 | `2` | usage / config error — every `--resume` refusal (including `--context` with no value), malformed `RAD_MAX_FAILED_ATTEMPTS` / `RAD_AGENT_PREFLIGHT_TIMEOUT_SECONDS` / `RAD_WAVE_TIMEOUT_SECONDS` |
 | `3` | needs a human decision — a `needs-decision` stop, e.g. `merge-conflict` (see [Resuming a stopped run](#resuming-a-stopped-run)) |
+
+`rad exercise` has its own codes — `0` ok or skipped, `1` failed, `2` usage/config
+(including a malformed `RAD_EXERCISE_TIMEOUT_SECONDS` / `RAD_EXERCISE_BLOCKING`);
+see [rad exercise](#rad-exercise).
 
 See the Stop contract in [`rad-wave-contract.md`](./rad-wave-contract.md#stop-contract)
 for the stop classes behind `1` and `3`.

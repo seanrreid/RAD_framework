@@ -51,6 +51,7 @@ import { parseCapabilityLine, resolveWaveCapabilities, sdkAllowedTools, commandR
 import { gatherDigestInputs, buildDigest, renderDigest, readScope } from './digest.js';
 import { buildPrBody, testsToWritePaths } from './pr-body.js';
 import { buildReviewPrompt, parseFindings } from './review.js';
+import { exerciseCommand, EXERCISE_USAGE } from './exercise.js';
 import {
   CONFIG_PATH, SETTINGS_KEYS, loadConfig, getConfigValue, migrateFromClaudeMd, serializeConfig, validateConfig,
   buildInitConfig, seedSettings, writeConfigAtomic, AGENT_ADAPTERS, AGENT_PRESETS,
@@ -90,6 +91,8 @@ const DIGEST_USAGE = 'rad digest <feature> [--branch <ref>] [--base <ref>]';
 const PR_BODY_USAGE = 'rad pr-body <feature> [--branch <ref>] [--base <ref>]';
 /** Usage line for `rad review`. */
 const REVIEW_USAGE = 'rad review <reviewer> [--base <ref>]';
+/** Usage line for `rad exercise` (owned by harness/exercise.js). */
+const EXERCISE_CLI_USAGE = EXERCISE_USAGE;
 /** Usage line for `rad capabilities`. */
 const CAPABILITIES_USAGE = 'rad capabilities <feature> [--plan <path>]';
 /** Usage line for `rad install-core`. */
@@ -156,6 +159,11 @@ const SUBCOMMANDS = {
     summary: 'Run one reviewer agent through the review lane (RAD_REVIEW_AGENT_CMD, else RAD_AGENT_CMD).',
     usage: REVIEW_USAGE,
     run: (argv, ctx) => reviewCommand(argv, ctx),
+  },
+  exercise: {
+    summary: "Run a plan's ## Exercise block against the branch tip in a throwaway worktree (--check lints it).",
+    usage: EXERCISE_CLI_USAGE,
+    run: (argv, ctx) => exerciseCommand(argv, { ...ctx, resolveAgent: (env) => exerciseAgentOrRefuse(env, ctx.repoRoot) }),
   },
   config: {
     summary: 'Create, read, validate, or migrate the RAD config file (.rad/config.yml).',
@@ -3426,6 +3434,23 @@ function reviewAgentOrRefuse(env, configLoad) {
     process.stderr.write(`rad review: ${CONFIG_PATH} is invalid: ${configLoad.errors.join('; ')}\n`);
   } else {
     process.stderr.write(NO_REVIEW_AGENT_MESSAGE);
+  }
+  return { code: USAGE_EXIT_CODE };
+}
+
+/**
+ * The exercise agent (same resolution as the review lane), or { code } after
+ * writing the reason. Injected into exerciseCommand so harness/exercise.js
+ * never imports this file.
+ */
+async function exerciseAgentOrRefuse(env, repoRoot) {
+  const configLoad = await loadConfig(repoRoot);
+  const agent = resolveReviewAgent(env, configLoad.ok ? configLoad.doc : null);
+  if (agent) return { agent };
+  if (!configLoad.ok && !configLoad.missing) {
+    process.stderr.write(`rad exercise: ${CONFIG_PATH} is invalid: ${configLoad.errors.join('; ')}\n`);
+  } else {
+    process.stderr.write(NO_REVIEW_AGENT_MESSAGE.replace('rad review: no review agent', 'rad exercise: no agent'));
   }
   return { code: USAGE_EXIT_CODE };
 }
