@@ -1,1 +1,18 @@
 {"feature":"exercise-review-step","type":"approved","actor":"sean@torchcodelab.com","role":"architect","ts":"2026-10-09T19:36:36.600Z","recordedBy":"sean@torchcodelab.com","data":{"fingerprint":"a0d12ba134822f1ef573eca9f2319193ab6400579250ea86095a10f48c61289a"}}
+{"feature":"exercise-review-step","type":"deliver-started","actor":"harness","ts":"2026-10-09T19:36:50.811Z"}
+{"feature":"exercise-review-step","type":"run-prepared","actor":"harness","ts":"2026-10-09T19:36:57.057Z","data":{"base":"main","merged":false,"fastForwarded":false,"committed":true,"pushed":true}}
+{"feature":"exercise-review-step","type":"wave-started","actor":"harness","ts":"2026-10-09T19:36:57.066Z","data":{"wave":1,"attempt":1}}
+{"feature":"exercise-review-step","type":"wave-attempt","actor":"harness","ts":"2026-10-09T19:41:01.615Z","data":{"wave":1,"attempt":1,"outcome":"success","tasks":[{"title":"The lint relay","status":"complete","commit":"005bf35","concern":"—","error":"—"}]}}
+{"feature":"exercise-review-step","type":"wave-complete","actor":"harness","ts":"2026-10-09T19:41:01.615Z","data":{"wave":1}}
+{"feature":"exercise-review-step","type":"wave-started","actor":"harness","ts":"2026-10-09T19:41:01.616Z","data":{"wave":2,"attempt":1}}
+{"feature":"exercise-review-step","type":"wave-attempt","actor":"harness","ts":"2026-10-09T19:41:27.590Z","data":{"wave":2,"attempt":1,"outcome":"success","tasks":[{"title":"The Claude review step","status":"complete","commit":"95560d1","concern":"—","error":"—"}]}}
+{"feature":"exercise-review-step","type":"wave-complete","actor":"harness","ts":"2026-10-09T19:41:27.590Z","data":{"wave":2}}
+{"feature":"exercise-review-step","type":"wave-started","actor":"harness","ts":"2026-10-09T19:41:27.591Z","data":{"wave":3,"attempt":1}}
+{"feature":"exercise-review-step","type":"wave-attempt","actor":"harness","ts":"2026-10-09T19:42:06.625Z","data":{"wave":3,"attempt":1,"outcome":"success","tasks":[{"title":"The Codex step and the review tests","status":"complete","commit":"f478169","concern":"—","error":"—"}]}}
+{"feature":"exercise-review-step","type":"wave-complete","actor":"harness","ts":"2026-10-09T19:42:06.625Z","data":{"wave":3}}
+{"feature":"exercise-review-step","type":"wave-started","actor":"harness","ts":"2026-10-09T19:42:06.626Z","data":{"wave":4,"attempt":1}}
+{"feature":"exercise-review-step","type":"wave-attempt","actor":"harness","ts":"2026-10-09T19:43:02.360Z","data":{"wave":4,"attempt":1,"outcome":"success","tasks":[{"title":"Templates and docs","status":"complete","commit":"8bb3925","concern":"—","error":"—"},{"title":"Docs","status":"complete","commit":"f0612ec","concern":"—","error":"—"}]}}
+{"feature":"exercise-review-step","type":"wave-complete","actor":"harness","ts":"2026-10-09T19:43:02.360Z","data":{"wave":4}}
+{"feature":"exercise-review-step","type":"wave-started","actor":"harness","ts":"2026-10-09T19:43:02.361Z","data":{"wave":5,"attempt":1}}
+{"feature":"exercise-review-step","type":"wave-attempt","actor":"harness","ts":"2026-10-09T19:51:50.734Z","data":{"wave":5,"attempt":1,"outcome":"success","tasks":[{"title":"Full verification","status":"complete","commit":"—","concern":"—","error":"—"}],"verify":{"command":"exec bash scripts/verify-all.sh","status":0,"passed":true}}}
+{"feature":"exercise-review-step","type":"wave-complete","actor":"harness","ts":"2026-10-09T19:51:50.739Z","data":{"wave":5}}
