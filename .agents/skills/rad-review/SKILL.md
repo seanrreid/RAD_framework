@@ -64,14 +64,38 @@ review.
 If a sub-agent cannot be spawned, say so in the report; do not review the
 files yourself in its place.
 
-### Step 4: Combined summary
+### Step 4: Exercise the artifact
+
+If the text the user wrote after the skill name contains `--no-exercise`, remove that token from the file list, skip
+this step, and print `Exercise: skipped (--no-exercise)`. Otherwise run the
+plan's `## Exercise` recipe against the delivered branch:
+
+```bash
+node harness/cli.js exercise "$FEATURE"
+```
+
+- **No recipe:** the command prints `Exercise: skipped (no recipe)`; report that.
+- **Ran:** include its stdout (the `rad-findings` block) and its stderr summary
+  line in the report.
+- **Failure:** on a non-zero exit, report the exit code and stderr line and
+  continue. A missing or failing exercise never stops the review.
+
+The mode is `blocking` only when `RAD_EXERCISE_BLOCKING` is `1` or `true`;
+otherwise it is `observe-only`. In `blocking` mode, HIGH exercise findings count
+as blocking items; in `observe-only` mode they are listed as advisory. This is a
+self-review check only: it never touches the approval gate. Report the output
+only; write nothing.
+
+### Step 5: Combined summary
 
 Report, in order:
 - the branch, plan, and base;
 - each deterministic check with its exit code and output;
 - each reviewer's findings;
+- a "Behavioral Exercise" section (recipe present or skipped, mode, findings);
 - a summary listing every blocking item (out-of-scope files, approval
-  blockers, missing tests, HIGH findings) or stating that none were found.
+  blockers, missing tests, HIGH findings, and HIGH exercise findings in
+  `blocking` mode) or stating that none were found.
 
 ## Rules
 
