@@ -1,7 +1,7 @@
 # Plan: Give rad Worktrees the Main Checkout's harness/node_modules (#232)
 Created: 2026-10-09
 Author: architect
-Status: approved
+Status: in-progress
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-10-09T16:52:32.574Z
 Recorded-By: sean@torchcodelab.com
