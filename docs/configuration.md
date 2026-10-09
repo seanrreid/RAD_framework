@@ -552,6 +552,14 @@ machinery always requires architect review.
 scope map — is self-protected too, so a plan that edits RAD's config is always
 flagged for architect review.
 
+When a plan has a self-protected path in scope **and** its last wave declares no
+`Verify:`, `scripts/lint-plan.sh` adds a further advisory warning suggesting
+`Verify: exec bash scripts/verify-all.sh` (see #236). The warning never changes
+the exit code. `verify-all.sh` runs the repo's CI checks locally in one pass
+(`--list` names them; `--only a,b` narrows; `--base <ref>` sets the base), and
+needs `RAD_VERIFY_TIMEOUT_SECONDS=1800` when run as a wave `Verify:` — the
+default is 600 s.
+
 The set lives as a literal (`RAD_SELF_PROTECTED_PATTERN`) in
 `scripts/lib/plan-paths.sh`; changing it requires a reviewed commit — there is
 deliberately no env var.

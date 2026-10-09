@@ -206,6 +206,12 @@ writes `Status: approved` to the plan doc and commits/pushes it to the
 `rad/[feature]` branch tip — never to the default branch. That recorded
 approval is the gate that unblocks `/rad-deliver`.
 
+A plan edited after delivery can be re-approved with the same verb: the plan
+header's `Status:` (e.g. `complete`) is kept, and only the approval provenance
+lines are updated (#228). For plans touching RAD's own machinery, add
+`Verify: exec bash scripts/verify-all.sh` to the last wave and deliver with
+`RAD_VERIFY_TIMEOUT_SECONDS=1800` (#236).
+
 If the architect approved out-of-band (in chat, a meeting, etc.), a
 non-architect can record it for them:
 

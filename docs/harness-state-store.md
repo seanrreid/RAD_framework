@@ -121,7 +121,10 @@ questions, and a robust state machine needs both. So `append()` runs a
 writes** on an illegal move. Examples of illegal moves that should never reach
 the log:
 
-- any event after a terminal `done`/`delivered` event for the feature;
+- any event after a terminal `done`/`delivered` event for the feature — except
+  an `approved` re-approval after `delivered` (#228): it is legal, rules (d)
+  (changed fingerprint required) and (e) (frozen role) still apply, and the phase
+  stays `delivered`. Nothing follows `done`;
 - `wave-complete` for a feature whose `phase` is not `in-progress`;
 - a `revision-requested` with no preceding reviewer/verifier output;
 - a duplicate `approved` that would silently shadow an earlier authority.

@@ -346,6 +346,15 @@ unknown `stopped` value, an unknown matrix action, or a malformed result
 **throws** — there is no default class, so a new terminal must be added to the
 table, never silently bucketed.
 
+### Last-wave verification
+
+A plan that touches RAD's own machinery (`harness/`, `scripts/`, `.rad/`,
+`.claude/`, `.agents/skills/`) should declare `Verify: exec bash scripts/verify-all.sh`
+on its last wave, so the whole CI check set runs before the deliver PR opens.
+`exec` makes the process `scripts/check-verify.sh` kills on a timeout the script
+itself, which cleans up its children. Run with `RAD_VERIFY_TIMEOUT_SECONDS=1800`
+(the default is 600 s). `scripts/lint-plan.sh` warns when it is missing (#236).
+
 ### Completion criteria
 
 A run is **complete** only when the event log shows it: a `wave-complete` for
