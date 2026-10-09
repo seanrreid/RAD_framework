@@ -157,7 +157,7 @@ rules. You can run any of them by hand.
 | Script | Enforces |
 |---|---|
 | `get-default-branch.sh` | The configured `default_branch` (never hardcode `main`) |
-| `checkout-plan.sh` | Safe checkout of a `rad/` branch at its remote tip (ff-only, name-validated) |
+| `checkout-plan.sh` | Safe checkout of a `rad/` branch at its remote tip (ff-only when behind; an ahead-only branch passes with a note; diverged is refused; name-validated) |
 | `check-plan-approved.sh` | A plan is `approved` at its branch tip before delivery (platform-agnostic) |
 | `check-role.sh` | The runner (or a named `--on-behalf-of` identity) holds the required role |
 | `check-scope.sh` | Every changed file is declared in the plan's Files-in-Scope / Tests-to-Write |

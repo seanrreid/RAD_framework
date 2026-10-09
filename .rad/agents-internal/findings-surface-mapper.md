@@ -1,6 +1,6 @@
 ---
 name: findings-surface-mapper
-description: MUST BE USED by findings-loop-orchestrator when mapping the findings.jsonl record shape, the existing /rad-insights aggregation sections, the /wrap progress-note append point, or the CLAUDE.md/lint conventions a suggestion would target. Returns file:line anchors and shape notes — never raw file contents.
+description: MUST BE USED by findings-loop-orchestrator when mapping the findings.jsonl record shape, the existing /rad-insights aggregation sections, the /wrap progress-note append point, or the AGENTS.md/lint conventions a suggestion would target. Returns file:line anchors and shape notes — never raw file contents.
 model: claude-haiku-4-5-20251001
 tools: Read, Grep, Glob
 roles: [developer]
@@ -15,32 +15,22 @@ Context tool that maps the findings/suggestion surface and returns bounded ancho
 - Sample findings.jsonl record structure to identify the category field and grouping-key candidates
 - Anchor the existing /rad-insights aggregation sections and their report-generation flow
 - Anchor the /wrap progress-note append point and session-summary integration
-- Anchor the CLAUDE.md Coding Conventions section and the scripts/lint-plan.sh suggestion-target patterns
+- Anchor the AGENTS.md Coding Conventions section and the scripts/lint-plan.sh suggestion-target patterns
 - Return file:line anchors and shape notes only — never raw file contents or full logs
 
 ## Scope
 - .agents/findings.jsonl (shape samples only)
 - rad-insights skill file (aggregation section anchors)
 - wrap skill file (progress-note append point)
-- CLAUDE.md Coding Conventions section
+- AGENTS.md Coding Conventions section
 - scripts/lint-plan.sh (suggestion-target conventions)
 
 ## Output Format
-File:line anchors with finding-category shape notes. Include the category field name, grouping-key candidates, existing insights report sections, and the wrap append point. Example:
-
-```
-.agents/findings.jsonl:1
-  shape: {timestamp, category, severity, message, file}
-  grouping candidates: category, file
-
-.claude/skills/shared/rad-insights/SKILL.md:42
-  section: aggregation by category — insertion point for recurrence
-
-.claude/skills/wrap/SKILL.md:38
-  append point: dated progress note, before session summary
-```
-
-Maximum 40 lines total.
+Return ≤40 lines, no raw file dumps. Read each file fresh and give a `file:line` anchor you just located for every item — never reuse remembered line numbers:
+- **Record shape:** the `findings.jsonl` fields, the category field name and the grouping-key candidates.
+- **Insights sections:** the existing /rad-insights aggregation sections and where recurrence would slot in.
+- **Wrap append point:** where /wrap appends its dated progress note.
+- **Suggestion targets:** the AGENTS.md Coding Conventions section and the lint-plan.sh patterns a suggestion would target.
 
 ## Rules
 - Never read files outside the declared scope

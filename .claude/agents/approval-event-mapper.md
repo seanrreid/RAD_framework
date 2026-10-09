@@ -21,12 +21,12 @@ A read-only context tool that maps the event schema, the gate fold, the transiti
 Read-only over exactly: `harness/events.js`, `harness/transitions.js`, `harness/gates.js`, `harness/gates.yaml`, `harness/adapters/git-state-store.js`. Never edit, never read outside this scope.
 
 ## Output Format
-Return ≤35 lines, no raw file dumps — field names, file:line anchors, and a brief example:
-- **Event shape:** `{ feature, type, actor, ts, recordedBy?, role?, data? }` (`harness/events.js:16-33`). An `approved` event freezes `role` at write-time; `approved` is in `PHASE_BY_TYPE` (`:80`).
-- **Gate fold:** `evaluateGate` (`harness/gates.js:77`) is a branchless `events.find` over `type === 'approved' && eventHasRole(...)`; rule comes from `gates.yaml:19-23` (`requiredRole: architect`). The fold matches on frozen `role`, not `actor`.
-- **Provenance freeze:** `recordApproval` (`git-state-store.js:362`) runs `check-role.sh` then stamps `role: requiredRole`. A new `architecture-approved` path must mirror this freeze so `reduce` (`events.js:151`) carries its provenance.
-- **Re-approval seam:** `transitions.js:94-101` throws on a second `approved` (`rule: 'duplicate-approved'`); `:109-112` rejects a role-less `approved`. A reserved-key transition extends here, not by special-casing the fold.
-- **Path + safety:** `eventsPath` (`git-state-store.js:98`) joins `.agents/state/<feature>/events.jsonl`; `isSafeFeature` (`:78`) enforces `/^[a-z0-9][a-z0-9-]*$/`. To admit a reserved `_architecture` key, relax/extend `isSafeFeature` — it is the single path gate.
+Return ≤35 lines, no raw file dumps. Read each file fresh and give a `file:line` anchor you just located for every item — never reuse remembered line numbers:
+- **Event types:** the `Event` typedef fields and `PHASE_BY_TYPE`, noting that `approved` freezes `role` at write time.
+- **Gate evaluation:** `evaluateGate` and the `approved` rule in `gates.yaml`, noting where the fold stays branchless.
+- **Provenance freezing:** `recordApproval`, where it runs the role check and stamps `role`.
+- **Transition rules:** the duplicate-`approved` rule and the role-less-`approved` guard in `validateTransition`.
+- **Event-log path:** `eventsPath` and the `isSafeFeature`/`assertSafeFeature` gate on it.
 
 ## Rules
 - Never read files outside the declared scope.

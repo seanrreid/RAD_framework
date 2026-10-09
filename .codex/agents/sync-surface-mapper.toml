@@ -12,11 +12,11 @@ A read-only context tool that maps the transport seam — where the verbs attach
 - Locate the `/rad-approve` and `/rad-deliver` command/skill flow and their gate-check invocation sites (where an approved-event read or gate fold runs).
 - Find any existing git-invocation helper in `harness/` or `scripts/` and distinguish plain-git shelling (`git push/fetch/rev-parse`) from host-API calls (`gh`, `glab`).
 - Surface `scripts/detect-platform.sh` and the per-platform mirror scripts (e.g. `scripts/rad-label.sh`) so the display/mirror layer is anchored apart from the gate path.
-- Surface the `### RAD Configuration` block in `CLAUDE.md` and `.env.example` to capture the `RAD_*` env-var documentation pattern any new sync knob must mirror.
+- Surface the `RAD_*` environment-variable reference in `docs/configuration.md` and `.env.example` to capture the `RAD_*` env-var documentation pattern any new sync knob must mirror.
 
 ## Scope
 
-Read-only across exactly: the `/rad-approve` and `/rad-deliver` command/skill flow plus their gate-check invocation sites; git-invocation helpers in `harness/` and `scripts/`; `scripts/detect-platform.sh` and the per-platform mirror scripts; the `### RAD Configuration` block in `CLAUDE.md`; and `.env.example`. Never edit, never read outside this scope.
+Read-only across exactly: the `/rad-approve` and `/rad-deliver` command/skill flow plus their gate-check invocation sites; git-invocation helpers in `harness/` and `scripts/`; `scripts/detect-platform.sh` and the per-platform mirror scripts; `docs/configuration.md` (the `RAD_*` variables); and `.env.example`. Never edit, never read outside this scope.
 
 ## Output Format
 
@@ -24,7 +24,7 @@ Return ≤35 lines, no raw file dumps — file:line anchors and field names only
 
 - `verb_attach_points`: the exact call sites in the approve/deliver flow where a push/fetch would attach (`path:line`), with which side (write-time vs read-time gate).
 - `git_vs_host_boundary`: where RAD shells to plain git vs to `gh`/`glab`, so transport rides the former and avoids the latter (`path:line` for each kind).
-- `env_var_pattern`: the existing `RAD_*` doc convention (CLAUDE.md block + `.env.example` entry) a new sync knob must mirror.
+- `env_var_pattern`: the existing `RAD_*` doc convention (`docs/configuration.md` entry + `.env.example` entry) a new sync knob must mirror.
 - `mirror_layer`: where the display/mirror layer lives (`detect-platform.sh`, `rad-label.sh`) so it stays out of the gate path.
 
 Example:

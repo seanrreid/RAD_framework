@@ -1,0 +1,16 @@
+{"feature":"hygiene-batch-a","type":"approved","actor":"sean@torchcodelab.com","role":"architect","ts":"2026-10-09T17:44:33.042Z","recordedBy":"sean@torchcodelab.com","data":{"fingerprint":"7e0b35877fd8c2b219b57eef834790816d58ae4acd8d0a076f9c2cd1d3737912"}}
+{"feature":"hygiene-batch-a","type":"deliver-started","actor":"harness","ts":"2026-10-09T17:44:50.321Z"}
+{"feature":"hygiene-batch-a","type":"run-prepared","actor":"harness","ts":"2026-10-09T17:44:56.841Z","data":{"base":"main","merged":false,"fastForwarded":false,"committed":true,"pushed":true}}
+{"feature":"hygiene-batch-a","type":"wave-started","actor":"harness","ts":"2026-10-09T17:44:56.845Z","data":{"wave":1,"attempt":1}}
+{"feature":"hygiene-batch-a","type":"wave-attempt","actor":"harness","ts":"2026-10-09T17:45:47.601Z","data":{"wave":1,"attempt":1,"outcome":"success","tasks":[{"title":"The ACP flake","status":"complete","commit":"1dc7135","concern":"—","error":"—"}]}}
+{"feature":"hygiene-batch-a","type":"wave-complete","actor":"harness","ts":"2026-10-09T17:45:47.601Z","data":{"wave":1}}
+{"feature":"hygiene-batch-a","type":"wave-started","actor":"harness","ts":"2026-10-09T17:45:47.604Z","data":{"wave":2,"attempt":1}}
+{"feature":"hygiene-batch-a","type":"wave-attempt","actor":"harness","ts":"2026-10-09T17:47:43.820Z","data":{"wave":2,"attempt":1,"outcome":"success","tasks":[{"title":"The ahead-only checkout","status":"complete","commit":"3a44ba0","concern":"—","error":"—"},{"title":"The checkout docs","status":"complete","commit":"23820de","concern":"—","error":"—"}]}}
+{"feature":"hygiene-batch-a","type":"wave-complete","actor":"harness","ts":"2026-10-09T17:47:43.821Z","data":{"wave":2}}
+{"feature":"hygiene-batch-a","type":"wave-started","actor":"harness","ts":"2026-10-09T17:47:43.822Z","data":{"wave":3,"attempt":1}}
+{"feature":"hygiene-batch-a","type":"wave-attempt","actor":"harness","ts":"2026-10-09T17:48:41.315Z","data":{"wave":3,"attempt":1,"outcome":"success","tasks":[{"title":"The two drifted mappers, the orchestrator and the fold mapper","status":"complete","commit":"3834aef","concern":"—","error":"—"},{"title":"The CLAUDE.md pointers and the audit doc","status":"complete","commit":"9adf8b2","concern":"—","error":"—"}]}}
+{"feature":"hygiene-batch-a","type":"wave-complete","actor":"harness","ts":"2026-10-09T17:48:41.316Z","data":{"wave":3}}
+{"feature":"hygiene-batch-a","type":"wave-started","actor":"harness","ts":"2026-10-09T17:48:41.317Z","data":{"wave":4,"attempt":1}}
+{"feature":"hygiene-batch-a","type":"wave-attempt","actor":"harness","ts":"2026-10-09T17:53:31.153Z","data":{"wave":4,"attempt":1,"outcome":"success","tasks":[{"title":"Full verification","status":"complete","commit":"—","concern":"—","error":"—"}]}}
+{"feature":"hygiene-batch-a","type":"wave-complete","actor":"harness","ts":"2026-10-09T17:53:31.157Z","data":{"wave":4}}
+{"feature":"hygiene-batch-a","type":"pr-opened","actor":"harness","ts":"2026-10-09T17:53:40.802Z"}

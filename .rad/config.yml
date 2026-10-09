@@ -118,7 +118,7 @@ agent_scope_map:
     roles: [architect]
   - agent: lint-surface-mapper
     type: context-tool
-    reads: "lint-plan.sh, check-scope.sh, lib/plan-paths.sh, .claude/agents samples, .rad/config.yml agent_scope_map"
+    reads: "lint-plan.sh, check-scope.sh, lib/plan-paths.sh, .rad/agents-internal samples, .rad/config.yml agent_scope_map"
     roles: [architect]
   - agent: quality-reviewer
     type: reviewer

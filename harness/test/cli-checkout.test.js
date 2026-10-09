@@ -104,10 +104,10 @@ async function runCheckout(root, argv, env = {}) {
 
 const currentBranch = (root) => git(root, ['rev-parse', '--abbrev-ref', 'HEAD']);
 
-function assertOk(r, root, { branch = BRANCH, head }) {
+function assertOk(r, root, { branch = BRANCH, head, ahead = '' }) {
   assert.equal(r.code, 0, r.stderr);
   assert.equal(currentBranch(root), branch);
-  assert.equal(r.stdout, `rad checkout: ok feature=${SLUG} branch=${branch} head=${head} plan=${PLAN_REL}\n`);
+  assert.equal(r.stdout, `rad checkout: ok feature=${SLUG} branch=${branch} head=${head} plan=${PLAN_REL}${ahead}\n`);
 }
 
 for (const [label, arg] of [['bare name', SLUG], ['.md suffix', `${SLUG}.md`], ['full plan path', PLAN_REL]]) {
@@ -130,6 +130,61 @@ test('checkout: existing local branch behind origin → fast-forwards to the rem
     git(root, ['checkout', '-q', 'main']);
     const r = await runCheckout(root, [SLUG]);
     assertOk(r, root, { head: tip });
+  }));
+
+/** Track the branch locally, then add `count` unpushed commits; returns the local tip. */
+function addUnpushedCommits(root, count) {
+  git(root, ['checkout', '-q', '-b', BRANCH, '--track', `origin/${BRANCH}`]);
+  let tip = '';
+  for (let i = 0; i < count; i += 1) tip = commitFile(root, `local-${i}.txt`, `${i}\n`, `local ${i}`);
+  git(root, ['checkout', '-q', 'main']);
+  return tip;
+}
+
+for (const count of [1, 2]) {
+  test(`checkout: local branch ahead of origin by ${count} → exit 0, commits kept, ahead=${count}`, () =>
+    withRepo(async ({ root }) => {
+      publishBranch(root, BRANCH);
+      const tip = addUnpushedCommits(root, count);
+      const r = await runCheckout(root, [SLUG]);
+      assertOk(r, root, { head: tip, ahead: ` ahead=${count}` });
+    }));
+}
+
+test('checkout: ahead-only script run passes with the ahead note on stderr', () =>
+  withRepo(async ({ root }) => {
+    publishBranch(root, BRANCH);
+    addUnpushedCommits(root, 2);
+    git(root, ['checkout', '-q', BRANCH]);
+    const res = testSh(join(root, SCRIPT_REL), [BRANCH], { cwd: root });
+    assert.equal(res.status, 0, res.stderr);
+    assert.match(res.stderr, new RegExp(`note: local '${BRANCH}' is 2 commit\\(s\\) ahead of origin \\(unpushed\\)`));
+  }));
+
+test('checkout: behind-only success line carries no ahead field', () =>
+  withRepo(async ({ root }) => {
+    publishBranch(root, BRANCH);
+    const r = await runCheckout(root, [SLUG]);
+    assert.doesNotMatch(r.stdout, /ahead=/);
+  }));
+
+test('checkout: a failing rev-list omits ahead= and does not fail the checkout', () =>
+  withRepo(async ({ root }) => {
+    publishBranch(root, BRANCH);
+    const tip = addUnpushedCommits(root, 1);
+    const out = process.stdout.write.bind(process.stdout);
+    let stdout = '';
+    const sh = (file, args, opts) =>
+      args[0] === 'rev-list' ? { status: 128, stdout: '', stderr: 'boom' } : testSh(file, args, opts);
+    process.stdout.write = (c) => { stdout += c; return true; };
+    let code;
+    try {
+      code = await checkoutCommand([SLUG], { repoRoot: root, sh, env: {} });
+    } finally {
+      process.stdout.write = out;
+    }
+    assert.equal(code, 0);
+    assert.equal(stdout, `rad checkout: ok feature=${SLUG} branch=${BRANCH} head=${tip} plan=${PLAN_REL}\n`);
   }));
 
 test('checkout: diverged local branch → exit 1 with the script divergence message', () =>

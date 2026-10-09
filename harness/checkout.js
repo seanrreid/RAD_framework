@@ -78,6 +78,17 @@ function readHead(sh, root) {
   return String(res.stdout ?? '').trim();
 }
 
+/**
+ * Count of local commits not on origin. Advisory: a failing or unparsable
+ * rev-list yields 0 (the field is omitted) and never fails the checkout.
+ */
+function countAhead(sh, root, branch) {
+  const res = sh('git', ['rev-list', '--count', `origin/${branch}..${branch}`], { cwd: root });
+  if (res.status !== 0) return 0;
+  const count = Number.parseInt(String(res.stdout ?? '').trim(), 10);
+  return Number.isInteger(count) && count > 0 ? count : 0;
+}
+
 /** Check out the branch and confirm the plan is at its tip; returns the ok-line fields. */
 function checkoutPlan(sh, root, feature, env) {
   const branch = conventionWorkBranch(feature, env);
@@ -86,7 +97,7 @@ function checkoutPlan(sh, root, feature, env) {
   if (!existsSync(join(root, planRel))) {
     throw failure(`checked out ${branch} but ${planRel} is missing at its tip; is this a RAD plan branch?`);
   }
-  return { branch, planRel, head: readHead(sh, root) };
+  return { branch, planRel, head: readHead(sh, root), ahead: countAhead(sh, root, branch) };
 }
 
 /**
@@ -105,8 +116,9 @@ export async function checkoutCommand(argv, ctx) {
       process.stdout.write(`usage: ${CHECKOUT_USAGE}\n`);
       return OK_EXIT;
     }
-    const { branch, planRel, head } = checkoutPlan(sh, ctx.repoRoot, parsed.feature, env);
-    process.stdout.write(`${VERB}: ok feature=${parsed.feature} branch=${branch} head=${head} plan=${planRel}\n`);
+    const { branch, planRel, head, ahead } = checkoutPlan(sh, ctx.repoRoot, parsed.feature, env);
+    const aheadField = ahead > 0 ? ` ahead=${ahead}` : '';
+    process.stdout.write(`${VERB}: ok feature=${parsed.feature} branch=${branch} head=${head} plan=${planRel}${aheadField}\n`);
     return OK_EXIT;
   } catch (err) {
     if (!(err instanceof CheckoutStop)) throw err;
