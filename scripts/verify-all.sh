@@ -59,7 +59,7 @@ builtin_checks() {
   printf '%s\n' \
     "harness-tests${TAB}node --test harness/test/*.test.js" \
     "evals${TAB}node --test harness/evals/*.eval.js" \
-    "script-tests${TAB}rc=0; for t in scripts/test-*.sh; do bash \"\$t\" >/dev/null 2>&1 || { echo \"FAILED: \$t\"; rc=1; }; done; exit \$rc" \
+    "script-tests${TAB}unset GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL; rc=0; for t in scripts/test-*.sh; do bash \"\$t\" >/dev/null 2>&1 || { echo \"FAILED: \$t\"; rc=1; }; done; exit \$rc" \
     "generate-drift${TAB}node harness/cli.js generate --check" \
     "playbook-lint${TAB}node harness/cli.js playbook lint" \
     "config-validate${TAB}node harness/cli.js config validate" \
