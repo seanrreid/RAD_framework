@@ -2132,7 +2132,8 @@ export async function deliverCommand(argv, ctx) {
  * not this header — never re-derive approval authority from this doc-write.
  *
  * @param {string} planFile - absolute path to the plan doc
- * @param {{ approvedBy: string, approvedAt: string, recordedBy?: string, evidence?: string, proxy: boolean }} fields
+ * @param {{ approvedBy: string, approvedAt: string, recordedBy?: string, evidence?: string, proxy: boolean, keepStatus?: boolean }} fields
+ * @returns {string} the header's resulting `Status:` value ('' when absent)
  */
 function writePlanStatus(planFile, fields) {
   const text = readFileSync(planFile, 'utf8');
@@ -2163,7 +2164,8 @@ function writePlanStatus(planFile, fields) {
     anchor = at;
   };
 
-  upsert('Status', 'approved');
+  // A delivered feature keeps its Status (e.g. `complete`); only provenance moves (#228).
+  if (!fields.keepStatus) upsert('Status', 'approved');
   upsert('Approved-By', approvedByValue);
   upsert('Approved-At', fields.approvedAt);
 
@@ -2177,6 +2179,13 @@ function writePlanStatus(planFile, fields) {
   }
 
   writeFileSync(planFile, lines.join('\n'), 'utf8');
+  return planHeaderStatus(lines.join('\n'));
+}
+
+/** The plan header's `Status:` value ('' when the header is absent). */
+function planHeaderStatus(text) {
+  const m = /^Status:[ \t]*(.*)$/m.exec(text);
+  return m ? m[1].trim() : '';
 }
 
 /** Approval-blocker check script, resolved under `<repoRoot>/scripts/`. */
@@ -2353,7 +2362,9 @@ function resolveApprover(sh, repoRoot, req) {
  */
 function recordApprovalAndStatus(store, a) {
   const ts = new Date().toISOString();
+  let delivered = false;
   try {
+    delivered = phaseOf(store.history(a.feature)) === DELIVERED_PHASE;
     store.recordApproval({
       feature: a.feature,
       // The event-log actor is the human identity; recordApproval freezes the
@@ -2370,15 +2381,15 @@ function recordApprovalAndStatus(store, a) {
     process.stderr.write(`rad approve: cannot record approval — ${err.message}\n`);
     return { code: APPROVE_FAILED_EXIT };
   }
-  writePlanStatus(a.planFile, { approvedBy: a.who.approvedBy, approvedAt: ts, recordedBy: a.who.recordedBy, evidence: a.evidence, proxy: a.who.proxy });
-  return { ts };
+  const status = writePlanStatus(a.planFile, { approvedBy: a.who.approvedBy, approvedAt: ts, recordedBy: a.who.recordedBy, evidence: a.evidence, proxy: a.who.proxy, keepStatus: delivered });
+  return { ts, status };
 }
 
 /** The structured, machine-greppable success line; `suffix` carries the publish fields. */
-function printApproveOk(feature, who, ts, suffix = '') {
+function printApproveOk(feature, who, ts, suffix = '', status = 'approved') {
   const recorded = who.proxy ? ` recorded-by=${who.recordedBy}` : '';
   process.stdout.write(
-    `rad approve: ok feature=${feature} status=approved approved-by=${who.approvedBy}${recorded} approved-at=${ts} proxy=${who.proxy}${suffix}\n`,
+    `rad approve: ok feature=${feature} status=${status} approved-by=${who.approvedBy}${recorded} approved-at=${ts} proxy=${who.proxy}${suffix}\n`,
   );
 }
 
@@ -2411,11 +2422,11 @@ function recordOrResume(store, a) {
     return { code: APPROVE_FAILED_EXIT };
   }
   const latest = latestApprovedEvent(history);
-  if (latest?.data?.fingerprint === a.planHash) return { ...resumedApproval(history, latest, a), resumed: true };
+  if (latest?.data?.fingerprint === a.planHash) return { ...resumedApproval(history, latest, a), status: planHeaderStatus(a.planText) || 'approved', resumed: true };
   const reapproval = latest !== null;
   const rec = recordApprovalAndStatus(store, a);
   if (rec.code !== undefined) return rec;
-  return { who: a.who, evidence: a.evidence, ts: rec.ts, reapproval, resumed: false };
+  return { who: a.who, evidence: a.evidence, ts: rec.ts, status: rec.status, reapproval, resumed: false };
 }
 
 /**
@@ -2447,7 +2458,7 @@ function approveAndPublish(sh, store, a) {
     return APPROVE_FAILED_EXIT;
   }
   const resumed = rec.resumed ? ' resumed=true' : '';
-  printApproveOk(a.feature, rec.who, rec.ts, ` committed=${result.committed} pushed=${result.pushed}${resumed}`);
+  printApproveOk(a.feature, rec.who, rec.ts, ` committed=${result.committed} pushed=${result.pushed}${resumed}`, rec.status);
   return 0;
 }
 
@@ -2518,7 +2529,7 @@ export async function approveCommand(argv, ctx) {
   if (rec.code !== undefined) return rec.code;
   // Record-only: best-effort RAD_SYNC publish, never fails the verb (offline-fail-safe).
   bestEffortSyncPush(repoRoot, workBranch, sh);
-  printApproveOk(feature, who, rec.ts);
+  printApproveOk(feature, who, rec.ts, '', rec.status);
   return 0;
 }
 

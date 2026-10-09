@@ -32,7 +32,8 @@ export class TransitionError extends Error {
 }
 
 /** Terminal phases — no event may follow once a feature reaches one. */
-const TERMINAL_PHASES = new Set(['delivered', 'done']);
+const DELIVERED_PHASE = 'delivered';
+const TERMINAL_PHASES = new Set([DELIVERED_PHASE, 'done']);
 
 /**
  * Event types that count as reviewer/verifier (evaluator) output — a
@@ -64,8 +65,11 @@ export function validateTransition(event, currentState) {
   const history = (currentState && currentState.history) || [];
   const phase = phaseOf(history);
 
-  // (a) No event may follow a terminal done/delivered state.
-  if (TERMINAL_PHASES.has(phase)) {
+  // (a) No event may follow a terminal done/delivered state — except a
+  // re-approval after delivery (#228): `approved` is legal when delivered, and
+  // rules (d) fingerprint and (e) role still apply to it. Never after `done`.
+  const isReapprovalAfterDelivery = event.type === 'approved' && phase === DELIVERED_PHASE;
+  if (TERMINAL_PHASES.has(phase) && !isReapprovalAfterDelivery) {
     throw new TransitionError(
       `Cannot append '${event.type}' after terminal phase '${phase}'`,
       { event, rule: 'after-terminal' },
