@@ -10,3 +10,4 @@
 {"feature":"wrap-kickoff-skills","type":"wave-started","actor":"harness","ts":"2026-10-09T14:06:55.860Z","data":{"wave":3,"attempt":1}}
 {"feature":"wrap-kickoff-skills","type":"wave-attempt","actor":"harness","ts":"2026-10-09T14:09:58.810Z","data":{"wave":3,"attempt":1,"outcome":"success","tasks":[{"title":"Registries and docs","status":"complete","commit":"e475a51","concern":"—","error":"—"}]}}
 {"feature":"wrap-kickoff-skills","type":"wave-complete","actor":"harness","ts":"2026-10-09T14:09:58.812Z","data":{"wave":3}}
+{"feature":"wrap-kickoff-skills","type":"pr-opened","actor":"harness","ts":"2026-10-09T14:10:09.254Z"}
