@@ -24,7 +24,7 @@ Orchestrates hook insertion points in the deliver spine (harness/spine.js wave-l
 
 **Inside:** harness/spine.js wave-loop control flow, harness/matrix.js resolveOutcome, harness/matrix.yaml stop-condition vocabulary and matrix structure, hook insertion logic and flow control entry points.
 
-**Outside:** hook runner module and execution engine (delegate to hook-runtime-orchestrator), event writer and event serialization (delegate to event-log-guardian), config surface and hook registration (delegate to hook-runtime-orchestrator), plan YAML parsing and wave iteration (delegate to plan-parser-guardian).
+**Outside:** hook runner module and execution engine (delegate to hook-runtime-orchestrator), config surface and hook registration (delegate to hook-runtime-orchestrator).
 
 ## Tool Call Order
 
