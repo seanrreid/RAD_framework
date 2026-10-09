@@ -72,7 +72,9 @@ artifact to `.agents/research/`. No code, no branch — just understanding.
 
 ### Phase 2 — Architecture (architect, once per project)
 `/rad-design` consumes the research and produces the agent architecture:
-`.agents/architecture/[slug].md`, the `.claude/agents/` boundary files, and the
+`.agents/architecture/[slug].md`, the agent boundary files — sources in
+`.rad/agents` (shipped) or `.rad/agents-internal` (repo-internal, never
+shipped); `rad generate` writes `.claude/agents` and `.codex/agents` — and the
 **`agent_scope_map`** block for `.rad/config.yml`. Run once to draft, review, then re-run to
 generate. This defines which agents exist and what each is allowed to touch.
 
@@ -137,7 +139,7 @@ merge is the only thing that writes to the protected branch.
 | Artifact | Path | Written by |
 |---|---|---|
 | Research notes | `.agents/research/` | `/rad-research` |
-| Architecture + scope map | `.agents/architecture/`, `CLAUDE.md`, `.claude/agents/` | `/rad-design` |
+| Architecture + scope map | `.agents/architecture/`, `CLAUDE.md`, agent sources in `.rad/agents/` (shipped) or `.rad/agents-internal/` (repo-internal, never shipped); `rad generate` writes `.claude/agents/` and `.codex/agents/` | `/rad-design` |
 | Plan (the contract) | `.agents/plans/[feature].md` (on its `rad/` branch) | `/rad-plan`, `/rad-adopt` |
 | Event log (record of a run) | `.agents/state/[feature]/events.jsonl` | `/rad-approve`, `rad deliver` |
 | Review findings | `.agents/findings.jsonl` | `/rad-review` |

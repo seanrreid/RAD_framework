@@ -5,7 +5,8 @@
  * Sources live under <root>/.rad/:
  *   .rad/skills/<name>/SKILL.md   frontmatter name, description, targets
  *                                  (+ optional claude.md / codex.md body overrides)
- *   .rad/agents/<name>.md         Claude agent frontmatter + optional codex: mapping
+ *   .rad/agents/<name>.md         Claude agent frontmatter + optional codex: mapping (shipped)
+ *   .rad/agents-internal/<name>.md  same format; repo-internal, never shipped
  *
  * Outputs (every one carries the generated marker):
  *   .claude/commands/<subdir>/<file>.md, .claude/skills/<name>/SKILL.md,
@@ -37,6 +38,9 @@ export { GENERATED_MARKER, hasGeneratedMarker } from './generated-marker.js';
 export const SOURCE_DIR = '.rad';
 const SKILLS_DIR = `${SOURCE_DIR}/skills`;
 const AGENTS_DIR = `${SOURCE_DIR}/agents`;
+const INTERNAL_AGENTS_DIR = `${SOURCE_DIR}/agents-internal`;
+/** Agent source dirs, read in this order; an agent name may appear in only one. */
+const AGENT_DIRS = Object.freeze([AGENTS_DIR, INTERNAL_AGENTS_DIR]);
 const SKILL_FILE = 'SKILL.md';
 /** Per-assistant body overrides allowed next to SKILL.md. */
 const OVERRIDE_FILES = Object.freeze({ claude: 'claude.md', codex: 'codex.md' });
@@ -202,9 +206,9 @@ function agentFieldErrors(rel, data) {
   return errors;
 }
 
-/** Read one agent source file: { agent } or { errors }. */
-async function readAgent(root, file) {
-  const rel = `${AGENTS_DIR}/${file}`;
+/** Read one agent source file under `dir`: { agent } or { errors }. */
+async function readAgent(root, dir, file) {
+  const rel = `${dir}/${file}`;
   if (!file.endsWith('.md')) return { errors: [`${rel}: agent sources must be .md files`] };
   const read = readRegular(root, rel);
   if (read.error) return { errors: [read.error] };
@@ -241,6 +245,17 @@ async function collect(root, rel, read, key, out) {
   }
 }
 
+/** One error per agent name defined in more than one agent dir, naming both paths. */
+function duplicateAgentErrors(agents) {
+  const seen = new Map();
+  const errors = [];
+  for (const agent of agents) {
+    if (seen.has(agent.name)) errors.push(`${agent.source}: agent ${agent.name} is also defined in ${seen.get(agent.name)}`);
+    else seen.set(agent.name, agent.source);
+  }
+  return errors;
+}
+
 /**
  * Read and validate every source under <root>/.rad/. Never throws.
  *
@@ -254,7 +269,8 @@ export async function readSources(root) {
     if (!st.isDirectory()) return { ok: false, errors: [`${SOURCE_DIR}/: not a directory (symlinks are refused)`] };
     const out = { skills: [], agents: [], errors: [] };
     await collect(root, SKILLS_DIR, readSkill, 'skills', out);
-    await collect(root, AGENTS_DIR, readAgent, 'agents', out);
+    for (const dir of AGENT_DIRS) await collect(root, dir, (r, file) => readAgent(r, dir, file), 'agents', out);
+    out.errors.push(...duplicateAgentErrors(out.agents));
     if (out.errors.length) return { ok: false, errors: out.errors };
     return { ok: true, sources: { skills: out.skills, agents: out.agents } };
   } catch (err) {

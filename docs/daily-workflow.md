@@ -70,8 +70,10 @@ treated as `actionable`.
 Reads the research artifact and drafts the agent hierarchy to
 `.agents/architecture/[slug].md` (`Status: draft`), then presents it inline and
 asks to **approve / edit / cancel** — all in one invocation:
-- **approve** — flips the status to `approved` and generates the agent files into
-  `.claude/agents/` in the same run. No manual edit, no re-run.
+- **approve** — flips the status to `approved`, writes the agent sources to
+  `.rad/agents/` (shipped) or `.rad/agents-internal/` (repo-internal, never
+  shipped), and runs `rad generate`, which writes `.claude/agents/` and
+  `.codex/agents/`, in the same run. No manual edit, no re-run.
 - **edit** — adjust role assignments or scope boundaries; the draft is revised and
   shown again.
 - **cancel** — leave it as a draft and stop; re-run `/rad-design [slug]` later to
@@ -83,7 +85,7 @@ generates directly on the next invocation.)
 Commit everything — the generated agents are the architecture:
 
 ```bash
-git add .claude/agents/ .agents/research/ .agents/architecture/ .rad/config.yml AGENTS.md CLAUDE.md
+git add .rad/agents/ .rad/agents-internal/ .claude/agents/ .codex/agents/ .agents/research/ .agents/architecture/ .rad/config.yml AGENTS.md CLAUDE.md
 git commit -m "chore: initialize RAD agent architecture"
 git push
 ```

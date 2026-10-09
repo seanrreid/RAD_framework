@@ -9,6 +9,7 @@ import { join, dirname } from 'node:path';
 import {
   GENERATED_MARKER, OUTPUT_ROOTS, readSources, renderOutputs, planGenerate, applyGenerate, hasGeneratedMarker,
 } from '../generate.js';
+import { generatedSource } from '../generated-marker.js';
 
 const SKILL_BOTH = `---
 name: review-x
@@ -294,6 +295,48 @@ test('hasGeneratedMarker: only in its defined position', () => {
   assert.equal(hasGeneratedMarker(`---\nname: a\n---\n\n<!-- ${GENERATED_MARKER} -->\n`), false);
   assert.equal(hasGeneratedMarker(`Body mentions ${GENERATED_MARKER}\n`), false);
   assert.equal(hasGeneratedMarker(''), false);
+});
+
+test('generatedSource: reads the source path from either marker form; null otherwise', () => {
+  assert.equal(generatedSource(`# ${GENERATED_MARKER} (source: .rad/agents/a.md)\nx = 1\n`), '.rad/agents/a.md');
+  assert.equal(generatedSource(`---\nname: a\n---\n<!-- ${GENERATED_MARKER} (source: .rad/agents-internal/a.md) -->\n\nB\n`),
+    '.rad/agents-internal/a.md');
+  assert.equal(generatedSource(`---\nname: a\n---\n<!-- ${GENERATED_MARKER} -->\n\nB\n`), null, 'marker without a source');
+  assert.equal(generatedSource(`---\nname: a\n---\n\nBody (source: .rad/agents/a.md)\n`), null, 'not a marker');
+  assert.equal(generatedSource(''), null);
+});
+
+test('agent: a source in .rad/agents-internal is generated with its internal source in the marker', async () => {
+  await withRoot({ '.rad/agents-internal/helper.md': AGENT }, async (root) => {
+    const out = await generated(root);
+    assert.deepEqual(Object.keys(out), ['.claude/agents/helper.md', '.codex/agents/helper.toml']);
+    for (const content of Object.values(out)) assert.equal(generatedSource(content), '.rad/agents-internal/helper.md');
+  });
+});
+
+test('agent: the same name in .rad/agents and .rad/agents-internal is an error naming both paths', async () => {
+  await assertSourceError({ '.rad/agents/helper.md': AGENT, '.rad/agents-internal/helper.md': AGENT },
+    /\.rad\/agents-internal\/helper\.md: agent helper is also defined in \.rad\/agents\/helper\.md/);
+});
+
+test('agent: with no .rad/agents-internal dir the output is unchanged; an empty one adds nothing', async () => {
+  const files = { '.rad/skills/review-x/SKILL.md': SKILL_BOTH, '.rad/agents/helper.md': AGENT };
+  const base = await withRoot(files, generated);
+  const withEmpty = await withRoot(files, async (root) => {
+    mkdirSync(join(root, '.rad/agents-internal'));
+    return generated(root);
+  });
+  assert.deepEqual(withEmpty, base);
+  assert.equal(generatedSource(base['.claude/agents/helper.md']), '.rad/agents/helper.md');
+});
+
+test('plan: outputs of an internal agent are named, not orphans', async () => {
+  await withRoot({ '.rad/agents-internal/helper.md': AGENT }, async (root) => {
+    applyGenerate(root, (await planFor(root)).plan);
+    const { plan } = await planFor(root);
+    assert.deepEqual(plan.orphans, []);
+    assert.deepEqual(plan.unchanged, ['.claude/agents/helper.md', '.codex/agents/helper.toml']);
+  });
 });
 
 /** Render the sources under `root` and plan against it. */

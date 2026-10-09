@@ -1,6 +1,8 @@
 # Agent Hierarchy Audit
 
-An audit of the 27 internal agents in `.claude/agents/`, the
+An audit of the 27 internal agents, sourced in `.rad/agents-internal/`
+(repo-internal, never shipped; `rad generate` writes `.claude/agents/` and
+`.codex/agents/`), the
 `*-parent-orchestrator` → `*-orchestrator` → `*-mapper` hierarchy that
 `/rad-design` produced for this repo's own features. Each agent is tagged with
 the reason its boundary exists (`purpose:` in its frontmatter), and each mapper

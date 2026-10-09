@@ -30,7 +30,7 @@ import {
   readFileSync, writeFileSync, readdirSync, lstatSync, mkdirSync, copyFileSync, chmodSync, renameSync,
 } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
-import { hasGeneratedMarker } from './generated-marker.js';
+import { generatedSource } from './generated-marker.js';
 
 /** Manifest location, relative to the target root. */
 export const MANIFEST_PATH = '.rad/installed.json';
@@ -100,12 +100,21 @@ function walkFlat(root, { dir, suffix }, out) {
   }
 }
 
-/** Collect regular files under `rel` that carry the generated marker (symlinks never followed). */
+/** True when `source` lies under a shipped SOURCE_TREES entry (fail closed: null or anything else is not shipped). */
+function isShippedSource(source) {
+  return source !== null && SOURCE_TREES.some((tree) => source.startsWith(`${tree}/`));
+}
+
+/**
+ * Collect regular files under `rel` whose generated marker names a shipped
+ * source (symlinks never followed). Outputs of repo-internal sources, or
+ * markers with no parseable source, stay out of core.
+ */
 function walkMarked(root, rel, out) {
   const found = new Set();
   walkTree(root, rel, found);
   for (const path of found) {
-    if (hasGeneratedMarker(readFileSync(join(root, path), 'utf8'))) out.add(path);
+    if (isShippedSource(generatedSource(readFileSync(join(root, path), 'utf8')))) out.add(path);
   }
 }
 

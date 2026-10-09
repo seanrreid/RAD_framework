@@ -14,7 +14,9 @@ RAD is a workflow layer on top of Claude Code that enforces two things:
 
 2. **You work within boundaries.** The architect has defined which parts of the
    codebase each role can access. These boundaries are enforced by the agent
-   definitions in `.claude/agents/` — not just by convention.
+   definitions — sources in `.rad/agents/` (shipped) or `.rad/agents-internal/`
+   (repo-internal, never shipped); `rad generate` writes `.claude/agents/` and
+   `.codex/agents/` — not just by convention.
 
 The result: you can work autonomously on your domain without needing to
 understand the whole codebase, and the architect can review your approach
