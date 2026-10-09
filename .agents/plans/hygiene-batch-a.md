@@ -1,7 +1,10 @@
 # Plan: Hygiene Batch A: ACP Flake, Ahead-Only Checkout, Agent Audit Follow-ups (#201, #230, #192)
 Created: 2026-10-09
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-10-09T17:44:33.042Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/hygiene-batch-a
 Issue: 201
 Adopted-From: https://github.com/seanrreid/RAD_framework/issues/201
