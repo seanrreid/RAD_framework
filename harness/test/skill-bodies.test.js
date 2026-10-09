@@ -164,3 +164,14 @@ for (const skill of PLAYBOOK_SKILLS) {
     }
   });
 }
+
+// The optional ## Exercise plan section must reach every generated body of both planning skills.
+for (const skill of PLAYBOOK_SKILLS) {
+  test(`${skill}: both generated bodies mention the optional ## Exercise section`, () => {
+    for (const relPath of [codexBodyPath(skill), claudeCommandPath(skill)]) {
+      const body = readGenerated(relPath);
+      assert.ok(body.includes('## Exercise'), `${relPath} lacks \`## Exercise\``);
+      assert.ok(body.includes('docs/rad-cli.md'), `${relPath} lacks the docs/rad-cli.md pointer`);
+    }
+  });
+}
