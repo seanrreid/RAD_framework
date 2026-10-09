@@ -372,6 +372,21 @@ test('AC#4 — checkout-plan.sh proceeds (exit 0) on a clean / fast-forwardable 
   });
 });
 
+test('AC#4 — checkout-plan.sh passes (exit 0, ahead note) on an ahead-only tip', async () => {
+  await withTempRepo((base) => {
+    const { localWt, workBranch } = setupCheckoutRepo(base, 'aheadonly');
+    writeFileSync(join(localWt, 'local.txt'), 'unpushed\n', 'utf8');
+    git(localWt, ['add', '-A']);
+    git(localWt, ['commit', '-q', '-m', 'local ahead']);
+    const localTip = git(localWt, ['rev-parse', 'HEAD']).stdout.trim();
+
+    const res = spawnSync(CHECKOUT_PLAN, [workBranch], { cwd: localWt, encoding: 'utf8' });
+    assert.equal(res.status, 0, `ahead-only must pass; got ${res.status}: ${res.stderr}`);
+    assert.match(res.stderr, /1 commit\(s\) ahead of origin/);
+    assert.equal(git(localWt, ['rev-parse', 'HEAD']).stdout.trim(), localTip, 'unpushed commit must be kept');
+  });
+});
+
 // ---------------------------------------------------------------------------
 // AC#5 — RAD_SYNC unset = byte-for-byte today.
 //

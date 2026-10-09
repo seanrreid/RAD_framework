@@ -10,12 +10,14 @@
 #   - validate the branch name against the configured work prefix (default `rad/`)
 #   - fetch the branch from origin; fail loudly if it doesn't exist
 #   - check out a local tracking branch from origin (or switch to the existing one)
-#   - fast-forward to the remote tip; fail loudly if local has diverged
+#   - behind origin: fast-forward to the remote tip
+#   - ahead of origin only (unpushed commits): leave the branch as is, note it on stderr
+#   - diverged (neither tip an ancestor of the other): fail loudly
 #
 # Usage: scripts/checkout-plan.sh rad/<feature>
 #
 # Exit codes:
-#   0 = on the branch at its remote tip
+#   0 = on the branch at its remote tip, or ahead of it with a stderr note
 #   1 = invalid name, missing branch, or divergence
 #
 # The work-branch prefix can be overridden via the RAD_BRANCH_PREFIX env var
@@ -49,12 +51,14 @@ git checkout "$BRANCH" 2>/dev/null || git checkout -b "$BRANCH" --track "origin/
 # Before the fast-forward pull, detect divergence explicitly so we can REFUSE
 # with a clear message that NAMES THE LOCK HOLDER rather than letting ff-only
 # fail opaquely. Divergence = local tip is NOT an ancestor of origin/<branch>
-# (a force-push or conflicting commits — no clean fast-forward). A clean
-# (fast-forwardable / in-sync) tip is NOT diverged and proceeds UNCHANGED below.
+# (a force-push or conflicting commits — no clean fast-forward) AND the remote
+# tip is NOT an ancestor of local either. A fast-forwardable (behind), in-sync or
+# ahead-only tip is NOT diverged: behind proceeds below, ahead-only passes with a note.
 LOCAL_TIP=$(git rev-parse "$BRANCH" 2>/dev/null || echo "")
 REMOTE_TIP=$(git rev-parse "origin/$BRANCH" 2>/dev/null || echo "")
 if [[ -n "$LOCAL_TIP" && -n "$REMOTE_TIP" && "$LOCAL_TIP" != "$REMOTE_TIP" ]] \
-   && ! git merge-base --is-ancestor "$LOCAL_TIP" "$REMOTE_TIP" 2>/dev/null; then
+   && ! git merge-base --is-ancestor "$LOCAL_TIP" "$REMOTE_TIP" 2>/dev/null \
+   && ! git merge-base --is-ancestor "$REMOTE_TIP" "$LOCAL_TIP" 2>/dev/null; then
   # Diverged. Name the conflicting holder from the most recent owner-claimed
   # event not followed by an owner-released (the branch-as-lock holder).
   FEATURE="${BRANCH#"$PREFIX"}"
@@ -81,6 +85,15 @@ if [[ -n "$LOCAL_TIP" && -n "$REMOTE_TIP" && "$LOCAL_TIP" != "$REMOTE_TIP" ]] \
   fi
   echo "  Resolve or reset to origin/$BRANCH (after coordinating with the holder), then re-run." >&2
   exit 1
+fi
+
+# Ahead-only: the remote tip is an ancestor of local, so ff-only would be a no-op
+# and the unpushed commits are kept. Say so rather than staying silent.
+if [[ -n "$LOCAL_TIP" && -n "$REMOTE_TIP" && "$LOCAL_TIP" != "$REMOTE_TIP" ]] \
+   && git merge-base --is-ancestor "$REMOTE_TIP" "$LOCAL_TIP" 2>/dev/null; then
+  AHEAD=$(git rev-list --count "origin/$BRANCH..$BRANCH")
+  echo "note: local '$BRANCH' is $AHEAD commit(s) ahead of origin (unpushed)" >&2
+  exit 0
 fi
 
 # Ensure we're exactly at the remote tip. ff-only fails loudly on divergence
