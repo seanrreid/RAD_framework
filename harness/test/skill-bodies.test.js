@@ -150,3 +150,17 @@ for (const skill of PLAYBOOK_SKILLS) {
     }
   });
 }
+
+// The last-wave full-suite Verify guidance must reach every generated body of both planning skills.
+const VERIFY_ALL_REQUIRED_TEXT = ['Verify: exec bash scripts/verify-all.sh', 'RAD_VERIFY_TIMEOUT_SECONDS=1800'];
+
+for (const skill of PLAYBOOK_SKILLS) {
+  test(`${skill}: both generated bodies document the last-wave verify-all guidance`, () => {
+    for (const relPath of [codexBodyPath(skill), claudeCommandPath(skill)]) {
+      const body = readGenerated(relPath);
+      for (const text of VERIFY_ALL_REQUIRED_TEXT) {
+        assert.ok(body.includes(text), `${relPath} lacks \`${text}\``);
+      }
+    }
+  });
+}

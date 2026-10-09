@@ -58,6 +58,41 @@ test('illegal (d): duplicate approved throws', () => {
   );
 });
 
+const arch = (fp) => ev('approved', { actor: 'architect', role: 'architect', data: fp === undefined ? {} : { fingerprint: fp } });
+
+test('re-approval after delivered (#228): changed fingerprint is legal', () => {
+  const history = [arch('a'), ev('pr-opened')];
+  assert.doesNotThrow(() => validateTransition(arch('b'), { history }));
+});
+
+test('re-approval after delivered: identical fingerprint is a duplicate', () => {
+  const history = [arch('a'), ev('pr-opened')];
+  assert.throws(() => validateTransition(arch('a'), { history }), (e) => e.rule === 'duplicate-approved');
+});
+
+test('re-approval after delivered: absent fingerprint fails closed as a duplicate', () => {
+  const history = [arch('a'), ev('pr-opened')];
+  assert.throws(() => validateTransition(arch(undefined), { history }), (e) => e.rule === 'duplicate-approved');
+});
+
+test('re-approval after delivered: a role-less approved is still rejected (rule e)', () => {
+  const history = [arch('a'), ev('pr-opened')];
+  const noRole = ev('approved', { actor: 'x', data: { fingerprint: 'b' } });
+  assert.throws(() => validateTransition(noRole, { history }), (e) => e.rule === 'approved-missing-role');
+});
+
+test('re-approval after done is still rejected', () => {
+  const history = [arch('a'), ev('pr-opened'), ev('done')];
+  assert.throws(() => validateTransition(arch('b'), { history }), (e) => e.rule === 'after-terminal');
+});
+
+test('other event types after delivered are still rejected', () => {
+  const history = [arch('a'), ev('pr-opened')];
+  for (const type of ['wave-attempt', 'deliver-started', 'architecture-approved']) {
+    assert.throws(() => validateTransition(ev(type, { role: 'architect' }), { history }), (e) => e.rule === 'after-terminal', type);
+  }
+});
+
 test('legal moves return normally (no throw)', () => {
   // approval onto a planned feature
   assert.doesNotThrow(() =>

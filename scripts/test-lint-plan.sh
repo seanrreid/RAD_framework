@@ -1340,6 +1340,49 @@ t_issue_header() {
   done
 }
 
+# ── #236: last-wave Verify advisory ───────────────────────────────────────────
+t_last_wave_verify_advisory() {
+  local plan="$TMP/lwv.md" msg="declares no Verify: and the plan touches self-protected paths"
+  # add_verify <plan> <wave>: insert a Verify: line under that wave's heading.
+  add_verify() {
+    awk -v w="$2" '{print} $0 ~ "^### Wave "w" " {print "Verify: exec bash scripts/verify-all.sh"}' "$1" > "$1.new" && mv "$1.new" "$1"
+  }
+  # (a) self-protected path, no Verify on any wave → warns, names wave + path, exit 0.
+  write_plan "$plan" "| harness/gates.js | 1-2 | x |" "harness/gates.js:1-10" 2
+  run_lint "$plan"
+  printf '%s\n' "$LINT_OUT" | grep -q "last wave (2) $msg (harness/gates.js) — consider 'Verify: exec bash scripts/verify-all.sh' (see #236)" \
+    || fail "#236: expected the last-wave advisory, got: $LINT_OUT"
+  [[ "$LINT_CODE" -eq 0 ]] || fail "#236: advisory changed the exit code ($LINT_CODE)"
+  # (b) Verify only on an earlier wave → still warns.
+  add_verify "$plan" 1
+  run_lint "$plan"
+  printf '%s\n' "$LINT_OUT" | grep -q "last wave (2) $msg" || fail "#236: earlier-wave Verify must still warn"
+  # (c) Verify on the last wave → no warning.
+  add_verify "$plan" 2
+  run_lint "$plan"
+  printf '%s\n' "$LINT_OUT" | grep -q "$msg" && fail "#236: last-wave Verify must silence the advisory" || true
+  # (d) no self-protected path → no warning.
+  write_plan "$plan" "| README.md | 1-2 | x |" "README.md:1-10" 2
+  run_lint "$plan"
+  printf '%s\n' "$LINT_OUT" | grep -q "$msg" && fail "#236: no self-protected path must not warn" || true
+  # (e) Verify only mid-sentence does not count → warns.
+  write_plan "$plan" "| harness/gates.js | 1-2 | x |" "harness/gates.js:1-10"
+  awk '{print} /^### Wave 1 /{print "Run the Verify: step later."}' "$plan" > "$plan.new" && mv "$plan.new" "$plan"
+  run_lint "$plan"
+  printf '%s\n' "$LINT_OUT" | grep -q "last wave (1) $msg" || fail "#236: mid-sentence Verify: must not count"
+  # (f) no waves → no warning.
+  write_plan "$plan" "| harness/gates.js | 1-2 | x |" "harness/gates.js:1-10"
+  grep -v '^### Wave\|^#### Task\|^Validate: AC#1\|^File: harness' "$plan" > "$plan.new" && mv "$plan.new" "$plan"
+  run_lint "$plan"
+  printf '%s\n' "$LINT_OUT" | grep -q "$msg" && fail "#236: a plan with no waves must not warn" || true
+  # (g) light plan (Tier: light) with self-protected path and no Verify → warns.
+  write_plan "$plan" "| harness/gates.js | 1-2 | x |" "harness/gates.js:1-10"
+  sed 's/^Status: pending-review/Status: pending-review\nTier: light/' "$plan" > "$plan.new" && mv "$plan.new" "$plan"
+  run_lint "$plan"
+  printf '%s\n' "$LINT_OUT" | grep -q "last wave (1) $msg" || fail "#236: light plan must warn too"
+  echo "✓ #236: last-wave Verify advisory (earlier-wave, last-wave, no self-protected, no waves, light, mid-sentence)"
+}
+
 t_missing_task_file
 t_multi_file_task_line
 t_budget_bare_number
@@ -1378,4 +1421,5 @@ t_vague_wording_multibyte
 t_consistency_edge_cases
 t_capability_advisory
 t_issue_header
+t_last_wave_verify_advisory
 echo "ALL PASS"

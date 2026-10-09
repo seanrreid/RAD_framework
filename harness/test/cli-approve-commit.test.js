@@ -197,6 +197,45 @@ test('re-approval: --no-commit approval, body edit, then approve again commits w
   });
 });
 
+/** Approve, then mark the feature delivered (pr-opened) with the header Status set to `complete`. */
+async function approveThenDeliver(root) {
+  const first = await runApprove(root, [SLUG]);
+  assert.equal(first.code, 0, first.stderr);
+  const pr = JSON.stringify({ feature: SLUG, type: 'pr-opened', actor: 'harness', ts: '2026-10-09T00:00:00.000Z' });
+  writeFileSync(join(root, EVENTS_REL), `${readFileSync(join(root, EVENTS_REL), 'utf8')}${pr}\n`);
+  writeFileSync(join(root, PLAN_REL), readPlan(root).replace(/^Status: approved$/m, 'Status: complete'));
+  git(root, ['add', PLAN_REL, EVENTS_REL]);
+  git(root, ['commit', '-q', '-m', 'deliver: demo']);
+}
+
+test('re-approval after delivery (#228): Status stays complete, provenance updates, ok line reports it', async () => {
+  await withRepo(async ({ root }) => {
+    await approveThenDeliver(root);
+    writeFileSync(join(root, PLAN_REL), `${readPlan(root)}#### Task 1.2: two\n`);
+    const r = await runApprove(root, [SLUG]);
+    assert.equal(r.code, 0, r.stderr);
+    const plan = readPlan(root);
+    assert.match(plan, /^Status: complete$/m);
+    assert.match(plan, new RegExp(`^Approved-By: ${USER}$`, 'm'));
+    assert.match(plan, /^Approved-At: 2/m);
+    assert.match(r.stdout, /status=complete /);
+    assert.equal(git(root, ['log', '-1', '--format=%s']).stdout, 'approve: demo (re-approval)');
+    assert.equal(head(root, `origin/${BRANCH}`), head(root), 'pushed');
+  });
+});
+
+test('re-approval after delivery: a same-fingerprint repeat resumes without a duplicate event', async () => {
+  await withRepo(async ({ root }) => {
+    await approveThenDeliver(root);
+    const before = readFileSync(join(root, EVENTS_REL), 'utf8');
+    const r = await runApprove(root, [SLUG]);
+    assert.equal(r.code, 0, r.stderr);
+    assert.match(r.stdout, /resumed=true/);
+    assert.match(r.stdout, /status=complete /);
+    assert.equal(readFileSync(join(root, EVENTS_REL), 'utf8'), before);
+  });
+});
+
 test('trailers: appended after the body in the order given', async () => {
   await withRepo(async ({ root }) => {
     const r = await runApprove(root, [SLUG, '--trailer', 'Refs: #186', '--trailer', 'Co-Authored-By: A <a@example.com>']);

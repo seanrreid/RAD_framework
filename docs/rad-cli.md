@@ -54,7 +54,10 @@ Records an architect approval and, by default, publishes it on the work branch:
    event is the **sole approval authority**; the gate reads it, not the doc — and
    writes `Status: approved`, `Approved-By`, `Approved-At` headers to the plan doc
    (`Recorded-By` and `Approval-Evidence` in proxy mode). These headers are a
-   **display-only mirror** of the event; nothing gates on them;
+   **display-only mirror** of the event; nothing gates on them. On a feature
+   whose phase is already `delivered`, the header's `Status:` line (e.g.
+   `complete`) is left as it is and only the provenance lines are updated; the
+   `ok` line's `status=` reports the header's resulting Status (#228);
 4. commits **only** the plan doc and the event log;
 5. pushes the work branch;
 6. labels the issue `approved`.
@@ -688,6 +691,13 @@ cases report as skipped in that lane.
 ---
 
 ### rad deliver
+
+> **Last-wave verification.** For a plan that touches `harness/`, `scripts/`,
+> `.rad/`, `.claude/` or `.agents/skills/`, put `Verify: exec bash scripts/verify-all.sh`
+> on the last wave and run with `RAD_VERIFY_TIMEOUT_SECONDS=1800` (the default is
+> 600 s). `verify-all.sh` mirrors the CI jobs locally; `deliver-integrity` and
+> `matrix-replay` are excluded (they need PR context). See #236 and
+> `docs/configuration.md`.
 
 ```
 rad deliver <feature> [--model <model-id>] [--resume --context <text>]

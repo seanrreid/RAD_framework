@@ -545,6 +545,34 @@ plan_wave_task_files() {
   done < "$plan_file"
 }
 
+# plan_last_wave_verify <plan-file>
+# Print `<last wave number> yes|no` — whether the plan's highest-numbered
+# `### Wave N` block declares a `Verify:` line. Mirrors parseWaveVerify in
+# harness/cli.js: a `### Wave N` heading opens a block, any other `##`/`###`
+# heading ends it, `####` headings stay inside, and a trimmed line matching
+# `^Verify:\s*(.+)$` counts. No waves → no output, exit 0; unreadable plan →
+# exit 2.
+plan_last_wave_verify() {
+  local plan_file="$1" line trimmed wave="" last="" has="no"
+  require_readable_plan plan_last_wave_verify "$plan_file" || return
+  while IFS= read -r line; do
+    trimmed="${line#"${line%%[![:space:]]*}"}"
+    trimmed="${trimmed%"${trimmed##*[![:space:]]}"}"
+    if [[ "$trimmed" =~ ^###[[:space:]]+Wave[[:space:]]+([0-9]+)([^0-9A-Za-z_]|$) ]]; then
+      wave=$((10#${BASH_REMATCH[1]}))
+      if [[ -z "$last" || "$wave" -ge "$last" ]]; then last="$wave"; has="no"; fi
+      continue
+    fi
+    if [[ "$trimmed" =~ ^#{2,3}[[:space:]] ]]; then
+      wave=""
+      continue
+    fi
+    [[ -n "$wave" && "$wave" == "$last" ]] || continue
+    if [[ "$trimmed" =~ ^Verify:[[:space:]]*(.+)$ ]]; then has="yes"; fi
+  done < "$plan_file"
+  [[ -z "$last" ]] || printf '%s %s\n' "$last" "$has"
+}
+
 # path_layer <path>
 # Print exactly one word — test | schema | api | ui | service | unknown — the
 # first layer pattern <path> matches, in that fixed precedence (a test file is a
