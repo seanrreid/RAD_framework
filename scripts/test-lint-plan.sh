@@ -1037,6 +1037,78 @@ t_playbook_no_node() {
   echo "✓ PLAYBOOK(i): node unavailable ⇒ error, exit 1 (fails closed)"
 }
 
+# ── Exercise block relay (#52) ────────────────────────────────────────────────
+# exercise_lint <name> <block-text|""> — lint a plan whose slug is advisory-test
+# (the fixture's Branch:). `rad exercise --check` reads .agents/plans/<slug>.md,
+# so the same text is also installed under that name.
+exercise_lint() {
+  write_tier_plan "$GREPO/.agents/plans/$1" "" 1
+  if [[ -n "$2" ]]; then printf '\n%s\n' "$2" >> "$GREPO/.agents/plans/$1"; fi
+  cp "$GREPO/.agents/plans/$1" "$GREPO/.agents/plans/advisory-test.md"
+  tier_lint "$1"
+}
+
+t_exercise_relay() {
+  ( exercise_lint ex-bad.md $'## Exercise\nObserve (AC#9): it works'
+    assert_out_has "EXERCISE(a)" "⚠ Exercise: Observe references AC#9"
+    assert_code "EXERCISE(a)" 0 ) || exit 1
+  echo "✓ EXERCISE(a): unknown AC#N in the block ⇒ warning relayed, exit 0"
+
+  ( exercise_lint ex-ok.md $'## Exercise\nObserve (AC#1): it works'
+    assert_out_lacks "EXERCISE(b)" "Exercise"
+    assert_code "EXERCISE(b)" 0 ) || exit 1
+  echo "✓ EXERCISE(b): clean block ⇒ no warning, exit 0"
+
+  ( exercise_lint ex-none.md ""
+    assert_out_lacks "EXERCISE(c)" "Exercise"
+    assert_code "EXERCISE(c)" 0 ) || exit 1
+  echo "✓ EXERCISE(c): no ## Exercise section ⇒ no warning, exit 0"
+
+  write_tier_plan "$GREPO/.agents/plans/ex-nobranch.md" "" 1
+  sed -i.bak '/^Branch:/d' "$GREPO/.agents/plans/ex-nobranch.md"; rm -f "$GREPO/.agents/plans/ex-nobranch.md.bak"
+  printf '\n## Exercise\nObserve (AC#9): x\n' >> "$GREPO/.agents/plans/ex-nobranch.md"
+  ( tier_lint ex-nobranch.md
+    assert_out_lacks "EXERCISE(d)" "Exercise:"
+    assert_code "EXERCISE(d)" 0 ) || exit 1
+  echo "✓ EXERCISE(d): Branch: header missing ⇒ check skipped, exit unchanged"
+
+  rm -f "$GREPO/.agents/plans/advisory-test.md"
+  write_tier_plan "$GREPO/.agents/plans/ex-noplan.md" "" 1
+  printf '\n## Exercise\nObserve (AC#9): x\n' >> "$GREPO/.agents/plans/ex-noplan.md"
+  ( tier_lint ex-noplan.md
+    assert_out_lacks "EXERCISE(e)" "Exercise:"
+    assert_code "EXERCISE(e)" 0 ) || exit 1
+  echo "✓ EXERCISE(e): check exits non-zero (slug plan missing) ⇒ skipped silently, exit 0"
+  rm -f "$GREPO/.agents/plans/advisory-test.md"
+}
+
+# No node on PATH: the relay skips silently and the lint still succeeds.
+t_exercise_no_node() {
+  local fake_bin="$TMP/ex-nonode-bin" tool base_code
+  mkdir -p "$fake_bin"
+  for tool in bash awk sed grep head mktemp rm cat tr dirname basename git env; do
+    ln -sf "$(command -v "$tool")" "$fake_bin/$tool"
+  done
+  # Other lint checks need node too, so the baseline code (no Exercise block)
+  # is the reference: the relay must leave it unchanged and print nothing.
+  write_tier_plan "$GREPO/.agents/plans/ex-nonode-base.md" "" 1
+  set +e
+  ( cd "$GREPO" && PATH="$fake_bin" "$fake_bin/bash" scripts/lint-plan.sh .agents/plans/ex-nonode-base.md >/dev/null 2>&1 )
+  base_code=$?
+  set -e
+  write_tier_plan "$GREPO/.agents/plans/ex-nonode.md" "" 1
+  printf '\n## Exercise\nObserve (AC#9): x\n' >> "$GREPO/.agents/plans/ex-nonode.md"
+  cp "$GREPO/.agents/plans/ex-nonode.md" "$GREPO/.agents/plans/advisory-test.md"
+  set +e
+  FRESH_OUT=$( cd "$GREPO" && PATH="$fake_bin" "$fake_bin/bash" scripts/lint-plan.sh .agents/plans/ex-nonode.md 2>&1 )
+  FRESH_CODE=$?
+  set -e
+  ( assert_out_lacks "EXERCISE(f)" "Exercise:"
+    assert_code "EXERCISE(f)" "$base_code" ) || exit 1
+  echo "✓ EXERCISE(f): node unavailable ⇒ relay skipped silently, exit code unchanged"
+  rm -f "$GREPO/.agents/plans/advisory-test.md"
+}
+
 # A plan with no Playbook: line, or only a fenced body example, lints as before.
 t_playbook_absent_identical() {
   ( playbook_lint pb-none.md ""
@@ -1413,6 +1485,8 @@ t_tier_absent_identical
 t_playbook_header
 t_playbook_no_node
 t_playbook_absent_identical
+t_exercise_relay
+t_exercise_no_node
 t_seed_playbook_pin
 t_empty_files_in_scope
 t_ac_citation_advisories

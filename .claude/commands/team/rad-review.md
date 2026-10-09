@@ -163,6 +163,34 @@ Use the accessibility-reviewer agent on all files changed since branching from t
 Include the agent's full output. HIGH findings are blocking; MEDIUM findings
 should be addressed before merge.
 
+### Step 4c: Exercise the artifact
+
+If `$ARGUMENTS` contains `--no-exercise`, remove that token from the file list,
+skip this step, and print `Exercise: skipped (--no-exercise)`. Otherwise run the
+plan's `## Exercise` recipe against the delivered branch:
+
+```bash
+node harness/cli.js exercise "$FEATURE"
+```
+
+- **No recipe:** the command prints `Exercise: skipped (no recipe)` on stdout and
+  exits 0. Keep that line as the step's output and continue.
+- **Ran:** include the command's stdout (its `rad-findings` block) in the review
+  report and keep its one-line stderr summary
+  (`rad exercise: feature=… agent=… executable=<basename> mode=… findings=…`)
+  for the Step 7 cycle record.
+- **Non-zero exit** (1 = Launch or the agent failed, or no `rad-findings` block;
+  2 = usage/config) → record the exit code and the stderr line in the report and
+  continue with the remaining steps. A missing or failing exercise never stops
+  the review.
+
+**Mode.** The mode is `blocking` only when `RAD_EXERCISE_BLOCKING` is `1` or
+`true`; otherwise it is `observe-only`. In `blocking` mode, HIGH exercise
+findings count in `Blocking issues` and set `Status: NEEDS FIXES FIRST`. In
+`observe-only` mode they are listed as advisory and do not. This is a
+self-review check only — it never touches the approval gate and records no
+approval or gate event.
+
 ### Step 5: Test coverage check
 
 ```bash
@@ -270,6 +298,11 @@ Status: [PASS | FAIL]
 **Advisory (SOFT):**
 - [finding] — [file:line]
 
+### Behavioral Exercise
+Recipe: [present | skipped (no recipe) | skipped (--no-exercise) | ✗ failed (exit [N]): [stderr] — review continued]
+Mode: [observe-only | blocking]
+- [HIGH | MEDIUM | LOW] [finding] — [file:line] ([advisory in observe-only; blocking in blocking mode for HIGH])
+
 ### Summary
 Status: [READY FOR ARCHITECT REVIEW | NEEDS FIXES FIRST]
 Blocking issues: [N]
@@ -282,8 +315,8 @@ Blocking issues: [N]
 
 ### Step 7: Persist findings to insights log
 
-Extract the `rad-findings` JSON blocks from the quality-reviewer and accessibility-reviewer
-outputs. Combine with cycle metadata and append to `.agents/findings.jsonl`.
+Extract the `rad-findings` JSON blocks from the quality-reviewer, accessibility-reviewer
+and (when Step 4c ran) exercise outputs. Combine with cycle metadata and append to `.agents/findings.jsonl`.
 
 Get cycle metadata:
 
@@ -295,7 +328,8 @@ CYCLE_ID="${FEATURE}-${DATE}"
 
 For each finding in each reviewer's `rad-findings` block, append one line to
 `.agents/findings.jsonl`. Findings from quality-reviewer omit the `wcag` field;
-findings from accessibility-reviewer include it.
+findings from accessibility-reviewer include it. Exercise findings are written
+with `reviewer: "exercise"`, `category: "behavior"` and `wcag: null`.
 
 ```json
 {"type":"finding","cycle_id":"[CYCLE_ID]","feature":"[FEATURE]","date":"[DATE]","reviewer":"[reviewer]","priority":"[priority]","category":"[category]","file":"[file]","line":[line or null],"issue":"[issue]","wcag":"[wcag or null]","verdict":[ "confirmed" | "false-alarm" | null ]}
@@ -312,8 +346,13 @@ without the field are classified by the documented keyword fallback in
 Then append one cycle summary record:
 
 ```json
-{"type":"cycle","cycle_id":"[CYCLE_ID]","feature":"[FEATURE]","date":"[DATE]","outcome":"[READY_FOR_ARCHITECT_REVIEW | NEEDS_FIXES_FIRST]","high":[total HIGH across all reviewers],"medium":[total MEDIUM],"low":[total LOW],"review_agent":{"source":"[subagent | RAD_REVIEW_AGENT_CMD]","executable":"[basename or null]"}}
+{"type":"cycle","cycle_id":"[CYCLE_ID]","feature":"[FEATURE]","date":"[DATE]","outcome":"[READY_FOR_ARCHITECT_REVIEW | NEEDS_FIXES_FIRST]","high":[total HIGH across all reviewers],"medium":[total MEDIUM],"low":[total LOW],"review_agent":{"source":"[subagent | RAD_REVIEW_AGENT_CMD]","executable":"[basename or null]"},"exercise":{"ran":[true | false],"mode":"[observe-only | blocking]"}}
 ```
+
+`exercise.ran` is `true` only when the Step 4c command exited 0 and did not
+skip. A skip (`--no-exercise` or no recipe) and a failed run both record
+`ran: false`. `ran: false` means "not exercised", not "nothing found" — do not
+read it as a clean result. `mode` follows `RAD_EXERCISE_BLOCKING` as in Step 4c.
 
 `review_agent.source` is `"RAD_REVIEW_AGENT_CMD"` when Steps 4/4b ran
 `harness/cli.js review`, else `"subagent"`. `executable` is the `executable=`

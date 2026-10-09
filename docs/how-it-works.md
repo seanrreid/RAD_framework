@@ -125,6 +125,10 @@ See [`rad deliver`](rad-cli.md#rad-deliver) for the full lifecycle.
 - plan fidelity + **acceptance-criteria coverage** (an AC no task delivers is HIGH),
 - the `quality-reviewer` and (for frontend) `accessibility-reviewer` agents,
 - test coverage,
+- **Step 4c — behavioral exercise**: when the plan has an optional `## Exercise`
+  section, `rad exercise` launches the delivered branch and observes it; findings
+  are `reviewer: "exercise"`. Skip it with `--no-exercise`; it is self-review only
+  and never touches the approval gate (see [`rad exercise`](rad-cli.md#rad-exercise)),
 - and appends structured findings to `.agents/findings.jsonl` for trend analysis
   via `/rad-insights`.
 

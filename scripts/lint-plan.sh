@@ -135,6 +135,21 @@ elif [[ -n "$PLAYBOOK_REF" ]]; then
 fi
 rm -f "$PLAYBOOK_ERR"
 
+# ── Exercise block relay ──────────────────────────────────────────────────────
+# `rad exercise <slug> --check` parses the plan's optional `## Exercise` block;
+# each stdout `warning: ...` line is relayed as a WARNING. Advisory only: a
+# missing node/CLI, a missing Branch: header or a non-zero check skips silently
+# (the exercise is optional), and this never adds an ERROR.
+EXERCISE_CLI="$RAD_PLAN_PATHS_ROOT/harness/cli.js"
+if [[ -n "$BRANCH" && "$BRANCH" == "${PREFIX}"* ]] && command -v node >/dev/null 2>&1 && [[ -f "$EXERCISE_CLI" ]]; then
+  EXERCISE_OUT=""
+  if EXERCISE_OUT=$(cd "$RAD_PLAN_PATHS_ROOT" && node "$EXERCISE_CLI" exercise "${BRANCH#"$PREFIX"}" --check 2>/dev/null); then
+    while IFS= read -r line; do
+      if [[ "$line" == "warning: "* ]]; then WARNINGS+=("Exercise: ${line#warning: }"); fi
+    done <<< "$EXERCISE_OUT"
+  fi
+fi
+
 # ── Required sections ─────────────────────────────────────────────────────────
 
 REQUIRED_SECTIONS=("Context" "Scope" "Acceptance Criteria" "Agent Scope" "Files in Scope" "Execution Notes" "Wave Plan" "Tests to Write" "Non-Goals" "Risks")

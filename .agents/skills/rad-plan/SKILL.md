@@ -301,6 +301,14 @@ Depends on: Wave 1 complete
 ## Tests to Write
 - [ ] [test] — [file]
 
+## Exercise
+<!-- OPTIONAL. Standard plans only; a light plan omits it. Lets /rad-review run
+     the delivered branch and observe behavior (`rad exercise`). Keys:
+       Launch: `cmd`        Teardown: `cmd`        Drive: what to do
+       Observe (AC#N): what should be seen, tied to a numbered AC
+     Needs at least one Observe line; skipped when this section is absent.
+     Full contract: docs/rad-cli.md (rad exercise). -->
+
 ## Non-Goals
 - [at least 2]
 
