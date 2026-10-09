@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import {
   CONFIG_PATH, PLATFORMS, loadConfig, validateConfig, getConfigValue, migrateFromClaudeMd, serializeConfig,
   settingsErrors, seedSettings, writeConfigAtomic, agentErrors, buildInitConfig, AGENT_ADAPTERS, AGENT_PRESETS,
+  DEFAULT_PLAYBOOK_KINDS, resolvePlaybookKinds,
 } from '../config.js';
 import { configCommand } from '../cli.js';
 
@@ -790,4 +791,38 @@ test('buildInitConfig: includes agent only when given, as a copy', () => {
   assert.deepEqual(withIt.agent, { adapter: 'command', command: 'claude -p' });
   assert.notEqual(withIt.agent, AGENT_PRESETS.claude);
   assert.deepEqual(validateConfig(withIt), []);
+});
+
+const withKinds = (kinds) => ({ ...clone(VALID), playbook_kinds: kinds });
+
+test('playbook_kinds: absent is valid and resolves to the default', () => {
+  assert.deepEqual(validateConfig(clone(VALID)), []);
+  assert.deepEqual(resolvePlaybookKinds(clone(VALID)), DEFAULT_PLAYBOOK_KINDS);
+  assert.deepEqual(DEFAULT_PLAYBOOK_KINDS, ['env-knob', 'hook-point', 'event-type', 'severity-pattern']);
+});
+
+test('playbook_kinds: a valid list is accepted and resolves to itself', () => {
+  const doc = withKinds(['env-knob', 'a1']);
+  assert.deepEqual(validateConfig(doc), []);
+  assert.deepEqual(resolvePlaybookKinds(doc), ['env-knob', 'a1']);
+});
+
+test('playbook_kinds: an empty list, a non-array, a duplicate, an empty or non-kebab string are each an error', () => {
+  const bad = [[], 'env-knob', {}, ['a', 'a'], [''], ['Env'], ['1a'], ['a_b'], ['-a'], [7], [null]];
+  for (const kinds of bad) {
+    assert.ok(validateConfig(withKinds(kinds)).some((e) => e.startsWith('playbook_kinds')),
+      `expected a playbook_kinds error for ${JSON.stringify(kinds)}`);
+  }
+});
+
+test('playbook_kinds: serialized only when set, and round trips', async () => {
+  assert.doesNotMatch(serializeConfig(clone(VALID)), /playbook_kinds/);
+  const text = serializeConfig(withKinds(['env-knob', 'hook-point']));
+  assert.match(text, /\nplaybook_kinds: \[env-knob, hook-point\]\n$/);
+  const root = mkdtempSync(join(tmpdir(), 'rad-kinds-'));
+  mkdirSync(join(root, '.rad'));
+  writeFileSync(join(root, CONFIG_PATH), text);
+  const loaded = await loadConfig(root);
+  assert.equal(loaded.ok, true);
+  assert.deepEqual(loaded.doc.playbook_kinds, ['env-knob', 'hook-point']);
 });
