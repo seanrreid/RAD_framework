@@ -1,1 +1,9 @@
 {"feature":"worktree-node-modules","type":"approved","actor":"sean@torchcodelab.com","role":"architect","ts":"2026-10-09T16:52:32.574Z","recordedBy":"sean@torchcodelab.com","data":{"fingerprint":"8dcb089b7d6e105dcdd1d4314deafb640907645c129c1262887d02cde78ae4e5"}}
+{"feature":"worktree-node-modules","type":"deliver-started","actor":"harness","ts":"2026-10-09T16:52:56.638Z"}
+{"feature":"worktree-node-modules","type":"run-prepared","actor":"harness","ts":"2026-10-09T16:53:02.961Z","data":{"base":"main","merged":false,"fastForwarded":false,"committed":true,"pushed":true}}
+{"feature":"worktree-node-modules","type":"wave-started","actor":"harness","ts":"2026-10-09T16:53:02.967Z","data":{"wave":1,"attempt":1}}
+{"feature":"worktree-node-modules","type":"wave-attempt","actor":"harness","ts":"2026-10-09T16:54:04.499Z","data":{"wave":1,"attempt":1,"outcome":"success","tasks":[{"title":"Link and clean up node_modules, with its test","status":"done_with_concerns","commit":"372469d","concern":"AC#1's detail text was truncated, so I implemented the link from the summary and the Validate edge cases. AC#7 (docs/rad-cli.md) isn't in this task's file list and is not done. The log file is untracked and uncommitted.","error":"—"}]}}
+{"feature":"worktree-node-modules","type":"wave-complete","actor":"harness","ts":"2026-10-09T16:54:04.499Z","data":{"wave":1}}
+{"feature":"worktree-node-modules","type":"wave-started","actor":"harness","ts":"2026-10-09T16:54:04.501Z","data":{"wave":2,"attempt":1}}
+{"feature":"worktree-node-modules","type":"wave-attempt","actor":"harness","ts":"2026-10-09T16:54:23.186Z","data":{"wave":2,"attempt":1,"outcome":"success","tasks":[{"title":"Docs","status":"complete","commit":"4e2e789","concern":"—","error":"—"}]}}
+{"feature":"worktree-node-modules","type":"wave-complete","actor":"harness","ts":"2026-10-09T16:54:23.187Z","data":{"wave":2}}
