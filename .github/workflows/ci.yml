@@ -129,6 +129,17 @@ jobs:
           node-version: 20
       - run: node harness/cli.js generate --check
 
+  # All PRs — every pinned playbook in .agents/playbooks/ parses and has a valid
+  # Upgrade Guide. Thin wrapper: the same command runs on any runner.
+  playbook-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: node harness/cli.js playbook lint
+
   # All PRs — scripted adversarial gate evals (blocking): each case attacks a
   # registry invariant in a throwaway fixture repo with a scripted adversary.
   # Thin wrapper: the same command runs on any runner. Live-agent lane is manual.

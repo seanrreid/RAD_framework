@@ -1050,6 +1050,27 @@ t_playbook_absent_identical() {
   echo "✓ PLAYBOOK(j,k): no Playbook: line / fenced body example ⇒ output unchanged, no check run"
 }
 
+# A plan pinning a shipped seed playbook at its current version, with a
+# Playbook Deviations section, lints clean; the same plan at a future version fails.
+t_seed_playbook_pin() {
+  local seed="$HERE/../.agents/playbooks/env-knob--timeout-style.md"
+  [[ -f "$seed" ]] || fail "SEED-PIN: seed playbook missing: $seed"
+  mkdir -p "$GREPO/.agents/playbooks"
+  cp "$seed" "$GREPO/.agents/playbooks/"
+  ( playbook_lint seed-ok.md "Playbook: env-knob/timeout-style@1"
+    printf '\n## Playbook Deviations\nNone\n' >> "$GREPO/.agents/plans/seed-ok.md"
+    tier_lint seed-ok.md
+    assert_out_lacks "SEED-PIN(a)" "Playbook"
+    assert_code "SEED-PIN(a)" 0 ) || exit 1
+  echo "✓ SEED-PIN(a): seed pinned at @1 with Playbook Deviations ⇒ no playbook error, exit 0"
+  ( playbook_lint seed-ahead.md "Playbook: env-knob/timeout-style@2"
+    printf '\n## Playbook Deviations\nNone\n' >> "$GREPO/.agents/plans/seed-ahead.md"
+    tier_lint seed-ahead.md
+    assert_out_has "SEED-PIN(b)" "is ahead of"
+    assert_code "SEED-PIN(b)" 1 ) || exit 1
+  echo "✓ SEED-PIN(b): same plan at @2 ⇒ ahead-of error, exit 1"
+}
+
 # ── Empty Files in Scope table (#145) ─────────────────────────────────────────
 # A header + separator with no data rows used to abort lint under pipefail with
 # NO output and exit 1. It must now name the error under Errors and exit 1; the
@@ -1349,6 +1370,7 @@ t_tier_absent_identical
 t_playbook_header
 t_playbook_no_node
 t_playbook_absent_identical
+t_seed_playbook_pin
 t_empty_files_in_scope
 t_ac_citation_advisories
 t_vague_wording_advisory
