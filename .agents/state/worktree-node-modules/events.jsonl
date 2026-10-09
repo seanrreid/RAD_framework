@@ -7,3 +7,4 @@
 {"feature":"worktree-node-modules","type":"wave-started","actor":"harness","ts":"2026-10-09T16:54:04.501Z","data":{"wave":2,"attempt":1}}
 {"feature":"worktree-node-modules","type":"wave-attempt","actor":"harness","ts":"2026-10-09T16:54:23.186Z","data":{"wave":2,"attempt":1,"outcome":"success","tasks":[{"title":"Docs","status":"complete","commit":"4e2e789","concern":"—","error":"—"}]}}
 {"feature":"worktree-node-modules","type":"wave-complete","actor":"harness","ts":"2026-10-09T16:54:23.187Z","data":{"wave":2}}
+{"feature":"worktree-node-modules","type":"pr-opened","actor":"harness","ts":"2026-10-09T16:54:35.133Z"}
