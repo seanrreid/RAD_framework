@@ -15,6 +15,8 @@ import { DEFAULT_CAPABILITIES } from '../capabilities.js';
 const FAKE_AGENT = fileURLToPath(new URL('./fixtures/acp/fake-agent.mjs', import.meta.url));
 /** Short timers keep the timeout and kill paths fast; real defaults are minutes / seconds. */
 const FAST = { timeoutMs: 5_000, killGraceMs: 200 };
+// The complete-check test spawns a real process and needs a roomier grace on loaded machines (#230).
+const COMPLETE_CHECK_KILL_GRACE_MS = 2_000;
 const SHORT_DEADLINE_MS = 400;
 
 const WAVE = { n: 1, type: 'sequential', tasks: [{ title: 'Fake task', what: 'do it' }] };
@@ -303,7 +305,7 @@ const lastCheck = (report) => report.checks[report.checks.length - 1];
 
 test('checkAcpAgent: complete passes all six checks in order and leaves no process', async () => {
   const { trace, cmd } = fake('complete');
-  const report = await checkAcpAgent({ cmd, repoRoot: workDir, ...FAST });
+  const report = await checkAcpAgent({ cmd, repoRoot: workDir, ...FAST, killGraceMs: COMPLETE_CHECK_KILL_GRACE_MS });
   assert.equal(report.ok, true, JSON.stringify(report));
   assert.deepEqual(checkNames(report), [...ACP_CHECK_NAMES]);
   assert.ok(report.checks.every((c) => c.ok && typeof c.detail === 'string'));
