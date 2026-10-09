@@ -179,28 +179,28 @@ still need.
 
 ## Drift Findings and Stale References
 
-Nine of 11 mappers pass the anchor check. Two have drifted, and three agents
-carry stale references. None were changed by this audit. All are tracked in
-[#192](https://github.com/seanrreid/RAD_framework/issues/192), with current
-locations and fix direction.
+All 11 mappers now pass the anchor check. The two that had drifted and the
+three agents with stale references were fixed under
+[#192](https://github.com/seanrreid/RAD_framework/issues/192); the findings
+below are resolved.
 
-**Drifted mappers:**
-- **approval-event-mapper:** its Output Format is a worked answer with literal
-  line numbers, and most have moved. Fix: replace the template with an anchor
-  contract that lists what to locate and requires a freshly read `file:line`.
-- **hook-surface-mapper:** its Output Format is prose with an anchor required
-  only on item 1. Fix: require `file:line` on every item and drop the
-  pre-written dedup text.
+**Drifted mappers (resolved):**
+- **approval-event-mapper:** its worked Output Format with literal line numbers
+  is replaced by an anchor contract that lists what to locate and requires a
+  freshly read `file:line`.
+- **hook-surface-mapper:** its Output Format now requires `file:line` on every
+  item, and the pre-written dedup text is dropped.
 
-**Stale references:**
-- **spine-integration-orchestrator** L26 delegates to `event-log-guardian` and
-  `plan-parser-guardian`. Neither agent exists.
-- **event-fold-mapper** L17/L24 places `recordApproval` in `harness/events.js`.
-  It is defined in `harness/adapters/git-state-store.js:439`; `events.js`
-  mentions it only in a comment. approval-event-mapper has the right file.
-- **lint-surface-mapper, sync-surface-mapper, findings-surface-mapper** still
-  point at CLAUDE.md sections. The scope map now lives in `.rad/config.yml`
-  and conventions in AGENTS.md.
+**Stale references (resolved):**
+- **spine-integration-orchestrator:** the delegations to `event-log-guardian`
+  and `plan-parser-guardian` (neither exists) are removed.
+- **event-fold-mapper:** `recordApproval` is now placed in
+  `harness/adapters/git-state-store.js`, and its scope names that file.
+- **lint-surface-mapper, sync-surface-mapper, findings-surface-mapper:** the
+  CLAUDE.md pointers now name the real locations: the scope map in
+  `.rad/config.yml`, conventions in AGENTS.md and the `RAD_*` variables in
+  `docs/configuration.md`. findings-surface-mapper's Output Format is now an
+  anchor contract.
 
 These agents are RAD-repo-internal; they are not shipped to adopters.
 
