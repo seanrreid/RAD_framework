@@ -19,6 +19,7 @@ authoritative on naming, status values, and lifecycle; this file is the map.
 | `state/<feature>/events.jsonl` | `/rad-approve`, `/rad-deliver` | the gate query | The **machine-authoritative** append-only event log. The `approved` event here is the sole gate authority `/rad-deliver` reads. |
 | `logs/` | `/rad-deliver` | architect review, resume | The **human-readable** per-execution narrative + resume state for interrupted runs. |
 | `findings/`, `findings.jsonl` | `/rad-review` | `/rad-insights` | Review results per feature, aggregated population-wide by `/rad-insights`. |
+| `playbooks/` | architects and developers, by hand | `/rad-plan` (the `Playbook:` header pin), `rad playbook` | Pinned, versioned write-ups of recurring change shapes, `<kind>--<slug>.md`. See `docs/playbooks.md`. |
 
 ## Two distinctions worth keeping straight
 

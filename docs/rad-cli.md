@@ -320,6 +320,36 @@ missing or unauthenticated); 1 the script failed, its output passed through;
 
 ---
 
+### rad playbook
+
+```
+rad playbook lint [--root <dir>] [<file>...]
+rad playbook check-ref [--root <dir>] <ref>
+```
+
+Validates pinned playbooks (see [playbooks.md](playbooks.md)). Both verbs read
+the allowed kinds from `playbook_kinds` in the root's `.rad/config.yml`, or the
+default kinds when the key (or the file) is absent. An unreadable or invalid
+config is an error, never skipped. `--root` defaults to the repo root.
+
+**`lint`** validates the given files, or every `*.md` except `README.md` in
+`<root>/.agents/playbooks/` when none are given. It prints one
+`<path>: <error>` line per violation, or `playbooks ok (N)`.
+
+**`check-ref`** resolves `<kind>/<slug>@<version>` against
+`.agents/playbooks/<kind>--<slug>.md`. It prints `ok current=N` when the pin is
+current and `stale current=N` when it is behind. An invalid ref, a disallowed
+kind, a missing or invalid file, or a version ahead of the file is a failure
+with the reason on stderr. `scripts/lint-plan.sh` calls this verb for a plan's
+`Playbook:` header line.
+
+`--help` / `-h` prints the usage line and exits 0.
+
+**Exit codes:** 0 ok (including stale); 1 a validation failure; 2 refused
+(unknown subcommand or flag, `--root` without a value, wrong `<ref>` count).
+
+---
+
 ### rad gate
 
 ```
