@@ -1,0 +1,25 @@
+{"feature":"playbook-skills","type":"approved","actor":"sean@torchcodelab.com","role":"architect","ts":"2026-10-09T16:29:43.756Z","recordedBy":"sean@torchcodelab.com","data":{"fingerprint":"c5c6791587b4f14aafb906cc97624faa32659fee299c3fc87039171b58b2dd85"}}
+{"feature":"playbook-skills","type":"deliver-started","actor":"harness","ts":"2026-10-09T16:30:05.591Z"}
+{"feature":"playbook-skills","type":"run-prepared","actor":"harness","ts":"2026-10-09T16:30:12.898Z","data":{"base":"main","merged":false,"fastForwarded":false,"committed":true,"pushed":true}}
+{"feature":"playbook-skills","type":"wave-started","actor":"harness","ts":"2026-10-09T16:30:12.912Z","data":{"wave":1,"attempt":1}}
+{"feature":"playbook-skills","type":"wave-attempt","actor":"harness","ts":"2026-10-09T16:30:52.459Z","data":{"wave":1,"attempt":1,"outcome":"success","tasks":[{"title":"The --playbook flag in rad-plan and rad-adopt","status":"complete","commit":"31decde","concern":"—","error":"—"}]}}
+{"feature":"playbook-skills","type":"wave-complete","actor":"harness","ts":"2026-10-09T16:30:52.461Z","data":{"wave":1}}
+{"feature":"playbook-skills","type":"wave-started","actor":"harness","ts":"2026-10-09T16:30:52.463Z","data":{"wave":2,"attempt":1}}
+{"feature":"playbook-skills","type":"wave-attempt","actor":"harness","ts":"2026-10-09T16:32:44.531Z","data":{"wave":2,"attempt":1,"outcome":"success","tasks":[{"title":"The env-knob seed playbook and the README","status":"complete","commit":"9146851","concern":"—","error":"—"},{"title":"The event-type seed playbook and the run-prepared paragraph","status":"complete","commit":"27cb118","concern":"—","error":"—"}]}}
+{"feature":"playbook-skills","type":"wave-complete","actor":"harness","ts":"2026-10-09T16:32:44.532Z","data":{"wave":2}}
+{"feature":"playbook-skills","type":"wave-started","actor":"harness","ts":"2026-10-09T16:32:44.534Z","data":{"wave":3,"attempt":1}}
+{"feature":"playbook-skills","type":"wave-attempt","actor":"harness","ts":"2026-10-09T16:35:26.484Z","data":{"wave":3,"attempt":1,"outcome":"success","tasks":[{"title":"CI job and registry tests","status":"complete","commit":"58b415c","concern":"—","error":"—"}]}}
+{"feature":"playbook-skills","type":"wave-complete","actor":"harness","ts":"2026-10-09T16:35:26.486Z","data":{"wave":3}}
+{"feature":"playbook-skills","type":"wave-started","actor":"harness","ts":"2026-10-09T16:35:26.487Z","data":{"wave":4,"attempt":1}}
+{"feature":"playbook-skills","type":"wave-attempt","actor":"harness","ts":"2026-10-09T16:36:05.771Z","data":{"wave":4,"attempt":1,"outcome":"success","tasks":[{"title":"Docs","status":"complete","commit":"5b1b97d","concern":"—","error":"—"}]}}
+{"feature":"playbook-skills","type":"wave-complete","actor":"harness","ts":"2026-10-09T16:36:05.772Z","data":{"wave":4}}
+{"feature":"playbook-skills","type":"wave-started","actor":"harness","ts":"2026-10-09T16:36:05.773Z","data":{"wave":5,"attempt":1}}
+{"feature":"playbook-skills","type":"wave-attempt","actor":"harness","ts":"2026-10-09T16:40:39.321Z","data":{"wave":5,"attempt":1,"outcome":"fail-scope","tasks":[{"title":"Full verification","status":"blocked_intent","commit":"—","concern":"—","error":"agent-adapters.test.js and cost.test.js fail with ERR_MODULE_NOT_FOUND for @anthropic-ai/claude-agent-sdk (not installed in this worktree, unrelated to this plan); every other check passes"}]}}
+{"feature":"playbook-skills","type":"wave-failed","actor":"harness","ts":"2026-10-09T16:40:39.323Z","data":{"wave":5,"action":"abort"}}
+{"feature":"playbook-skills","type":"deliver-stopped","actor":"harness","ts":"2026-10-09T16:40:39.326Z","data":{"class":"failed","reason":"fail-scope","decision":"wave 5: fail-scope — the work is wrong for the plan; fix the plan or the code and re-run","wave":5,"action":"abort","outcome":"fail-scope"}}
+{"feature":"playbook-skills","type":"deliver-started","actor":"harness","ts":"2026-10-09T17:13:39.353Z"}
+{"feature":"playbook-skills","type":"run-prepared","actor":"harness","ts":"2026-10-09T17:13:45.818Z","data":{"base":"main","merged":true,"fastForwarded":false,"committed":false,"pushed":true,"stashed":true}}
+{"feature":"playbook-skills","type":"wave-started","actor":"harness","ts":"2026-10-09T17:13:45.866Z","data":{"wave":5,"attempt":1}}
+{"feature":"playbook-skills","type":"wave-attempt","actor":"harness","ts":"2026-10-09T17:20:04.996Z","data":{"wave":5,"attempt":1,"outcome":"success","tasks":[{"title":"Full verification","status":"done_with_concerns","commit":"3b8fd5d","concern":"No code changes were needed. The commit only adds the execution-log row. Task 5.1's `docs/playbooks.md` target was not edited because AC#8 is verification-only. 14 evals skipped because `RAD_REVIEW_EVAL_CMD` is unset.","error":"—"}]}}
+{"feature":"playbook-skills","type":"wave-complete","actor":"harness","ts":"2026-10-09T17:20:04.997Z","data":{"wave":5}}
+{"feature":"playbook-skills","type":"pr-opened","actor":"harness","ts":"2026-10-09T17:20:15.694Z"}

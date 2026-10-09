@@ -31,6 +31,10 @@ Without `--light`, every step below runs in standard mode, unchanged.
 past a research artifact's cited non-actionable disposition (see Step 0). The
 override and its reason are recorded in the plan header.
 
+`--playbook <kind>/<slug>[@<version>]` may accompany the description to start from a
+pinned playbook in `.agents/playbooks/` (see Step 1b). A bare ref pins the
+playbook's current version.
+
 ---
 
 ## Process
@@ -73,6 +77,37 @@ From that output, find:
 
 Only call agents available to your role. If a feature requires an agent outside
 your role's scope, note it in the plan as a dependency requiring architect involvement.
+
+### Step 1b: Load the pinned playbook
+
+Skip this step unless $ARGUMENTS includes `--playbook <kind>/<slug>[@<version>]`.
+
+1. **Resolve the ref.** With no `@<version>`, use the `version` in the playbook
+   file's frontmatter (`.agents/playbooks/<kind>--<slug>.md`).
+2. **Check it.** Run:
+
+   ```bash
+   node harness/cli.js playbook check-ref <kind>/<slug>@<version>
+   ```
+
+   A non-zero exit stops this command: show stderr and write no plan. A
+   `stale current=N` result is a warning, not a stop: also read the Upgrade Guide
+   entries after the pinned version.
+3. **Read the playbook** at `.agents/playbooks/<kind>--<slug>.md`. Treat its
+   `## Files typically touched` and `## Wave skeleton` as the starting point for
+   research scope, Files in Scope and the wave structure. Adapt them to the
+   actual change; never copy them blindly.
+4. **Record the pin.** Add `Playbook: <kind>/<slug>@<version>` to the plan header,
+   after `Issue:`.
+5. **Record deviations.** The plan body gets a `## Playbook Deviations` section
+   after `## Risks`: each departure from the playbook and why, or `None`.
+6. **Guardrails.** Pinning never approves a plan or lowers any gate — the plan
+   still goes through rad-approve — and a run never edits a playbook.
+
+**`--light` with `--playbook`.** Allowed only when the plan stays within the light
+bounds (one wave, at most three tasks, no self-protected path). A playbook whose
+steps need more, or that touches `harness/`, `scripts/` or `.rad/`, means
+`--light` is refused: say so and stop, and the user re-runs without `--light`.
 
 ### Step 2: Delegate research to a sub-agent
 
@@ -180,6 +215,7 @@ Author: [role — developer | designer]
 Status: pending-review
 Branch: rad/[feature-slug]
 Issue: [issue number — omit when the plan has no issue]
+Playbook: [<kind>/<slug>@<version> — omit unless --playbook was given]
 
 ## Context
 [2–3 sentences: what exists today and what needs to change]
@@ -273,6 +309,10 @@ Depends on: Wave 1 complete
 ## Risks
 [Anything that could break existing behavior]
 
+## Playbook Deviations
+<!-- Only when --playbook was given. -->
+[Each departure from the playbook and why, or "None"]
+
 ## Waivers
 <!-- OPTIONAL. Only for high-risk path findings you are deliberately keeping.
      One bullet per finding: `- high-risk:<path>: <justification>`.
@@ -327,6 +367,7 @@ Status: pending-review
 Branch: rad/[feature-slug]
 Tier: light
 Issue: [issue number — omit when the plan has no issue]
+Playbook: [<kind>/<slug>@<version> — omit unless --playbook was given]
 
 ## Context
 [1–2 sentences: what exists today and what needs to change]
@@ -358,6 +399,10 @@ Validate: AC#[N] — [how to verify]
 ## Risks
 <!-- OPTIONAL. -->
 [Anything that could break existing behavior]
+
+## Playbook Deviations
+<!-- Only when --playbook was given. -->
+[Each departure from the playbook and why, or "None"]
 ```
 
 A light plan is limited to 1 wave, at most 3 tasks, and no high-risk or

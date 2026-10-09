@@ -1514,6 +1514,19 @@ file + reason), `2` = usage error (RAD harness or agents dir not found). A missi
 
 ---
 
+### playbook-lint (CI job)
+
+```
+node harness/cli.js playbook lint
+```
+
+All-PR job in `.github/workflows/ci.yml` after `generated-drift`: a thin wrapper
+that runs [`rad playbook lint`](#rad-playbook) over `.agents/playbooks/`
+(frontmatter, Upgrade Guide rule). **Exit codes:** `0` = clean, non-zero = one
+or more violations, each printed as `<path>: <error>`.
+
+---
+
 ## Known follow-ups
 
 - **Decision 2** (DONE): `events.jsonl` is now the sole approval authority. The

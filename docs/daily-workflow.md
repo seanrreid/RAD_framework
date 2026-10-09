@@ -128,6 +128,12 @@ standard `/rad-plan` for everything else. Both tiers go through `/rad-approve`.
 `/rad-research` and `/rad-design` run once per project, not per change — the
 per-change cost is `/rad-plan` only.
 
+**Starting from a playbook.** For a recurring change shape (an env knob, an
+audit-only event), add `--playbook <kind>/<slug>[@<version>]`, e.g.
+`/rad-plan --playbook env-knob/timeout-style "..."`. The plan starts from the
+playbook's files and wave skeleton and pins it in a `Playbook:` header line, so
+the architect approves the shape too. See [playbooks.md](playbooks.md).
+
 ---
 
 ## Adopting a pre-existing issue (developer, designer, or architect)
@@ -147,6 +153,8 @@ An `## Issue Gaps` section captures assumptions made where the issue was vague.
 The plan goes through `/rad-approve` before execution, same as any other plan.
 `/rad-adopt` runs the same disposition check as `/rad-plan` when a research
 artifact exists, with the same `--override-disposition "<reason>"` escape hatch.
+It also accepts `--playbook <kind>/<slug>[@<version>]` (see
+[playbooks.md](playbooks.md)).
 
 **What makes a good plan:**
 - File references are real (architect will check)

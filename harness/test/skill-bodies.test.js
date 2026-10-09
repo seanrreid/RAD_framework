@@ -135,3 +135,18 @@ for (const skill of TOOL_NEUTRAL_SKILLS) {
     }
   });
 }
+
+// The --playbook flag and its load step must reach every generated body of both planning skills.
+const PLAYBOOK_SKILLS = ['rad-plan', 'rad-adopt'];
+const PLAYBOOK_REQUIRED_TEXT = ['--playbook <kind>/<slug>[@<version>]', 'playbook check-ref', '## Playbook Deviations'];
+
+for (const skill of PLAYBOOK_SKILLS) {
+  test(`${skill}: both generated bodies document --playbook, check-ref and Playbook Deviations`, () => {
+    for (const relPath of [codexBodyPath(skill), claudeCommandPath(skill)]) {
+      const body = readGenerated(relPath);
+      for (const text of PLAYBOOK_REQUIRED_TEXT) {
+        assert.ok(body.includes(text), `${relPath} lacks \`${text}\``);
+      }
+    }
+  });
+}

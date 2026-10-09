@@ -291,6 +291,14 @@ eligibility) and `dormantStop(history)` — that stop when it is `needs-decision
 **and** no `deliver-started` follows it, else `null`. `rad stop-status` prints the
 `dormantStop` result (see [`rad-cli.md`](./rad-cli.md#rad-stop-status)).
 
+**`run-prepared` is audit-only.** When the spine is given a `prepare` port and it
+succeeds, the spine appends one `run-prepared` event
+`{ base, merged, fastForwarded, committed, pushed, stashed? }` after
+`deliver-started` (and any `run-resumed`) and before the first wave. It carries no
+authority (never a gate, never an outcome) and, like `run-resumed`, is absent from
+`PHASE_BY_TYPE`, so a history with it folds identically to one without it. See the
+prepare step in [`rad-wave-contract.md`](./rad-wave-contract.md).
+
 ## `rad-deliver` as a harness spine, calling the ports
 
 This is the audit's step-1 prototype, written against the ports and driven by the
