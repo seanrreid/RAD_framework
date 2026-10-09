@@ -194,7 +194,7 @@ invariants:
         note: "a malformed value exits 2; a large value only delays fail-timeout"
 
   - id: adapter-env-allow-listed
-    claim: "The command agent adapter spawns RAD_AGENT_CMD (deliver waves) and RAD_REVIEW_AGENT_CMD / RAD_AGENT_CMD (the rad review lane), and the acp adapter spawns RAD_AGENT_CMD (deliver waves, its preflight and rad acp-check), with only the allow-listed environment variables, so no exported credential reaches any of these children."
+    claim: "The command agent adapter spawns RAD_AGENT_CMD (deliver waves) and RAD_REVIEW_AGENT_CMD / RAD_AGENT_CMD (the rad review lane and rad exercise), and the acp adapter spawns RAD_AGENT_CMD (deliver waves, its preflight and rad acp-check), with only the allow-listed environment variables, so no exported credential reaches any of these children."
     authority: "the ENV_ALLOW_LIST constant in harness/adapters/agent/command.js"
     evals: [harness/evals/delivery.eval.js]
     enforced_by:
