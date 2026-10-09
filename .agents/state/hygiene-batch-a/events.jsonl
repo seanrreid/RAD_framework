@@ -13,3 +13,4 @@
 {"feature":"hygiene-batch-a","type":"wave-started","actor":"harness","ts":"2026-10-09T17:48:41.317Z","data":{"wave":4,"attempt":1}}
 {"feature":"hygiene-batch-a","type":"wave-attempt","actor":"harness","ts":"2026-10-09T17:53:31.153Z","data":{"wave":4,"attempt":1,"outcome":"success","tasks":[{"title":"Full verification","status":"complete","commit":"—","concern":"—","error":"—"}]}}
 {"feature":"hygiene-batch-a","type":"wave-complete","actor":"harness","ts":"2026-10-09T17:53:31.157Z","data":{"wave":4}}
+{"feature":"hygiene-batch-a","type":"pr-opened","actor":"harness","ts":"2026-10-09T17:53:40.802Z"}
