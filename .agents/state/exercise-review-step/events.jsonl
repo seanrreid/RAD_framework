@@ -16,3 +16,4 @@
 {"feature":"exercise-review-step","type":"wave-started","actor":"harness","ts":"2026-10-09T19:43:02.361Z","data":{"wave":5,"attempt":1}}
 {"feature":"exercise-review-step","type":"wave-attempt","actor":"harness","ts":"2026-10-09T19:51:50.734Z","data":{"wave":5,"attempt":1,"outcome":"success","tasks":[{"title":"Full verification","status":"complete","commit":"—","concern":"—","error":"—"}],"verify":{"command":"exec bash scripts/verify-all.sh","status":0,"passed":true}}}
 {"feature":"exercise-review-step","type":"wave-complete","actor":"harness","ts":"2026-10-09T19:51:50.739Z","data":{"wave":5}}
+{"feature":"exercise-review-step","type":"pr-opened","actor":"harness","ts":"2026-10-09T19:51:59.854Z"}
