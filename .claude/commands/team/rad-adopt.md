@@ -21,6 +21,10 @@ If empty, ask for the issue reference or description before proceeding.
 research artifact's cited non-actionable disposition (see Step 2b). The override
 and its reason are recorded in the plan header.
 
+`--playbook <kind>/<slug>[@<version>]` may accompany the input to start from a
+pinned playbook in `.agents/playbooks/` (see Step 3b). A bare ref pins the
+playbook's current version.
+
 ---
 
 ## Process
@@ -104,6 +108,32 @@ Is this correct? (yes / clarify)
 
 If the user clarifies, update the interpretation and continue.
 
+### Step 3b: Load the pinned playbook
+
+Skip this step unless $ARGUMENTS includes `--playbook <kind>/<slug>[@<version>]`.
+
+1. **Resolve the ref.** With no `@<version>`, use the `version` in the playbook
+   file's frontmatter (`.agents/playbooks/<kind>--<slug>.md`).
+2. **Check it.** Run:
+
+   ```bash
+   node harness/cli.js playbook check-ref <kind>/<slug>@<version>
+   ```
+
+   A non-zero exit stops this command: show stderr and write no plan. A
+   `stale current=N` result is a warning, not a stop: also read the Upgrade Guide
+   entries after the pinned version.
+3. **Read the playbook** at `.agents/playbooks/<kind>--<slug>.md`. Treat its
+   `## Files typically touched` and `## Wave skeleton` as the starting point for
+   research scope, Files in Scope and the wave structure. Adapt them to the
+   actual change; never copy them blindly.
+4. **Record the pin.** Add `Playbook: <kind>/<slug>@<version>` to the plan header,
+   after `Issue:` (rad-adopt's header template carries the same line).
+5. **Record deviations.** The plan body gets a `## Playbook Deviations` section
+   after `## Risks`: each departure from the playbook and why, or `None`.
+6. **Guardrails.** Pinning never approves a plan or lowers any gate — the plan
+   still goes through rad-approve — and a run never edits a playbook.
+
 ### Step 4: Research the codebase
 
 Delegate the research to a sub-agent if your tool can run one; otherwise do it
@@ -125,6 +155,7 @@ Author: [role — architect | developer | designer]
 Status: pending-review
 Branch: rad/[feature-slug]
 Issue: [issue number when the source is an issue — omit otherwise]
+Playbook: [<kind>/<slug>@<version> — omit unless --playbook was given]
 Adopted-From: [issue URL or description]
 Issue-Title: [original issue title, if fetched]
 
@@ -200,6 +231,10 @@ Validate: AC#[N] — [how to verify]
 ## Risks
 [Anything that could break existing behavior. Note if original issue
  description conflicted with current code state.]
+
+## Playbook Deviations
+<!-- Only when --playbook was given. -->
+[Each departure from the playbook and why, or "None"]
 
 ## Issue Gaps
 [Anything the original issue left unspecified that this plan resolves with
