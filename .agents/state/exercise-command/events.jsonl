@@ -1,1 +1,18 @@
 {"feature":"exercise-command","type":"approved","actor":"sean@torchcodelab.com","role":"architect","ts":"2026-10-09T19:10:21.246Z","recordedBy":"sean@torchcodelab.com","data":{"fingerprint":"f4c3b54adf293595d9bde1d7a4a69c11bd5708380f7ec704e37191ac76fcb3c4"}}
+{"feature":"exercise-command","type":"deliver-started","actor":"harness","ts":"2026-10-09T19:10:36.094Z"}
+{"feature":"exercise-command","type":"run-prepared","actor":"harness","ts":"2026-10-09T19:10:42.850Z","data":{"base":"main","merged":false,"fastForwarded":false,"committed":true,"pushed":true}}
+{"feature":"exercise-command","type":"wave-started","actor":"harness","ts":"2026-10-09T19:10:42.857Z","data":{"wave":1,"attempt":1}}
+{"feature":"exercise-command","type":"wave-attempt","actor":"harness","ts":"2026-10-09T19:11:27.545Z","data":{"wave":1,"attempt":1,"outcome":"success","tasks":[{"title":"The block parser","status":"complete","commit":"ad125e8","concern":"—","error":"—"}]}}
+{"feature":"exercise-command","type":"wave-complete","actor":"harness","ts":"2026-10-09T19:11:27.546Z","data":{"wave":1}}
+{"feature":"exercise-command","type":"wave-started","actor":"harness","ts":"2026-10-09T19:11:27.547Z","data":{"wave":2,"attempt":1}}
+{"feature":"exercise-command","type":"wave-attempt","actor":"harness","ts":"2026-10-09T19:12:24.572Z","data":{"wave":2,"attempt":1,"outcome":"success","tasks":[{"title":"The isolated recipe runner","status":"complete","commit":"9424896","concern":"—","error":"—"}]}}
+{"feature":"exercise-command","type":"wave-complete","actor":"harness","ts":"2026-10-09T19:12:24.572Z","data":{"wave":2}}
+{"feature":"exercise-command","type":"wave-started","actor":"harness","ts":"2026-10-09T19:12:24.573Z","data":{"wave":3,"attempt":1}}
+{"feature":"exercise-command","type":"wave-attempt","actor":"harness","ts":"2026-10-09T19:15:40.426Z","data":{"wave":3,"attempt":1,"outcome":"success","tasks":[{"title":"The exercise command","status":"done_with_concerns","commit":"b53ae12","concern":"A Launch that exits non-zero after the agent has started is only detected once the agent returns, because runCommandPrompt has no abort hook. Only the total timeout bounds that wait.","error":"—"},{"title":"CLI wiring","status":"complete","commit":"895c662","concern":"—","error":"—"}]}}
+{"feature":"exercise-command","type":"wave-complete","actor":"harness","ts":"2026-10-09T19:15:40.427Z","data":{"wave":3}}
+{"feature":"exercise-command","type":"wave-started","actor":"harness","ts":"2026-10-09T19:15:40.428Z","data":{"wave":4,"attempt":1}}
+{"feature":"exercise-command","type":"wave-attempt","actor":"harness","ts":"2026-10-09T19:16:20.969Z","data":{"wave":4,"attempt":1,"outcome":"success","tasks":[{"title":"Docs and invariant","status":"complete","commit":"3dc1f91","concern":"—","error":"—"}]}}
+{"feature":"exercise-command","type":"wave-complete","actor":"harness","ts":"2026-10-09T19:16:20.970Z","data":{"wave":4}}
+{"feature":"exercise-command","type":"wave-started","actor":"harness","ts":"2026-10-09T19:16:20.971Z","data":{"wave":5,"attempt":1}}
+{"feature":"exercise-command","type":"wave-attempt","actor":"harness","ts":"2026-10-09T19:24:41.554Z","data":{"wave":5,"attempt":1,"outcome":"success","tasks":[{"title":"Full verification","status":"complete","commit":"—","concern":"—","error":"—"}],"verify":{"command":"exec bash scripts/verify-all.sh","status":0,"passed":true}}}
+{"feature":"exercise-command","type":"wave-complete","actor":"harness","ts":"2026-10-09T19:24:41.556Z","data":{"wave":5}}
