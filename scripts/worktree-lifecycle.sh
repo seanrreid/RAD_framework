@@ -76,6 +76,27 @@ marker_valid() {
   grep -q "\"feature\"[[:space:]]*:[[:space:]]*\"$feature\"" "$marker"
 }
 
+# Link the main checkout's gitignored harness/node_modules into a new worktree so
+# SDK-importing tests load there. Never an error: a missing source or an existing
+# destination is reported on stderr and skipped.
+link_node_modules() {
+  local dir="$1" common main src dest
+  common="$(git rev-parse --git-common-dir)" || return 0
+  main="$(cd "$common/.." && pwd)" || return 0
+  src="$main/harness/node_modules"
+  dest="$dir/harness/node_modules"
+  if [[ ! -d "$src" ]]; then
+    echo "worktree-lifecycle: no $src to link; run npm install in the main checkout" >&2
+    return 0
+  fi
+  if [[ -e "$dest" || -L "$dest" ]]; then
+    echo "worktree-lifecycle: $dest already exists; leaving it" >&2
+    return 0
+  fi
+  [[ -d "$dir/harness" ]] || return 0
+  ln -s "$src" "$dest"
+}
+
 cmd_create() {
   local feature="${1:-}" branch="${2:-}" dir_arg="${3:-}"
   [[ -z "$feature" || -z "$branch" ]] && { usage; exit 2; }
@@ -97,6 +118,8 @@ cmd_create() {
 }
 EOF
 
+  link_node_modules "$dir"
+
   # Last line of stdout is the resolved dir, so callers can capture it.
   printf '%s\n' "$dir"
 }
@@ -117,6 +140,11 @@ cmd_remove() {
   # check above has passed) so a plain `git worktree remove` sees a clean tree and
   # we never need --force.
   rm -f "$dir/$MARKER_NAME"
+  # Drop only the node_modules symlink made by create (never a real directory, never
+  # recursive) so the tree is clean without --force and the link target is untouched.
+  if [[ -L "$dir/harness/node_modules" ]]; then
+    rm -f "$dir/harness/node_modules"
+  fi
   git worktree remove "$dir"
 }
 
