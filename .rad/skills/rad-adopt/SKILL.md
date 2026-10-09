@@ -251,6 +251,11 @@ Validate: AC#[N] — [how to verify]
 The `## Issue Gaps` section is mandatory — it surfaces where the plan made
 judgment calls that the original issue left open.
 
+**Verify the whole suite on the last wave.** When a plan touches `harness/`,
+`scripts/`, `.rad/`, `.claude/` or `.agents/skills/`, add the line
+`Verify: exec bash scripts/verify-all.sh` to the last wave, and run `rad deliver`
+with `RAD_VERIFY_TIMEOUT_SECONDS=1800` (the default is 600 s).
+
 **Open questions become clarification markers.** Any open question or unmade
 decision MUST be written inline, where it applies, as a marker on a single line:
 `[NEEDS CLARIFICATION: <question>]`. Never resolve one silently by assumption.
