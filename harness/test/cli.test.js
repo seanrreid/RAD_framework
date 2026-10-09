@@ -6,14 +6,14 @@ import {
 import { createHash } from 'node:crypto';
 import { basename, join, dirname, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
-import { execFileSync, execFile } from 'node:child_process';
+import { execFileSync, execFile, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import {
   approveCommand, gateCommand, parsePlanCtx, deliverCommand, stopStatusCommand, forecastCommand, digestCommand, prBodyCommand,
   resolveHooksDir, makeSpineScriptPort, SCRIPT_ARG_KEYS, reviewCommand, resolveAgent, isMainModule,
   capabilitiesCommand, installCoreCommand, installPresetCommand, installStatusCommand, configCommand,
-  acpCheckCommand, generateCommand,
+  acpCheckCommand, generateCommand, main,
 } from '../cli.js';
 import { buildReviewPrompt, reviewInstruction } from '../review.js';
 import { REVIEW_INSTRUCTION } from '../evals/reviewers/lib.js';
@@ -3933,5 +3933,29 @@ test('stop-status #212 — main mode reads the checkout log, never the branch ti
     assert.equal(code, 0);
     assert.equal(stdout, TIP_STOP_LINE);
     assert.deepEqual(calls, []);
+  });
+});
+
+test('exercise AC#8 — --help lists exercise', () => {
+  const stdout = execFileSync(process.execPath, [CLI, '--help'], { encoding: 'utf8' });
+  assert.match(stdout, /^\s+exercise\s+/m);
+  assert.match(stdout, /rad exercise <feature> \[--check\]/);
+});
+
+test('exercise AC#8 — no argument exits 2 with usage', () => {
+  const r = spawnSync(process.execPath, [CLI, 'exercise'], { encoding: 'utf8' });
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /Usage: rad exercise <feature> \[--check\]/);
+});
+
+test('exercise AC#8 — no agent configured exits 2 naming rad exercise', async () => {
+  await withTempRepo(async (repoRoot) => {
+    mkdirSync(join(repoRoot, '.agents', 'plans'), { recursive: true });
+    writeFileSync(join(repoRoot, '.agents', 'plans', 'feat.md'),
+      '# P\n\n## Acceptance Criteria\n1. **One.** x\n\n## Exercise\nObserve (AC#1): it works\n');
+    const { code, stderr } = await withProcessEnv({ RAD_REVIEW_AGENT_CMD: undefined, RAD_AGENT_CMD: undefined },
+      () => captureStdio(() => main(['exercise', 'feat'], { repoRoot })));
+    assert.equal(code, 2);
+    assert.match(stderr, /rad exercise: no agent configured/);
   });
 });
