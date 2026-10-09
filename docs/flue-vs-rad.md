@@ -84,7 +84,7 @@ providers." Its own `AGENTS.md` says: "No tests exist in the repo."
 | Result contract | Schema-validated finish tool (`harness.prompt({ result })`) | Plain-text `WAVE_RESULT` block, regex-parsed, unknown status → `blocked_code` (fail-closed) |
 | Structured retries | `idempotencyKey` converges redeliveries on the original submission; durable `step.do()` replays recorded values | Bounded attempts + doom-loop fingerprint; retry carries `priorFailure` (#90); no idempotency key (#112) |
 | Learning / memory | `usePersistentState`, compaction with baseline snapshot | Findings → lints/conventions; fresh context per wave, no compaction |
-| Reusable procedures | Blueprints: versioned Markdown guides with generated-file markers and an upgrade guide | Pinned playbooks proposed (#50), not built |
+| Reusable procedures | Blueprints: versioned Markdown guides with generated-file markers and an upgrade guide | Pinned playbooks shipped (#50): versioned, upgrade guide, `--playbook` flag; in-source marker deferred |
 | Cost visibility | Per-turn `cacheRead`/`cacheWrite`/`cost` on every `turn` event | Per-wave `{ input, output, total }`, adapter-optional; most CLIs emit none |
 | Tests | "No tests exist in the repo" (their words) | 21 harness test files + 15 script fixtures; adversarial composed-path evals still open (#109) |
 | Provider seam | Pi's provider protocol, `useModel('vendor/model')` | `RAD_AGENT_CMD` string or the SDK adapter; protocol question open (#86) |

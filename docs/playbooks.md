@@ -6,7 +6,25 @@ header, so the shape the plan was written against is part of what the architect
 approves. The mechanism is mechanical only: `rad playbook` validates files and
 refs, `plan_playbook` and `lint-plan.sh` check the plan header, and the plan
 fingerprint covers the pin. The `--playbook` flag in `/rad-plan` and
-`/rad-adopt` is not part of this mechanism yet.
+`/rad-adopt` loads a playbook before research and writes the `Playbook:` header
+for you (see [Using a playbook](#using-a-playbook)). Two seed playbooks ship:
+`env-knob--timeout-style` and `event-type--audit-only`. CI runs
+`rad playbook lint` in the `playbook-lint` job.
+
+## Using a playbook
+
+```
+/team:rad-plan --playbook env-knob/timeout-style "add RAD_FOO_TIMEOUT_SECONDS"
+/team:rad-adopt #42 --playbook event-type/audit-only@1
+```
+
+`--playbook <kind>/<slug>[@<version>]` sits beside `--override-disposition`. A
+bare ref pins the current version. The skill checks the ref with
+`rad playbook check-ref` before research (`/rad-plan` Step 1b, `/rad-adopt`
+Step 3b), uses the playbook's files and wave skeleton as the starting point,
+writes the `Playbook:` header line and records departures in a
+`## Playbook Deviations` section. A playbook is guidance the plan cites;
+approval and severity routing are unchanged.
 
 ## Location and naming
 

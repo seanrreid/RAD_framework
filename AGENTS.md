@@ -132,4 +132,8 @@ draft). It does not generate plans, research, or deliver, and it never
 auto-commits — the architect reviews, signs off, and commits by hand. See
 `docs/epic-decomposition.md` for when, why, and how to run it.
 
+`/rad-plan` and `/rad-adopt` accept `--playbook <kind>/<slug>[@<version>]` to start
+from a pinned playbook in `.agents/playbooks/` (recorded as the plan's `Playbook:`
+header; guidance only, never approval). See `docs/playbooks.md`.
+
 See `docs/daily-workflow.md` for the full guide.
