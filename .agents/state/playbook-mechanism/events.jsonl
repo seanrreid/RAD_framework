@@ -16,3 +16,4 @@
 {"feature":"playbook-mechanism","type":"wave-started","actor":"harness","ts":"2026-10-09T15:44:34.107Z","data":{"wave":5,"attempt":1}}
 {"feature":"playbook-mechanism","type":"wave-attempt","actor":"harness","ts":"2026-10-09T15:46:56.070Z","data":{"wave":5,"attempt":1,"outcome":"success","tasks":[{"title":"Docs","status":"complete","commit":"5b751a9","concern":"—","error":"—"}]}}
 {"feature":"playbook-mechanism","type":"wave-complete","actor":"harness","ts":"2026-10-09T15:46:56.072Z","data":{"wave":5}}
+{"feature":"playbook-mechanism","type":"pr-opened","actor":"harness","ts":"2026-10-09T15:47:05.216Z"}
