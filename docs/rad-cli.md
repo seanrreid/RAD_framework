@@ -1095,12 +1095,24 @@ complete/preserve** lifecycle:
 1. **create** — `git worktree add` checks out the work branch into the isolated
    dir, and a `.rad-worktree.json` marker is written at its root (`status:
    "active"`). The spine's scripts then run against this isolated tree.
+   `create` also symlinks the main checkout's `harness/node_modules` to
+   `<worktree>/harness/node_modules`: dependencies are gitignored, so a fresh
+   worktree has none and SDK-importing tests (e.g. `agent-adapters.test.js`,
+   `cost.test.js`) could not load. `harness/.gitignore` ignores `node_modules`
+   (no trailing slash), so the link is never staged. If the source is absent,
+   `create` prints `worktree-lifecycle: no <main>/harness/node_modules to link;
+   run npm install in the main checkout` on stderr and carries on — a note, never
+   an error. An existing destination is left alone, with a similar stderr note.
 2. **complete (on success)** — when the spine finishes cleanly, the marker is
-   cleared and `git worktree remove` tears the worktree down.
+   cleared and `git worktree remove` tears the worktree down. `remove` deletes
+   only the `harness/node_modules` symlink (`rm -f`, never recursive, never a real
+   directory) before `git worktree remove`, so the main checkout's dependencies are
+   untouched and no `--force` is needed.
 3. **preserve (on failure)** — when the spine stops on any terminal (gate,
    doom-loop, post-check, token-budget) or throws, the worktree is **kept** and
    its marker is rewritten to `status: "preserved"` so you can inspect the
-   isolated tree. The structured failure line surfaces its path as
+   isolated tree (the `node_modules` link is kept too, so tests still run there).
+   The structured failure line surfaces its path as
    `worktree=<dir>`. Before preserving, a run that did not complete commits
    only its event log to the work branch, locally, as `deliver(<feature>):
    record stopped run`, so a later `--resume` sees the stop at the branch tip
