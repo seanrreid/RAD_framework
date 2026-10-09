@@ -43,6 +43,7 @@ agent_scope_map:
 settings:               # optional; see Settings below
   high_risk_patterns: '(^|/)(auth|billing)(/|$)'
   hooks_dir: scripts/hooks
+playbook_kinds: [env-knob, hook-point, event-type, severity-pattern]  # optional
 ```
 
 | Key | Type | Required | Rules |
@@ -67,6 +68,7 @@ settings:               # optional; see Settings below
 | `settings` | mapping | no | Only the keys `high_risk_patterns`, `hooks_dir`; any other key is an error (`unknown key settings.<key>`). A non-mapping value is an error (`settings must be a mapping`). See [Settings](#settings). |
 | `settings.high_risk_patterns` | string | no | Non-empty; must not contain a line break. Same meaning as `RAD_HIGH_RISK_PATTERNS`. |
 | `settings.hooks_dir` | string | no | Non-empty; must not start with `-` or contain a line break. Same meaning as `RAD_HOOKS_DIR`; resolved relative to the repo root. |
+| `playbook_kinds` | list of strings | no | Allowed playbook kinds. Absent means the default `env-knob`, `hook-point`, `event-type`, `severity-pattern`. Non-empty, each entry a kebab-case string (`^[a-z][a-z0-9-]*$`), no duplicates; a non-list is an error (`playbook_kinds must be a list`). Written last. See [playbooks.md](playbooks.md). |
 
 The top-level document must be a YAML mapping. Any role list (and a scope-map
 row's `roles`, and `capabilities.deny`) may be written as a lone string — it is

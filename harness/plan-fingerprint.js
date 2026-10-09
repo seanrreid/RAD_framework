@@ -15,6 +15,10 @@
  * non-circular. A plan with no header `Capabilities:` line must hash
  * byte-identically to the body-only scheme, or every existing approval breaks.
  *
+ * Same exception for the header `Playbook:` line (#50): it pins the playbooks a
+ * plan was written against, so it is folded under HEADER_PLAYBOOK_MARKER after
+ * any Capabilities fold. A plan with no `Playbook:` line hashes exactly as before.
+ *
  * Built-in crypto only — no external deps. Reuses the createHash('sha256')
  * normalize→stringify→digest pattern from harness/fingerprint.js.
  */
@@ -25,6 +29,9 @@ const BODY_HEADING_PREFIX = '## ';
 const HEADER_CAPABILITIES_PATTERN = /^Capabilities:/;
 // Fold separator: changing it re-hashes every plan that has a header Capabilities line.
 const HEADER_CAPABILITIES_MARKER = '\n<!-- rad:header-capabilities -->\n';
+const HEADER_PLAYBOOK_PATTERN = /^Playbook:/;
+// Fold separator: changing it re-hashes every plan that has a header Playbook line.
+const HEADER_PLAYBOOK_MARKER = '\n<!-- rad:header-playbook -->\n';
 
 /** Index of the first body heading, or -1 when the plan has none. */
 function bodyStart(lines) {
@@ -42,6 +49,19 @@ function headerCapabilityLines(lines) {
   const start = bodyStart(lines);
   const header = start === -1 ? lines : lines.slice(0, start);
   return header.map((line) => line.trim()).filter((line) => HEADER_CAPABILITIES_PATTERN.test(line));
+}
+
+/**
+ * The header block's `Playbook:` lines, selected exactly as headerCapabilityLines
+ * selects `Capabilities:` lines.
+ *
+ * @param {string[]} lines
+ * @returns {string[]}
+ */
+function headerPlaybookLines(lines) {
+  const start = bodyStart(lines);
+  const header = start === -1 ? lines : lines.slice(0, start);
+  return header.map((line) => line.trim()).filter((line) => HEADER_PLAYBOOK_PATTERN.test(line));
 }
 
 /**
@@ -77,18 +97,24 @@ function normalizeBody(planText) {
  *
  * The mutable header block is excluded by construction (see module header), so
  * editing only a header line (e.g. `Status:`) yields the SAME hash, while
- * editing any body section or a header `Capabilities:` line yields a DIFFERENT hash.
+ * editing any body section or a header `Capabilities:` / `Playbook:` line yields a DIFFERENT hash.
  *
  * @param {string} planText - full plan document text
  * @returns {{ hash: string }} 64-char SHA-256 hex digest of the normalized body
  */
 export function planFingerprint(planText) {
   const text = String(planText ?? '');
-  const capabilities = headerCapabilityLines(text.split('\n'));
+  const lines = text.split('\n');
+  const capabilities = headerCapabilityLines(lines);
   const body = normalizeBody(text);
   const hashed = capabilities.length === 0
     ? body
     : `${body}${HEADER_CAPABILITIES_MARKER}${capabilities.join('\n')}`;
-  const hash = createHash('sha256').update(hashed).digest('hex');
+  // Fold order is part of the hash: Capabilities first, then Playbook.
+  const playbook = headerPlaybookLines(lines);
+  const full = playbook.length === 0
+    ? hashed
+    : `${hashed}${HEADER_PLAYBOOK_MARKER}${playbook.join('\n')}`;
+  const hash = createHash('sha256').update(full).digest('hex');
   return { hash };
 }

@@ -26,6 +26,7 @@
 #   - plan_mockup_refs     — unfenced .agents/mockups/*.html|.htm refs, first-seen
 # …and for light-planning-tier:
 #   - plan_tier             — header-block Tier: value (absent ⇒ standard)
+#   - plan_playbook         — header-block Playbook: value (absent ⇒ empty output)
 #   - plan_light_violations — light-tier: <reason> per exceeded light bound
 #
 # Self-contained: builds a temp git-repo fixture (git init + a local bare origin
@@ -576,6 +577,31 @@ if plan_tier "$TMP/does-not-exist.md" 2>"$TMP/err.txt"; then
 fi
 grep -q "missing or unreadable" "$TMP/err.txt" || fail "plan_tier: missing plan must explain on stderr"
 echo "✓ plan_tier: missing plan file ⇒ non-zero + stderr message"
+
+# ── plan_playbook: header-block Playbook: line only ─────────────────────────
+# check_playbook <name> <plan text> <expected stdout> <expected rc>
+check_playbook() {
+  local file="$TMP/playbook-$1.md" got rc=0
+  printf '%b' "$2" > "$file"
+  got=$(plan_playbook "$file" 2>/dev/null) || rc=$?
+  [[ "$got" == "$3" ]] || fail "plan_playbook ($1): expected [$3], got [$got]"
+  [[ "$rc" -eq "$4" ]] || fail "plan_playbook ($1): expected exit $4, got $rc"
+}
+check_playbook absent   '# Plan\nStatus: draft\n\n## Goal\nx\n'                                  ''                          0
+check_playbook present  '# Plan\nPlaybook: env-knob/timeout-style@1\n\n## Goal\nx\n'             'env-knob/timeout-style@1'  0
+check_playbook padded   '# Plan\nPlaybook:   env-knob/a@2  \n## Goal\n'                            'env-knob/a@2'              0
+check_playbook repeated '# Plan\nPlaybook: env-knob/a@1\nPlaybook: env-knob/b@1\n## Goal\n'       ''                          1
+check_playbook empty    '# Plan\nPlaybook:\n## Goal\n'                                              ''                          1
+check_playbook blank    '# Plan\nPlaybook:   \n## Goal\n'                                           ''                          1
+check_playbook body     '# Plan\nStatus: draft\n\n## Goal\n```\nPlaybook: env-knob/a@1\n```\n'   ''                          0
+check_playbook bodydup  '# Plan\nPlaybook: env-knob/a@1\n\n## Goal\nPlaybook: env-knob/b@1\n'     'env-knob/a@1'              0
+echo "✓ plan_playbook: absent ⇒ empty, present/padded trimmed, repeated and empty ⇒ exit 1, body Playbook: ignored"
+
+if plan_playbook "$TMP/does-not-exist.md" 2>"$TMP/err.txt"; then
+  fail "plan_playbook: missing plan file must return non-zero"
+fi
+grep -q "missing or unreadable" "$TMP/err.txt" || fail "plan_playbook: missing plan must explain on stderr"
+echo "✓ plan_playbook: missing plan file ⇒ non-zero + stderr message"
 
 # ── plan_light_violations: bounds + risky paths on light plans only ─────────
 # write_tier_plan <file> <tier-header-line> <waves> <tasks-per-wave> <scope-path>

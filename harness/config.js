@@ -21,7 +21,7 @@ export const PLATFORMS = Object.freeze(['github', 'gitlab', 'bitbucket', 'forgej
 /** The only schema version this reader understands. */
 export const CONFIG_VERSION = 1;
 
-const TOP_LEVEL_KEYS = Object.freeze(['version', 'platform', 'default_branch', 'agent', 'roles', 'agent_scope_map', 'capabilities', 'settings']);
+const TOP_LEVEL_KEYS = Object.freeze(['version', 'platform', 'default_branch', 'agent', 'roles', 'agent_scope_map', 'capabilities', 'settings', 'playbook_kinds']);
 const ROLE_KEYS = Object.freeze(['architect', 'developers', 'designers']);
 const SCOPE_ROW_KEYS = Object.freeze(['agent', 'type', 'reads', 'roles']);
 /** Keys allowed under `capabilities:` (the project-level deny list, #85). */
@@ -43,6 +43,10 @@ export const AGENT_PRESETS = Object.freeze({
 const AGENT_KEYS = Object.freeze(['adapter', 'command']);
 /** Adapters that launch a process and so require `agent.command`; `sdk` must not set one. */
 const COMMAND_ADAPTERS = Object.freeze(['command', 'acp']);
+/** Playbook kinds allowed when `playbook_kinds:` is absent (#50). */
+export const DEFAULT_PLAYBOOK_KINDS = Object.freeze(['env-knob', 'hook-point', 'event-type', 'severity-pattern']);
+/** A playbook kind is kebab-case: lowercase letter first, then lowercase letters, digits and hyphens. */
+const PLAYBOOK_KIND_PATTERN = /^[a-z][a-z0-9-]*$/;
 /** A bracketed value (e.g. `[your GitHub username]`) is an unfilled template placeholder. */
 const PLACEHOLDER_PREFIX = '[';
 /** Required keys `migrateFromClaudeMd` must find, by dotted name. */
@@ -177,6 +181,23 @@ export function agentErrors(agent) {
   return [...errors, ...agentCommandErrors(agent.adapter, agent.command)];
 }
 
+/** Errors for the optional `playbook_kinds:` list. Fail-closed: empty, non-array, duplicate and non-kebab are errors. */
+export function playbookKindsErrors(kinds) {
+  if (kinds === undefined) return [];
+  if (!Array.isArray(kinds)) return ['playbook_kinds must be a list'];
+  if (kinds.length === 0) return ['playbook_kinds must not be empty'];
+  const errors = kinds.filter((k) => typeof k !== 'string' || !PLAYBOOK_KIND_PATTERN.test(k))
+    .map((k) => `playbook_kinds entry ${JSON.stringify(k)} must be a kebab-case string (${PLAYBOOK_KIND_PATTERN})`);
+  const dupes = kinds.filter((k, i) => kinds.indexOf(k) !== i);
+  return [...errors, ...[...new Set(dupes)].map((k) => `playbook_kinds has a duplicate entry ${JSON.stringify(k)}`)];
+}
+
+/** The configured playbook kinds, or DEFAULT_PLAYBOOK_KINDS when the key is absent. */
+export function resolvePlaybookKinds(config) {
+  const kinds = config?.playbook_kinds;
+  return kinds === undefined ? [...DEFAULT_PLAYBOOK_KINDS] : kinds;
+}
+
 function scalarErrors(doc) {
   const errors = [];
   if (doc.version === undefined) errors.push('version is required');
@@ -202,7 +223,7 @@ export function validateConfig(doc) {
   const norm = normalizeConfig(doc);
   const errors = Object.keys(norm).filter((k) => !TOP_LEVEL_KEYS.includes(k)).map((k) => `unknown top-level key '${k}'`);
   errors.push(...scalarErrors(norm), ...rolesErrors(norm.roles), ...capabilitiesErrors(norm.capabilities),
-    ...settingsErrors(norm.settings), ...agentErrors(norm.agent));
+    ...settingsErrors(norm.settings), ...agentErrors(norm.agent), ...playbookKindsErrors(norm.playbook_kinds));
   if (norm.agent_scope_map !== undefined) {
     if (!Array.isArray(norm.agent_scope_map)) errors.push('agent_scope_map must be a list');
     else norm.agent_scope_map.forEach((row, i) => errors.push(...scopeRowErrors(row, i)));
@@ -391,6 +412,8 @@ export function serializeConfig(doc) {
   // Written only when present, so configs without it serialize byte-identically to before.
   if (d.capabilities !== undefined) out.push('capabilities:', `  deny: ${flowList(d.capabilities.deny)}`);
   if (d.settings !== undefined) out.push(...settingsLines(d.settings));
+  // Written only when present, so configs without it serialize byte-identically to before.
+  if (d.playbook_kinds !== undefined) out.push(`playbook_kinds: ${flowList(d.playbook_kinds)}`);
   return out.join('\n') + '\n';
 }
 

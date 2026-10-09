@@ -101,6 +101,40 @@ elif [[ "$TIER" != "$TIER_LIGHT" && "$TIER" != "$TIER_STANDARD" ]]; then
   ERRORS+=("Invalid Tier: '$TIER' (expected light or standard)")
 fi
 
+# ── Playbook ref ──────────────────────────────────────────────────────────────
+# Parsed by plan_playbook (header block only). No `Playbook:` line ⇒ nothing
+# runs, so such a plan lints exactly as before. With one, the ref is checked by
+# `rad playbook check-ref`; a failed read, a missing node/CLI or an exit other
+# than 0/1 is an ERROR (fail closed). A stale pin (behind current) is a WARNING.
+PLAYBOOK_CHECK_REJECTED_EXIT=1
+PLAYBOOK_REF=""
+PLAYBOOK_RC=0
+PLAYBOOK_ERR=$(mktemp "${TMPDIR:-/tmp}/lint-plan-playbook.XXXXXX")
+PLAYBOOK_REF=$(plan_playbook "$PLAN_FILE" 2>"$PLAYBOOK_ERR") || PLAYBOOK_RC=$?
+if [[ "$PLAYBOOK_RC" -ne 0 ]]; then
+  ERRORS+=("Playbook header invalid: $(head -1 "$PLAYBOOK_ERR")")
+elif [[ -n "$PLAYBOOK_REF" ]]; then
+  PLAYBOOK_CLI="$RAD_PLAN_PATHS_ROOT/harness/cli.js"
+  PLAYBOOK_OUT=""
+  if ! command -v node >/dev/null 2>&1; then
+    ERRORS+=("Playbook $PLAYBOOK_REF could not be checked: node is not available")
+  elif [[ ! -f "$PLAYBOOK_CLI" ]]; then
+    ERRORS+=("Playbook $PLAYBOOK_REF could not be checked: RAD harness not found at $PLAYBOOK_CLI")
+  else
+    PLAYBOOK_OUT=$(node "$PLAYBOOK_CLI" playbook check-ref --root "$RAD_PLAN_PATHS_ROOT" "$PLAYBOOK_REF" 2>"$PLAYBOOK_ERR") || PLAYBOOK_RC=$?
+    if [[ "$PLAYBOOK_RC" -eq 0 ]]; then
+      if [[ "$PLAYBOOK_OUT" == stale* ]]; then
+        WARNINGS+=("Playbook $PLAYBOOK_REF is behind current version ${PLAYBOOK_OUT##*current=}")
+      fi
+    elif [[ "$PLAYBOOK_RC" -eq "$PLAYBOOK_CHECK_REJECTED_EXIT" ]]; then
+      ERRORS+=("Playbook $PLAYBOOK_REF rejected: $(head -1 "$PLAYBOOK_ERR")")
+    else
+      ERRORS+=("Playbook $PLAYBOOK_REF could not be checked: rad playbook check-ref exited $PLAYBOOK_RC: $(head -1 "$PLAYBOOK_ERR")")
+    fi
+  fi
+fi
+rm -f "$PLAYBOOK_ERR"
+
 # ── Required sections ─────────────────────────────────────────────────────────
 
 REQUIRED_SECTIONS=("Context" "Scope" "Acceptance Criteria" "Agent Scope" "Files in Scope" "Execution Notes" "Wave Plan" "Tests to Write" "Non-Goals" "Risks")

@@ -1,0 +1,19 @@
+{"feature":"playbook-mechanism","type":"approved","actor":"sean@torchcodelab.com","role":"architect","ts":"2026-10-09T15:36:37.412Z","recordedBy":"sean@torchcodelab.com","data":{"fingerprint":"c2c629e140643ee17fdb08d09ad0cda3ac83c66def7b74e02ee7e3dbefb290ea"}}
+{"feature":"playbook-mechanism","type":"deliver-started","actor":"harness","ts":"2026-10-09T15:37:00.983Z"}
+{"feature":"playbook-mechanism","type":"run-prepared","actor":"harness","ts":"2026-10-09T15:37:07.508Z","data":{"base":"main","merged":false,"fastForwarded":false,"committed":true,"pushed":true}}
+{"feature":"playbook-mechanism","type":"wave-started","actor":"harness","ts":"2026-10-09T15:37:07.518Z","data":{"wave":1,"attempt":1}}
+{"feature":"playbook-mechanism","type":"wave-attempt","actor":"harness","ts":"2026-10-09T15:38:25.133Z","data":{"wave":1,"attempt":1,"outcome":"success","tasks":[{"title":"The playbook_kinds config key","status":"complete","commit":"8ee7163","concern":"—","error":"—"},{"title":"The fingerprint fold","status":"complete","commit":"7c4ab46","concern":"—","error":"—"}]}}
+{"feature":"playbook-mechanism","type":"wave-complete","actor":"harness","ts":"2026-10-09T15:38:25.133Z","data":{"wave":1}}
+{"feature":"playbook-mechanism","type":"wave-started","actor":"harness","ts":"2026-10-09T15:38:25.135Z","data":{"wave":2,"attempt":1}}
+{"feature":"playbook-mechanism","type":"wave-attempt","actor":"harness","ts":"2026-10-09T15:39:29.563Z","data":{"wave":2,"attempt":1,"outcome":"success","tasks":[{"title":"The pure playbook module","status":"complete","commit":"7fafd91","concern":"—","error":"—"}]}}
+{"feature":"playbook-mechanism","type":"wave-complete","actor":"harness","ts":"2026-10-09T15:39:29.563Z","data":{"wave":2}}
+{"feature":"playbook-mechanism","type":"wave-started","actor":"harness","ts":"2026-10-09T15:39:29.564Z","data":{"wave":3,"attempt":1}}
+{"feature":"playbook-mechanism","type":"wave-attempt","actor":"harness","ts":"2026-10-09T15:40:41.165Z","data":{"wave":3,"attempt":1,"outcome":"success","tasks":[{"title":"The rad playbook command","status":"complete","commit":"45ec4bb","concern":"—","error":"—"}]}}
+{"feature":"playbook-mechanism","type":"wave-complete","actor":"harness","ts":"2026-10-09T15:40:41.166Z","data":{"wave":3}}
+{"feature":"playbook-mechanism","type":"wave-started","actor":"harness","ts":"2026-10-09T15:40:41.167Z","data":{"wave":4,"attempt":1}}
+{"feature":"playbook-mechanism","type":"wave-attempt","actor":"harness","ts":"2026-10-09T15:44:34.105Z","data":{"wave":4,"attempt":1,"outcome":"success","tasks":[{"title":"The plan-header lint","status":"complete","commit":"d9eecbd","concern":"—","error":"—"}]}}
+{"feature":"playbook-mechanism","type":"wave-complete","actor":"harness","ts":"2026-10-09T15:44:34.106Z","data":{"wave":4}}
+{"feature":"playbook-mechanism","type":"wave-started","actor":"harness","ts":"2026-10-09T15:44:34.107Z","data":{"wave":5,"attempt":1}}
+{"feature":"playbook-mechanism","type":"wave-attempt","actor":"harness","ts":"2026-10-09T15:46:56.070Z","data":{"wave":5,"attempt":1,"outcome":"success","tasks":[{"title":"Docs","status":"complete","commit":"5b751a9","concern":"—","error":"—"}]}}
+{"feature":"playbook-mechanism","type":"wave-complete","actor":"harness","ts":"2026-10-09T15:46:56.072Z","data":{"wave":5}}
+{"feature":"playbook-mechanism","type":"pr-opened","actor":"harness","ts":"2026-10-09T15:47:05.216Z"}

@@ -1,4 +1,5 @@
 import { test } from 'node:test';
+import { createHash } from 'node:crypto';
 import assert from 'node:assert/strict';
 import { fingerprint } from '../fingerprint.js';
 import { planFingerprint } from '../plan-fingerprint.js';
@@ -91,4 +92,43 @@ test('a wave Capabilities line in the body still changes the hash', () => {
 test('a plan with no body heading still folds its header Capabilities line', () => {
   const headerOnly = '# Plan: fixture\nStatus: draft\n';
   assert.notEqual(planHash(`${headerOnly}Capabilities: fs_read\n`), planHash(headerOnly));
+});
+
+// Header `Playbook:` line (#50): folded after Capabilities; absent line must not move any hash.
+const withHeaderPlaybook = (line, caps) =>
+  `# Plan: fixture\n\nStatus: approved\n${caps ? `Capabilities: ${caps}\n` : ''}${line}\n\n${PLAN_BODY}`;
+
+test('plan without a Playbook line still hashes to the fixed pre-change hash', () => {
+  assert.equal(planHash(PLAN_BODY_ONLY), PRE_FOLD_HASH);
+  assert.equal(planHash(withHeaderPlaybook('Notes: none')), PRE_FOLD_HASH);
+});
+
+test('a header Playbook line changes the hash; changing it changes it again', () => {
+  const a = planHash(withHeaderPlaybook('Playbook: docs/playbooks/a.md@1'));
+  assert.notEqual(a, PRE_FOLD_HASH);
+  assert.notEqual(planHash(withHeaderPlaybook('Playbook: docs/playbooks/a.md@2')), a);
+});
+
+test('trailing whitespace on the Playbook line does not change the hash', () => {
+  assert.equal(planHash(withHeaderPlaybook('Playbook: a@1  \t')), planHash(withHeaderPlaybook('Playbook: a@1')));
+});
+
+test('a Playbook line in the body, outside the header, is ignored', () => {
+  const bodyLine = 'Playbook: docs/playbooks/a.md@1';
+  const plan = `${PLAN_BODY_ONLY}\n${bodyLine}\n`;
+  // Hash equals the plain body digest: no marker was folded in.
+  const bodyOnly = `${PLAN_BODY}\n${bodyLine}\n`;
+  assert.equal(planHash(plan), createHash('sha256').update(bodyOnly).digest('hex'));
+});
+
+test('Capabilities plus Playbook: both fold, and each change moves the hash', () => {
+  const both = planHash(withHeaderPlaybook('Playbook: a@1', 'fs_read'));
+  assert.notEqual(both, planHash(withHeaderCaps('fs_read')));
+  assert.notEqual(both, planHash(withHeaderPlaybook('Playbook: a@1')));
+  assert.notEqual(both, planHash(withHeaderPlaybook('Playbook: a@2', 'fs_read')));
+  assert.notEqual(both, planHash(withHeaderPlaybook('Playbook: a@1', 'fs_read, net')));
+});
+
+test('Capabilities-only plans keep their hash after the Playbook fold exists', () => {
+  assert.equal(planHash(withHeaderCaps('fs_read')), planHash(withHeaderPlaybook('Notes: none', 'fs_read')));
 });

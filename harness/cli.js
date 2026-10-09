@@ -72,6 +72,7 @@ import { planStatusCommand, PLAN_STATUS_USAGE } from './plan-status.js';
 import { checkoutCommand, CHECKOUT_USAGE } from './checkout.js';
 import { wrapCommand, WRAP_USAGE } from './wrap.js';
 import { labelCommand, LABEL_USAGE } from './label.js';
+import { playbookCommand, PLAYBOOK_USAGE } from './playbook-command.js';
 import { makePreparePort } from './deliver-prepare.js';
 import { makeFinishPort, executionLogPaths } from './deliver-finish.js';
 
@@ -230,6 +231,11 @@ const SUBCOMMANDS = {
     summary: "Mirror a RAD status onto an issue as its rad:<status> label (wraps scripts/rad-label.sh).",
     usage: LABEL_USAGE,
     run: (argv, ctx) => labelCommand(argv, ctx),
+  },
+  playbook: {
+    summary: 'Lint playbook files and check a pinned playbook ref (read-only).',
+    usage: PLAYBOOK_USAGE,
+    run: (argv, ctx) => playbookCommand(argv, ctx),
   },
   'plan-fingerprint': {
     summary: 'Print the SHA-256 fingerprint of a plan doc body (read-only).',
