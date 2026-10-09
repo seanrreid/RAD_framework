@@ -223,10 +223,19 @@ It:
    honoring `RAD_BRANCH_PREFIX`). It never reads a local plan header, because
    the plan is not on the default branch before checkout;
 2. runs `scripts/checkout-plan.sh <branch>`, which fetches the branch from
-   origin, checks it out and fast-forwards it to the remote tip;
+   origin, checks it out and brings it to the remote tip (see the branch states
+   below);
 3. confirms that `.agents/plans/<feature>.md` exists at the branch tip.
 
 It changes the checked-out branch but commits nothing and never pushes.
+
+**Branch states.** The script compares the local branch with `origin/<branch>`:
+- **behind** (local tip is an ancestor of origin): fast-forwards to the remote tip;
+- **ahead** (origin's tip is an ancestor of local, i.e. unpushed commits): passes
+  and leaves the branch as is. The script prints
+  `note: local '<branch>' is N commit(s) ahead of origin (unpushed)` to stderr,
+  and the success line ends with ` ahead=N`;
+- **diverged** (neither tip is an ancestor of the other): refused with exit 1.
 
 **Argument:** `<feature>`, `<feature>.md` or `.agents/plans/<feature>.md`.
 `--help` / `-h` prints the usage line and exits 0.
@@ -244,7 +253,9 @@ It changes the checked-out branch but commits nothing and never pushes.
 - `git rev-parse HEAD` failed
 
 **Success line:**
-`rad checkout: ok feature=<f> branch=<branch> head=<sha> plan=.agents/plans/<f>.md`
+`rad checkout: ok feature=<f> branch=<branch> head=<sha> plan=.agents/plans/<f>.md`,
+with ` ahead=N` appended only when the local branch is N (> 0) commits ahead of
+origin. If counting them fails, the field is omitted and the checkout still succeeds.
 
 **Exit codes:** 0 on the branch at its remote tip with the plan present; 1 the
 checkout script failed or the plan is missing; 2 refused before any git call.
