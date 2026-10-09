@@ -87,9 +87,6 @@ The user decided on 2026-10-09:
    - docs/configuration.md: the `playbook_kinds` key.
    - `.agents/README.md`: a `playbooks/` row.
 
-## Amendments
-- **Amendment 1 (2026-10-09, after delivery, from the full-suite run):** the data-driven `HEADER_FOLDS` loop in `harness/plan-fingerprint.js` removed the source line `const hashed = capabilities.length === 0`, which the mutated twin of the eval `widen-capabilities-after-approval` uses as its patch anchor (`harness/evals/approval.eval.js` ~181). The twin fails with `mutate: … not found`, and the evals are CI-blocking. The fix re-points the mutation at the new code: replace `for (const [pattern, marker] of HEADER_FOLDS) {` with `for (const [pattern, marker] of []) {`, which drops all header folds (hashing reverts to body-only), exactly what the twin simulates. `harness/evals/approval.eval.js` is added to Files in Scope. No fingerprint behavior changes.
-
 ## Agent Scope
 Research came from a read-only sub-agent survey of the rad-plan skill and its `--light` flag, lint-plan.sh and plan-paths.sh header handling, plan-fingerprint.js, the install manifest and scope exemptions, the existing recurring-shape PRs, and the config validation. Targeted greps for the config key lists, the fingerprint constants and the lint structure followed. There are no out-of-scope dependencies.
 
@@ -109,7 +106,6 @@ Research came from a read-only sub-agent survey of the rad-plan skill and its `-
 | harness/label.js | 1-81 | Read only: the command-module model |
 | harness/plan-fingerprint.js | 1-94 | The `Playbook:` fold |
 | harness/test/fingerprint.test.js | 1-1 | Append cases (AC#6) |
-| harness/evals/approval.eval.js | 170-190 | Amendment 1: re-point the `widen-capabilities-after-approval` mutation at the new fold loop |
 | scripts/lib/plan-paths.sh | 605-635 | `plan_playbook` |
 | scripts/lint-plan.sh | 50-110 | The `Playbook:` check |
 | scripts/lint-agent-files.sh | 18-30 | Read only: the `RAD_CLI` pattern |
