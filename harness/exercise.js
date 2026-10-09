@@ -1,6 +1,17 @@
 // `rad exercise` — runs a plan's optional `## Exercise` block against the built
-// branch. This file holds the pure block parser; it does no I/O and never throws.
+// branch. This file holds the pure block parser (no I/O, never throws) and the
+// isolated recipe runner (Launch process group, Teardown, detached worktree).
 // It must not import harness/cli.js (agent resolution and config are injected).
+
+import { spawn, spawnSync } from 'node:child_process';
+import { buildChildEnv, KILL_GRACE_MS } from './adapters/agent/command.js';
+import { sanitizeErrorMessage } from './adapters/agent/contract.js';
+
+const SHELL = '/bin/sh';
+const OUTPUT_TAIL_CHARS = 4000;
+const GROUP_POLL_MS = 25;
+const TEARDOWN_TIMEOUT_MS = 60_000;
+const WORKTREE_NAME_PREFIX = 'exercise-';
 
 const EXERCISE_HEADING = /^##\s+Exercise\s*$/i;
 const CRITERIA_HEADING = /^##\s+Acceptance Criteria\s*$/i;
@@ -101,4 +112,146 @@ export function parseExerciseBlock(planText) {
   block.present = block.observes.length > 0;
   if (!block.present) block.warnings.push('Exercise block has no Observe lines; it will be skipped');
   return block;
+}
+
+// ---------------------------------------------------------------------------
+// Isolated recipe runner
+// ---------------------------------------------------------------------------
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** True while any process in group `pid` is alive (signal 0 probes only). */
+function groupAlive(pid, killFn) {
+  try {
+    killFn(-pid, 0);
+    return true;
+  } catch (err) {
+    if (err?.code === 'ESRCH') return false;
+    return true; // EPERM: the group exists but is not ours to signal
+  }
+}
+
+/** Signal the whole group; ESRCH (already gone) is the expected race. */
+function signalGroup(pid, signal, killFn, log) {
+  try {
+    killFn(-pid, signal);
+  } catch (err) {
+    if (err?.code === 'ESRCH') return;
+    log(`rad exercise: failed to send ${signal} to launch group ${pid}: ${err?.message ?? err}\n`);
+  }
+}
+
+/**
+ * Start `command` via `/bin/sh -c` in `cwd` as the leader of its own process
+ * group, under the agent adapter's env allow-list. Never throws: a spawn
+ * failure resolves `exited` with `{ code: null, signal: null, error }`.
+ *
+ * @returns {{ pid: number|undefined, tail: () => string,
+ *             hasExited: () => boolean,
+ *             exited: Promise<{code: number|null, signal: string|null, error?: string}> }}
+ */
+export function startLaunch({ command, cwd, env = buildChildEnv(), spawnFn = spawn }) {
+  let tail = '';
+  let done = false;
+  const append = (chunk) => {
+    tail = (tail + chunk.toString()).slice(-OUTPUT_TAIL_CHARS);
+  };
+  let child;
+  let settle;
+  const exited = new Promise((resolve) => { settle = resolve; });
+  const finish = (result) => {
+    if (done) return;
+    done = true;
+    settle(result);
+  };
+  try {
+    child = spawnFn(SHELL, ['-c', command], {
+      cwd, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  } catch (err) {
+    finish({ code: null, signal: null, error: sanitizeErrorMessage(err?.message ?? String(err)) });
+    return { pid: undefined, tail: () => tail, hasExited: () => done, exited };
+  }
+  child.stdout?.on('data', append);
+  child.stderr?.on('data', append);
+  child.on('error', (err) => finish({
+    code: null, signal: null, error: sanitizeErrorMessage(err?.message ?? String(err)),
+  }));
+  child.on('close', (code, signal) => finish({ code, signal }));
+  return { pid: child.pid, tail: () => tail, hasExited: () => done, exited };
+}
+
+/**
+ * Terminate the Launch process group: SIGTERM to `-pid`, then SIGKILL after the
+ * grace period if any member (e.g. a grandchild) is still alive. Resolves once
+ * the group is gone or the kill has been sent. Never throws.
+ */
+export async function stopGroup(launch, {
+  killGraceMs = KILL_GRACE_MS,
+  killFn = process.kill,
+  log = (m) => process.stderr.write(m),
+} = {}) {
+  const pid = launch?.pid;
+  if (!Number.isInteger(pid) || pid <= 0) return;
+  signalGroup(pid, 'SIGTERM', killFn, log);
+  const deadline = Date.now() + killGraceMs;
+  while (groupAlive(pid, killFn) && Date.now() < deadline) await sleep(GROUP_POLL_MS);
+  if (!groupAlive(pid, killFn)) return;
+  signalGroup(pid, 'SIGKILL', killFn, log);
+  const killDeadline = Date.now() + killGraceMs;
+  while (groupAlive(pid, killFn) && Date.now() < killDeadline) await sleep(GROUP_POLL_MS);
+}
+
+/**
+ * Run `Teardown:` under the same scrubbed env. A failure (non-zero exit, signal,
+ * spawn error, timeout) is logged to stderr with its exit code and returned as
+ * `ok: false`; it never throws, so it cannot change the command's exit code.
+ *
+ * @returns {{ ok: boolean, code: number|null, output: string }}
+ */
+export function runTeardown({
+  command, cwd, env = buildChildEnv(), timeoutMs = TEARDOWN_TIMEOUT_MS,
+  spawnSyncFn = spawnSync, log = (m) => process.stderr.write(m),
+}) {
+  if (!command) return { ok: true, code: 0, output: '' };
+  const r = spawnSyncFn(SHELL, ['-c', command], {
+    cwd, env, encoding: 'utf8', timeout: timeoutMs, killSignal: 'SIGKILL',
+  });
+  const output = `${r.stdout ?? ''}${r.stderr ?? ''}`.slice(-OUTPUT_TAIL_CHARS);
+  const code = typeof r.status === 'number' ? r.status : null;
+  if (r.error || code !== 0) {
+    const reason = sanitizeErrorMessage(r.error?.message ?? (r.signal ? `signal ${r.signal}` : output));
+    log(`rad exercise: teardown failed (exit code ${code ?? 'none'}): ${reason}\n`);
+    return { ok: false, code, output };
+  }
+  return { ok: true, code, output };
+}
+
+/** Name of the throwaway worktree for `feature`. */
+export function exerciseWorktreeName(feature) {
+  return `${WORKTREE_NAME_PREFIX}${feature}`;
+}
+
+/**
+ * Create a detached worktree at commit `tip` (a SHA, so the branch stays free in
+ * the main checkout), run `fn(dir)`, and always remove the worktree afterwards.
+ * A removal failure is logged and never masks `fn`'s result or error. A create
+ * failure propagates (nothing to clean up).
+ *
+ * @param {{ create(name: string, ref: string): string, complete(name: string, dir?: string): void }} worktree
+ */
+export async function withDetachedWorktree({
+  worktree, feature, tip, fn, log = (m) => process.stderr.write(m),
+}) {
+  const name = exerciseWorktreeName(feature);
+  const dir = worktree.create(name, tip);
+  try {
+    return await fn(dir);
+  } finally {
+    try {
+      worktree.complete(name, dir);
+    } catch (err) {
+      log(`rad exercise: worktree removal failed: ${sanitizeErrorMessage(err?.message ?? String(err))}\n`);
+    }
+  }
 }
