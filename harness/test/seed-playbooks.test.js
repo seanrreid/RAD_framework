@@ -25,6 +25,10 @@ const QUOTED_TESTS = Object.freeze({
       'deliver acp — unset or empty RAD_WAVE_TIMEOUT_SECONDS keeps the default',
     ],
   },
+  'event-type--audit-only.md': {
+    'harness/test/events.test.js': ['run-resumed is audit-only: it establishes no phase and leaves the folded phase unchanged'],
+    'harness/test/spine-prepare.test.js': ['absent prepare port → event sequence identical to a baseline run'],
+  },
 });
 
 const read = (rel) => readFileSync(join(ROOT, rel), 'utf8');
