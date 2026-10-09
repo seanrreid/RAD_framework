@@ -1,7 +1,7 @@
 # Plan: Pinned Playbooks, Part 2: --playbook Flag, Seed Playbooks, CI and Docs (#50)
 Created: 2026-10-09
 Author: architect
-Status: approved
+Status: in-progress
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-10-09T16:29:43.756Z
 Recorded-By: sean@torchcodelab.com
