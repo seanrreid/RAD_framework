@@ -87,6 +87,10 @@ Columns:
   when UI files changed). It does not call `rad review`, never writes
   `.agents/findings.jsonl`, and never commits or pushes, so it belongs with
   the read-only slice. Findings recording can follow with #186.
+  Both variants also run the optional behavioral exercise (Claude Step 4c): the
+  Claude command persists its findings (`reviewer: "exercise"`) and the cycle
+  `exercise` field; the Codex skill only reports a "Behavioral Exercise" section
+  and writes nothing. `--no-exercise` skips it in both.
 - **rad-insights in #186 part 4-ii**: reading is its main job, but
   `--draft-plans` cuts a `rad/insights-proposals-<date>` branch and commits a
   plan, so it ports with the state-changing workflow (explicit-only on Codex).

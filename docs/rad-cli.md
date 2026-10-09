@@ -743,6 +743,21 @@ never depends on the mode.
 unset/empty/`0`/`false` (mode `observe-only`); any other value exits **2**. The
 mode only labels the summary line.
 
+**In `/rad-review`.** Step 4c of the Claude command runs `rad exercise <feature>`
+unless `--no-exercise` is passed (the token is removed from the file list), and
+the Codex `rad-review` skill runs it read-only. Both print
+`Exercise: skipped (--no-exercise)` when skipped by the flag, and keep the
+`Exercise: skipped (no recipe)` stdout when the plan has no block. A non-zero
+exit is recorded and the review continues. The Claude command persists findings
+(`reviewer: "exercise"`, `category: "behavior"`) and adds
+`"exercise":{"ran":<bool>,"mode":"observe-only|blocking"}` to the cycle record;
+`ran` is true only when the command exited `0` and did not skip, so `ran: false`
+means "not exercised", not "nothing found". With `RAD_EXERCISE_BLOCKING=1`/`true`,
+HIGH exercise findings count as blocking in the review report (`NEEDS FIXES
+FIRST`) — self-review only; the approval gate is never touched. The Codex skill
+reports the same section and persists nothing. `scripts/lint-plan.sh` relays the
+`--check` warnings as advisory lint warnings.
+
 **Not a security sandbox: the approved plan is the control.** The recipe's
 commands run on your machine; the env allow-list and the throwaway worktree limit
 accidents, not a hostile recipe. What the recipe may run is governed by the plan

@@ -282,6 +282,19 @@ existing helper) and **Terminology drift** (new names for concepts the codebase
 already names).
 
 Fix any HIGH priority issues before requesting architect review.
+
+**Behavioral exercise (Step 4c).** A standard plan may carry an optional
+`## Exercise` section (`Launch:`, `Teardown:`, `Drive:`, and
+`Observe (AC#N):` lines; a light plan omits it). When present, `/rad-review`
+Step 4c runs `rad exercise <feature>` against the delivered branch and adds a
+`### Behavioral Exercise` section to the report. Pass `--no-exercise` to skip it;
+with no recipe it is skipped automatically. Findings are persisted as
+`reviewer: "exercise"`, `category: "behavior"`, and the cycle record carries
+`"exercise":{"ran":<bool>,"mode":...}`. `ran: false` means "not exercised"
+(skipped or failed), not "nothing found". By default (`observe-only`) HIGH
+exercise findings are advisory; with `RAD_EXERCISE_BLOCKING=1` they count as
+blocking in this self-review only — the exercise never touches the approval gate.
+The Codex `rad-review` skill reports the same section but persists nothing.
 MEDIUM and LOW issues can be noted but don't block the PR.
 
 ---
