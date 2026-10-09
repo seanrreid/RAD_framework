@@ -21,7 +21,7 @@ paths; part 2 migrated the read-only slice into `.rad/` sources. Rows marked
 | 1 | This doc; `harness/generate.js`; `rad generate [--check]`; CI `generated-drift`; `^\.codex/` and `^\.agents/skills/` self-protected | #171 |
 | 2 | Read-only slice migrated into `.rad/`: both reviewers, `quality-review`, `accessibility-review`, `rad-status`, a Codex-only `rad-review` (deterministic scripts plus reviewer sub-agents). Generated outputs and reviewers shipped through core, invariant added. Delivered | #171 |
 | 3 | `AGENTS.md` as the conventions source, `CLAUDE.md` importing it with `@AGENTS.md`; readers use `AGENTS.md` with a `CLAUDE.md` fallback; install scaffold and `lint-claude-md` cover both files (`config migrate` unchanged). Delivered | #171 |
-| Parity | State-changing workflow for Codex (plan, adopt, approve, deliver, design, research, epic-decompose, insights, kickoff/wrap); the deliver-gate hook shipping gap. Plan, adopt, approve and deliver generated (deliver in part 3d: one shared skill that runs `rad deliver`); research and epic-decompose in part 3e; design in part 3f; kickoff and wrap in part 4-i (wrap publishes notes through `rad wrap`) | #186 |
+| Parity | State-changing workflow for Codex (plan, adopt, approve, deliver, design, research, epic-decompose, insights, kickoff/wrap); the deliver-gate hook shipping gap. Plan, adopt, approve and deliver generated (deliver in part 3d: one shared skill that runs `rad deliver`); research and epic-decompose in part 3e; design in part 3f; kickoff and wrap in part 4-i (wrap publishes notes through `rad wrap`); insights in part 4-ii — part 4 done | #186 |
 
 ---
 
@@ -52,7 +52,7 @@ Columns:
 | rad-approve | `.claude/commands/architect/rad-approve.md` | `.agents/skills/rad-approve/SKILL.md` (+ `agents/openai.yaml`, `codex_implicit: false`) | `.rad/skills/rad-approve/SKILL.md` | as-is | `$ARGUMENTS` | yes | generated (#186 part 2d) |
 | rad-design | `.claude/commands/architect/rad-design.md` | `.agents/skills/rad-design/SKILL.md` (+ `agents/openai.yaml`, `codex_implicit: false`) | `.rad/skills/rad-design/SKILL.md` | as-is | rad CLI, `$ARGUMENTS` | yes | generated (#186 part 3f) |
 | rad-epic-decompose | `.claude/commands/architect/rad-epic-decompose.md` | `.agents/skills/rad-epic-decompose/SKILL.md` (+ `agents/openai.yaml`, `codex_implicit: false`) | `.rad/skills/rad-epic-decompose/SKILL.md` | as-is | rad CLI, `$ARGUMENTS`, `gh` | artifact | generated (#186 part 3e) |
-| rad-insights | `.claude/commands/shared/rad-insights.md` | `.agents/skills/rad-insights/SKILL.md` | `.rad/skills/rad-insights/SKILL.md` | wrapper | `$ARGUMENTS`, `$1/$2` | yes (`--draft-plans` only) | planned: parity issue #186 |
+| rad-insights | `.claude/commands/shared/rad-insights.md` | `.agents/skills/rad-insights/SKILL.md` (+ `agents/openai.yaml`, `codex_implicit: false`) | `.rad/skills/rad-insights/SKILL.md` | as-is | `{{args}}` | yes (`--draft-plans` only) | generated (#186 part 4-ii) |
 | rad-status | `.claude/commands/shared/rad-status.md` | `.agents/skills/rad-status/SKILL.md` | `.rad/skills/rad-status/SKILL.md` | as-is | none | no | generated (#171 part 2) |
 | rad-plan | `.claude/commands/team/rad-plan.md` | `.agents/skills/rad-plan/SKILL.md` | `.rad/skills/rad-plan/SKILL.md` | as-is | sub-agent (optional), `$ARGUMENTS` | yes | generated (#186 part 2c) |
 | rad-adopt | `.claude/commands/team/rad-adopt.md` | `.agents/skills/rad-adopt/SKILL.md` | `.rad/skills/rad-adopt/SKILL.md` | as-is | `$ARGUMENTS`, `gh` | yes | generated (#186 part 2c) |
@@ -87,10 +87,11 @@ Columns:
   when UI files changed). It does not call `rad review`, never writes
   `.agents/findings.jsonl`, and never commits or pushes, so it belongs with
   the read-only slice. Findings recording can follow with #186.
-- **rad-insights in #186**: reading is its main job, but `--draft-plans` cuts
-  a `rad/insights-proposals-<date>` branch and commits a plan, so it ports
-  with the state-changing workflow. Its `$1/$2` are awk fields, not
-  positional args. One migration, not two.
+- **rad-insights in #186 part 4-ii**: reading is its main job, but
+  `--draft-plans` cuts a `rad/insights-proposals-<date>` branch and commits a
+  plan, so it ports with the state-changing workflow (explicit-only on Codex).
+  One shared body serves both tools. Its `$1/$2` are awk fields, not
+  positional args.
 - **kickoff and wrap in part 4-i**: kickoff is read-only, but it is the
   session pair of `wrap` (state-changing), so they shipped together and a
   Codex user never gets half the ritual. One shared body serves both: wrap

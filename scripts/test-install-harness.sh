@@ -533,7 +533,7 @@ assert_not_exists "$NOCFG_T/$PRESET_EXT" "no config -> no preset file written"
 # ── 7. the generated read-only slice ships (#171 part 2) ────────────────────
 # A stable line from quality-reviewer's body, proving rad review read the agent.
 readonly REVIEWER_BODY_LINE="Universal code quality review agent."
-readonly SLICE_SKILLS=(quality-review accessibility-review rad-status rad-review rad-plan rad-adopt rad-approve rad-deliver rad-research rad-epic-decompose rad-design wrap kickoff)
+readonly SLICE_SKILLS=(quality-review accessibility-review rad-status rad-review rad-plan rad-adopt rad-approve rad-deliver rad-research rad-epic-decompose rad-design wrap kickoff rad-insights)
 
 # 7a. fresh install: generated outputs (marked), sources, no internal agents
 for r in quality-reviewer accessibility-reviewer; do
@@ -549,6 +549,7 @@ assert_exists "$MAIN/.agents/skills/rad-deliver/agents/openai.yaml" "fresh insta
 assert_exists "$MAIN/.agents/skills/rad-epic-decompose/agents/openai.yaml" "fresh install ships .agents/skills/rad-epic-decompose/agents/openai.yaml"
 assert_exists "$MAIN/.agents/skills/rad-design/agents/openai.yaml" "fresh install ships .agents/skills/rad-design/agents/openai.yaml"
 assert_exists "$MAIN/.agents/skills/wrap/agents/openai.yaml" "fresh install ships .agents/skills/wrap/agents/openai.yaml"
+assert_exists "$MAIN/.agents/skills/rad-insights/agents/openai.yaml" "fresh install ships .agents/skills/rad-insights/agents/openai.yaml"
 assert_not_exists "$MAIN/.claude/agents/event-fold-orchestrator.md" "fresh install ships no internal orchestrator agent"
 ( cd "$MAIN" && isolated node harness/cli.js generate --check ) >"$TMP/slice-check.out" 2>&1 \
   && ok "generate --check exits 0 in the installed target" \

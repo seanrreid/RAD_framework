@@ -1,0 +1,10 @@
+{"feature":"insights-skill","type":"approved","actor":"sean@torchcodelab.com","role":"architect","ts":"2026-10-09T14:41:05.637Z","recordedBy":"sean@torchcodelab.com","data":{"fingerprint":"a97bcc306428290183b4d25e2f1071bea1779b12933019c87cd83155878c11ee"}}
+{"feature":"insights-skill","type":"deliver-started","actor":"harness","ts":"2026-10-09T14:41:23.125Z"}
+{"feature":"insights-skill","type":"run-prepared","actor":"harness","ts":"2026-10-09T14:41:29.763Z","data":{"base":"main","merged":false,"fastForwarded":false,"committed":true,"pushed":true}}
+{"feature":"insights-skill","type":"wave-started","actor":"harness","ts":"2026-10-09T14:41:29.772Z","data":{"wave":1,"attempt":1}}
+{"feature":"insights-skill","type":"wave-attempt","actor":"harness","ts":"2026-10-09T14:42:20.691Z","data":{"wave":1,"attempt":1,"outcome":"success","tasks":[{"title":"The rad-insights skill","status":"complete","commit":"cfe7f3b","concern":"—","error":"—"}]}}
+{"feature":"insights-skill","type":"wave-complete","actor":"harness","ts":"2026-10-09T14:42:20.691Z","data":{"wave":1}}
+{"feature":"insights-skill","type":"wave-started","actor":"harness","ts":"2026-10-09T14:42:20.692Z","data":{"wave":2,"attempt":1}}
+{"feature":"insights-skill","type":"wave-attempt","actor":"harness","ts":"2026-10-09T14:43:31.790Z","data":{"wave":2,"attempt":1,"outcome":"success","tasks":[{"title":"Registries and portability","status":"done_with_concerns","commit":"71885ef","concern":"No literal \"Codex override body\" line existed in the insights notes; I removed the stale \"One migration, not two.\" sentence and the \"wrapper\" Body value instead","error":"—"}]}}
+{"feature":"insights-skill","type":"wave-complete","actor":"harness","ts":"2026-10-09T14:43:31.790Z","data":{"wave":2}}
+{"feature":"insights-skill","type":"pr-opened","actor":"harness","ts":"2026-10-09T14:43:42.103Z"}
