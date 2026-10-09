@@ -1,6 +1,6 @@
 /**
- * branch-publish.js — the resumable commit/push/label step behind `rad approve`
- * and `rad plan-status`.
+ * branch-publish.js — the resumable commit/push/label step behind `rad approve`,
+ * `rad plan-status` and `rad wrap` (which requests no label).
  *
  * Publishes a fixed set of paths on the plan's work branch: commits ONLY those
  * paths (explicit pathspec, so unrelated files never ride along), pushes when
@@ -98,6 +98,10 @@ function pushIfNeeded(sh, root, req, fail) {
 
 /** Label the issue with `labelStatus`, or say why not. */
 function labelIssue(sh, root, req, fail) {
+  if (!hasLabelStatus(req)) {
+    process.stdout.write('label skipped: no label requested\n');
+    return;
+  }
   if (req.issue === null || req.issue === undefined) {
     process.stdout.write('label skipped: no issue\n');
     return;
@@ -108,21 +112,32 @@ function labelIssue(sh, root, req, fail) {
   }
 }
 
+/** An absent or null `labelStatus` means no label was requested (e.g. `rad wrap`). */
+function hasLabelStatus(req) {
+  return req.labelStatus !== undefined && req.labelStatus !== null;
+}
+
+const isBlank = (value) => typeof value !== 'string' || value.trim() === '';
+
 /** Programmer errors (not runtime failures): an empty pathspec would commit everything. */
 function requireRequest(req) {
   if (!Array.isArray(req.paths) || req.paths.length === 0) throw new TypeError('publishPlanChange: paths must be a non-empty array');
-  for (const key of ['verb', 'branch', 'message', 'labelStatus']) {
-    if (typeof req[key] !== 'string' || req[key].trim() === '') throw new TypeError(`publishPlanChange: ${key} is required`);
+  for (const key of ['verb', 'branch', 'message']) {
+    if (isBlank(req[key])) throw new TypeError(`publishPlanChange: ${key} is required`);
+  }
+  if (hasLabelStatus(req) && isBlank(req.labelStatus)) {
+    throw new TypeError('publishPlanChange: labelStatus must be a non-empty string when given');
   }
 }
 
 /**
- * Commit `paths` (if changed), push the branch (if origin lags), then label.
+ * Commit `paths` (if changed), push the branch (if origin lags), then label
+ * (skipped when `labelStatus` is absent or null).
  *
  * @param {Function} sh - `(cmd, args, { cwd }) => { status, stdout, stderr }`
  * @param {string} repoRoot
  * @param {{ verb: string, branch: string, paths: string[], message: string,
- *           issue: number|null, labelStatus: string }} req
+ *           issue: number|null, labelStatus?: string|null }} req
  * @returns {{ code: number, committed: boolean, pushed: boolean, message: string }}
  */
 export function publishPlanChange(sh, repoRoot, req) {
