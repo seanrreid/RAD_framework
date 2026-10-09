@@ -37,24 +37,31 @@ const HEADER_PLAYBOOK_MARKER = '\n<!-- rad:header-playbook -->\n';
 function bodyStart(lines) {
   return lines.findIndex((line) => line.startsWith(BODY_HEADING_PREFIX));
 }
-// Fold order is part of the hash: Capabilities first, then Playbook.
-const HEADER_FOLDS = Object.freeze([
-  [HEADER_CAPABILITIES_PATTERN, HEADER_CAPABILITIES_MARKER],
-  [HEADER_PLAYBOOK_PATTERN, HEADER_PLAYBOOK_MARKER],
-]);
 
 /**
- * The header block's lines matching `pattern` (before the first `## `, or the
- * whole doc when there is none), trimmed, in document order.
+ * The header block's `Capabilities:` lines (before the first `## `, or the whole
+ * doc when there is none), trimmed, in document order.
  *
  * @param {string[]} lines
- * @param {RegExp} pattern
  * @returns {string[]}
  */
-function headerLines(lines, pattern) {
+function headerCapabilityLines(lines) {
   const start = bodyStart(lines);
   const header = start === -1 ? lines : lines.slice(0, start);
-  return header.map((line) => line.trim()).filter((line) => pattern.test(line));
+  return header.map((line) => line.trim()).filter((line) => HEADER_CAPABILITIES_PATTERN.test(line));
+}
+
+/**
+ * The header block's `Playbook:` lines, selected exactly as headerCapabilityLines
+ * selects `Capabilities:` lines.
+ *
+ * @param {string[]} lines
+ * @returns {string[]}
+ */
+function headerPlaybookLines(lines) {
+  const start = bodyStart(lines);
+  const header = start === -1 ? lines : lines.slice(0, start);
+  return header.map((line) => line.trim()).filter((line) => HEADER_PLAYBOOK_PATTERN.test(line));
 }
 
 /**
@@ -98,11 +105,16 @@ function normalizeBody(planText) {
 export function planFingerprint(planText) {
   const text = String(planText ?? '');
   const lines = text.split('\n');
-  let hashed = normalizeBody(text);
-  for (const [pattern, marker] of HEADER_FOLDS) {
-    const folded = headerLines(lines, pattern);
-    if (folded.length > 0) hashed += `${marker}${folded.join('\n')}`;
-  }
-  const hash = createHash('sha256').update(hashed).digest('hex');
+  const capabilities = headerCapabilityLines(lines);
+  const body = normalizeBody(text);
+  const hashed = capabilities.length === 0
+    ? body
+    : `${body}${HEADER_CAPABILITIES_MARKER}${capabilities.join('\n')}`;
+  // Fold order is part of the hash: Capabilities first, then Playbook.
+  const playbook = headerPlaybookLines(lines);
+  const full = playbook.length === 0
+    ? hashed
+    : `${hashed}${HEADER_PLAYBOOK_MARKER}${playbook.join('\n')}`;
+  const hash = createHash('sha256').update(full).digest('hex');
   return { hash };
 }
