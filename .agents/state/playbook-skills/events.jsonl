@@ -22,3 +22,4 @@
 {"feature":"playbook-skills","type":"wave-started","actor":"harness","ts":"2026-10-09T17:13:45.866Z","data":{"wave":5,"attempt":1}}
 {"feature":"playbook-skills","type":"wave-attempt","actor":"harness","ts":"2026-10-09T17:20:04.996Z","data":{"wave":5,"attempt":1,"outcome":"success","tasks":[{"title":"Full verification","status":"done_with_concerns","commit":"3b8fd5d","concern":"No code changes were needed. The commit only adds the execution-log row. Task 5.1's `docs/playbooks.md` target was not edited because AC#8 is verification-only. 14 evals skipped because `RAD_REVIEW_EVAL_CMD` is unset.","error":"—"}]}}
 {"feature":"playbook-skills","type":"wave-complete","actor":"harness","ts":"2026-10-09T17:20:04.997Z","data":{"wave":5}}
+{"feature":"playbook-skills","type":"pr-opened","actor":"harness","ts":"2026-10-09T17:20:15.694Z"}
