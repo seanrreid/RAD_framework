@@ -951,6 +951,105 @@ t_tier_absent_identical() {
   echo "✓ TIER(g): untiered plans ⇒ output byte-identical to the pre-tier baseline"
 }
 
+# ── Playbook ref (plan-header lint) ───────────────────────────────────────────
+# Playbook fixtures live in GREPO/.agents/playbooks; the lint reads them through
+# `rad playbook check-ref` against the fixture repo's copied harness.
+# write_playbook <kind> <slug> <frontmatter-version> <last-guide-version>
+write_playbook() {
+  local kind="$1" slug="$2" fm_version="$3" last="$4" i
+  mkdir -p "$GREPO/.agents/playbooks"
+  {
+    printf -- '---\n{"kind":"%s","slug":"%s","version":%s,"summary":"s","primary_file":"x"}\n---\n# Body\n\n## Upgrade Guide\n' \
+      "$kind" "$slug" "$fm_version"
+    for ((i = 1; i <= last; i++)); do printf '### Version %d — 2026-10-0%d\nchange\n' "$i" "$i"; done
+  } > "$GREPO/.agents/playbooks/$kind--$slug.md"
+}
+
+# playbook_lint <name> <header-line> — lint a tier-less plan carrying that header line.
+playbook_lint() {
+  write_tier_plan "$GREPO/.agents/plans/$1" "$2" 1
+  tier_lint "$1"
+}
+
+t_playbook_header() {
+  write_playbook env-knob timeout-style 2 2
+  ( playbook_lint pb-ok.md "Playbook: env-knob/timeout-style@2"
+    assert_out_has "PLAYBOOK(a)" "✓ pb-ok.md — plan is valid"
+    assert_out_lacks "PLAYBOOK(a)" "Playbook"
+    assert_code "PLAYBOOK(a)" 0 ) || exit 1
+  echo "✓ PLAYBOOK(a): valid current ref ⇒ plan is valid, exit 0"
+
+  ( playbook_lint pb-stale.md "Playbook: env-knob/timeout-style@1"
+    assert_out_has "PLAYBOOK(b)" "⚠ Playbook env-knob/timeout-style@1 is behind current version 2"
+    assert_out_lacks "PLAYBOOK(b)" "✗"
+    assert_code "PLAYBOOK(b)" 0 ) || exit 1
+  echo "✓ PLAYBOOK(b): stale ref ⇒ warning, exit 0"
+
+  ( playbook_lint pb-kind.md "Playbook: bogus-kind/timeout-style@1"
+    assert_out_has "PLAYBOOK(c)" "✗ Playbook bogus-kind/timeout-style@1 rejected:"
+    assert_out_has "PLAYBOOK(c)" "not an allowed playbook kind"
+    assert_code "PLAYBOOK(c)" 1 ) || exit 1
+  echo "✓ PLAYBOOK(c): unknown kind ⇒ error, exit 1"
+
+  ( playbook_lint pb-missing.md "Playbook: env-knob/no-such@1"
+    assert_out_has "PLAYBOOK(d)" "not found"
+    assert_code "PLAYBOOK(d)" 1 ) || exit 1
+  echo "✓ PLAYBOOK(d): missing playbook file ⇒ error, exit 1"
+
+  ( playbook_lint pb-ahead.md "Playbook: env-knob/timeout-style@3"
+    assert_out_has "PLAYBOOK(e)" "is ahead of"
+    assert_code "PLAYBOOK(e)" 1 ) || exit 1
+  echo "✓ PLAYBOOK(e): ref version greater than current ⇒ error, exit 1"
+
+  ( write_tier_plan "$GREPO/.agents/plans/pb-dup.md" "Playbook: env-knob/timeout-style@2" 1
+    sed -i.bak 's/^Playbook: .*/&\nPlaybook: env-knob\/timeout-style@1/' "$GREPO/.agents/plans/pb-dup.md"
+    rm -f "$GREPO/.agents/plans/pb-dup.md.bak"
+    tier_lint pb-dup.md
+    assert_out_has "PLAYBOOK(f)" "✗ Playbook header invalid: plan_playbook: more than one Playbook: header line"
+    assert_code "PLAYBOOK(f)" 1 ) || exit 1
+  echo "✓ PLAYBOOK(f): repeated Playbook: line ⇒ error, exit 1"
+
+  ( playbook_lint pb-empty.md "Playbook:"
+    assert_out_has "PLAYBOOK(g)" "✗ Playbook header invalid: plan_playbook: empty Playbook: value"
+    assert_code "PLAYBOOK(g)" 1 ) || exit 1
+  echo "✓ PLAYBOOK(g): empty Playbook: value ⇒ error, exit 1"
+
+  ( playbook_lint pb-garbage.md "Playbook: not-a-ref"
+    assert_out_has "PLAYBOOK(h)" "is not a valid playbook ref"
+    assert_code "PLAYBOOK(h)" 1 ) || exit 1
+  echo "✓ PLAYBOOK(h): malformed ref ⇒ error, exit 1"
+}
+
+# Fail closed: with no node on PATH a plan that names a playbook is an ERROR.
+t_playbook_no_node() {
+  local fake_bin="$TMP/pb-nonode-bin" tool
+  mkdir -p "$fake_bin"
+  for tool in bash awk sed grep head mktemp rm cat tr dirname basename git env; do
+    ln -sf "$(command -v "$tool")" "$fake_bin/$tool"
+  done
+  write_tier_plan "$GREPO/.agents/plans/pb-nonode.md" "Playbook: env-knob/timeout-style@2" 1
+  set +e
+  FRESH_OUT=$( cd "$GREPO" && PATH="$fake_bin" "$fake_bin/bash" scripts/lint-plan.sh .agents/plans/pb-nonode.md 2>&1 )
+  FRESH_CODE=$?
+  set -e
+  ( assert_out_has "PLAYBOOK(i)" "could not be checked: node is not available"
+    assert_code "PLAYBOOK(i)" 1 ) || exit 1
+  echo "✓ PLAYBOOK(i): node unavailable ⇒ error, exit 1 (fails closed)"
+}
+
+# A plan with no Playbook: line, or only a fenced body example, lints as before.
+t_playbook_absent_identical() {
+  ( playbook_lint pb-none.md ""
+    [[ "$FRESH_OUT" == "✓ pb-none.md — plan is valid (waves: 1, budget: ~2L)" ]] || fail "PLAYBOOK(j): output drifted: $FRESH_OUT"
+    assert_code "PLAYBOOK(j)" 0 ) || exit 1
+  write_tier_plan "$GREPO/.agents/plans/pb-fenced.md" "" 1
+  printf '\n## Notes\n```\nPlaybook: bogus/none@9\n```\n' >> "$GREPO/.agents/plans/pb-fenced.md"
+  ( tier_lint pb-fenced.md
+    assert_out_lacks "PLAYBOOK(k)" "Playbook"
+    assert_code "PLAYBOOK(k)" 0 ) || exit 1
+  echo "✓ PLAYBOOK(j,k): no Playbook: line / fenced body example ⇒ output unchanged, no check run"
+}
+
 # ── Empty Files in Scope table (#145) ─────────────────────────────────────────
 # A header + separator with no data rows used to abort lint under pipefail with
 # NO output and exit 1. It must now name the error under Errors and exit 1; the
@@ -1247,6 +1346,9 @@ t_tier_light_sections
 t_tier_invalid_values
 t_tier_light_blockers
 t_tier_absent_identical
+t_playbook_header
+t_playbook_no_node
+t_playbook_absent_identical
 t_empty_files_in_scope
 t_ac_citation_advisories
 t_vague_wording_advisory

@@ -626,6 +626,34 @@ plan_tier() {
   esac
 }
 
+# plan_playbook <plan-file>
+# Print the trimmed value of the `Playbook:` line in the HEADER BLOCK only (the
+# lines before the first `## ` heading), so a fenced example in the body never
+# counts. No such line ⇒ print nothing, exit 0. A second header `Playbook:` line
+# or an empty value ⇒ message on stderr, exit 1. Unreadable plan ⇒ exit 2.
+plan_playbook() {
+  local plan_file="$1" out rc=0
+  require_readable_plan plan_playbook "$plan_file" || return
+  out=$(awk '
+    /^## / { exit }
+    /^Playbook:/ {
+      n++
+      if (n == 1) { v = substr($0, 10); gsub(/^[ \t]+|[ \t\r]+$/, "", v) }
+    }
+    END {
+      if (n > 1) { print "duplicate"; exit 0 }
+      if (n == 1 && v == "") { print "empty"; exit 0 }
+      if (n == 1) print "value:" v
+    }
+  ' "$plan_file") || return
+  case "$out" in
+    duplicate) echo "plan_playbook: more than one Playbook: header line in $plan_file" >&2; rc=1 ;;
+    empty)     echo "plan_playbook: empty Playbook: value in $plan_file" >&2; rc=1 ;;
+    value:*)   printf '%s\n' "${out#value:}" ;;
+  esac
+  return "$rc"
+}
+
 # plan_light_violations <plan-file>
 # Print one `light-tier: <reason>` line per bound a light plan exceeds: more than
 # RAD_LIGHT_MAX_WAVES `### Wave` headings, more than RAD_LIGHT_MAX_TASKS
