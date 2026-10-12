@@ -4,7 +4,7 @@ Author: architect
 Status: complete
 Completed-At: 2026-10-12T18:56:12.777Z
 Approved-By: sean@torchcodelab.com
-Approved-At: 2026-10-12T18:08:44.425Z
+Approved-At: 2026-10-12T19:02:17.443Z
 Recorded-By: sean@torchcodelab.com
 Branch: rad/test-weakening-guard
 Issue: 241
@@ -178,3 +178,6 @@ None.
 - ASSUMPTION: the check compares the whole work branch with the base (as the scope check does), so a violation made in wave 1 keeps failing every later wave until waived or reverted.
 - ASSUMPTION: skip-marker patterns cover JS/TS, Python, Go and Java only; others fall to #242.
 - ASSUMPTION: line ranges for `check-scope.sh`, `lint-plan.sh` and the docs are estimates from grep results; the executor should confirm exact lines and stay within the declared files.
+
+## Waivers
+- test-removal:scripts/test-check-scope.sh: the guard's own test cases write fixture lines that contain skip-marker text (for example `printf "it.skip('old', ...)"`) as data, not as real skips; CI's first real run of the guard flagged them (PR #258). Follow-up on the marker heuristic is tracked in #242.

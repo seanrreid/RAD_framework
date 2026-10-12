@@ -8,3 +8,4 @@
 {"feature":"test-weakening-guard","type":"wave-attempt","actor":"harness","ts":"2026-10-12T18:56:12.671Z","data":{"wave":2,"attempt":1,"outcome":"success","tasks":[{"title":"Register the invariant and note the decision","status":"complete","commit":"a13c01b","concern":"—","error":"—"},{"title":"Full-suite check","status":"complete","commit":"—","concern":"—","error":"—"}],"verify":{"command":"exec bash scripts/verify-all.sh","status":0,"passed":true}}}
 {"feature":"test-weakening-guard","type":"wave-complete","actor":"harness","ts":"2026-10-12T18:56:12.672Z","data":{"wave":2}}
 {"feature":"test-weakening-guard","type":"pr-opened","actor":"harness","ts":"2026-10-12T18:56:21.947Z"}
+{"feature":"test-weakening-guard","type":"approved","actor":"sean@torchcodelab.com","role":"architect","ts":"2026-10-12T19:02:17.443Z","recordedBy":"sean@torchcodelab.com","data":{"fingerprint":"f3a905921fe3b90a9b853fd1ea76d1a7407b501f66d12122165ce4b7a0c40918"}}
