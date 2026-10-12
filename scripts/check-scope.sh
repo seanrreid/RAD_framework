@@ -6,14 +6,23 @@
 # Usage: scripts/check-scope.sh <plan-file> <work-branch> [base-branch]
 #   base-branch defaults to the project default branch (get-default-branch.sh).
 #
+# Two independent checks run: declared scope, and test integrity (a test file
+# deleted, renamed away, or given a skip marker needs a `## Waivers` bullet
+# `- test-removal:<path>: <reason>`; see lib/test-integrity.sh). Both are reported.
+#
 # Exit codes:
-#   0 = all changes within scope
-#   1 = out-of-scope files detected
-#   2 = usage error
+#   0 = all changes within scope and no unwaived test weakening
+#   1 = out-of-scope files or a test-integrity violation detected
+#   2 = usage error, config error, or a failure of the check itself
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# shellcheck source=lib/plan-paths.sh
+source "$SCRIPT_DIR/lib/plan-paths.sh" || { echo "ERROR: cannot load lib/plan-paths.sh" >&2; exit 2; }
+# shellcheck source=lib/test-integrity.sh
+source "$SCRIPT_DIR/lib/test-integrity.sh" || { echo "ERROR: cannot load lib/test-integrity.sh" >&2; exit 2; }
 
 readonly CONFIG_ERROR_EXIT=2
 
@@ -156,26 +165,49 @@ while IFS= read -r file; do
   fi
 done <<< "$CHANGED_FILES"
 
+# ── Test integrity ────────────────────────────────────────────────────────────
+# A library failure is a failure of the check itself (exit 2), never a pass.
+
+TEST_VIOLATIONS=""
+TEST_RC=0
+TEST_VIOLATIONS=$(test_integrity_violations "$PLAN_FILE" "$REF_EXPR") || TEST_RC=$?
+if [[ "$TEST_RC" -ne 0 ]]; then
+  echo "ERROR: test-integrity check failed (exit $TEST_RC); not reporting clean" >&2
+  exit "$CONFIG_ERROR_EXIT"
+fi
+
 # ── Output ────────────────────────────────────────────────────────────────────
 
 PLAN_NAME=$(basename "$PLAN_FILE" .md)
 
-if [[ "${#OUT_OF_SCOPE[@]}" -eq 0 ]]; then
-  echo "✓ Scope check passed: $PLAN_NAME"
-  echo "  ${#IN_SCOPE[@]} file(s) changed — all within declared scope"
-  exit 0
-fi
+report_test_violations() {
+  local line count
+  count=$(printf '%s\n' "$TEST_VIOLATIONS" | grep -c . || true)
+  echo "✗ Test integrity violation: $PLAN_NAME"
+  echo ""
+  echo "Test changes that weaken the suite (${count}):"
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    echo "  ✗ $line"
+  done <<< "$TEST_VIOLATIONS"
+  echo ""
+  echo "To allow a path, add a bullet under ## Waivers in the plan:"
+  echo "  - ${RAD_TEST_WAIVER_PREFIX}<path>: <reason>"
+  echo "The reason must be non-empty and the path must match exactly."
+}
 
 # Rename pairs on the SAME range that produced CHANGED_FILES, as `dest<TAB>src`.
 # `--name-status` prints `R<score><TAB>src<TAB>dest`. Advisory data only: it
 # annotates the violation list and never feeds the verdict, so a failed lookup
 # degrades to today's message rather than blocking — but it says why.
 RENAME_PAIRS=""
-if ! RENAME_PAIRS=$(git diff --find-renames --diff-filter=R --name-status "$REF_EXPR" 2>/dev/null \
-     | awk -F'\t' 'NF >= 3 { print $3 "\t" $2 }'); then
-  RENAME_PAIRS=""
-  echo "⚠ rename detection unavailable for $REF_EXPR — listing paths without rename hints" >&2
-fi
+load_rename_pairs() {
+  if ! RENAME_PAIRS=$(git diff --find-renames --diff-filter=R --name-status "$REF_EXPR" 2>/dev/null \
+       | awk -F'\t' 'NF >= 3 { print $3 "\t" $2 }'); then
+    RENAME_PAIRS=""
+    echo "⚠ rename detection unavailable for $REF_EXPR — listing paths without rename hints" >&2
+  fi
+}
 
 rename_source_in_scope() {
   # Print the declared-in-scope path that $1 was renamed FROM, if the diff
@@ -194,32 +226,54 @@ rename_source_in_scope() {
   return 0
 }
 
-echo "✗ Scope violation: $PLAN_NAME"
-echo ""
-echo "Out-of-scope changes (${#OUT_OF_SCOPE[@]}):"
-RENAME_HINT_SHOWN=false
-for f in "${OUT_OF_SCOPE[@]}"; do
-  rename_src=$(rename_source_in_scope "$f")
-  if [[ -n "$rename_src" ]]; then
-    echo "  ✗ $f — likely undeclared rename target of declared file: $rename_src"
-    RENAME_HINT_SHOWN=true
-  else
-    echo "  ✗ $f"
-  fi
-done
-echo ""
-SCOPE_COUNT=$(printf '%s' "$SCOPE_LIST" | grep -c . || true)
-echo "Declared scope (${SCOPE_COUNT} paths):"
-while IFS= read -r p; do
-  [[ -z "$p" ]] && continue
-  echo "  · $p"
-done <<< "$SCOPE_LIST"
-echo ""
-if $RENAME_HINT_SHOWN; then
-  echo "A rename declares BOTH paths as separate Files-in-Scope rows: this check"
-  echo "reads the File column only and never the Change prose, so a destination"
-  echo "described only in prose reads as out-of-scope drift. Add the missing row."
+report_scope_violation() {
+  load_rename_pairs
+  echo "✗ Scope violation: $PLAN_NAME"
   echo ""
+  echo "Out-of-scope changes (${#OUT_OF_SCOPE[@]}):"
+  RENAME_HINT_SHOWN=false
+  for f in "${OUT_OF_SCOPE[@]}"; do
+    rename_src=$(rename_source_in_scope "$f")
+    if [[ -n "$rename_src" ]]; then
+      echo "  ✗ $f — likely undeclared rename target of declared file: $rename_src"
+      RENAME_HINT_SHOWN=true
+    else
+      echo "  ✗ $f"
+    fi
+  done
+  echo ""
+  SCOPE_COUNT=$(printf '%s' "$SCOPE_LIST" | grep -c . || true)
+  echo "Declared scope (${SCOPE_COUNT} paths):"
+  while IFS= read -r p; do
+    [[ -z "$p" ]] && continue
+    echo "  · $p"
+  done <<< "$SCOPE_LIST"
+  echo ""
+  if $RENAME_HINT_SHOWN; then
+    echo "A rename declares BOTH paths as separate Files-in-Scope rows: this check"
+    echo "reads the File column only and never the Change prose, so a destination"
+    echo "described only in prose reads as out-of-scope drift. Add the missing row."
+    echo ""
+  fi
+  echo "Out-of-scope changes require architect approval before this PR can merge."
+}
+
+SCOPE_FAILED=false
+TEST_FAILED=false
+[[ "${#OUT_OF_SCOPE[@]}" -gt 0 ]] && SCOPE_FAILED=true
+[[ -n "$TEST_VIOLATIONS" ]] && TEST_FAILED=true
+
+if $SCOPE_FAILED; then
+  report_scope_violation
+else
+  echo "✓ Scope check passed: $PLAN_NAME"
+  echo "  ${#IN_SCOPE[@]} file(s) changed — all within declared scope"
 fi
-echo "Out-of-scope changes require architect approval before this PR can merge."
-exit 1
+if $TEST_FAILED; then
+  $SCOPE_FAILED && echo ""
+  report_test_violations
+fi
+if $SCOPE_FAILED || $TEST_FAILED; then
+  exit 1
+fi
+exit 0

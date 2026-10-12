@@ -769,10 +769,13 @@ collect_high_risk_blockers() {
 
 # Waivers that apply to nothing: a clarify id (markers are resolve-only) or an id
 # matching no current finding (stale). Neither is applied by the blocker check.
+# `test-removal:<path>` ids are waivers for check-scope.sh's test-integrity guard,
+# not findings, so they are never stale.
 collect_waiver_warnings() {
   local id
   while IFS= read -r id; do
     [[ -z "$id" ]] && continue
+    [[ "$id" == "$RAD_TEST_WAIVER_PREFIX"* ]] && continue  # consumed by check-scope.sh, not a finding
     if [[ "$id" == "$CLARIFY_WAIVER_PREFIX"* ]]; then
       WARNINGS+=("waiver '$id' names a clarification marker — markers can't be waived — answer the question and delete the marker")
     elif ! printf '%s\n' "$HIGH_RISK_FINDINGS" | grep -Fxq -e "$id"; then
