@@ -510,6 +510,20 @@ readonly RAD_WAVE_HEADING_RE='^### Wave ([0-9]+)'
 # Layer patterns (extended regex, matched via path_matches). Checked in the
 # fixed precedence of path_layer; built in, not operator-tunable.
 readonly RAD_LAYER_TEST_RE='(^|/)(tests?|__tests__|spec)/|\.(test|spec)\.'
+
+# Test-integrity guard (scripts/lib/test-integrity.sh). A "test path" is the
+# layer test pattern above plus the per-language file conventions the layer
+# pattern misses: test-*.sh scripts, *_test.go and test_*.py. Defined once here.
+readonly RAD_TEST_PATH_RE="${RAD_LAYER_TEST_RE}"'|(^|/)test-[^/]*\.sh$|_test\.go$|(^|/)test_[^/]*\.py$'
+
+# Waiver id prefix: `- test-removal:<path>: <reason>` under ## Waivers allows
+# deleting, renaming away, or skip-marking exactly <path>.
+readonly RAD_TEST_WAIVER_PREFIX='test-removal:'
+
+# Skip markers (extended regex), per-language starting points: JS/TS .skip( xit(
+# xdescribe( xtest( it.todo( test.todo(; Python @pytest.mark.skip @unittest.skip;
+# Go t.Skip(; Java @Disabled; pending(. Matched against ADDED lines only.
+readonly RAD_SKIP_MARKER_RE='\.skip\(|(^|[^[:alnum:]_])(xit|xdescribe|xtest|pending)\(|(it|test)\.todo\(|@pytest\.mark\.skip|@unittest\.skip|t\.Skip\(|@Disabled'
 readonly RAD_LAYER_SCHEMA_RE='(^|/)(migrations?|schema|db)/|\.sql$|\.prisma$'
 readonly RAD_LAYER_API_RE='(^|/)(api|routes?|controllers?|handlers?|graphql)/|\.graphql$|openapi\.(ya?ml|json)$'
 readonly RAD_LAYER_UI_RE='\.(tsx|jsx|vue|svelte|css|scss|sass|html?)$|(^|/)(components?|pages|views|ui|frontend|styles)/'
