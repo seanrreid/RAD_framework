@@ -1,7 +1,8 @@
 # Plan: Kill the Agent's Process Group, and Announce Verify in the Wave Prompt (#245, #250)
 Created: 2026-10-12
 Author: architect
-Status: in-progress
+Status: complete
+Completed-At: 2026-10-12T16:11:53.101Z
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-10-12T15:56:33.974Z
 Recorded-By: sean@torchcodelab.com
