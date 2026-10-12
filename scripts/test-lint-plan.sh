@@ -699,6 +699,22 @@ t_waiver_warnings() {
   echo "✓ WV: stale, empty-justification and clarify-naming waivers each get a ⚠ warning, exit 0"
 }
 
+t_test_removal_waiver() {
+  # A test-removal:<path> waiver belongs to check-scope.sh's test-integrity
+  # guard: never stale. An unknown non-test-removal id still is.
+  local plan="$TMP/blk-test-removal.md"
+  write_plan "$plan" "| $REAL_PATH | 1-2 | x |" "$REAL_PATH:1-2" 1 false \
+    "$(printf '\n## Waivers\n- test-removal:test/gone.test.js: replaced by e2e\n- unknown-id:foo: nothing matches')"
+  ( unset RAD_HIGH_RISK_PATTERNS; run_lint "$plan"
+    printf '%s\n' "$LINT_OUT" | grep -q "stale waiver: 'test-removal:" \
+      && fail "TR(a): test-removal waiver reported stale: $LINT_OUT" || true
+    printf '%s\n' "$LINT_OUT" | grep -qF "⚠ stale waiver: 'unknown-id:foo' matches no current finding" \
+      || fail "TR(b): unknown waiver id no longer warned stale: $LINT_OUT"
+    [[ "$LINT_CODE" -eq 0 ]] || fail "TR: exit code changed to $LINT_CODE"
+  ) || exit 1
+  echo "✓ TR: test-removal waiver draws no stale warning; unknown id still does"
+}
+
 t_fenced_waiver_ignored() {
   # (a) A fenced example ## Waivers block → no stale-waiver warning (it is not a
   # waiver at all), and it does not waive the real high-risk finding.
@@ -1496,6 +1512,7 @@ t_freshness_config_error
 t_blocker_markers
 t_blocker_high_risk
 t_waiver_warnings
+t_test_removal_waiver
 t_fenced_waiver_ignored
 t_blocker_no_new_output
 t_stack_order_advisory
