@@ -7,3 +7,4 @@
 {"feature":"function-length-ratchet","type":"wave-started","actor":"harness","ts":"2026-10-12T19:40:01.286Z","data":{"wave":2,"attempt":1}}
 {"feature":"function-length-ratchet","type":"wave-attempt","actor":"harness","ts":"2026-10-12T19:51:02.295Z","data":{"wave":2,"attempt":1,"outcome":"success","tasks":[{"title":"Wire it into verify-all and CI","status":"complete","commit":"f9bbbe2","concern":"—","error":"—"},{"title":"Generate the baseline and document it","status":"complete","commit":"9c68df0","concern":"—","error":"—"},{"title":"Full-suite check","status":"complete","commit":"—","concern":"—","error":"—"}],"verify":{"command":"exec bash scripts/verify-all.sh","status":0,"passed":true}}}
 {"feature":"function-length-ratchet","type":"wave-complete","actor":"harness","ts":"2026-10-12T19:51:02.301Z","data":{"wave":2}}
+{"feature":"function-length-ratchet","type":"pr-opened","actor":"harness","ts":"2026-10-12T19:51:11.756Z"}
