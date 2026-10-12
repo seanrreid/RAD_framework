@@ -1193,6 +1193,24 @@ Both are *opt-in*: absent, the spine behaves exactly as before.
   file/command outputs — do not paste entire files or long logs") so each wave
   agent keeps its own context lean.
 
+  When the wave declares a `Verify:` command, the prompt also carries a
+  `## Verification` section stating the command verbatim, that the harness runs
+  it after the wave (a non-zero exit is a failed attempt), and its timeout in
+  seconds — `RAD_VERIFY_TIMEOUT_SECONDS` when a positive integer, else the
+  default 600, the same value `scripts/check-verify.sh` enforces. A wave with no
+  `Verify:` says none is declared.
+
+#### Agent process groups
+
+Command-adapter and acp agent children run in their own process group and every
+kill path — timeout, output-cap overflow, abort, and the acp shutdown — signals
+the whole group (SIGTERM, then SIGKILL after the grace), so a backgrounded
+grandchild dies with its agent. A live agent group is also killed when `rad`
+receives SIGINT or SIGTERM or exits, so Ctrl-C does not orphan the agent; `rad`
+then terminates with the original signal's normal exit behavior. **POSIX only:**
+on Windows there are no process groups, so the helper signals the child pid only
+and a grandchild may outlive it.
+
 #### Worktree isolation (default)
 
 **Breaking default (#61):** `rad deliver` now isolates every run into a git
