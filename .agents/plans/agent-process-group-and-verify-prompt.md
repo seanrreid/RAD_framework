@@ -1,9 +1,9 @@
 # Plan: Kill the Agent's Process Group, and Announce Verify in the Wave Prompt (#245, #250)
 Created: 2026-10-12
 Author: architect
-Status: in-progress
+Status: approved
 Approved-By: sean@torchcodelab.com
-Approved-At: 2026-10-12T15:04:04.715Z
+Approved-At: 2026-10-12T15:56:00.516Z
 Recorded-By: sean@torchcodelab.com
 Branch: rad/agent-process-group-and-verify-prompt
 Issue: 245
@@ -52,6 +52,7 @@ No sub-agents were called. Research was inline (7 tool calls): `command.js`, `ac
 | harness/adapters/agent/acp.js | 310-322 | Shutdown SIGTERM/SIGKILL via group |
 | harness/adapters/agent/contract.js | 158-260 | Add `## Verification` section before `${priorFailureBlock}` |
 | harness/cli.js | 735-790 | `parsePlanCtx` returns `verifyTimeoutSeconds` |
+| harness/test/cli.test.js | 1-700 | Add `resolveVerifyTimeoutSeconds` and `parsePlanCtx` `verifyTimeoutSeconds` tests |
 | harness/test/process-group.test.js | 1-120 | New. Helper unit tests (platform guard, ESRCH, cleanup handlers) |
 | harness/test/command-adapter-kill.test.js | 1-140 | New. Timeout, overflow and abort leave no grandchild |
 | harness/test/acp-adapter.test.js | 1-400 | Extend: ACP shutdown and cap kill signal the group |
@@ -124,7 +125,7 @@ Validate: AC#4, AC#8 — the platform behavior is stated; `bash scripts/lint-cla
 - [ ] Command adapter: timeout, overflow and abort leave no grandchild — harness/test/command-adapter-kill.test.js
 - [ ] ACP adapter: shutdown and stdout-cap kill signal the group — harness/test/acp-adapter.test.js
 - [ ] Prompt: Verification section cases and ordering — harness/test/agent-contract.test.js
-- [ ] planCtx: verifyTimeoutSeconds resolution cases — harness/test/ (alongside the parsePlanCtx tests)
+- [ ] planCtx: verifyTimeoutSeconds resolution cases — harness/test/cli.test.js (alongside the parsePlanCtx tests)
 
 ## Non-Goals
 - Sandboxing the agent or scoping its credentials (#244)
@@ -146,5 +147,6 @@ None.
 - ASSUMPTION: the SIGINT/SIGTERM/exit cleanup (AC#3) was not in either issue; it is added because `detached` would otherwise make Ctrl-C orphan the agent. Confirm this is wanted here and not a separate issue.
 - ASSUMPTION: `sdk.js` is excluded because it has no spawn; the issue says to verify `acp.js` and `sdk.js`. Confirmed by grep: only `command.js` and `acp.js` call `spawn`.
 - ASSUMPTION: the prompt's `Verify: none (reason)` wording (#250) depends on #236, which has not landed. This plan handles only "no `Verify:` declared"; a `none (reason)` follow-up belongs with #236.
+- AMENDED 2026-10-12 after the third delivery attempt stopped on `fail-scope` in wave 2: the verify-timeout tests belong in `harness/test/cli.test.js`, which the plan had referred to only as "alongside the parsePlanCtx tests". It is now named in Files in Scope; the agent's additions there were reviewed and match Task 2.1.
 - AMENDED 2026-10-12 after the first delivery attempt stopped on `fail-scope`: the ACP fake-agent fixture was an undeclared file the group-kill test needs. It is now in Files in Scope; the agent's change to it was reviewed and is additive only.
 - ASSUMPTION: the `## Verification` section goes before the prior-failure block (stable head) rather than at the very top; #112 (closed) is the reason prefix placement matters.
