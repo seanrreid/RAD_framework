@@ -192,6 +192,37 @@ test('an ignored cancel and SIGTERM: SIGKILL after the grace period', async () =
   assert.equal(isAlive(pidOf(trace)), false);
 });
 
+const grandchildPidOf = (trace) => Number(readTrace(trace).find((l) => l.startsWith('grandchild '))?.slice(11));
+const GRANDCHILD_DEATH_POLL_MS = 50;
+const GRANDCHILD_DEATH_DEADLINE_MS = 3_000;
+
+/** Run `scenario`, then assert the agent's backgrounded grandchild is dead; always reaps it. */
+async function assertGrandchildKilled(scenario, opts) {
+  const { result, trace } = await runScenario(scenario, opts);
+  const pid = grandchildPidOf(trace);
+  try {
+    assert.ok(pid, 'the fake agent recorded its grandchild pid');
+    const deadline = Date.now() + GRANDCHILD_DEATH_DEADLINE_MS;
+    while (isAlive(pid) && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, GRANDCHILD_DEATH_POLL_MS));
+    }
+    assert.equal(isAlive(pid), false, 'grandchild is gone');
+  } finally {
+    if (pid) { try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ } }
+  }
+  return { result, trace };
+}
+
+test('shutdown after a timeout signals the group: no grandchild survives', async () => {
+  const { result } = await assertGrandchildKilled('grandchild-hang', { timeoutMs: SHORT_DEADLINE_MS });
+  assert.equal(result.outcome, 'fail-timeout');
+});
+
+test('the stdout-cap kill signals the group: no grandchild survives', async () => {
+  const { result } = await assertGrandchildKilled('grandchild-flood');
+  assert.equal(result.outcome, 'fail-protocol');
+});
+
 test('a crash mid-turn: fail-protocol with the exit code and a stderr excerpt', async () => {
   const { result } = await runScenario('crash');
   assert.equal(result.outcome, 'fail-protocol');

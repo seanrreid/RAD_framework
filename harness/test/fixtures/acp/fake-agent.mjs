@@ -13,6 +13,7 @@
  */
 import { createInterface } from 'node:readline';
 import { appendFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
 
 const [scenario, traceFile] = process.argv.slice(2);
 /** Scenarios that fail before any session/prompt, so they have no SCENARIOS entry. */
@@ -87,6 +88,15 @@ async function readFileRequest(msg) {
   finish(msg, ok ? GOOD_BLOCK : failBlock(`fs request answered ${JSON.stringify(res)}`));
 }
 
+const FLOOD_BYTES = 11 * 1024 * 1024; // just over the adapter's 10 MB stdout cap
+const GRANDCHILD_SLEEP_SECONDS = '300';
+
+/** Start a sleep in this agent's process group and record its pid in the trace. */
+function startGrandchild() {
+  const grandchild = spawn('sleep', [GRANDCHILD_SLEEP_SECONDS], { stdio: 'ignore' });
+  trace(`grandchild ${grandchild.pid}`);
+}
+
 let promptCount = 0;
 let hangingPrompt = null;
 
@@ -119,6 +129,13 @@ const SCENARIOS = {
   'unknown-stop': (msg) => finish(msg, GOOD_BLOCK, 'exploded'),
   'unsolicited-cancel': (msg) => finish(msg, GOOD_BLOCK, 'cancelled'),
   hang: (msg) => { hangingPrompt = msg; },
+  // Backgrounds a long sleep in the agent's group, then hangs (kill-path tests).
+  'grandchild-hang': (msg) => { startGrandchild(); hangingPrompt = msg; },
+  // Same, then floods stdout past the cap.
+  'grandchild-flood': () => {
+    startGrandchild();
+    process.stdout.write(`${'x'.repeat(FLOOD_BYTES)}\n`);
+  },
   'ignore-cancel': () => {},
   crash: () => {
     say('Working on it...');
@@ -172,7 +189,7 @@ if (!(scenario in SCENARIOS) && !HANDSHAKE_SCENARIOS.includes(scenario)) {
 }
 trace(`pid ${process.pid}`);
 /** Scenarios that keep running after stdin closes. */
-const OUTLIVES_STDIN = ['ignore-cancel', 'linger'];
+const OUTLIVES_STDIN = ['ignore-cancel', 'linger', 'grandchild-hang', 'grandchild-flood'];
 if (scenario === 'ignore-cancel') process.on('SIGTERM', () => trace('SIGTERM ignored'));
 if (OUTLIVES_STDIN.includes(scenario)) setInterval(() => {}, 1_000);
 const rl = createInterface({ input: process.stdin, crlfDelay: Infinity });

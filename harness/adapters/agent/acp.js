@@ -40,6 +40,7 @@ import {
   normalizeUsage,
 } from './contract.js';
 import { buildChildEnv, tokenizeCommand, KILL_GRACE_MS, PREFLIGHT_TIMEOUT_MS } from './command.js';
+import { spawnOptions, signalGroup, trackGroup, untrackGroup } from './process-group.js';
 import { DEFAULT_CAPABILITIES } from '../../capabilities.js';
 
 /** The only ACP wire version RAD speaks. No negotiation up or down. */
@@ -157,20 +158,6 @@ function parseAgentCommand(cmd) {
 
 // ── JSON-RPC connection over the agent's stdio ─────────────────────────────
 
-/**
- * Send `signal` to a child that has not yet exited. ESRCH (it exited in
- * between) is the expected race; anything else is logged with context.
- */
-function signalChild(child, signal) {
-  if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null) return;
-  try {
-    process.kill(child.pid, signal);
-  } catch (err) {
-    if (err?.code === 'ESRCH') return;
-    process.stderr.write(`acp adapter: failed to send ${signal} to agent pid ${child.pid}: ${err?.message ?? err}\n`);
-  }
-}
-
 /** Write one message as a single line. JSON.stringify never emits a raw newline. */
 function sendMessage(conn, message) {
   const { stdin } = conn.child;
@@ -252,7 +239,7 @@ function attachChildEvents(conn, markExited) {
     conn.stdoutBytes += chunk.length;
     if (conn.stdoutBytes <= MAX_STDOUT_BYTES) return;
     failConnection(conn, protocolFailure(`agent output exceeded ${MAX_STDOUT_BYTES} bytes; process killed`));
-    signalChild(child, 'SIGKILL');
+    signalGroup(child, 'SIGKILL');
   });
   createInterface({ input: child.stdout, crlfDelay: Infinity }).on('line', (line) => handleLine(conn, line));
 }
@@ -268,14 +255,15 @@ function openConnection(argv, cwd, handlers) {
   const [file, ...args] = argv;
   let child;
   try {
-    child = spawn(file, args, { cwd, env: buildChildEnv(), stdio: ['pipe', 'pipe', 'pipe'] });
+    child = spawn(file, args, { cwd, env: buildChildEnv(), stdio: ['pipe', 'pipe', 'pipe'], ...spawnOptions() });
   } catch (err) {
     throw protocolFailure(`could not run the ACP agent: ${err?.message ?? err}`);
   }
+  if (child.pid !== undefined) trackGroup(child);
   let markExited;
   const exited = new Promise((resolveExit) => { markExited = resolveExit; });
   const conn = { child, handlers, exited, pending: new Map(), nextId: 0, fatal: null, stderr: '', stdoutBytes: 0 };
-  attachChildEvents(conn, () => markExited());
+  attachChildEvents(conn, () => { untrackGroup(child); markExited(); });
   return conn;
 }
 
@@ -315,9 +303,9 @@ async function shutdown(conn, killGraceMs, { graceful }) {
     if (!conn.child.stdin.destroyed) conn.child.stdin.end();
     if (await exitWithin(conn, killGraceMs)) return SHUTDOWN_GRACEFUL;
   }
-  signalChild(conn.child, 'SIGTERM');
+  signalGroup(conn.child, 'SIGTERM');
   if (await exitWithin(conn, killGraceMs)) return SHUTDOWN_SIGTERM;
-  signalChild(conn.child, 'SIGKILL');
+  signalGroup(conn.child, 'SIGKILL');
   if (await exitWithin(conn, killGraceMs)) return SHUTDOWN_SIGKILL;
   process.stderr.write(`acp adapter: agent pid ${conn.child.pid} did not exit after SIGKILL\n`);
   return SHUTDOWN_STUCK;
