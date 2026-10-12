@@ -1,7 +1,10 @@
 # Plan: Kill the Agent's Process Group, and Announce Verify in the Wave Prompt (#245, #250)
 Created: 2026-10-12
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-10-12T14:58:14.130Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/agent-process-group-and-verify-prompt
 Issue: 245
 Adopted-From: https://github.com/seanrreid/RAD_framework/issues/245
