@@ -1,9 +1,9 @@
 # Plan: Kill the Agent's Process Group, and Announce Verify in the Wave Prompt (#245, #250)
 Created: 2026-10-12
 Author: architect
-Status: in-progress
+Status: approved
 Approved-By: sean@torchcodelab.com
-Approved-At: 2026-10-12T14:58:14.130Z
+Approved-At: 2026-10-12T15:04:04.715Z
 Recorded-By: sean@torchcodelab.com
 Branch: rad/agent-process-group-and-verify-prompt
 Issue: 245
@@ -55,6 +55,7 @@ No sub-agents were called. Research was inline (7 tool calls): `command.js`, `ac
 | harness/test/process-group.test.js | 1-120 | New. Helper unit tests (platform guard, ESRCH, cleanup handlers) |
 | harness/test/command-adapter-kill.test.js | 1-140 | New. Timeout, overflow and abort leave no grandchild |
 | harness/test/acp-adapter.test.js | 1-400 | Extend: ACP shutdown and cap kill signal the group |
+| harness/test/fixtures/acp/fake-agent.mjs | 1-200 | Add `grandchild-hang` and `grandchild-flood` scenarios that start a background `sleep` and record its pid in the trace |
 | harness/test/agent-contract.test.js | 72-106 | Extend: Verification section cases |
 | docs/rad-cli.md | 1-1 | Note the process-group kill and POSIX-only behavior |
 
@@ -96,7 +97,7 @@ Validate: AC#1, AC#2 — `command-adapter-kill.test.js`: fake agent starts `slee
 
 #### Task 1.3: ACP adapter uses the group
 File: harness/adapters/agent/acp.js:160-170, 240-275, 310-322
-What: Same change for the ACP child: detached spawn, track/untrack, the local `signalChild` delegates to `signalGroup`, so the stdout-cap kill and `shutdown` signal the group.
+What: Same change for the ACP child: detached spawn, track/untrack, the local `signalChild` delegates to `signalGroup`, so the stdout-cap kill and `shutdown` signal the group. The existing fake ACP agent fixture (`harness/test/fixtures/acp/fake-agent.mjs`) gains two additive scenarios, `grandchild-hang` and `grandchild-flood`, that start a background `sleep` and record its pid; existing scenarios are untouched.
 Validate: AC#2 — extend `acp-adapter.test.js` with a fake ACP agent that backgrounds a child; shutdown and the cap kill leave no grandchild.
 
 ### Wave 2 — sequential
@@ -145,4 +146,5 @@ None.
 - ASSUMPTION: the SIGINT/SIGTERM/exit cleanup (AC#3) was not in either issue; it is added because `detached` would otherwise make Ctrl-C orphan the agent. Confirm this is wanted here and not a separate issue.
 - ASSUMPTION: `sdk.js` is excluded because it has no spawn; the issue says to verify `acp.js` and `sdk.js`. Confirmed by grep: only `command.js` and `acp.js` call `spawn`.
 - ASSUMPTION: the prompt's `Verify: none (reason)` wording (#250) depends on #236, which has not landed. This plan handles only "no `Verify:` declared"; a `none (reason)` follow-up belongs with #236.
+- AMENDED 2026-10-12 after the first delivery attempt stopped on `fail-scope`: the ACP fake-agent fixture was an undeclared file the group-kill test needs. It is now in Files in Scope; the agent's change to it was reviewed and is additive only.
 - ASSUMPTION: the `## Verification` section goes before the prior-failure block (stable head) rather than at the very top; #112 (closed) is the reason prefix placement matters.
