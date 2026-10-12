@@ -3,7 +3,7 @@ Created: 2026-10-12
 Author: architect
 Status: approved
 Approved-By: sean@torchcodelab.com
-Approved-At: 2026-10-12T15:56:00.516Z
+Approved-At: 2026-10-12T15:56:33.974Z
 Recorded-By: sean@torchcodelab.com
 Branch: rad/agent-process-group-and-verify-prompt
 Issue: 245
@@ -51,13 +51,13 @@ No sub-agents were called. Research was inline (7 tool calls): `command.js`, `ac
 | harness/adapters/agent/acp.js | 240-275 | `detached` spawn, track/untrack, stdout-cap kill via group |
 | harness/adapters/agent/acp.js | 310-322 | Shutdown SIGTERM/SIGKILL via group |
 | harness/adapters/agent/contract.js | 158-260 | Add `## Verification` section before `${priorFailureBlock}` |
-| harness/cli.js | 735-790 | `parsePlanCtx` returns `verifyTimeoutSeconds` |
-| harness/test/cli.test.js | 1-700 | Add `resolveVerifyTimeoutSeconds` and `parsePlanCtx` `verifyTimeoutSeconds` tests |
+| harness/cli.js | 630-790 | `parsePlanCtx` returns `verifyTimeoutSeconds` |
+| harness/test/cli.test.js | 10-60 | Add `resolveVerifyTimeoutSeconds` and `parsePlanCtx` `verifyTimeoutSeconds` tests |
 | harness/test/process-group.test.js | 1-120 | New. Helper unit tests (platform guard, ESRCH, cleanup handlers) |
 | harness/test/command-adapter-kill.test.js | 1-140 | New. Timeout, overflow and abort leave no grandchild |
-| harness/test/acp-adapter.test.js | 1-400 | Extend: ACP shutdown and cap kill signal the group |
-| harness/test/fixtures/acp/fake-agent.mjs | 1-200 | Add `grandchild-hang` and `grandchild-flood` scenarios that start a background `sleep` and record its pid in the trace |
-| harness/test/agent-contract.test.js | 72-106 | Extend: Verification section cases |
+| harness/test/acp-adapter.test.js | 190-230 | Extend: ACP shutdown and cap kill signal the group |
+| harness/test/fixtures/acp/fake-agent.mjs | 85-140 | Add `grandchild-hang` and `grandchild-flood` scenarios that start a background `sleep` and record its pid in the trace |
+| harness/test/agent-contract.test.js | 570-625 | Extend: Verification section cases |
 | docs/rad-cli.md | 1-1 | Note the process-group kill and POSIX-only behavior |
 
 ## Execution Notes
