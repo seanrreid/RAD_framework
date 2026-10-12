@@ -7,3 +7,4 @@
 {"feature":"test-weakening-guard","type":"wave-started","actor":"harness","ts":"2026-10-12T18:45:03.566Z","data":{"wave":2,"attempt":1}}
 {"feature":"test-weakening-guard","type":"wave-attempt","actor":"harness","ts":"2026-10-12T18:56:12.671Z","data":{"wave":2,"attempt":1,"outcome":"success","tasks":[{"title":"Register the invariant and note the decision","status":"complete","commit":"a13c01b","concern":"—","error":"—"},{"title":"Full-suite check","status":"complete","commit":"—","concern":"—","error":"—"}],"verify":{"command":"exec bash scripts/verify-all.sh","status":0,"passed":true}}}
 {"feature":"test-weakening-guard","type":"wave-complete","actor":"harness","ts":"2026-10-12T18:56:12.672Z","data":{"wave":2}}
+{"feature":"test-weakening-guard","type":"pr-opened","actor":"harness","ts":"2026-10-12T18:56:21.947Z"}
