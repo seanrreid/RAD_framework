@@ -795,7 +795,9 @@ cases report as skipped in that lane.
 > **Last-wave verification.** For a plan that touches `harness/`, `scripts/`,
 > `.rad/`, `.claude/` or `.agents/skills/`, put `Verify: exec bash scripts/verify-all.sh`
 > on the last wave and run with `RAD_VERIFY_TIMEOUT_SECONDS=1800` (the default is
-> 600 s). `verify-all.sh` mirrors the CI jobs locally; `deliver-integrity` and
+> 600 s). Every non-light plan must declare a last-wave `Verify:` command or
+> `Verify: none (<reason>)`; `rad approve` refuses it otherwise (`missing-verify`,
+> not waivable; `Tier: light` is exempt). `verify-all.sh` mirrors the CI jobs locally; `deliver-integrity` and
 > `matrix-replay` are excluded (they need PR context). See #236 and
 > `docs/configuration.md`.
 

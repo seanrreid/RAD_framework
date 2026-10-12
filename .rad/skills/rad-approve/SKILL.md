@@ -224,6 +224,10 @@ confirmation prompt:
   **cannot be waived**. The fix is to shrink the plan back within the limits, or
   promote it to standard: remove `Tier: light` and add the standard sections.
   Then re-run `rad-approve`.
+- **`missing-verify` blockers** — a standard-tier plan whose last wave has no
+  `Verify:` line, or a bare `Verify: none` with no reason. These **cannot be
+  waived**. The fix is a real command on the last wave, or
+  `Verify: none (<reason>)`. `Tier: light` plans are exempt. Then re-run `rad-approve`.
 - **Applied waivers** — list each with its justification. Judge every justification
   yourself: approving the plan accepts the waiver. Waivers are frozen into the
   `approved` event, so editing `## Waivers` after approval changes the plan
