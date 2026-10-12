@@ -1,7 +1,7 @@
 # Plan: Block Test Weakening in a Delivery (#241)
 Created: 2026-10-12
 Author: architect
-Status: approved
+Status: in-progress
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-10-12T18:08:44.425Z
 Recorded-By: sean@torchcodelab.com
