@@ -4001,3 +4001,18 @@ test('exercise AC#8 — no agent configured exits 2 naming rad exercise', async 
     assert.match(stderr, /rad exercise: no agent configured/);
   });
 });
+
+test('parsePlanCtx — Verify: none (any case, with or without a reason) declares no check; a command merely starting with "none" is kept', () => {
+  const plan = [
+    '# feature', 'Branch: rad/feature', '',
+    '### Wave 1', 'Verify: none (x)', '',
+    '### Wave 2', 'Verify: None (nothing to run here)', '',
+    '### Wave 3', 'Verify: none', '',
+    '### Wave 4', 'Verify: nonexistent-tool --flag', '',
+    '### Wave 5', 'Verify: npm test', 'Verify: NONE (superseded)', '',
+  ].join('\n');
+
+  const ctx = parsePlanCtx(plan);
+  assert.deepEqual(ctx.waveVerify, { 4: 'nonexistent-tool --flag' },
+    'only the real command survives; none waves (including a later none over an earlier command) are absent');
+});

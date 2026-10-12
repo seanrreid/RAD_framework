@@ -18,7 +18,7 @@ the source of truth. If a bullet and its source disagree, the source wins.
 ## Testing standards
 
 - `scripts/verify-all.sh` runs the repo's CI checks locally in one pass; its built-in check table is the authoritative list of test commands. See `scripts/verify-all.sh`.
-- A plan that touches a self-protected path should declare `Verify: exec bash scripts/verify-all.sh` on its last wave; `scripts/lint-plan.sh` warns when it does not. See `docs/configuration.md` and #236.
+- A plan that touches a self-protected path should declare `Verify: exec bash scripts/verify-all.sh` on its last wave; `scripts/lint-plan.sh` warns when it does not. Every non-light plan must declare a last-wave `Verify:` command or `Verify: none (<reason>)`; `rad approve` blocks (`missing-verify`, not waivable) otherwise, and `Tier: light` is exempt. See `docs/configuration.md` and #236.
 - New `*.sh` and `*.mjs` files under `scripts/` must be committed mode `100755`, or the shell-safety lint fails. See `scripts/lint-shell-safety.sh`.
 
 ## Known constraints

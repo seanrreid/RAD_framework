@@ -10,6 +10,11 @@
 #     `Tier: light` plan exceeding a light bound — too many waves or tasks, or a
 #     high-risk or self-protected scope path. NON-WAIVABLE: these never pass
 #     through applied_waivers; the fix is to shrink the plan or drop the tier.
+#   - a missing last-wave Verify (`missing-verify`, plan_last_wave_verify): a
+#     standard-tier plan with waves whose last wave declares no `Verify:` (or a
+#     bare `Verify: none` with no reason). NON-WAIVABLE like light-tier; fix it
+#     with a real command or `Verify: none (<reason>)`. Light plans and plans with
+#     no waves are exempt.
 # For a standard plan (no `Tier: light`) the self-protected advisory is
 # deliberately NOT a blocker.
 #
@@ -80,12 +85,28 @@ applied_waivers() {
 # Appended to every light-tier blocker: the only two ways to clear one.
 readonly LIGHT_TIER_HINT='(shrink the plan or remove "Tier: light" to make it a standard plan)'
 
-# report_blockers <markers> <findings> <applied> <light-violations>
+readonly MISSING_VERIFY_HINT='(add a real "Verify: <command>" to the last wave, or declare "Verify: none (<reason>)")'
+
+# missing_last_wave_verify <plan-file>
+# Print `<wave> <state>` when the plan is standard-tier and its last wave's Verify
+# state is `no` or `bare`; print nothing for light plans, no waves, `yes`, `none`.
+missing_last_wave_verify() {
+  local plan_file="$1" tier info state
+  tier=$(plan_tier "$plan_file") || return
+  [[ "$tier" == "light" ]] && return 0
+  info=$(plan_last_wave_verify "$plan_file") || return
+  [[ -z "$info" ]] && return 0
+  state="${info#* }"
+  if [[ "$state" == "no" || "$state" == "bare" ]]; then printf '%s\n' "$info"; fi
+}
+
+# report_blockers <markers> <findings> <applied> <light-violations> <missing-verify>
 # Name every blocker on stderr; print the blocker count on stdout (captured by
 # the caller, never reaching the script's own stdout). Light-tier violations are
-# counted unconditionally — <applied> is never consulted for them.
+# counted unconditionally — <applied> is never consulted for them, nor for
+# missing-verify.
 report_blockers() {
-  local markers="$1" findings="$2" applied="$3" light="$4" line question id count=0
+  local markers="$1" findings="$2" applied="$3" light="$4" verify="$5" line question id count=0
   if [[ -n "$markers" ]]; then
     while IFS=$'\t' read -r line question; do
       echo "✗ clarification marker at line $line: $question" >&2
@@ -105,6 +126,10 @@ report_blockers() {
       count=$((count + 1))
     done <<< "$light"
   fi
+  if [[ -n "$verify" ]]; then
+    echo "✗ missing-verify: last wave (${verify% *}) has ${verify#* } Verify: $MISSING_VERIFY_HINT" >&2
+    count=$((count + 1))
+  fi
   echo "$count"
 }
 
@@ -122,14 +147,15 @@ report_pattern_tag() {
 }
 
 main() {
-  local plan_file="${1:-}" markers findings waivers applied light blockers
+  local plan_file="${1:-}" markers findings waivers applied light verify blockers
   validate_plan_arg "$#" "$plan_file"
   markers=$(plan_clarification_markers "$plan_file") || die "could not read clarification markers"
   findings=$(plan_high_risk_findings "$plan_file") || die "could not compute high-risk findings"
   waivers=$(plan_waivers "$plan_file") || die "could not read ## Waivers"
   applied=$(applied_waivers "$findings" "$waivers") || die "could not match waivers to findings"
   light=$(plan_light_violations "$plan_file") || die "could not compute light-tier violations"
-  blockers=$(report_blockers "$markers" "$findings" "$applied" "$light") || die "could not report blockers"
+  verify=$(missing_last_wave_verify "$plan_file") || die "could not compute the last-wave Verify state"
+  blockers=$(report_blockers "$markers" "$findings" "$applied" "$light" "$verify") || die "could not report blockers"
   if [[ "$blockers" -gt 0 ]]; then
     echo "$SELF: $blockers approval blocker(s) in $plan_file" >&2
     exit "$EXIT_BLOCKED"

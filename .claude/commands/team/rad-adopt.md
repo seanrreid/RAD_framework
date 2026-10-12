@@ -252,9 +252,12 @@ Validate: AC#[N] — [how to verify]
 The `## Issue Gaps` section is mandatory — it surfaces where the plan made
 judgment calls that the original issue left open.
 
-**Verify the whole suite on the last wave.** When a plan touches `harness/`,
-`scripts/`, `.rad/`, `.claude/` or `.agents/skills/`, add the line
-`Verify: exec bash scripts/verify-all.sh` to the last wave, and run `rad deliver`
+**Every non-light plan needs a last-wave `Verify:`.** Put a `Verify: <command>` line
+on the last wave, or `Verify: none (<reason>)` when there is genuinely nothing to run;
+`rad-approve` refuses a standard-tier plan without one (`missing-verify`, not waivable).
+A bare `Verify: none` with no reason does not count. `Tier: light` plans are exempt.
+When a plan touches `harness/`, `scripts/`, `.rad/`, `.claude/` or `.agents/skills/`,
+use the line `Verify: exec bash scripts/verify-all.sh` and run `rad deliver`
 with `RAD_VERIFY_TIMEOUT_SECONDS=1800` (the default is 600 s).
 
 **Open questions become clarification markers.** Any open question or unmade

@@ -383,19 +383,16 @@ while IFS= read -r path; do
 done < <(plan_scope_paths "$PLAN_FILE")
 
 # ── Last-wave Verify advisory (#236) ──────────────────────────────────────────
-# A plan touching self-protected paths whose last wave declares no `Verify:` is
-# advised to run the full suite there. WARNING only; the exit code is unaffected.
+# Any plan whose last wave declares no `Verify:` (state `no`) or a bare
+# `Verify: none` (state `bare`) will be BLOCKED at approval (missing-verify, see
+# check-approval-blockers.sh). WARNING only; the lint exit code is unaffected.
 # stderr stays visible: a read failure names its reason, then the advisory is skipped.
 LAST_WAVE_INFO=$(plan_last_wave_verify "$PLAN_FILE") || LAST_WAVE_INFO=""
-if [[ "$LAST_WAVE_INFO" == *" no" ]]; then
-  while IFS= read -r path; do
-    [[ -z "$path" ]] && continue
-    if path_is_self_protected "$path"; then
-      WARNINGS+=("last wave (${LAST_WAVE_INFO% *}) declares no Verify: and the plan touches self-protected paths ($path) — consider 'Verify: exec bash scripts/verify-all.sh' (see #236)")
-      break
-    fi
-  done < <(plan_scope_paths "$PLAN_FILE")
-fi
+case "${LAST_WAVE_INFO#* }" in
+  no|bare)
+    WARNINGS+=("last wave (${LAST_WAVE_INFO% *}) has ${LAST_WAVE_INFO#* } Verify: — approval will be blocked (missing-verify); add 'Verify: exec bash scripts/verify-all.sh' (or another real command) or 'Verify: none (<reason>)' (see #236)")
+    ;;
+esac
 
 # ── Capability request advisory ───────────────────────────────────────────────
 # A `Capabilities:` line (#85) requesting a class beyond the default set (net,

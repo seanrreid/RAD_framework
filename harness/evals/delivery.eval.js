@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { defaultPlan } from './lib/fixture.js';
+import { defaultPlan, FIXTURE_VERIFY_LINE } from './lib/fixture.js';
 import { defineCases } from './lib/runner.js';
 
 const FEATURE = 'demo';
@@ -38,7 +38,7 @@ const currentBranch = (fx) => fx.git('rev-parse', '--abbrev-ref', 'HEAD').stdout
 const originMainTip = (fx) => fx.run('git', ['--git-dir', join(fx.base, 'bitbucket.org', 'origin.git'), 'rev-parse', 'main']).stdout.trim();
 
 const verifyHangPlan = defaultPlan(FEATURE).replace(
-  /^(### Wave 1.*)$/m, `$1\n\nVerify: sleep ${HANG_SECONDS}`);
+  FIXTURE_VERIFY_LINE, `Verify: sleep ${HANG_SECONDS}`);
 
 // Narrower than all five classes: the command adapter cannot enforce it, so
 // deliver must refuse before any event rather than silently over-grant.
