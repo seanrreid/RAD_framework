@@ -10,3 +10,4 @@
 {"feature":"cycle-metrics-and-budget-warning","type":"wave-started","actor":"harness","ts":"2026-10-12T16:56:52.342Z","data":{"wave":3,"attempt":1}}
 {"feature":"cycle-metrics-and-budget-warning","type":"wave-attempt","actor":"harness","ts":"2026-10-12T17:07:34.242Z","data":{"wave":3,"attempt":1,"outcome":"success","tasks":[{"title":"The insights step and report section","status":"complete","commit":"22df805","concern":"—","error":"—"},{"title":"Regenerate the outputs","status":"complete","commit":"bd79c8f","concern":"—","error":"—"},{"title":"Full-suite check","status":"complete","commit":"—","concern":"—","error":"—"}],"verify":{"command":"exec bash scripts/verify-all.sh","status":0,"passed":true}}}
 {"feature":"cycle-metrics-and-budget-warning","type":"wave-complete","actor":"harness","ts":"2026-10-12T17:07:34.242Z","data":{"wave":3}}
+{"feature":"cycle-metrics-and-budget-warning","type":"pr-opened","actor":"harness","ts":"2026-10-12T17:07:43.978Z"}
