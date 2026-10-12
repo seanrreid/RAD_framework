@@ -1,7 +1,10 @@
 # Plan: Block Test Weakening in a Delivery (#241)
 Created: 2026-10-12
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-10-12T18:08:44.425Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/test-weakening-guard
 Issue: 241
 Adopted-From: https://github.com/seanrreid/RAD_framework/issues/241
