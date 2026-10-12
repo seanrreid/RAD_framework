@@ -81,6 +81,7 @@
 - Never commit secrets, tokens, or credentials
 - Never assume a library exists — only use packages in the package file
 - Never execute /rad-deliver without an `approved` event in `.agents/state/<feature>/events.jsonl` (the gate authority, appended by /rad-approve). The plan doc's `Status: approved` header is a display-only mirror, not the gate. Approval is checked by `rad deliver` and the gate, not by prose alone.
+- Never read `.agents/plans/`, `.agents/research/` or `.agents/logs/` unless the task names them — completed specs describe past intent and can be mistaken for current requirements
 -
 
 ---
