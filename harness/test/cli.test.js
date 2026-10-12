@@ -10,7 +10,7 @@ import { execFileSync, execFile, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import {
-  approveCommand, gateCommand, parsePlanCtx, deliverCommand, stopStatusCommand, forecastCommand, digestCommand, prBodyCommand,
+  approveCommand, gateCommand, parsePlanCtx, resolveVerifyTimeoutSeconds, deliverCommand, stopStatusCommand, forecastCommand, digestCommand, prBodyCommand,
   resolveHooksDir, makeSpineScriptPort, SCRIPT_ARG_KEYS, reviewCommand, resolveAgent, isMainModule,
   capabilitiesCommand, installCoreCommand, installPresetCommand, installStatusCommand, configCommand,
   acpCheckCommand, generateCommand, main,
@@ -29,6 +29,26 @@ const CLI = join(HERE, '..', 'cli.js');
 // ---------------------------------------------------------------------------
 // parsePlanCtx — per-wave model tiering (AC#2)
 // ---------------------------------------------------------------------------
+
+test('resolveVerifyTimeoutSeconds — unset, valid, and malformed RAD_VERIFY_TIMEOUT_SECONDS', () => {
+  const resolve = (v) => resolveVerifyTimeoutSeconds(v === undefined ? {} : { RAD_VERIFY_TIMEOUT_SECONDS: v });
+  assert.equal(resolve(undefined), 600, 'unset → default');
+  assert.equal(resolve('1800'), 1800, 'valid positive integer');
+  for (const bad of ['0', '-5', '+5', 'abc', ' 30', '30 ', '1.5', '', '007']) {
+    assert.equal(resolve(bad), 600, `malformed ${JSON.stringify(bad)} → default`);
+  }
+});
+
+test('parsePlanCtx — carries verifyTimeoutSeconds from the env', () => {
+  const prev = process.env.RAD_VERIFY_TIMEOUT_SECONDS;
+  process.env.RAD_VERIFY_TIMEOUT_SECONDS = '1800';
+  try {
+    assert.equal(parsePlanCtx('Branch: rad/x\n').verifyTimeoutSeconds, 1800);
+  } finally {
+    if (prev === undefined) delete process.env.RAD_VERIFY_TIMEOUT_SECONDS;
+    else process.env.RAD_VERIFY_TIMEOUT_SECONDS = prev;
+  }
+});
 
 test('parsePlanCtx — a Model: line under ### Wave 2 lands in planCtx.waveModels[2]', () => {
   const plan = [

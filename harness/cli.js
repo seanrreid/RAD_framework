@@ -631,6 +631,30 @@ function parseWaveVerify(text) {
   return waveVerify;
 }
 
+/**
+ * Default per-wave Verify: timeout, in seconds. Must stay in lockstep with
+ * VERIFY_TIMEOUT_SECONDS_DEFAULT in scripts/check-verify.sh, which enforces it.
+ */
+const VERIFY_TIMEOUT_SECONDS_DEFAULT = 600;
+
+/** Env var that overrides the Verify: timeout (read by check-verify.sh too). */
+const VERIFY_TIMEOUT_ENV = 'RAD_VERIFY_TIMEOUT_SECONDS';
+
+/**
+ * The Verify: timeout the harness will enforce, shown to the agent in the wave
+ * prompt. A malformed env value falls back to the default here; check-verify.sh
+ * still hard-fails it at run time.
+ *
+ * @param {Record<string, string|undefined>} [env]
+ * @returns {number}
+ */
+export function resolveVerifyTimeoutSeconds(env = process.env) {
+  const raw = env[VERIFY_TIMEOUT_ENV];
+  return typeof raw === 'string' && POSITIVE_INTEGER_PATTERN.test(raw)
+    ? Number(raw)
+    : VERIFY_TIMEOUT_SECONDS_DEFAULT;
+}
+
 /** A `### Wave N` heading; N is the wave number. */
 const WAVE_HEADING_PATTERN = /^###\s+Wave\s+(\d+)\b/;
 /** A `Capabilities:` line. The value may be empty so an empty declaration is reported, never ignored. */
@@ -734,6 +758,7 @@ function parseUnpromisedTests(text, testsByWave) {
  * @param {string} text - full plan doc text
  * @returns {{ branch: string, acceptanceCriteria: string[], waveModels: Record<number, string>, waveVerify: Record<number, string>,
  *   planCapabilities: string[]|undefined, waveCapabilities: Record<number, string[]>, capabilityErrors: string[],
+ *   verifyTimeoutSeconds: number,
  *   waveNumbers: number[], testsByWave: Record<number, string[]>, unpromisedTests: string[],
  *   waveTasks: Record<number, { type: string, tasks: object[] }>,
  *   executionNotes: { doNotTouch: string[], keyFiles: string[], reminders: string[] } }}
@@ -780,6 +805,7 @@ export function parsePlanCtx(text) {
     acceptanceCriteria: acLines,
     waveModels: parseWaveModels(text),
     waveVerify: parseWaveVerify(text),
+    verifyTimeoutSeconds: resolveVerifyTimeoutSeconds(),
     testsByWave,
     unpromisedTests: parseUnpromisedTests(text, testsByWave),
     // Per-wave `#### Task N.M:` blocks (taskBlocksByWave), handed to runWave

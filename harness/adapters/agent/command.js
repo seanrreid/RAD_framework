@@ -34,6 +34,7 @@ import {
   withTimeout,
   normalizeUsage,
 } from './contract.js';
+import { spawnOptions, signalGroup, trackGroup, untrackGroup } from './process-group.js';
 
 /**
  * Env vars that are safe to forward to the child. This set carries process
@@ -108,23 +109,6 @@ function describeExitFailure(run) {
 }
 
 /**
- * Send `signal` to a child that has not yet exited. ESRCH (it exited between
- * the check and the signal) is the expected race and is not an error; any
- * other failure is logged with context — the agent may still be running.
- */
-function signalChild(child, signal) {
-  if (child.exitCode !== null || child.signalCode !== null) return;
-  try {
-    process.kill(child.pid, signal);
-  } catch (err) {
-    if (err?.code === 'ESRCH') return;
-    process.stderr.write(
-      `command adapter: failed to send ${signal} to agent pid ${child.pid}: ${err?.message ?? err}\n`,
-    );
-  }
-}
-
-/**
  * On `signal` abort, terminate the child: SIGTERM now, SIGKILL after
  * `killGraceMs` if it is still alive. The grace timer is cleared when the child
  * exits so nothing keeps the event loop alive past the child.
@@ -137,8 +121,8 @@ function killOnAbort(child, signal, killGraceMs) {
   if (!signal) return;
   let graceTimer;
   const terminate = () => {
-    signalChild(child, 'SIGTERM');
-    graceTimer = setTimeout(() => signalChild(child, 'SIGKILL'), killGraceMs);
+    signalGroup(child, 'SIGTERM');
+    graceTimer = setTimeout(() => signalGroup(child, 'SIGKILL'), killGraceMs);
   };
   child.on('exit', () => {
     clearTimeout(graceTimer);
@@ -216,11 +200,13 @@ function spawnOnce(cmd, prompt, repoRoot, effectiveModel, { signal, killGraceMs 
         cwd: repoRoot,
         env: buildChildEnv(),
         stdio: ['pipe', 'pipe', 'pipe'],
+        ...spawnOptions(),
       });
     } catch (err) {
       reject(err);
       return;
     }
+    if (child.pid !== undefined) trackGroup(child);
     killOnAbort(child, signal, killGraceMs);
 
     let stdout = '';
@@ -236,15 +222,15 @@ function spawnOnce(cmd, prompt, repoRoot, effectiveModel, { signal, killGraceMs 
       total += Buffer.byteLength(s);
       if (total > MAX_OUTPUT_BYTES) {
         truncated = true;
-        child.kill('SIGKILL');
+        signalGroup(child, 'SIGKILL');
         return;
       }
       append(s);
     };
     child.stdout.on('data', (d) => capture(d, (s) => { stdout += s; }));
     child.stderr.on('data', (d) => capture(d, (s) => { stderr += s; }));
-    child.on('error', (err) => reject(err));
-    child.on('close', (code) => resolve({ code, stdout, stderr, truncated }));
+    child.on('error', (err) => { untrackGroup(child); reject(err); });
+    child.on('close', (code) => { untrackGroup(child); resolve({ code, stdout, stderr, truncated }); });
 
     // Attach before writing: an agent that exits without reading stdin makes
     // the write fail asynchronously. Only EPIPE is expected — 'close' settles
