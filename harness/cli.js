@@ -309,6 +309,31 @@ const MAX_FAILED_ATTEMPTS_ENV = 'RAD_MAX_FAILED_ATTEMPTS';
  * carries a line break is a hard usage error (exit 2, before any event).
  */
 const HOOKS_DIR_ENV = 'RAD_HOOKS_DIR';
+
+/** Env var arming the spine's cumulative token breaker. */
+const TOKEN_BUDGET_ENV = 'RAD_TOKEN_BUDGET';
+
+/** One-line stderr notice when no valid token budget is set (informational only). */
+const TOKEN_BUDGET_WARNING =
+  `rad deliver: ${TOKEN_BUDGET_ENV} is unset or not a positive integer; no token cap applies to this run\n`;
+
+/**
+ * Parse a token budget with the rule the breaker uses: parseInt, positive only.
+ * @returns {number|null} the budget, or null when the breaker stays disabled
+ */
+function parseTokenBudget(env) {
+  const parsed = Number.parseInt(env[TOKEN_BUDGET_ENV], 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+/**
+ * The no-cap warning line, or null when a valid RAD_TOKEN_BUDGET is set.
+ * @param {Record<string, string|undefined>} env
+ * @returns {string|null}
+ */
+export function tokenBudgetWarning(env = process.env) {
+  return parseTokenBudget(env ?? {}) === null ? TOKEN_BUDGET_WARNING : null;
+}
 const DEFAULT_HOOKS_SUBDIR = join('scripts', 'hooks');
 const MALFORMED_HOOKS_DIR = /^-|[\r\n]/;
 /** How a config-supplied hooks dir is named in operator-facing errors. */
@@ -2037,8 +2062,10 @@ export async function deliverCommand(argv, ctx) {
 
   // Optional cumulative token budget. RAD_TOKEN_BUDGET, when a positive integer,
   // arms the spine's budget breaker; unset/invalid/0 leaves it null (disabled).
-  const parsedBudget = Number.parseInt(process.env.RAD_TOKEN_BUDGET, 10);
-  const tokenBudget = Number.isFinite(parsedBudget) && parsedBudget > 0 ? parsedBudget : null;
+  // An unarmed breaker is announced once on stderr, before any wave runs.
+  const tokenBudget = parseTokenBudget(process.env);
+  const budgetWarning = tokenBudgetWarning(process.env);
+  if (budgetWarning !== null) process.stderr.write(budgetWarning);
 
   const now = () => new Date().toISOString();
   const workBranch = resolveWorkBranch(setup, planCtx, feature);
