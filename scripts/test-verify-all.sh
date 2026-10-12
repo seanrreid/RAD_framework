@@ -107,7 +107,7 @@ RC=0
 OUT="$(env -u RAD_VERIFY_ALL_CHECKS_FILE bash "$SCRIPT" --list 2>&1)" || RC=$?
 expect_rc "V5 --list" 0 "$RC"
 for n in harness-tests evals script-tests generate-drift playbook-lint config-validate \
-  lint-invariants lint-agent-files lint-claude-md lint-shell-safety plan-lint events-append-only; do
+  lint-invariants lint-agent-files lint-claude-md lint-shell-safety lint-function-length plan-lint events-append-only; do
   expect_has "V5 lists $n" "$n"
 done
 

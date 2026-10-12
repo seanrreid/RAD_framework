@@ -67,6 +67,7 @@ builtin_checks() {
     "lint-agent-files${TAB}scripts/lint-agent-files.sh" \
     "lint-claude-md${TAB}scripts/lint-claude-md.sh" \
     "lint-shell-safety${TAB}scripts/lint-shell-safety.sh" \
+    "lint-function-length${TAB}node scripts/lint-function-length.mjs" \
     "plan-lint${TAB}rc=0; for p in \$(git diff --name-only \"\$VERIFY_ALL_BASE\"...HEAD -- '.agents/plans/*.md'); do [ -f \"\$p\" ] || continue; scripts/lint-plan.sh \"\$p\" || rc=1; done; exit \$rc${TAB}${BASE_MARKER}" \
     "events-append-only${TAB}scripts/check-events-append-only.sh \"\$VERIFY_ALL_BASE\"${TAB}${BASE_MARKER}"
 }
