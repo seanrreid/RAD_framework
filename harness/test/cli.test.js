@@ -13,7 +13,7 @@ import {
   approveCommand, gateCommand, parsePlanCtx, resolveVerifyTimeoutSeconds, deliverCommand, stopStatusCommand, forecastCommand, digestCommand, prBodyCommand,
   resolveHooksDir, makeSpineScriptPort, SCRIPT_ARG_KEYS, reviewCommand, resolveAgent, isMainModule,
   capabilitiesCommand, installCoreCommand, installPresetCommand, installStatusCommand, configCommand,
-  acpCheckCommand, generateCommand, main,
+  acpCheckCommand, generateCommand, main, tokenBudgetWarning,
 } from '../cli.js';
 import { buildReviewPrompt, reviewInstruction } from '../review.js';
 import { REVIEW_INSTRUCTION } from '../evals/reviewers/lib.js';
@@ -625,6 +625,28 @@ test('deliver AC#6 — ok with the fold confirming completion → exit 0', async
     assert.equal(code, 0, `expected exit 0; stderr:\n${stderr}`);
     assert.ok(readLog(logFile).some((e) => e.type === 'pr-opened'));
   });
+});
+
+test('tokenBudgetWarning — warns for unset and malformed budgets, null for a valid one', () => {
+  for (const v of [undefined, '', '0', '-5', 'abc', '   ']) {
+    const line = tokenBudgetWarning({ RAD_TOKEN_BUDGET: v });
+    assert.match(line, /RAD_TOKEN_BUDGET/, `value ${JSON.stringify(v)}`);
+    assert.match(line, /no token cap applies/);
+    assert.equal(line.trim().split('\n').length, 1);
+  }
+  assert.ok(tokenBudgetWarning({}));
+  assert.equal(tokenBudgetWarning({ RAD_TOKEN_BUDGET: '200000' }), null);
+});
+
+test('deliver — unset RAD_TOKEN_BUDGET writes exactly one no-cap warning; a valid budget writes none', async () => {
+  const count = (s) => s.split('\n').filter((l) => l.includes('no token cap applies')).length;
+  for (const [env, expected] of [[{}, 1], [{ RAD_TOKEN_BUDGET: 'abc' }, 1], [{ RAD_TOKEN_BUDGET: '200000' }, 0]]) {
+    await withTempRepo(async (repoRoot) => {
+      seedApprovedTwoWavePlan(repoRoot);
+      const { stderr } = await runDeliverCaptured({ repoRoot, env, runWave: async () => ({ outcome: 'success' }) });
+      assert.equal(count(stderr), expected, `env ${JSON.stringify(env)}; stderr:\n${stderr}`);
+    });
+  }
 });
 
 test('deliver prepare — a provided ctx.prepare is called exactly once', async () => {

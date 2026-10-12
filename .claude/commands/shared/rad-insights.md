@@ -831,9 +831,66 @@ Reading the output:
   contract) — every attempt, so a wave retried twice on `fail-protocol` counts 2.
   `wave-complete` events are never counted: the spine writes no outcome on them.
 
+### Step 4h: Cycle time, human touches and tokens per delivered feature
+
+Per-feature cycle time, human touches and tokens per delivered feature come from
+the pure folds in `harness/cycle-metrics.js` (`stageDurations`, `humanTouches`,
+`tokensPerDeliveredFeature`). Import them; never re-implement them in jq or shell.
+What counts as a touch is a policy decision documented in that module's header.
+Run from the repo root; `RAD_STATE_DIR` (default `.agents/state`) exists only so the
+script is testable against a fixture dir:
+
+```bash
+node --input-type=module -e '
+import { readFileSync, readdirSync, existsSync } from "node:fs";
+import { join } from "node:path";
+const { stageDurations, humanTouches, tokensPerDeliveredFeature } =
+  await import("./harness/cycle-metrics.js");
+
+const stateDir = process.env.RAD_STATE_DIR || ".agents/state";
+const features = existsSync(stateDir)
+  ? readdirSync(stateDir, { withFileTypes: true })
+      .filter((d) => d.isDirectory())
+      .map((d) => d.name)
+      .filter((f) => existsSync(join(stateDir, f, "events.jsonl")))
+      .sort()
+  : [];
+
+const histories = {};
+const perFeature = {};
+for (const feature of features) {
+  histories[feature] = readFileSync(join(stateDir, feature, "events.jsonl"), "utf8")
+    .split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  perFeature[feature] = {
+    durations: stageDurations(histories[feature]),
+    touches: humanTouches(histories[feature]),
+  };
+}
+const tokens = tokensPerDeliveredFeature(histories);
+console.log(JSON.stringify({ noEventLogs: features.length === 0, perFeature, tokens }, null, 2));
+'
+```
+
+Reading the output:
+
+- **`perFeature[*].durations`** — `approvedToStartMs` (first `approved` → first
+  `deliver-started`), `runMs` (first `deliver-started` → last `pr-opened`) and
+  `totalMs` (first `approved` → last `pr-opened`), in milliseconds. `null` means an
+  endpoint is missing or the timestamps are invalid or run backwards — render it as
+  "n/a", never as 0.
+- **`perFeature[*].touches`** — `approvals`, `reApprovals`, `needsDecisionStops`,
+  `resumes` and `total` (approvals counted once, not re-approvals on top).
+- **`tokens`** — `perFeature` lists only delivered features (those with a
+  `pr-opened` event); a delivered feature with no recorded usage is `null` and is
+  excluded from `mean`.
+- **`noEventLogs: true`** — no `events.jsonl` exists anywhere; omit the section.
+
+These values are reporting only. They set no target or threshold, and nothing
+reads them to block, warn or gate a command.
+
 ### Step 5: Synthesize and output report
 
-Using the data from Steps 3–4g, write the following report. Populate each section
+Using the data from Steps 3–4h, write the following report. Populate each section
 with real numbers and real pattern names — do not leave placeholders.
 
 ```markdown
@@ -1099,6 +1156,18 @@ No signal crossed the prompt-surface threshold ([threshold]) — no proposal.
 blocked_spec / blocked_intent could not be evaluated — no wave-attempt event
 carries per-task data yet.
 [Suggestion only — name the target file and section; never edit it.]
+
+### Cycle Time and Human Touches
+[From Step 4h. Omit this section entirely if noEventLogs is true.]
+[One line per feature in `perFeature`; render a null duration as "n/a":]
+- [feature] — approved→start [duration] | run [duration] | total [duration];
+  touches [total] ([approvals] approval(s), [reApprovals] re-approval(s),
+  [needsDecisionStops] needs-decision stop(s), [resumes] resume(s))
+Tokens per delivered feature:
+- [feature] — [N] tokens   [or "n/a (no usage recorded)" when null]
+Mean: [tokens.mean, or "n/a" when null]
+[Framing — render verbatim under the list:]
+Reporting only — no target or threshold applies to these values.
 
 ### Recommended Focus Areas
 [Top 2–3 patterns that are both frequent and high-severity. Each as one sentence:
