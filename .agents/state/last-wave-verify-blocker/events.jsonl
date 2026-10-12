@@ -10,3 +10,4 @@
 {"feature":"last-wave-verify-blocker","type":"wave-started","actor":"harness","ts":"2026-10-12T18:21:04.311Z","data":{"wave":3,"attempt":1}}
 {"feature":"last-wave-verify-blocker","type":"wave-attempt","actor":"harness","ts":"2026-10-12T18:32:17.556Z","data":{"wave":3,"attempt":1,"outcome":"success","tasks":[{"title":"Templates, approve skill and docs","status":"complete","commit":"6ff16f1","concern":"—","error":"—"},{"title":"Regenerate","status":"complete","commit":"4da6aed","concern":"—","error":"—"},{"title":"Full-suite check","status":"complete","commit":"—","concern":"—","error":"—"}],"verify":{"command":"exec bash scripts/verify-all.sh","status":0,"passed":true}}}
 {"feature":"last-wave-verify-blocker","type":"wave-complete","actor":"harness","ts":"2026-10-12T18:32:17.559Z","data":{"wave":3}}
+{"feature":"last-wave-verify-blocker","type":"pr-opened","actor":"harness","ts":"2026-10-12T18:32:28.152Z"}
