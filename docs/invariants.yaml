@@ -92,6 +92,23 @@ invariants:
         guarded: "yes"
         note: "CI detects deliver PRs by plan content (scripts/detect-deliver-pr.sh), independent of the branch prefix (#154)"
 
+  - id: test-weakening-blocked
+    claim: "A wave cannot delete, rename away, or skip an existing test unless the approved plan waives that exact path; the scope check reports it and exits 1."
+    authority: "the approved plan's ## Waivers (test-removal:<path>: <reason>)"
+    evals: [harness/evals/delivery.eval.js]
+    enforced_by:
+      - { file: scripts/lib/test-integrity.sh, symbol: "test_integrity_violations" }
+      - { file: scripts/check-scope.sh, symbol: "test_integrity_violations", note: "check-scope calls the library and folds its findings into the exit code" }
+    bypasses:
+      - id: unmatched-test-layout
+        surface: "test files whose layout RAD_TEST_PATH_RE does not match"
+        guarded: "no"
+        note: "tracked in #242"
+      - id: waived-path
+        surface: "a path with a test-removal waiver in the approved plan"
+        guarded: "yes"
+        note: "the architect approved the waiver; waivers are frozen into approved.data.waivers"
+
   - id: events-append-only
     claim: "Event logs are only ever appended to; no change may remove or modify an existing event line."
     authority: "the append-only event log .agents/state/<feature>/events.jsonl"
