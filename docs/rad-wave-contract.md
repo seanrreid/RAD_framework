@@ -353,7 +353,10 @@ A plan that touches RAD's own machinery (`harness/`, `scripts/`, `.rad/`,
 on its last wave, so the whole CI check set runs before the deliver PR opens.
 `exec` makes the process `scripts/check-verify.sh` kills on a timeout the script
 itself, which cleans up its children. Run with `RAD_VERIFY_TIMEOUT_SECONDS=1800`
-(the default is 600 s). `scripts/lint-plan.sh` warns when it is missing (#236).
+(the default is 600 s). `scripts/lint-plan.sh` warns when it is missing, and `rad approve` blocks a
+standard-tier plan whose last wave has neither a `Verify:` command nor
+`Verify: none (<reason>)` (`missing-verify`, not waivable; `Tier: light` is
+exempt). `Verify: none` is read as "no check", never run as a command (#236).
 
 ### Completion criteria
 

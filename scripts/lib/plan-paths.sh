@@ -545,22 +545,40 @@ plan_wave_task_files() {
   done < "$plan_file"
 }
 
+# classify_verify_value <trimmed Verify: value>
+# Print `yes` for a real command, `none` for `none (<non-blank reason>)`, `bare`
+# for `none` without a reason (or an empty/blank `()`). `none` is matched
+# case-insensitively and only as a whole word: `nonexistent-tool` is a command.
+# Mirrors the `none` rule in parseWaveVerify (harness/cli.js).
+classify_verify_value() {
+  local value="$1" lowered reason
+  lowered=$(printf '%s' "$value" | tr '[:upper:]' '[:lower:]')
+  if [[ ! "$lowered" =~ ^none([[:space:]]|\(|$) ]]; then echo yes; return 0; fi
+  if [[ "$value" =~ ^[Nn][Oo][Nn][Ee][[:space:]]*\((.*)\)$ ]]; then
+    reason="${BASH_REMATCH[1]}"
+    if [[ "$reason" =~ [^[:space:]] ]]; then echo none; return 0; fi
+  fi
+  echo bare
+}
+
 # plan_last_wave_verify <plan-file>
-# Print `<last wave number> yes|no` — whether the plan's highest-numbered
-# `### Wave N` block declares a `Verify:` line. Mirrors parseWaveVerify in
-# harness/cli.js: a `### Wave N` heading opens a block, any other `##`/`###`
-# heading ends it, `####` headings stay inside, and a trimmed line matching
-# `^Verify:\s*(.+)$` counts. No waves → no output, exit 0; unreadable plan →
-# exit 2.
+# Print `<last wave number> yes|no|none|bare` — the state of the plan's
+# highest-numbered `### Wave N` block's Verify: `yes` a real command, `none`
+# `Verify: none (<reason>)`, `bare` `Verify: none` with no/blank reason, `no` no
+# `Verify:` line. The LAST `Verify:` line in the block decides. Mirrors
+# parseWaveVerify in harness/cli.js: a `### Wave N` heading opens a block, any
+# other `##`/`###` heading ends it, `####` headings stay inside, and a trimmed
+# line matching `^Verify:\s*(.+)$` counts. No waves → no output, exit 0;
+# unreadable plan → exit 2.
 plan_last_wave_verify() {
-  local plan_file="$1" line trimmed wave="" last="" has="no"
+  local plan_file="$1" line trimmed wave="" last="" state="no"
   require_readable_plan plan_last_wave_verify "$plan_file" || return
   while IFS= read -r line; do
     trimmed="${line#"${line%%[![:space:]]*}"}"
     trimmed="${trimmed%"${trimmed##*[![:space:]]}"}"
     if [[ "$trimmed" =~ ^###[[:space:]]+Wave[[:space:]]+([0-9]+)([^0-9A-Za-z_]|$) ]]; then
       wave=$((10#${BASH_REMATCH[1]}))
-      if [[ -z "$last" || "$wave" -ge "$last" ]]; then last="$wave"; has="no"; fi
+      if [[ -z "$last" || "$wave" -ge "$last" ]]; then last="$wave"; state="no"; fi
       continue
     fi
     if [[ "$trimmed" =~ ^#{2,3}[[:space:]] ]]; then
@@ -568,9 +586,11 @@ plan_last_wave_verify() {
       continue
     fi
     [[ -n "$wave" && "$wave" == "$last" ]] || continue
-    if [[ "$trimmed" =~ ^Verify:[[:space:]]*(.+)$ ]]; then has="yes"; fi
+    if [[ "$trimmed" =~ ^Verify:[[:space:]]*(.+)$ ]]; then
+      state=$(classify_verify_value "${BASH_REMATCH[1]}")
+    fi
   done < "$plan_file"
-  [[ -z "$last" ]] || printf '%s %s\n' "$last" "$has"
+  [[ -z "$last" ]] || printf '%s %s\n' "$last" "$state"
 }
 
 # path_layer <path>

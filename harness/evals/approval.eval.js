@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { defineCases } from './lib/runner.js';
-import { defaultPlan } from './lib/fixture.js';
+import { defaultPlan, FIXTURE_VERIFY_LINE } from './lib/fixture.js';
 
 const ALWAYS_PASS_SCRIPT = '#!/usr/bin/env bash\nexit 0\n';
 const HOOK_BLOCK_EXIT = 2;
@@ -262,7 +262,7 @@ defineCases([
 function twoWavePlan(feature) {
   return defaultPlan(feature).replace('## Tests to Write', [
     '### Wave 2 — sequential', '', '#### Task 2.1: Touch the feature file again',
-    'File: src/feature.txt:1-5', 'What: append to src/feature.txt.', 'Validate: AC#1.', '',
+    'File: src/feature.txt:1-5', 'What: append to src/feature.txt.', 'Validate: AC#1.', '', FIXTURE_VERIFY_LINE, '',
     '## Tests to Write'].join('\n'));
 }
 

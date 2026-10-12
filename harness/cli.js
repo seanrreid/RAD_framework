@@ -611,6 +611,9 @@ function parseWaveModels(text) {
   return waveModels;
 }
 
+/** `Verify: none` / `none (reason)` declares no check; `nonexistent-tool` is still a command. */
+const VERIFY_NONE_RE = /^none(?:$|[\s(])/i;
+
 /**
  * Parse optional per-wave verification commands from the plan doc.
  *
@@ -650,7 +653,11 @@ function parseWaveVerify(text) {
     }
     if (currentWave !== undefined) {
       const m = /^Verify:\s*(.+)$/.exec(line.trim());
-      if (m && m[1].trim() !== '') waveVerify[currentWave] = m[1].trim();
+      if (m && m[1].trim() !== '') {
+        // `none` (with or without a reason) declares "no check": last line wins.
+        if (VERIFY_NONE_RE.test(m[1].trim())) delete waveVerify[currentWave];
+        else waveVerify[currentWave] = m[1].trim();
+      }
     }
   }
   return waveVerify;

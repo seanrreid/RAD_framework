@@ -210,7 +210,9 @@ A plan edited after delivery can be re-approved with the same verb: the plan
 header's `Status:` (e.g. `complete`) is kept, and only the approval provenance
 lines are updated (#228). For plans touching RAD's own machinery, add
 `Verify: exec bash scripts/verify-all.sh` to the last wave and deliver with
-`RAD_VERIFY_TIMEOUT_SECONDS=1800` (#236).
+`RAD_VERIFY_TIMEOUT_SECONDS=1800` (#236). Every non-light plan must declare a
+last-wave `Verify:` command or `Verify: none (<reason>)`; approval is blocked
+(`missing-verify`, not waivable) without one. `Tier: light` plans are exempt.
 
 If the architect approved out-of-band (in chat, a meeting, etc.), a
 non-architect can record it for them:

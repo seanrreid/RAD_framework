@@ -33,6 +33,9 @@ const radConfigText = (email) => [
 // so the push guard's read fails while origin itself stays reachable.
 const UNAVAILABLE_TIP_SRC = '#!/usr/bin/env bash\necho "default-tip: remote unavailable (eval stub)" >&2\nexit 3\n';
 
+// A standard-tier plan must declare a last-wave Verify: at approval; the fixture has nothing to run.
+export const FIXTURE_VERIFY_LINE = 'Verify: none (fixture: nothing to run)';
+
 export const defaultPlan = (feature, instruction = '') => [
   `# Plan: ${feature}`, 'Created: 2026-09-29', 'Author: architect', 'Status: draft',
   `Branch: rad/${feature}`, '',
@@ -42,7 +45,7 @@ export const defaultPlan = (feature, instruction = '') => [
   '## Wave Plan', '', '### Wave 1 — sequential', '',
   '#### Task 1.1: Write the feature file', 'File: src/feature.txt:1-5',
   `What: create src/feature.txt.${instruction ? ` ${instruction}` : ''}`,
-  'Validate: AC#1 — the file exists.', '',
+  'Validate: AC#1 — the file exists.', '', FIXTURE_VERIFY_LINE, '',
   '## Tests to Write', '', '- [ ] feature file present — tests/feature.test.txt', '',
 ].join('\n');
 
