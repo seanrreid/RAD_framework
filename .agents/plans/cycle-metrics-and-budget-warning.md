@@ -1,7 +1,8 @@
 # Plan: Cycle-Time and Human-Touch Metrics in /rad-insights, and the Unset-Budget Warning (#247, #246)
 Created: 2026-10-12
 Author: architect
-Status: in-progress
+Status: complete
+Completed-At: 2026-10-12T17:07:34.342Z
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-10-12T16:54:58.705Z
 Recorded-By: sean@torchcodelab.com
