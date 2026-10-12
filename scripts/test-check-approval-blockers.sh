@@ -45,6 +45,11 @@ expect_empty_stdout() {
   [[ ! -s "$OUT" ]] || fail "$1: stdout must be empty, got: [$(cat "$OUT")]"
 }
 
+# Every fixture declares a last-wave Verify so pre-existing cases keep their
+# intended outcome; missing-verify cases override it via WAVE_VERIFY_LINE.
+FIXTURE_VERIFY='Verify: none (fixture: nothing to run)'
+WAVE_VERIFY_LINE="$FIXTURE_VERIFY"
+
 # write_plan <file> <scope-path> <extra-body>
 write_plan() {
   cat > "$1" <<EOF
@@ -55,6 +60,10 @@ Status: pending-review
 | File | Lines | Change |
 |------|-------|--------|
 | \`$2\` | 1-10 | Modify |
+
+## Wave Plan
+### Wave 1
+$WAVE_VERIFY_LINE
 
 $3
 EOF
@@ -70,8 +79,8 @@ echo "✓ clean plan ⇒ exit 0, empty stdout"
 write_plan "$TMP/marker.md" "docs/readme.md" "Which store? [NEEDS CLARIFICATION: pick a store]"
 run_check -- "$TMP/marker.md"
 expect "one marker" 1; expect_empty_stdout "one marker"
-grep -q "clarification marker at line 9: pick a store" "$ERR" \
-  || fail "one marker: stderr must name line 9, got: [$(cat "$ERR")]"
+grep -q "clarification marker at line 13: pick a store" "$ERR" \
+  || fail "one marker: stderr must name line 13, got: [$(cat "$ERR")]"
 echo "✓ one marker ⇒ exit 1, line named on stderr"
 
 # ── fenced marker only ────────────────────────────────────────────────────────
@@ -177,7 +186,9 @@ write_tier_plan() {
   { printf '# Plan: fixture\nStatus: pending-review\n%s\n\n## Files in Scope\n' "$2"
     printf '| File | Lines | Change |\n|------|-------|--------|\n| `%s` | 1-10 | Modify |\n\n' "$3"
     printf '## Wave Plan\n'
-    for ((w = 1; w <= $4; w++)); do printf '### Wave %s\n#### Task %s.1: t\nFile: %s\n' "$w" "$w" "$3"; done
+    for ((w = 1; w <= $4; w++)); do printf '### Wave %s\n#### Task %s.1: t\nFile: %s\n' "$w" "$w" "$3"
+      [[ -z "$WAVE_VERIFY_LINE" ]] || printf '%s\n' "$WAVE_VERIFY_LINE"
+    done
     printf '\n%s\n' "$5"
   } > "$1"
 }
@@ -224,6 +235,71 @@ run_check -- "$TMP/standard-5.md"
 expect "standard 5 waves" 0; expect_empty_stdout "standard 5 waves"
 [[ ! -s "$ERR" ]] || fail "standard 5 waves: stderr must be empty, got: [$(cat "$ERR")]"
 echo "✓ standard (no Tier:) 5-wave plan ⇒ exit 0 as today"
+
+# ── missing-verify: non-waivable last-wave blocker ────────────────────────────
+# with_verify <line> <fn...>: run a fixture builder with WAVE_VERIFY_LINE set.
+build_with_verify() {
+  local line="$1"; shift
+  WAVE_VERIFY_LINE="$line"
+  "$@"
+  WAVE_VERIFY_LINE="$FIXTURE_VERIFY"
+}
+
+build_with_verify "" write_tier_plan "$TMP/mv-none.md" "" "docs/readme.md" 2 ""
+run_check -- "$TMP/mv-none.md"
+expect "mv: standard, no Verify" 1; expect_empty_stdout "mv: standard, no Verify"
+grep -Fq "missing-verify: last wave (2) has no Verify:" "$ERR" \
+  || fail "mv: stderr must name missing-verify + wave, got: [$(cat "$ERR")]"
+grep -Fq 'Verify: <command>' "$ERR" && grep -Fq 'Verify: none (<reason>)' "$ERR" \
+  || fail "mv: message must tell both fixes, got: [$(cat "$ERR")]"
+echo "✓ missing-verify: standard plan, no Verify ⇒ exit 1, both fixes named"
+
+build_with_verify "Verify: none" write_tier_plan "$TMP/mv-bare.md" "" "docs/readme.md" 1 ""
+run_check -- "$TMP/mv-bare.md"
+expect "mv: bare none" 1; expect_empty_stdout "mv: bare none"
+grep -Fq "missing-verify: last wave (1) has bare Verify:" "$ERR" \
+  || fail "mv: bare none must be named, got: [$(cat "$ERR")]"
+build_with_verify "Verify: none ()" write_tier_plan "$TMP/mv-empty.md" "" "docs/readme.md" 1 ""
+run_check -- "$TMP/mv-empty.md"
+expect "mv: none with empty reason" 1
+echo "✓ missing-verify: bare 'Verify: none' and 'none ()' ⇒ exit 1"
+
+build_with_verify "Verify: none (docs only)" write_tier_plan "$TMP/mv-reason.md" "" "docs/readme.md" 1 ""
+run_check -- "$TMP/mv-reason.md"
+expect "mv: none with reason" 0; expect_empty_stdout "mv: none with reason"
+echo "✓ missing-verify: 'Verify: none (reason)' clears it ⇒ exit 0"
+
+build_with_verify "Verify: bash scripts/verify-all.sh" write_tier_plan "$TMP/mv-cmd.md" "" "docs/readme.md" 1 ""
+run_check -- "$TMP/mv-cmd.md"
+expect "mv: real command" 0; expect_empty_stdout "mv: real command"
+build_with_verify "Verify: nonexistent-tool" write_tier_plan "$TMP/mv-nonex.md" "" "docs/readme.md" 1 ""
+run_check -- "$TMP/mv-nonex.md"
+expect "mv: command starting with none" 0
+echo "✓ missing-verify: a real command (even one starting 'none…') clears it ⇒ exit 0"
+
+build_with_verify "" write_tier_plan "$TMP/mv-light.md" "Tier: light" "docs/readme.md" 1 ""
+run_check -- "$TMP/mv-light.md"
+expect "mv: light exempt" 0; expect_empty_stdout "mv: light exempt"
+echo "✓ missing-verify: Tier: light plan without Verify ⇒ exempt, exit 0"
+
+printf '# Plan: fixture\nStatus: pending-review\n\n## Files in Scope\n| `docs/readme.md` | 1 | Modify |\n' > "$TMP/mv-nowaves.md"
+run_check -- "$TMP/mv-nowaves.md"
+expect "mv: no waves" 0; expect_empty_stdout "mv: no waves"
+echo "✓ missing-verify: plan with no waves ⇒ not blocked"
+
+build_with_verify "" write_tier_plan "$TMP/mv-waiver.md" "" "docs/readme.md" 1 \
+  $'## Waivers\n- missing-verify: no suite for docs'
+run_check -- "$TMP/mv-waiver.md"
+expect "mv: waiver bullet" 1; expect_empty_stdout "mv: waiver bullet"
+grep -Fq "missing-verify" "$ERR" || fail "mv: waiver bullet must not clear it, got: [$(cat "$ERR")]"
+echo "✓ missing-verify: a '- missing-verify:' waiver bullet has no effect ⇒ exit 1"
+
+build_with_verify "" write_tier_plan "$TMP/mv-plus-marker.md" "" "docs/readme.md" 1 "[NEEDS CLARIFICATION: q]"
+run_check -- "$TMP/mv-plus-marker.md"
+expect "mv: with marker" 1
+grep -Fq "clarification marker" "$ERR" && grep -Fq "2 approval blocker(s)" "$ERR" \
+  || fail "mv: existing blockers must still be counted alongside, got: [$(cat "$ERR")]"
+echo "✓ missing-verify: counted together with existing blockers (2 blockers)"
 
 # ── high-risk-pattern tag line (non-default effective pattern only) ───────────
 # Default pattern ⇒ stdout byte-identical to the pre-tag contract.

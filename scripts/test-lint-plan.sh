@@ -70,6 +70,10 @@ run_lint() {
 #            `## Program Design` section is emitted so has_section finds it.
 #       $6 = tail (optional, default empty). Raw text appended after ## Risks —
 #            e.g. a marker line (lands in Risks) or a `## Waivers` section.
+# Every wave declares this Verify: so fixtures stay clean of the last-wave advisory
+# (#236); the advisory tests set it empty to build a plan with no Verify at all.
+FIXTURE_VERIFY='Verify: none (fixture: nothing to run)'
+
 write_plan() {
   local out="$1" scope_rows="$2" task_file="$3"
   local wave_count="${4:-1}" program_design="${5:-false}" tail="${6:-}"
@@ -116,11 +120,13 @@ EOF
     printf '#### Task 1.1: do the thing\n'
     [[ -n "$task_file" ]] && printf 'File: %s\n' "$task_file"
     printf 'Validate: AC#1 — x\n'
+    [[ -z "$FIXTURE_VERIFY" ]] || printf '%s\n' "$FIXTURE_VERIFY"
     # Additional minimal waves for the >=3-wave "large plan" cases.
     for (( w = 2; w <= wave_count; w++ )); do
       printf '### Wave %d — sequential\n' "$w"
       printf '#### Task %d.1: do the thing\n' "$w"
       printf 'Validate: AC#1 — x\n'
+      [[ -z "$FIXTURE_VERIFY" ]] || printf '%s\n' "$FIXTURE_VERIFY"
     done
     cat <<'EOF'
 
@@ -1181,6 +1187,7 @@ write_consistency_plan() {
     printf '\n## Agent Scope\ndeveloper\n\n## Files in Scope\n'
     printf '| File | Lines | Change |\n|------|-------|--------|\n| src/app.js | 1-2 | x |\n\n'
     printf '## Execution Notes\n### Do Not Touch\n- None\n\n## Wave Plan\n### Wave 1 — sequential\n'
+    printf '%s\n' "$FIXTURE_VERIFY"
     if [[ -n "$tasks" ]]; then printf '%s\n' "$tasks"; fi
     printf '\n## Tests to Write\n- [ ] t — scripts/test-lint-plan.sh\n\n'
     printf '## Non-Goals\n- a\n- b\n\n## Risks\nnone\n'
@@ -1412,47 +1419,62 @@ t_issue_header() {
   done
 }
 
-# ── #236: last-wave Verify advisory ───────────────────────────────────────────
+# ── #236: last-wave Verify advisory (every plan; approval will be blocked) ────
 t_last_wave_verify_advisory() {
-  local plan="$TMP/lwv.md" msg="declares no Verify: and the plan touches self-protected paths"
-  # add_verify <plan> <wave>: insert a Verify: line under that wave's heading.
-  add_verify() {
-    awk -v w="$2" '{print} $0 ~ "^### Wave "w" " {print "Verify: exec bash scripts/verify-all.sh"}' "$1" > "$1.new" && mv "$1.new" "$1"
+  local plan="$TMP/lwv.md" msg="has no Verify: — approval will be blocked (missing-verify)"
+  local saved_verify="$FIXTURE_VERIFY"
+  FIXTURE_VERIFY=""
+  # set_verify <plan> <wave> <value>: insert a Verify: line under that wave's heading.
+  set_verify() {
+    awk -v w="$2" -v v="$3" '{print} $0 ~ "^### Wave "w" " {print "Verify: " v}' "$1" > "$1.new" && mv "$1.new" "$1"
   }
-  # (a) self-protected path, no Verify on any wave → warns, names wave + path, exit 0.
+  warns() { printf '%s\n' "$LINT_OUT" | grep -q "last wave ($1) has $2 Verify: — approval will be blocked (missing-verify)"; }
+  # (a) self-protected path, no Verify on any wave → warns, names wave, exit 0.
   write_plan "$plan" "| harness/gates.js | 1-2 | x |" "harness/gates.js:1-10" 2
   run_lint "$plan"
-  printf '%s\n' "$LINT_OUT" | grep -q "last wave (2) $msg (harness/gates.js) — consider 'Verify: exec bash scripts/verify-all.sh' (see #236)" \
-    || fail "#236: expected the last-wave advisory, got: $LINT_OUT"
-  [[ "$LINT_CODE" -eq 0 ]] || fail "#236: advisory changed the exit code ($LINT_CODE)"
+  warns 2 no || fail "#236(a): expected the last-wave advisory, got: $LINT_OUT"
+  printf '%s\n' "$LINT_OUT" | grep -q "add 'Verify: exec bash scripts/verify-all.sh'.*'Verify: none (<reason>)'" \
+    || fail "#236(a): advisory must name both fixes, got: $LINT_OUT"
+  [[ "$LINT_CODE" -eq 0 ]] || fail "#236(a): advisory changed the exit code ($LINT_CODE)"
   # (b) Verify only on an earlier wave → still warns.
-  add_verify "$plan" 1
+  set_verify "$plan" 1 "exec bash scripts/verify-all.sh"
   run_lint "$plan"
-  printf '%s\n' "$LINT_OUT" | grep -q "last wave (2) $msg" || fail "#236: earlier-wave Verify must still warn"
-  # (c) Verify on the last wave → no warning.
-  add_verify "$plan" 2
+  warns 2 no || fail "#236(b): earlier-wave Verify must still warn"
+  # (c) real command on the last wave → no warning.
+  set_verify "$plan" 2 "exec bash scripts/verify-all.sh"
   run_lint "$plan"
-  printf '%s\n' "$LINT_OUT" | grep -q "$msg" && fail "#236: last-wave Verify must silence the advisory" || true
-  # (d) no self-protected path → no warning.
+  warns 2 no && fail "#236(c): last-wave Verify must silence the advisory" || true
+  # (d) a plan touching no self-protected path now warns too (all-plans scope).
   write_plan "$plan" "| README.md | 1-2 | x |" "README.md:1-10" 2
   run_lint "$plan"
-  printf '%s\n' "$LINT_OUT" | grep -q "$msg" && fail "#236: no self-protected path must not warn" || true
+  warns 2 no || fail "#236(d): a non-self-protected plan must warn too"
   # (e) Verify only mid-sentence does not count → warns.
   write_plan "$plan" "| harness/gates.js | 1-2 | x |" "harness/gates.js:1-10"
   awk '{print} /^### Wave 1 /{print "Run the Verify: step later."}' "$plan" > "$plan.new" && mv "$plan.new" "$plan"
   run_lint "$plan"
-  printf '%s\n' "$LINT_OUT" | grep -q "last wave (1) $msg" || fail "#236: mid-sentence Verify: must not count"
+  warns 1 no || fail "#236(e): mid-sentence Verify: must not count"
   # (f) no waves → no warning.
   write_plan "$plan" "| harness/gates.js | 1-2 | x |" "harness/gates.js:1-10"
   grep -v '^### Wave\|^#### Task\|^Validate: AC#1\|^File: harness' "$plan" > "$plan.new" && mv "$plan.new" "$plan"
   run_lint "$plan"
-  printf '%s\n' "$LINT_OUT" | grep -q "$msg" && fail "#236: a plan with no waves must not warn" || true
-  # (g) light plan (Tier: light) with self-protected path and no Verify → warns.
+  printf '%s\n' "$LINT_OUT" | grep -q "$msg" && fail "#236(f): a plan with no waves must not warn" || true
+  # (g) light plan with no Verify → warns (the lint is advisory for every tier).
   write_plan "$plan" "| harness/gates.js | 1-2 | x |" "harness/gates.js:1-10"
   sed 's/^Status: pending-review/Status: pending-review\nTier: light/' "$plan" > "$plan.new" && mv "$plan.new" "$plan"
   run_lint "$plan"
-  printf '%s\n' "$LINT_OUT" | grep -q "last wave (1) $msg" || fail "#236: light plan must warn too"
-  echo "✓ #236: last-wave Verify advisory (earlier-wave, last-wave, no self-protected, no waves, light, mid-sentence)"
+  warns 1 no || fail "#236(g): light plan must warn too"
+  # (h) bare `Verify: none` → warns as bare; (i) `none (reason)` → silent.
+  write_plan "$plan" "| README.md | 1-2 | x |" "README.md:1-10"
+  set_verify "$plan" 1 "none"
+  run_lint "$plan"
+  warns 1 bare || fail "#236(h): bare Verify: none must warn, got: $LINT_OUT"
+  write_plan "$plan" "| README.md | 1-2 | x |" "README.md:1-10"
+  set_verify "$plan" 1 "none (docs only)"
+  run_lint "$plan"
+  printf '%s\n' "$LINT_OUT" | grep -q "approval will be blocked (missing-verify)" \
+    && fail "#236(i): Verify: none (reason) must not warn" || true
+  FIXTURE_VERIFY="$saved_verify"
+  echo "✓ #236: last-wave Verify advisory (no, bare, none-with-reason, earlier-wave, last-wave, all plans, no waves, light, mid-sentence)"
 }
 
 t_missing_task_file
