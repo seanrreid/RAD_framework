@@ -117,6 +117,17 @@ jobs:
           node-version: 20
       - run: scripts/lint-invariants.sh
 
+  # All PRs — function-length ratchet (#252): no new function over ~40 lines,
+  # and the baseline of existing offenders can only shrink. Pure node, no npm install.
+  function-length-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: node scripts/lint-function-length.mjs
+
   # All PRs — generated-file drift (fail-closed, #171): every Claude and Codex
   # output must match its .rad/ source, and no marked orphan may remain.
   # Thin wrapper: the same command runs on any runner. No sources yet: exits 0.
