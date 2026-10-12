@@ -1,7 +1,10 @@
 # Plan: Keep .agents History Out of Default Context, and Record RAD's Own Rationale (#249)
 Created: 2026-10-12
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-10-12T14:58:28.428Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/agents-md-history-rule-and-rad-decisions
 Issue: 249
 Adopted-From: https://github.com/seanrreid/RAD_framework/issues/249
