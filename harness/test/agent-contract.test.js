@@ -571,3 +571,50 @@ test('buildWavePrompt — a malformed operatorContext throws instead of dropping
     );
   }
 });
+
+// ---------------------------------------------------------------------------
+// buildWavePrompt — AC#5/AC#7 the `## Verification` section announces the
+// wave's Verify: check and the timeout the harness enforces.
+// ---------------------------------------------------------------------------
+
+const VERIFICATION_HEADING = '## Verification';
+const VERIFY_CTX = { ...PROMPT_CTX, waveVerify: { 1: 'npm test' }, verifyTimeoutSeconds: 1800 };
+
+test('buildWavePrompt — AC#5 a Verify: command is stated verbatim with the harness behavior and timeout', () => {
+  const prompt = buildWavePrompt(PROMPT_WAVE, VERIFY_CTX);
+  assert.ok(prompt.includes(`${VERIFICATION_HEADING}\n\n`), 'section present');
+  assert.ok(prompt.includes('```\nnpm test\n```'), 'command fenced verbatim');
+  assert.ok(prompt.includes('runs it after the wave'), 'states the harness runs it');
+  assert.ok(prompt.includes('non-zero exit as a failed attempt'));
+  assert.ok(prompt.includes('1800 seconds'), 'timeout shown');
+});
+
+test('buildWavePrompt — AC#5 a wave with no Verify: says none is declared', () => {
+  for (const ctx of [PROMPT_CTX, { ...VERIFY_CTX, waveVerify: { 2: 'npm test' } }, { ...VERIFY_CTX, waveVerify: null }]) {
+    const prompt = buildWavePrompt(PROMPT_WAVE, ctx);
+    assert.ok(prompt.includes(`${VERIFICATION_HEADING}\n\nNo \`Verify:\` command is declared for Wave 1.`));
+    assert.ok(!prompt.includes('seconds'), 'no timeout when nothing runs');
+  }
+});
+
+test('buildWavePrompt — AC#7 a command containing backticks gets a longer fence', () => {
+  const command = 'echo ```` && true';
+  const prompt = buildWavePrompt(PROMPT_WAVE, { ...VERIFY_CTX, waveVerify: { 1: command } });
+  assert.ok(prompt.includes(`\`\`\`\`\`\n${command}\n\`\`\`\`\``), 'fence is 5 backticks, one more than the longest run');
+});
+
+test('buildWavePrompt — AC#5/AC#7 Verification precedes prior-failure and leaves it and operator context unchanged', () => {
+  const priorFailure = { attempt: 1, outcome: 'fail-tests', excerpt: 'boom' };
+  const operatorContext = { context: 'go ahead', stop: OPERATOR_STOP };
+  const withAll = buildWavePrompt(PROMPT_WAVE, { ...VERIFY_CTX, priorFailure, operatorContext });
+  const verifyAt = withAll.indexOf(VERIFICATION_HEADING);
+  const failureAt = withAll.indexOf('## Prior Attempt Failure');
+  const operatorAt = withAll.indexOf(OPERATOR_HEADING);
+  assert.ok(verifyAt > 0 && verifyAt < failureAt && failureAt < operatorAt, 'order: Verification, prior failure, operator context');
+
+  // The tail from the prior-failure section onward does not depend on the
+  // Verification section: it is identical with and without a Verify: command.
+  const baseline = buildWavePrompt(PROMPT_WAVE, { ...PROMPT_CTX, priorFailure, operatorContext });
+  const tailFrom = (text) => text.slice(text.indexOf('## Prior Attempt Failure'));
+  assert.equal(tailFrom(withAll), tailFrom(baseline));
+});

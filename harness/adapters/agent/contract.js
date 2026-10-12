@@ -144,6 +144,35 @@ function renderOperatorContext(operatorContext) {
   return `\n${OPERATOR_CONTEXT_HEADING}\n\n${body}\n`;
 }
 
+/** The label opening the section that announces the wave's Verify: check. */
+const VERIFICATION_HEADING = '## Verification';
+
+/**
+ * Render the `## Verification` section: what the harness runs after the wave.
+ *
+ * Owns its surrounding blank lines (like the other optional sections) and sits
+ * BEFORE the volatile prior-failure block so a retry still extends the same
+ * prefix up to that block. The command is carried verbatim inside a fence longer
+ * than any backtick run it contains.
+ *
+ * @param {string|undefined} waveVerify - the wave's `Verify:` command, if any
+ * @param {number|string} waveNumber
+ * @param {number} timeoutSeconds - the timeout check-verify.sh will enforce
+ * @returns {string}
+ */
+function renderVerification(waveVerify, waveNumber, timeoutSeconds) {
+  if (typeof waveVerify !== 'string' || waveVerify.trim() === '') {
+    return `\n${VERIFICATION_HEADING}\n\nNo \`Verify:\` command is declared for Wave ${waveNumber}.\n`;
+  }
+  const fence = fenceFor(waveVerify);
+  const body = [
+    `Wave ${waveNumber} declares this \`Verify:\` command (verbatim):`,
+    `${fence}\n${waveVerify}\n${fence}`,
+    `The harness runs it after the wave and treats a non-zero exit as a failed attempt. It times out after ${timeoutSeconds} seconds.`,
+  ].join('\n\n');
+  return `\n${VERIFICATION_HEADING}\n\n${body}\n`;
+}
+
 /**
  * Build the wave prompt string from plan state. This function is the single
  * source of the wave prompt template that `rad deliver` sends to the agent.
@@ -164,6 +193,8 @@ export function buildWavePrompt(wave, planCtx) {
     acceptanceCriteria = [],
     priorFailure = null,
     operatorContext = null,
+    waveVerify = {},
+    verifyTimeoutSeconds,
   } = planCtx;
 
   const { doNotTouch = [], keyFiles = [], reminders = [] } = executionNotes;
@@ -191,6 +222,12 @@ export function buildWavePrompt(wave, planCtx) {
   // '' when the run was not resumed with operator input — same byte-for-byte
   // guarantee as priorFailureBlock (AC#7).
   const operatorContextBlock = renderOperatorContext(operatorContext);
+
+  const verificationBlock = renderVerification(
+    waveVerify?.[waveNumber],
+    waveNumber,
+    verifyTimeoutSeconds,
+  );
 
   const acBlock = acceptanceCriteria.length
     ? acceptanceCriteria.map((ac, i) => `- AC#${i + 1}: ${ac}`).join('\n')
@@ -228,7 +265,7 @@ ${keyFilesBlock}
 
 ### Reminders
 ${remindersBlock}
-${priorFailureBlock}${operatorContextBlock}
+${verificationBlock}${priorFailureBlock}${operatorContextBlock}
 ## Guardrail Extensions
 
 Before writing any code, complete this protocol:
