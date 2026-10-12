@@ -1,7 +1,8 @@
 # Plan: Missing Last-Wave Verify Is an Approval Blocker (#236)
 Created: 2026-10-12
 Author: architect
-Status: in-progress
+Status: complete
+Completed-At: 2026-10-12T18:32:17.796Z
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-10-12T18:08:31.488Z
 Recorded-By: sean@torchcodelab.com
