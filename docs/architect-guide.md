@@ -337,3 +337,7 @@ git commit -m "docs: update AGENTS.md — [what changed]"
 
 Do a full `AGENTS.md` review monthly or after any significant refactor.
 See `docs/maintaining-claude-md.md` for the review checklist.
+
+## Rationale and decisions
+
+RAD's own architecture decisions, testing standards and known constraints are recorded in [`rad-decisions.md`](rad-decisions.md).
