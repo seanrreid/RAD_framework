@@ -1166,7 +1166,9 @@ Both are *opt-in*: absent, the spine behaves exactly as before.
   exceeded the budget. The stop is a normal structured terminal — not a throw:
   `rad deliver` exits 1 and prints `stopped=token-budget spent=<n> budget=<n>`, and a
   `wave-failed` event with `reason: token-budget` is recorded. Unset, `0`, or
-  non-numeric values leave the breaker disabled (no behavior change). Waves whose
+  non-numeric values leave the breaker disabled (no behavior change), and `rad deliver`
+  writes one line to stderr at start saying no token cap applies and naming
+  `RAD_TOKEN_BUDGET` (informational; it never blocks). Waves whose
   adapter emits no usage contribute `0`, so the breaker never trips spuriously.
 
   ```bash

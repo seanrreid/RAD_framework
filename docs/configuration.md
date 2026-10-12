@@ -284,6 +284,10 @@ RAD_TOKEN_BUDGET: <positive integer>          # per-deliver cumulative token cei
 RAD_MAX_FAILED_ATTEMPTS: <positive integer>   # cumulative failed wave-attempt cap
 ```
 
+When `RAD_TOKEN_BUDGET` is unset or not a positive integer, `rad deliver` writes one
+line to stderr at start (before any wave) saying no token cap applies; the breaker
+itself is unchanged.
+
 `RAD_MAX_FAILED_ATTEMPTS` (opt-in) stops deliver with `failed-attempt-cap` once the
 non-success wave-attempts since the latest `deliver-stopped` reach it; a malformed
 value (non-numeric, zero, negative) is a hard error — **exit 2** before any event.
