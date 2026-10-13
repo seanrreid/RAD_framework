@@ -1,7 +1,10 @@
 # Plan: Refactor the Command and SDK Adapters Under the Function-Length Ratchet (#252, part 2 of 6)
 Created: 2026-10-13
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-10-13T13:54:51.060Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/refactor-command-sdk-adapters
 Adopted-From: #252 part 2 of 6 (refactor harness/adapters/agent/command.js and sdk.js; the issue stays open until all six plans land)
 Issue-Title: Refactor over-long core functions (runOneWave, createGitStateStore, deliverCommand, ...)
