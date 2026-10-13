@@ -1,7 +1,8 @@
 # Plan: Report Token Usage from claude -p, and Warn When a Budget Cannot Trip (#270)
 Created: 2026-10-13
 Author: architect
-Status: in-progress
+Status: complete
+Completed-At: 2026-10-13T19:42:20.139Z
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-10-13T19:23:30.405Z
 Recorded-By: sean@torchcodelab.com
