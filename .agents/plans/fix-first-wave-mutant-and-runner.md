@@ -1,7 +1,8 @@
 # Plan: Fix the First-Wave Approval Mutant and Make the Eval Runner Reject Crashing Mutants (#269)
 Created: 2026-10-13
 Author: architect
-Status: in-progress
+Status: complete
+Completed-At: 2026-10-13T18:54:12.609Z
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-10-13T18:38:11.635Z
 Recorded-By: sean@torchcodelab.com
