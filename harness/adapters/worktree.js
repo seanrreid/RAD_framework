@@ -5,6 +5,7 @@ import { join } from 'node:path';
 export const MARKER_NAME = '.rad-worktree.json';
 export const STATUS_ACTIVE = 'active';
 export const STATUS_PRESERVED = 'preserved';
+const SCRIPT = 'scripts/worktree-lifecycle.sh';
 
 /**
  * Worktree lifecycle adapter — an injectable port over scripts/worktree-lifecycle.sh.
@@ -28,58 +29,60 @@ export const STATUS_PRESERVED = 'preserved';
  * @returns {{ create(feature: string, branch: string): string, complete(feature: string, dir?: string): void, preserve(feature: string, dir?: string): void, reactivate(dir: string): string, readMarker(dir: string): Object|null }}
  */
 export function makeWorktreeLifecycle({ sh, now }) {
-  const SCRIPT = 'scripts/worktree-lifecycle.sh';
-
   // The injected clock is part of the port contract for any timestamp need; the
   // script stamps its own marker, so we don't pass `now` through today.
   void now;
 
-  function run(args) {
-    const result = sh(SCRIPT, args);
-    if (result.status !== 0) {
-      throw new Error(
-        `worktree-lifecycle ${args[0]} failed (status ${result.status}): ` +
-          `${result.stderr || result.stdout || 'no output'}`,
-      );
-    }
-    return result;
-  }
-
   return {
-    /** Create an isolated worktree for `feature` on `branch`; returns its path. */
-    create(feature, branch) {
-      const result = run(['create', feature, branch]);
-      // The script prints the resolved dir as the last line of stdout.
-      const lines = String(result.stdout).trim().split('\n');
-      return lines[lines.length - 1];
-    },
-
-    /** Tear down the feature's worktree (refused by the script unless marked). */
-    complete(feature, dir) {
-      run(withDir(['remove', feature], dir));
-    },
-
-    /** Keep the worktree in place, marking it preserved. */
-    preserve(feature, dir) {
-      run(withDir(['preserve', feature], dir));
-    },
-
-    /** Flip a preserved worktree's marker back to active; returns `dir`. */
-    reactivate(dir) {
-      const marker = readMarker(dir);
-      if (!marker) throw new Error(`cannot reactivate '${dir}' — no ${MARKER_NAME}`);
-      if (marker.status !== STATUS_PRESERVED) {
-        throw new Error(
-          `cannot reactivate '${dir}' — marker status is '${marker.status}', not '${STATUS_PRESERVED}'`,
-        );
-      }
-      const next = { ...marker, status: STATUS_ACTIVE };
-      writeFileSync(join(dir, MARKER_NAME), `${JSON.stringify(next, null, 2)}\n`);
-      return dir;
-    },
-
+    create: (feature, branch) => createWorktree(sh, feature, branch),
+    complete: (feature, dir) => completeWorktree(sh, feature, dir),
+    preserve: (feature, dir) => preserveWorktree(sh, feature, dir),
+    reactivate,
     readMarker,
   };
+}
+
+function run(sh, args) {
+  const result = sh(SCRIPT, args);
+  if (result.status !== 0) {
+    throw new Error(
+      `worktree-lifecycle ${args[0]} failed (status ${result.status}): ` +
+        `${result.stderr || result.stdout || 'no output'}`,
+    );
+  }
+  return result;
+}
+
+/** Create an isolated worktree for `feature` on `branch`; returns its path. */
+function createWorktree(sh, feature, branch) {
+  const result = run(sh, ['create', feature, branch]);
+  // The script prints the resolved dir as the last line of stdout.
+  const lines = String(result.stdout).trim().split('\n');
+  return lines[lines.length - 1];
+}
+
+/** Tear down the feature's worktree (refused by the script unless marked). */
+function completeWorktree(sh, feature, dir) {
+  run(sh, withDir(['remove', feature], dir));
+}
+
+/** Keep the worktree in place, marking it preserved. */
+function preserveWorktree(sh, feature, dir) {
+  run(sh, withDir(['preserve', feature], dir));
+}
+
+/** Flip a preserved worktree's marker back to active; returns `dir`. */
+function reactivate(dir) {
+  const marker = readMarker(dir);
+  if (!marker) throw new Error(`cannot reactivate '${dir}' — no ${MARKER_NAME}`);
+  if (marker.status !== STATUS_PRESERVED) {
+    throw new Error(
+      `cannot reactivate '${dir}' — marker status is '${marker.status}', not '${STATUS_PRESERVED}'`,
+    );
+  }
+  const next = { ...marker, status: STATUS_ACTIVE };
+  writeFileSync(join(dir, MARKER_NAME), `${JSON.stringify(next, null, 2)}\n`);
+  return dir;
 }
 
 /** Append the optional explicit worktree dir the script accepts as its last arg. */
