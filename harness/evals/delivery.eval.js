@@ -94,7 +94,7 @@ defineCases([
       assert.equal(fx.adversaryRan(), false, 'the agent ran despite the pre-wave veto');
     },
     // Regression lock for bug 2: before Wave 1 the CLI never wired the hook runner.
-    mutate: (root) => patchFile(root, 'harness/cli.js', '      runHooks,\n      pushGuard', '      pushGuard'),
+    mutate: (root) => patchFile(root, 'harness/cli.js', '    runHooks: run.runHooks,\n    pushGuard: true,', '    pushGuard: true,'),
   },
   {
     id: 'verify-hang',
