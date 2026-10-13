@@ -10,3 +10,4 @@
 {"feature":"source-provenance-stamp","type":"wave-started","actor":"harness","ts":"2026-10-13T13:32:18.928Z","data":{"wave":3,"attempt":1}}
 {"feature":"source-provenance-stamp","type":"wave-attempt","actor":"harness","ts":"2026-10-13T13:43:14.893Z","data":{"wave":3,"attempt":1,"outcome":"success","tasks":[{"title":"Skills and docs","status":"complete","commit":"591b4e7","concern":"—","error":"—"},{"title":"Regenerate","status":"complete","commit":"6cbbd02","concern":"—","error":"—"},{"title":"Full-suite check","status":"complete","commit":"—","concern":"—","error":"—"}],"verify":{"command":"exec bash scripts/verify-all.sh","status":0,"passed":true}}}
 {"feature":"source-provenance-stamp","type":"wave-complete","actor":"harness","ts":"2026-10-13T13:43:14.894Z","data":{"wave":3}}
+{"feature":"source-provenance-stamp","type":"pr-opened","actor":"harness","ts":"2026-10-13T13:43:24.701Z"}
