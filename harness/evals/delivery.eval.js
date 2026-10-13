@@ -55,6 +55,59 @@ function writeCrashingHook(fx) {
   return join(fx.base, 'hooks');
 }
 
+// --- Test-weakening guard (scripts/lib/test-integrity.sh) -------------------
+const LEGACY_TEST = 'tests/legacy.test.txt';
+const MOVED_TEST = 'tests/legacy-moved.txt';
+const LEGACY_SEED = { [LEGACY_TEST]: 'legacy check\n' };
+const CRASH_PATTERN = /ReferenceError|TypeError|SyntaxError|command not found|unbound variable/;
+const INTEGRITY_LIB = join('scripts', 'lib', 'test-integrity.sh');
+const VIOLATION_HEADER = 'Test integrity violation';
+const OUT_OF_SCOPE_HEADER = 'Out-of-scope changes';
+
+/** The default plan plus a legacy-test scope row (and any extra rows / waiver bullets). */
+function legacyTestPlan(feature, { extraRows = [], waiver = '' } = {}) {
+  const rows = [LEGACY_TEST, ...extraRows].map((f) => `| ${f} | 1-5 | Modify |`).join('\n');
+  const withRows = defaultPlan(feature).replace(
+    '| src/feature.txt | 1-5 | Create the feature file |', `| src/feature.txt | 1-5 | Create the feature file |\n${rows}`);
+  return waiver ? `${withRows}\n## Waivers\n\n- test-removal:${waiver}: eval fixture retires this test\n` : withRows;
+}
+
+const writeIntegrityStub = (root, body) => writeFileSync(join(root, INTEGRITY_LIB), `#!/usr/bin/env bash\n${body}\n`);
+const disableIntegrityGuard = (root) => writeIntegrityStub(root, 'test_integrity_violations() { return 0; }');
+const flagEveryTest = (root) => writeIntegrityStub(root,
+  `test_integrity_violations() { printf '%s — deleted\\n' '${LEGACY_TEST}'; return 0; }`);
+
+/** Deliver, then run the fixture's own check-scope.sh on the resulting branch. */
+function deliverThenScopeCheck(fx) {
+  const deliver = fx.deliver();
+  assert.doesNotMatch(deliver.stderr, CRASH_PATTERN, `deliver crashed: ${deliver.stderr}`);
+  const scope = fx.run('bash', ['scripts/check-scope.sh', `.agents/plans/${FEATURE}.md`, `rad/${FEATURE}`, 'main']);
+  assert.doesNotMatch(scope.stderr, CRASH_PATTERN, `check-scope crashed: ${scope.stderr}`);
+  return { ...deliver, scope, scopeOutput: scope.stdout + scope.stderr };
+}
+
+function assertGuardAloneObjected(fx, result) {
+  assert.equal(result.status, EXIT_FAILED, `deliver exit ${result.status}: ${result.stderr}`);
+  assert.equal(attemptOutcomes(result.events).at(-1), 'fail-scope', `outcomes ${attemptOutcomes(result.events)}`);
+  assert.equal(typesOf(result.events).includes('wave-complete'), false, `wave-complete on a blocked run: ${typesOf(result.events)}`);
+  assert.ok(typesOf(result.events).includes('approved'), 'the plan was not approved');
+  assert.ok(fx.adversaryRan(), 'the adversary did not run');
+  assert.equal(result.scope.status, 1, `check-scope exit ${result.scope.status}: ${result.scopeOutput}`);
+  assert.ok(result.scopeOutput.includes(VIOLATION_HEADER), `no integrity violation: ${result.scopeOutput}`);
+  assert.ok(result.scopeOutput.includes(LEGACY_TEST), `violation does not name ${LEGACY_TEST}: ${result.scopeOutput}`);
+  assert.equal(result.scopeOutput.includes(OUT_OF_SCOPE_HEADER), false, `scope also objected: ${result.scopeOutput}`);
+}
+
+const blockedCase = (id, adversary, extraRows = []) => ({
+  id,
+  invariant: 'test-weakening-blocked',
+  adversary,
+  fixture: { plan: legacyTestPlan(FEATURE, { extraRows }), seedFiles: LEGACY_SEED },
+  act: deliverThenScopeCheck,
+  assert: assertGuardAloneObjected,
+  mutate: disableIntegrityGuard,
+});
+
 defineCases([
   {
     id: 'deliver-in-scope-advances',
@@ -194,5 +247,24 @@ defineCases([
     // No command refusal → the constrained wave runs unrestricted (silent over-grant).
     mutate: (root) => patchFile(root, 'harness/cli.js',
       'const refusal = commandRefusal(resolved.byWave);', 'const refusal = null;'),
+  },
+  blockedCase('test-deleted-blocked', 'delete-test'),
+  blockedCase('test-renamed-blocked', 'rename-test', [MOVED_TEST]),
+  blockedCase('test-skip-marker-blocked', 'skip-test'),
+  {
+    id: 'test-removal-waived-advances',
+    invariant: 'test-weakening-blocked',
+    adversary: 'delete-test',
+    fixture: { plan: legacyTestPlan(FEATURE, { waiver: LEGACY_TEST }), seedFiles: LEGACY_SEED },
+    act: deliverThenScopeCheck,
+    assert: (fx, result) => {
+      assert.equal(result.status, 0, `deliver exit ${result.status}: ${result.stderr}`);
+      assert.ok(typesOf(result.events).includes('wave-complete'), `no wave-complete in ${typesOf(result.events)}`);
+      assert.ok(typesOf(result.events).includes('approved'), 'the plan was not approved');
+      assert.ok(fx.adversaryRan(), 'the adversary did not run');
+      assert.equal(result.scope.status, 0, `check-scope exit ${result.scope.status}: ${result.scopeOutput}`);
+    },
+    // A guard that ignores the waiver reports the waived path anyway.
+    mutate: flagEveryTest,
   },
 ]);
