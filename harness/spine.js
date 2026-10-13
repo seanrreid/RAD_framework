@@ -690,6 +690,126 @@ function waveForAgent(wave, waveTasks) {
   return { ...wave, type: entry.type, tasks: entry.tasks };
 }
 
+/** Token-budget breaker: stops BEFORE any further model work when spent >= budget. */
+function tokenBudgetStop(wave, loop) {
+  const { state, feature, now, tokenBudget, stopCtx } = loop;
+  if (!(tokenBudget > 0 && loop.spent >= tokenBudget)) return null;
+  state.append({
+    feature,
+    type: 'wave-failed',
+    actor: 'harness',
+    ts: now(),
+    data: { wave: wave.n, reason: 'token-budget', spent: loop.spent, budget: tokenBudget },
+  });
+  return stopRun({ stopped: 'token-budget', ok: false, wave: wave.n, spent: loop.spent, budget: tokenBudget }, stopCtx);
+}
+
+/** Resume verify: on a resumed run, once before the first non-skipped wave. */
+function resumeVerifyStop(loop) {
+  const { sh, feature, testsByWave, waves, completed, stopCtx } = loop;
+  if (completed.size === 0 || loop.resumeVerified) return null;
+  loop.resumeVerified = true; // run exactly once, before the first non-skipped wave
+  const promised =
+    testsByWave == null ? null : promisedUnion(testsByWave, waves, (n) => completed.has(n));
+  const verify = presenceGate({ sh, feature, testsByWave, promised });
+  return verify.status !== 0 ? stopRun({ stopped: 'resume-verify', ok: false }, stopCtx) : null;
+}
+
+/** ── Orphan convergence (#119): an attempt whose process died mid-agent left
+ * a `wave-started` with no `wave-attempt`. Surface it to the operator via
+ * the matrix before any new attempt runs. Its token spend was never
+ * recorded, so the budget breaker under-counts it — that is unrecoverable. ── */
+function orphanStop(wave, loop) {
+  const { history, matrix, state, feature, now, runHooks, stopCtx } = loop;
+  const orphaned = convergeOrphans({ history, wave, matrix, state, feature, now, runHooks });
+  return orphaned ? stopRun(orphaned, stopCtx) : null;
+}
+
+/** Stages that must pass before any attempt of `wave`, in order: approval
+ * re-check, token budget, resume verify, orphan convergence. Returns the stopRun
+ * result of a stop, or null. */
+async function preWaveStop(wave, loop) {
+  const { state, feature, approvalIntact, stopCtx } = loop;
+  // Approval re-check fires before EVERY wave — the run's first included —
+  // ahead of the budget check and any wave-started: an edited (or
+  // un-approved) plan must stop before any agent runs. #151 exempted the
+  // first wave on the premise that the entry gate covered it, but the gate
+  // fold ignores the plan fingerprint, so only this check catches an edit
+  // made after approval (#77).
+  const reason = await approvalChangeReason({ state, feature, approvalIntact });
+  if (reason) {
+    return stopRun({ stopped: 'approval-changed', ok: false, wave: wave.n, reason }, stopCtx);
+  }
+  // Budget check fires before running THIS wave (and before resume-verify) so
+  // an over-budget run stops without doing any further model work.
+  return tokenBudgetStop(wave, loop) ?? resumeVerifyStop(loop) ?? orphanStop(wave, loop);
+}
+
+/** ── Failed-attempt cap (#77): checked before the pre-wave hooks and any
+ * wave-started, so a capped run does no further agent work. ── */
+function attemptCapStop(wave, loop) {
+  const { maxFailedAttempts, stopCtx } = loop;
+  if (!(capEnabled(maxFailedAttempts) && loop.failedAttempts >= maxFailedAttempts)) return null;
+  return stopRun(
+    { stopped: 'failed-attempt-cap', ok: false, wave: wave.n, failed: loop.failedAttempts, cap: maxFailedAttempts },
+    stopCtx,
+  );
+}
+
+/** ── Hook: pre-wave (veto-capable point). Fired BEFORE runWave. A veto here
+ * aborts the wave without running the agent: route the veto outcome through
+ * the existing matrix and terminate the same way an agent-emitted outcome
+ * would. The veto outcome is validated against the frozen vocabulary first
+ * (fail-closed → 'abort-user') so an unknown token never reaches the matrix.
+ * First-veto-wins is enforced in the runner. ── */
+function preWaveVetoStop(wave, loop) {
+  const { state, feature, now, matrix, runHooks, stopCtx } = loop;
+  const preVeto = fireHooks(
+    runHooks,
+    'pre-wave',
+    { feature, wave: wave.n, outcome: null },
+    { state, feature, now },
+  ).veto;
+  if (!preVeto) return null;
+  const vetoOutcome = safeVetoOutcome(preVeto.outcome);
+  const provenance = { point: 'pre-wave', hook: preVeto.hook, outcome: vetoOutcome, source: 'hook' };
+  state.append({ feature, type: 'hook-veto', actor: 'harness', ts: now(), data: provenance });
+  const { action } = resolveOutcome('implement', vetoOutcome, matrix);
+  state.append({
+    feature,
+    type: 'wave-failed',
+    actor: 'harness',
+    ts: now(),
+    data: { wave: wave.n, action, outcome: vetoOutcome, source: 'hook', point: 'pre-wave', hook: preVeto.hook },
+  });
+  return stopRun(
+    { stopped: 'hook-veto', ok: false, wave: wave.n, action, outcome: vetoOutcome, point: 'pre-wave', hook: preVeto.hook },
+    stopCtx,
+  );
+}
+
+/** Record wave-started, run the agent between the two push-guard tip reads and
+ * record an unavailable tip. Returns { result, tipBefore, tipAfter }. */
+async function invokeWave(wave, loop, attempt, priorFailure) {
+  const { state, feature, now, runWave, sh, waveModels, waveCapabilities, resume, pushGuard, waveTasks } = loop;
+  appendWaveStarted({ state, feature, now, wave, attempt, waveModels, waveCapabilities });
+
+  // ADDITIVE second argument: attempt context. A runWave that ignores it is
+  // unchanged; one that reads it can make attempt N+1 differ from attempt N.
+  const attemptCtx = { attempt, priorFailure };
+  if (loop.operatorContextPending) {
+    attemptCtx.operatorContext = { context: resume.context, stop: resume.stop };
+    loop.operatorContextPending = false;
+  }
+  const tipBefore = pushGuard ? sh(PUSH_GUARD_SCRIPT, feature) : null;
+  const result = await runWave(waveForAgent(wave, waveTasks), attemptCtx);
+  const tipAfter = pushGuard ? sh(PUSH_GUARD_SCRIPT, feature) : null;
+  if (pushGuard) {
+    recordPushCheckUnavailable({ state, feature, now, wave, attempt, before: tipBefore, after: tipAfter });
+  }
+  return { result, tipBefore, tipAfter };
+}
+
 /**
  * Run ONE wave (a plan wave, or the synthetic end-of-run test wave) through the
  * per-wave body: approval re-check, token budget, resume verify, orphan
@@ -701,51 +821,12 @@ function waveForAgent(wave, waveTasks) {
  */
 async function runOneWave(wave, loop) {
   const {
-    state, feature, now, matrix, runWave, sh, maxAttempts, tokenBudget, waveVerify, waveModels,
-    waveCapabilities, runHooks, approvalIntact, maxFailedAttempts, resume, pushGuard, testsByWave,
-    waveTasks, waves, completed, history, stopCtx,
+    state, feature, now, matrix, sh, maxAttempts, waveVerify, runHooks, pushGuard, testsByWave,
+    waves, history, stopCtx,
   } = loop;
 
-  // Approval re-check fires before EVERY wave — the run's first included —
-  // ahead of the budget check and any wave-started: an edited (or
-  // un-approved) plan must stop before any agent runs. #151 exempted the
-  // first wave on the premise that the entry gate covered it, but the gate
-  // fold ignores the plan fingerprint, so only this check catches an edit
-  // made after approval (#77).
-  const reason = await approvalChangeReason({ state, feature, approvalIntact });
-  if (reason) {
-    return stopRun({ stopped: 'approval-changed', ok: false, wave: wave.n, reason }, stopCtx);
-  }
-
-  // Budget check fires before running THIS wave (and before resume-verify) so
-  // an over-budget run stops without doing any further model work.
-  if (tokenBudget > 0 && loop.spent >= tokenBudget) {
-    state.append({
-      feature,
-      type: 'wave-failed',
-      actor: 'harness',
-      ts: now(),
-      data: { wave: wave.n, reason: 'token-budget', spent: loop.spent, budget: tokenBudget },
-    });
-    return stopRun({ stopped: 'token-budget', ok: false, wave: wave.n, spent: loop.spent, budget: tokenBudget }, stopCtx);
-  }
-
-  if (completed.size > 0 && !loop.resumeVerified) {
-    loop.resumeVerified = true; // run exactly once, before the first non-skipped wave
-    const promised =
-      testsByWave == null ? null : promisedUnion(testsByWave, waves, (n) => completed.has(n));
-    const verify = presenceGate({ sh, feature, testsByWave, promised });
-    if (verify.status !== 0) {
-      return stopRun({ stopped: 'resume-verify', ok: false }, stopCtx);
-    }
-  }
-
-  // ── Orphan convergence (#119): an attempt whose process died mid-agent left
-  // a `wave-started` with no `wave-attempt`. Surface it to the operator via
-  // the matrix before any new attempt runs. Its token spend was never
-  // recorded, so the budget breaker under-counts it — that is unrecoverable. ──
-  const orphaned = convergeOrphans({ history, wave, matrix, state, feature, now, runHooks });
-  if (orphaned) return stopRun(orphaned, stopCtx);
+  const preStop = await preWaveStop(wave, loop);
+  if (preStop) return preStop;
 
   // ── Resume seeding (#119): continue the attempt budget and the doom-loop
   // fingerprint from attempts recorded since the wave's last terminal
@@ -761,60 +842,9 @@ async function runOneWave(wave, loop) {
   let priorFailure = null;
 
   for (let attempt = prior.attempts + 1; attempt <= maxAttempts; attempt += 1) {
-    // ── Failed-attempt cap (#77): checked before the pre-wave hooks and any
-    // wave-started, so a capped run does no further agent work. ──
-    if (capEnabled(maxFailedAttempts) && loop.failedAttempts >= maxFailedAttempts) {
-      return stopRun(
-        { stopped: 'failed-attempt-cap', ok: false, wave: wave.n, failed: loop.failedAttempts, cap: maxFailedAttempts },
-        stopCtx,
-      );
-    }
-
-    // ── Hook: pre-wave (veto-capable point). Fired BEFORE runWave. A veto here
-    // aborts the wave without running the agent: route the veto outcome through
-    // the existing matrix and terminate the same way an agent-emitted outcome
-    // would. The veto outcome is validated against the frozen vocabulary first
-    // (fail-closed → 'abort-user') so an unknown token never reaches the matrix.
-    // First-veto-wins is enforced in the runner. ──
-    const preVeto = fireHooks(
-      runHooks,
-      'pre-wave',
-      { feature, wave: wave.n, outcome: null },
-      { state, feature, now },
-    ).veto;
-    if (preVeto) {
-      const vetoOutcome = safeVetoOutcome(preVeto.outcome);
-      const provenance = { point: 'pre-wave', hook: preVeto.hook, outcome: vetoOutcome, source: 'hook' };
-      state.append({ feature, type: 'hook-veto', actor: 'harness', ts: now(), data: provenance });
-      const { action } = resolveOutcome('implement', vetoOutcome, matrix);
-      state.append({
-        feature,
-        type: 'wave-failed',
-        actor: 'harness',
-        ts: now(),
-        data: { wave: wave.n, action, outcome: vetoOutcome, source: 'hook', point: 'pre-wave', hook: preVeto.hook },
-      });
-      return stopRun(
-        { stopped: 'hook-veto', ok: false, wave: wave.n, action, outcome: vetoOutcome, point: 'pre-wave', hook: preVeto.hook },
-        stopCtx,
-      );
-    }
-
-    appendWaveStarted({ state, feature, now, wave, attempt, waveModels, waveCapabilities });
-
-    // ADDITIVE second argument: attempt context. A runWave that ignores it is
-    // unchanged; one that reads it can make attempt N+1 differ from attempt N.
-    const attemptCtx = { attempt, priorFailure };
-    if (loop.operatorContextPending) {
-      attemptCtx.operatorContext = { context: resume.context, stop: resume.stop };
-      loop.operatorContextPending = false;
-    }
-    const tipBefore = pushGuard ? sh(PUSH_GUARD_SCRIPT, feature) : null;
-    const result = await runWave(waveForAgent(wave, waveTasks), attemptCtx);
-    const tipAfter = pushGuard ? sh(PUSH_GUARD_SCRIPT, feature) : null;
-    if (pushGuard) {
-      recordPushCheckUnavailable({ state, feature, now, wave, attempt, before: tipBefore, after: tipAfter });
-    }
+    const attemptStop = attemptCapStop(wave, loop) ?? preWaveVetoStop(wave, loop);
+    if (attemptStop) return attemptStop;
+    const { result, tipBefore, tipAfter } = await invokeWave(wave, loop, attempt, priorFailure);
 
     // ── Hook: post-wave (veto-capable point). Fired after the wave result,
     // before the per-wave test-presence gate. A veto here REPLACES the wave's
