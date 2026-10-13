@@ -1,0 +1,7 @@
+{"feature":"switch-agent-to-usage-wrapper","type":"approved","actor":"sean@torchcodelab.com","role":"architect","ts":"2026-10-13T19:55:32.323Z","recordedBy":"sean@torchcodelab.com","data":{"fingerprint":"78ad2db6b9f5a9409df4ed06aaf416f238e146568a444b7333b9af8c34ecb19b"}}
+{"feature":"switch-agent-to-usage-wrapper","type":"deliver-started","actor":"harness","ts":"2026-10-13T19:55:48.550Z"}
+{"feature":"switch-agent-to-usage-wrapper","type":"run-prepared","actor":"harness","ts":"2026-10-13T19:55:55.302Z","data":{"base":"main","merged":false,"fastForwarded":false,"committed":true,"pushed":true}}
+{"feature":"switch-agent-to-usage-wrapper","type":"wave-started","actor":"harness","ts":"2026-10-13T19:55:55.310Z","data":{"wave":1,"attempt":1}}
+{"feature":"switch-agent-to-usage-wrapper","type":"wave-attempt","actor":"harness","ts":"2026-10-13T20:16:34.433Z","data":{"wave":1,"attempt":1,"outcome":"success","tasks":[{"title":"Change the agent command","status":"complete","commit":"6421760","concern":"—","error":"—"},{"title":"Full-suite check","status":"complete","commit":"—","concern":"—","error":"—"}],"verify":{"command":"exec bash scripts/verify-all.sh","status":0,"passed":true}}}
+{"feature":"switch-agent-to-usage-wrapper","type":"wave-complete","actor":"harness","ts":"2026-10-13T20:16:34.438Z","data":{"wave":1}}
+{"feature":"switch-agent-to-usage-wrapper","type":"pr-opened","actor":"harness","ts":"2026-10-13T20:16:46.747Z"}

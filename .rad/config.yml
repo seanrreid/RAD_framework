@@ -3,9 +3,10 @@
 version: 1
 platform: github        # github | gitlab | bitbucket | forgejo | manual
 default_branch: main
+# command is the usage wrapper (scripts/claude-usage.mjs, reports token usage and cost to the harness); reverting to `claude -p` removes usage reporting
 agent:
   adapter: command
-  command: claude -p
+  command: node scripts/claude-usage.mjs
 roles:
   architect:
     - sean@torchcodelab.com
