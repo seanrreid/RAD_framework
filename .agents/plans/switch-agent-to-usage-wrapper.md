@@ -1,7 +1,8 @@
 # Plan: Switch This Repository's Agent Command to the Usage Wrapper (#270)
 Created: 2026-10-13
 Author: architect
-Status: in-progress
+Status: complete
+Completed-At: 2026-10-13T20:16:34.679Z
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-10-13T19:55:32.323Z
 Recorded-By: sean@torchcodelab.com
