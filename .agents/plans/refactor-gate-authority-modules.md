@@ -1,7 +1,7 @@
 # Plan: Refactor the Gate, Transition, Hook and Worktree Modules Under the Ratchet (#252, part 4 of 6)
 Created: 2026-10-13
 Author: architect
-Status: approved
+Status: in-progress
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-10-13T14:49:52.228Z
 Recorded-By: sean@torchcodelab.com
