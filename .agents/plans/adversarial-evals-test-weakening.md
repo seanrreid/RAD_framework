@@ -1,7 +1,10 @@
 # Plan: Adversarial Evals for the Test-Weakening Guard
 Created: 2026-10-13
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-10-13T18:11:12.007Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/adversarial-evals-test-weakening
 Adopted-From: #242 trigger sweep, decision 3 (add an adversarial eval for the test-weakening guard now; #242 stays open for the false-positive question)
 Issue-Title: Revisit: is the test-weakening guard catching real cases without false positives?
