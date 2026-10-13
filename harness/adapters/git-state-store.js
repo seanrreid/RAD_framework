@@ -243,6 +243,96 @@ function parsePlan(text) {
 }
 
 /**
+ * Per-store context threaded through the hoisted operations. `evaluateGate` is
+ * the cached gate evaluator (injected, or resolved lazily at most once).
+ *
+ * @typedef {{ repoRoot: string, sh: typeof defaultSh, roleConfigRoot: string, evaluateGate?: Function }} StoreContext
+ */
+
+/** Read + parse a feature's event log (crash-tolerant). */
+function readHistory(ctx, feature) {
+  assertSafeFeature(feature);
+  return readEvents(eventsPath(ctx.repoRoot, feature));
+}
+
+/**
+ * Append one event. Validates the transition against the current state
+ * (derived by reduce over existing history) BEFORE writing — an illegal move
+ * throws TransitionError and nothing is written. Stamps `ts` if absent, but
+ * accepts a caller-injected `ts` (the store never overrides one the caller
+ * passed).
+ */
+function appendEvent(ctx, event) {
+  if (!event || typeof event !== 'object') {
+    throw new TypeError('append(event): event must be an object');
+  }
+  const { feature } = event;
+  if (!feature) throw new Error('append(event): event.feature is required');
+  assertSafeFeature(feature);
+  if (!event.type) throw new Error('append(event): event.type is required');
+  if (!event.actor) throw new Error('append(event): event.actor is required');
+
+  const existing = readHistory(ctx, feature);
+  // reduce derives the current state; transition validation reads its history.
+  reduce(existing); // pure fold (also asserts the history shape)
+  // The hook lifecycle events (hook-observed / hook-veto / hook-failed) are
+  // in-progress observations recorded alongside wave events. They carry a
+  // provenance payload on `event.data` ({ point, hook, outcome, source:'hook' })
+  // and are permitted exactly like wave-attempt/wave-failed — validateTransition
+  // gates illegal MOVES (post-terminal, duplicate approval, …), not a type
+  // allowlist, so these three pass while no other event is loosened.
+  validateTransition(event, { history: existing });
+
+  // Only reached on a legal transition — now safe to persist.
+  const stamped = { ...event, ts: event.ts ?? new Date().toISOString() };
+
+  const file = eventsPath(ctx.repoRoot, feature);
+  mkdirSync(dirname(file), { recursive: true });
+  appendFileSync(file, JSON.stringify(stamped) + '\n', 'utf8');
+}
+
+/** Derived current phase (pure fold over the log). */
+function phaseFor(ctx, feature) {
+  return phaseOf(readHistory(ctx, feature));
+}
+
+/** Parse the feature's plan doc structured sections, or null if none. */
+function readPlan(ctx, feature) {
+  assertSafeFeature(feature);
+  const file = planPath(ctx.repoRoot, feature);
+  if (!existsSync(file)) return null;
+  return parsePlan(readFileSync(file, 'utf8'));
+}
+
+/**
+ * Evaluate a named gate. Delegates the predicate to evaluateGate() over the
+ * event history — a pure fold over the frozen event log. No shell-outs are
+ * performed here; all authority (role verification) is established at
+ * WRITE-TIME by recordApproval (which calls check-role.sh and freezes the
+ * verified role into the event). Gate evaluation reads only what is already
+ * frozen in the log.
+ *
+ * TRANSITIONAL NOTE — doc-Status authority (check-plan-approved.sh):
+ *   The branch-tip doc-Status check (scripts/check-plan-approved.sh) is a
+ *   complementary guardrail that was previously performed here at read-time.
+ *   It is now run by the Claude deliver-gate hook
+ *   (scripts/deliver-gate-hook.mjs) before /team:rad-deliver. It must NOT be
+ *   re-introduced into this function; doing so would couple the pure gate
+ *   fold to external filesystem/git state.
+ *
+ * Async: the gate-rule evaluator is loaded lazily (it pulls in the YAML
+ * policy parser), so callers `await state.gate(...)`. The dynamic import only
+ * happens the first time a gate is evaluated on a store without an injected
+ * `evaluateGate`.
+ */
+async function evaluateNamedGate(ctx, feature, name) {
+  if (!ctx.evaluateGate) {
+    ({ evaluateGate: ctx.evaluateGate } = await import('../gates.js'));
+  }
+  return ctx.evaluateGate(name, readHistory(ctx, feature));
+}
+
+/**
  * Create a Git StateStore.
  *
  * @param {{ repoRoot: string, sh?: typeof defaultSh, configRoot?: string }} opts
@@ -262,98 +352,13 @@ export function createGitStateStore({
   evaluateGate,
 } = {}) {
   if (!repoRoot) throw new Error('createGitStateStore: repoRoot is required');
-  const roleConfigRoot = configRoot ?? repoRoot;
-
-  // Resolve the gate evaluator lazily so the store loads without js-yaml: the
-  // dynamic import of gates.js (which pulls in js-yaml, the one runtime dep)
-  // only happens the first time gate() is actually called. Injectable (the
-  // `evaluateGate` option) for tests that exercise gate() without the dep.
-  let cachedEvaluateGate = evaluateGate;
-  async function resolveEvaluateGate() {
-    if (!cachedEvaluateGate) {
-      ({ evaluateGate: cachedEvaluateGate } = await import('../gates.js'));
-    }
-    return cachedEvaluateGate;
-  }
-
-  /** Read + parse a feature's event log (crash-tolerant). */
-  function history(feature) {
-    assertSafeFeature(feature);
-    return readEvents(eventsPath(repoRoot, feature));
-  }
-
-  /**
-   * Append one event. Validates the transition against the current state
-   * (derived by reduce over existing history) BEFORE writing — an illegal move
-   * throws TransitionError and nothing is written. Stamps `ts` if absent, but
-   * accepts a caller-injected `ts` (the store never overrides one the caller
-   * passed).
-   */
-  function append(event) {
-    if (!event || typeof event !== 'object') {
-      throw new TypeError('append(event): event must be an object');
-    }
-    const { feature } = event;
-    if (!feature) throw new Error('append(event): event.feature is required');
-    assertSafeFeature(feature);
-    if (!event.type) throw new Error('append(event): event.type is required');
-    if (!event.actor) throw new Error('append(event): event.actor is required');
-
-    const existing = history(feature);
-    // reduce derives the current state; transition validation reads its history.
-    reduce(existing); // pure fold (also asserts the history shape)
-    // The hook lifecycle events (hook-observed / hook-veto / hook-failed) are
-    // in-progress observations recorded alongside wave events. They carry a
-    // provenance payload on `event.data` ({ point, hook, outcome, source:'hook' })
-    // and are permitted exactly like wave-attempt/wave-failed — validateTransition
-    // gates illegal MOVES (post-terminal, duplicate approval, …), not a type
-    // allowlist, so these three pass while no other event is loosened.
-    validateTransition(event, { history: existing });
-
-    // Only reached on a legal transition — now safe to persist.
-    const stamped = { ...event, ts: event.ts ?? new Date().toISOString() };
-
-    const file = eventsPath(repoRoot, feature);
-    mkdirSync(dirname(file), { recursive: true });
-    appendFileSync(file, JSON.stringify(stamped) + '\n', 'utf8');
-  }
-
-  /** Derived current phase (pure fold over the log). */
-  function phase(feature) {
-    return phaseOf(history(feature));
-  }
-
-  /** Parse the feature's plan doc structured sections, or null if none. */
-  function plan(feature) {
-    assertSafeFeature(feature);
-    const file = planPath(repoRoot, feature);
-    if (!existsSync(file)) return null;
-    return parsePlan(readFileSync(file, 'utf8'));
-  }
-
-  /**
-   * Evaluate a named gate. Delegates the predicate to evaluateGate() over the
-   * event history — a pure fold over the frozen event log. No shell-outs are
-   * performed here; all authority (role verification) is established at
-   * WRITE-TIME by recordApproval (which calls check-role.sh and freezes the
-   * verified role into the event). Gate evaluation reads only what is already
-   * frozen in the log.
-   *
-   * TRANSITIONAL NOTE — doc-Status authority (check-plan-approved.sh):
-   *   The branch-tip doc-Status check (scripts/check-plan-approved.sh) is a
-   *   complementary guardrail that was previously performed here at read-time.
-   *   It is now run by the Claude deliver-gate hook
-   *   (scripts/deliver-gate-hook.mjs) before /team:rad-deliver. It must NOT be
-   *   re-introduced into this function; doing so would couple the pure gate
-   *   fold to external filesystem/git state.
-   *
-   * Async: the gate-rule evaluator is loaded lazily (it pulls in the YAML
-   * policy parser), so callers `await state.gate(...)`.
-   */
-  async function gate(feature, name) {
-    const evaluate = await resolveEvaluateGate();
-    return evaluate(name, history(feature));
-  }
+  const ctx = { repoRoot, sh, roleConfigRoot: configRoot ?? repoRoot, evaluateGate };
+  const { roleConfigRoot } = ctx;
+  const history = (feature) => readHistory(ctx, feature);
+  const append = (event) => appendEvent(ctx, event);
+  const phase = (feature) => phaseFor(ctx, feature);
+  const plan = (feature) => readPlan(ctx, feature);
+  const gate = (feature, name) => evaluateNamedGate(ctx, feature, name);
 
   /**
    * Enumerate features that have an event log and/or a plan doc — no per-branch
