@@ -1,7 +1,7 @@
 # Plan: Refactor the Deliver Spine Under the Function-Length Ratchet (#252, part 6 of 6)
 Created: 2026-10-13
 Author: architect
-Status: approved
+Status: in-progress
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-10-13T16:04:14.416Z
 Recorded-By: sean@torchcodelab.com
