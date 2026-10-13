@@ -184,70 +184,51 @@ function renderVerification(waveVerify, waveNumber, timeoutSeconds) {
  *   resumes a stopped run — rendered verbatim after the prior-failure section
  * @returns {string}
  */
-export function buildWavePrompt(wave, planCtx) {
-  const {
-    feature,
-    branch,
-    executionLog,
-    executionNotes = {},
-    acceptanceCriteria = [],
-    priorFailure = null,
-    operatorContext = null,
-    waveVerify = {},
-    verifyTimeoutSeconds,
-  } = planCtx;
+const NO_ITEMS_PLACEHOLDER = '(none)';
+const NO_CRITERIA_PLACEHOLDER = '(see plan file)';
+const UNKNOWN_WAVE_NUMBER = '?';
 
-  const { doNotTouch = [], keyFiles = [], reminders = [] } = executionNotes;
-  const waveNumber = wave.n ?? wave.number ?? wave.id ?? '?';
-  const waveType = wave.type ?? 'sequential';
-  const tasks = wave.tasks ?? [];
+const GUARDRAIL_SECTION = `## Guardrail Extensions
 
-  const doNotTouchBlock = doNotTouch.length
-    ? doNotTouch.map((l) => `- ${l}`).join('\n')
-    : '(none)';
+Before writing any code, complete this protocol:
 
-  const keyFilesBlock = keyFiles.length
-    ? keyFiles.map((l) => `- ${l}`).join('\n')
-    : '(none)';
+1. List the file paths you expect to touch in this wave.
+2. Match each path against the "Applies When" clause of each file in \`ai/extensions/\` (frontend.md, backend.md, database.md, security.md, testing.md).
+3. Always load \`ai/guardrails.md\` as the baseline — no exceptions.
+4. Load only the domain extensions whose "Applies When" clause matches your changed paths or the task domain. When in doubt, include the extension.
+5. State the loaded extensions explicitly before writing any code.`;
 
-  const remindersBlock = reminders.length
-    ? reminders.map((l) => `- ${l}`).join('\n')
-    : '(none)';
+/** Bullet list with a `(none)` fallback for the Execution Notes blocks. */
+function renderBulletList(items) {
+  return items.length ? items.map((l) => `- ${l}`).join('\n') : NO_ITEMS_PLACEHOLDER;
+}
 
-  // '' on a first attempt (and for any caller that never sets priorFailure), so
-  // the template below renders byte-for-byte the prompt it rendered before this
-  // section existed.
-  const priorFailureBlock = renderPriorFailure(priorFailure);
-
-  // '' when the run was not resumed with operator input — same byte-for-byte
-  // guarantee as priorFailureBlock (AC#7).
-  const operatorContextBlock = renderOperatorContext(operatorContext);
-
-  const verificationBlock = renderVerification(
-    waveVerify?.[waveNumber],
-    waveNumber,
-    verifyTimeoutSeconds,
-  );
-
-  const acBlock = acceptanceCriteria.length
+function renderAcceptanceCriteria(acceptanceCriteria) {
+  return acceptanceCriteria.length
     ? acceptanceCriteria.map((ac, i) => `- AC#${i + 1}: ${ac}`).join('\n')
-    : '(see plan file)';
+    : NO_CRITERIA_PLACEHOLDER;
+}
 
-  const taskBlocks = tasks
-    .map((t, i) => {
-      const num = `${waveNumber}.${i + 1}`;
-      const fileList = Array.isArray(t.files) ? t.files.join(', ') : (t.file ?? '');
-      return [
-        `### Task ${num}: ${t.title ?? t.name ?? `Task ${num}`}`,
-        fileList ? `File: ${fileList}` : '',
-        t.what ? `What: ${t.what}` : '',
-        t.validate ? `Validate: ${t.validate}` : '',
-      ]
-        .filter(Boolean)
-        .join('\n');
-    })
-    .join('\n\n');
+function renderTaskBlock(t, i, waveNumber) {
+  const num = `${waveNumber}.${i + 1}`;
+  const fileList = Array.isArray(t.files) ? t.files.join(', ') : (t.file ?? '');
+  return [
+    `### Task ${num}: ${t.title ?? t.name ?? `Task ${num}`}`,
+    fileList ? `File: ${fileList}` : '',
+    t.what ? `What: ${t.what}` : '',
+    t.validate ? `Validate: ${t.validate}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
 
+function renderTaskBlocks(tasks, waveNumber) {
+  return tasks.map((t, i) => renderTaskBlock(t, i, waveNumber)).join('\n\n');
+}
+
+/** Static opening, run facts and the Execution Notes lists (ends in a newline). */
+function renderPreamble({ waveNumber, waveType, planCtx, notes }) {
+  const { feature, branch, executionLog } = planCtx;
   return `You are executing Wave ${waveNumber} of a RAD delivery. Do not read files speculatively — only load what is listed below. Truncate large file/command outputs — do not paste entire files or long logs into your reasoning; load only what each task lists. Do not open PRs or push branches.
 
 Branch: ${branch}
@@ -258,32 +239,18 @@ Wave type: ${waveType}
 ## Execution Notes
 
 ### Do Not Touch
-${doNotTouchBlock}
+${renderBulletList(notes.doNotTouch)}
 
 ### Key Files (pre-load before starting)
-${keyFilesBlock}
+${renderBulletList(notes.keyFiles)}
 
 ### Reminders
-${remindersBlock}
-${verificationBlock}${priorFailureBlock}${operatorContextBlock}
-## Guardrail Extensions
+${renderBulletList(notes.reminders)}
+`;
+}
 
-Before writing any code, complete this protocol:
-
-1. List the file paths you expect to touch in this wave.
-2. Match each path against the "Applies When" clause of each file in \`ai/extensions/\` (frontend.md, backend.md, database.md, security.md, testing.md).
-3. Always load \`ai/guardrails.md\` as the baseline — no exceptions.
-4. Load only the domain extensions whose "Applies When" clause matches your changed paths or the task domain. When in doubt, include the extension.
-5. State the loaded extensions explicitly before writing any code.
-
-## Acceptance Criteria
-${acBlock}
-
-## Tasks
-
-${taskBlocks}
-
-## For each task:
+function renderTaskInstructions(feature, waveNumber) {
+  return `## For each task:
 1. Load only the files listed — no additional reads
 2. Implement exactly what the task describes — nothing more
 3. Run the validation command
@@ -300,9 +267,11 @@ ${taskBlocks}
    Validated: [AC#N — validation method]"
 6. Append to execution log:
    | [step#] | Wave ${waveNumber} | [task title] | ✓ complete | [commit hash] | [time] |
-7. Do not continue to the next task if blocked_* — report immediately
+7. Do not continue to the next task if blocked_* — report immediately`;
+}
 
-## Return format
+function renderReturnFormat(waveNumber) {
+  return `## Return format
 At the end, output exactly this block and nothing after it:
 
 WAVE_RESULT
@@ -315,6 +284,35 @@ tasks:
     concern: [one-line concern if done_with_concerns, else —]
     error: [one-line summary if blocked_*, else —]
 END_WAVE_RESULT`;
+}
+
+export function buildWavePrompt(wave, planCtx) {
+  const {
+    feature,
+    executionNotes = {},
+    acceptanceCriteria = [],
+    priorFailure = null,
+    operatorContext = null,
+    waveVerify = {},
+    verifyTimeoutSeconds,
+  } = planCtx;
+
+  const { doNotTouch = [], keyFiles = [], reminders = [] } = executionNotes;
+  const waveNumber = wave.n ?? wave.number ?? wave.id ?? UNKNOWN_WAVE_NUMBER;
+  const waveType = wave.type ?? 'sequential';
+
+  // The three optional sections are '' when absent, so the template renders
+  // byte-for-byte the prompt it rendered before they existed (each owns its own
+  // surrounding blank lines).
+  return [
+    renderPreamble({ waveNumber, waveType, planCtx, notes: { doNotTouch, keyFiles, reminders } }),
+    renderVerification(waveVerify?.[waveNumber], waveNumber, verifyTimeoutSeconds),
+    renderPriorFailure(priorFailure),
+    renderOperatorContext(operatorContext),
+    `\n${GUARDRAIL_SECTION}\n\n## Acceptance Criteria\n${renderAcceptanceCriteria(acceptanceCriteria)}\n\n## Tasks\n\n${renderTaskBlocks(wave.tasks ?? [], waveNumber)}\n\n`,
+    renderTaskInstructions(feature, waveNumber),
+    `\n\n${renderReturnFormat(waveNumber)}`,
+  ].join('');
 }
 
 /**
@@ -350,60 +348,79 @@ export const VALID_TASK_STATUSES = new Set([
  * @param {string} block - trimmed body between the delimiters
  * @returns {{ status: string, tasks: Array }}
  */
+/** Per-task field lines: line test, prefix to strip, optional value normalizer. */
+const TASK_FIELDS = [
+  { key: 'status', test: /^\s+status:\s/, prefix: /^status:\s+/, normalize: normalizeTaskStatus },
+  { key: 'commit', test: /^\s+commit:\s/, prefix: /^commit:\s+/ },
+  { key: 'concern', test: /^\s+concern:\s/, prefix: /^concern:\s+/ },
+  { key: 'error', test: /^\s+error:\s/, prefix: /^error:\s+/ },
+];
+
+/**
+ * Unknown/typo'd status defaults to a NON-passing value so a malformed status
+ * can never be silently reported as success (it must fail loud and route
+ * through the matrix). 'blocked_code' → fail-tests → revision.
+ */
+function normalizeTaskStatus(val) {
+  return VALID_TASK_STATUSES.has(val) ? val : 'blocked_code';
+}
+
+/** Top-level "status: complete" — an indented status belongs to a task. */
+function isTopLevelStatus(line, trimmed) {
+  return /^status:\s/.test(trimmed) && !line.startsWith('  ') && !line.startsWith('\t');
+}
+
+/** Task list item "  - title: ..." → a fresh task, or null for any other line. */
+function startTask(trimmed) {
+  if (!/^-\s+title:\s/.test(trimmed)) return null;
+  return {
+    title: trimmed.replace(/^-\s+title:\s+/, '').trim(),
+    status: 'complete',
+    commit: '—',
+    concern: '—',
+    error: '—',
+  };
+}
+
+function applyTaskField(task, line, trimmed) {
+  const field = TASK_FIELDS.find((f) => f.test.test(line));
+  if (!field) return;
+  const val = trimmed.replace(field.prefix, '').trim();
+  task[field.key] = field.normalize ? field.normalize(val) : val;
+}
+
+/** Anything other than an explicit complete/failed top-level status is failed. */
+function normalizeWaveStatus(waveStatus) {
+  return waveStatus === 'complete' || waveStatus === 'failed' ? waveStatus : 'failed';
+}
+
 export function parseWaveResult(block) {
-  const lines = block.split('\n');
   let waveStatus = 'failed';
   const tasks = [];
   let currentTask = null;
 
-  for (const raw of lines) {
+  for (const raw of block.split('\n')) {
     const line = raw.trimEnd();
     const trimmed = line.trimStart();
 
-    // Top-level: "status: complete"
-    if (/^status:\s/.test(trimmed) && !line.startsWith('  ') && !line.startsWith('\t')) {
+    if (isTopLevelStatus(line, trimmed)) {
       waveStatus = trimmed.replace(/^status:\s+/, '').trim();
       continue;
     }
 
-    // Task list item: "  - title: ..."
-    if (/^-\s+title:\s/.test(trimmed)) {
+    const started = startTask(trimmed);
+    if (started) {
       if (currentTask) tasks.push(currentTask);
-      currentTask = {
-        title: trimmed.replace(/^-\s+title:\s+/, '').trim(),
-        status: 'complete',
-        commit: '—',
-        concern: '—',
-        error: '—',
-      };
+      currentTask = started;
       continue;
     }
 
-    if (currentTask) {
-      if (/^\s+status:\s/.test(line)) {
-        const val = trimmed.replace(/^status:\s+/, '').trim();
-        // Unknown/typo'd status defaults to a NON-passing value so a malformed
-        // status can never be silently reported as success (it must fail loud
-        // and route through the matrix). 'blocked_code' → fail-tests → revision.
-        currentTask.status = VALID_TASK_STATUSES.has(val) ? val : 'blocked_code';
-      } else if (/^\s+commit:\s/.test(line)) {
-        currentTask.commit = trimmed.replace(/^commit:\s+/, '').trim();
-      } else if (/^\s+concern:\s/.test(line)) {
-        currentTask.concern = trimmed.replace(/^concern:\s+/, '').trim();
-      } else if (/^\s+error:\s/.test(line)) {
-        currentTask.error = trimmed.replace(/^error:\s+/, '').trim();
-      }
-    }
+    if (currentTask) applyTaskField(currentTask, line, trimmed);
   }
 
   if (currentTask) tasks.push(currentTask);
 
-  // Derive top-level status from tasks when not explicitly set
-  if (waveStatus !== 'complete' && waveStatus !== 'failed') {
-    waveStatus = 'failed';
-  }
-
-  return { status: waveStatus, tasks };
+  return { status: normalizeWaveStatus(waveStatus), tasks };
 }
 
 /**
@@ -595,80 +612,103 @@ export function normalizeUsage(raw) {
  * @param {unknown} err
  * @returns {'transient'|'permanent'|'model'|'resource'}
  */
-export function classifyError(err) {
-  const status =
-    (err && (err.status ?? err.statusCode ?? err.code)) ?? null;
+/** Keyword lists per retry bucket, matched against the lowercased haystack. */
+const RESOURCE_KEYWORDS = [
+  'out of memory',
+  'token limit',
+  'token-limit',
+  'context length',
+  'maximum context',
+];
+const PERMANENT_KEYWORDS = [
+  'unauthorized',
+  'forbidden',
+  'permission',
+  'authentication',
+  'not found',
+  'not-found',
+];
+const TRANSIENT_KEYWORDS = [
+  'rate limit',
+  'rate-limit',
+  'ratelimit',
+  '429',
+  'timeout',
+  'timed out',
+  'network',
+  'socket',
+  'econnreset',
+  'econnrefused',
+  'etimedout',
+  'enotfound',
+  'eai_again',
+];
+const MODEL_KEYWORDS = [
+  'malformed',
+  'invalid json',
+  'invalid-json',
+  'unexpected token',
+];
+
+const PERMANENT_STATUSES = new Set([401, 403, 404]);
+const TRANSIENT_STATUS_RATE_LIMIT = 429;
+const TRANSIENT_STATUS_SERVER_MIN = 500;
+
+function includesAny(haystack, keywords) {
+  return keywords.some((keyword) => haystack.includes(keyword));
+}
+
+/**
+ * Pull the three facts classifyError reasons over: the numeric status (or null),
+ * the RAW error name (not lowercased), and the lowercased keyword haystack.
+ */
+function errorContext(err) {
+  const status = (err && (err.status ?? err.statusCode ?? err.code)) ?? null;
   const numericStatus = typeof status === 'number' ? status : null;
 
   const name = String((err && err.name) || '');
   const message = String((err && err.message) || err || '');
   // A non-numeric `code` (e.g. 'ECONNRESET', 'ENOTFOUND') is a string error
   // identifier — fold it into the keyword haystack so it can be matched.
-  const codeStr =
-    err && typeof err.code === 'string' ? err.code : '';
+  const codeStr = err && typeof err.code === 'string' ? err.code : '';
   const haystack = `${name} ${message} ${codeStr}`.toLowerCase();
+  return { numericStatus, name, haystack };
+}
+
+function isResourceError({ haystack }) {
+  return /\boom\b/.test(haystack) || includesAny(haystack, RESOURCE_KEYWORDS);
+}
+
+// The raw-name comparison is deliberately against the un-lowercased name.
+function isPermanentError({ numericStatus, name, haystack }) {
+  return (
+    PERMANENT_STATUSES.has(numericStatus) ||
+    includesAny(haystack, PERMANENT_KEYWORDS) ||
+    name === 'enoent'
+  );
+}
+
+function isTransientError({ numericStatus, haystack }) {
+  return (
+    numericStatus === TRANSIENT_STATUS_RATE_LIMIT ||
+    (numericStatus !== null && numericStatus >= TRANSIENT_STATUS_SERVER_MIN) ||
+    includesAny(haystack, TRANSIENT_KEYWORDS)
+  );
+}
+
+function isModelError({ name, haystack }) {
+  return includesAny(haystack, MODEL_KEYWORDS) || name === 'syntaxerror';
+}
+
+export function classifyError(err) {
+  const ctx = errorContext(err);
 
   // Resource exhaustion — a hard ceiling, not a blip. Checked first so a
   // "token limit" message is never misread as a transient rate limit.
-  if (
-    /\boom\b/.test(haystack) ||
-    haystack.includes('out of memory') ||
-    haystack.includes('token limit') ||
-    haystack.includes('token-limit') ||
-    haystack.includes('context length') ||
-    haystack.includes('maximum context')
-  ) {
-    return 'resource';
-  }
-
-  // Permanent — authentication / authorization / missing resource.
-  if (numericStatus === 401 || numericStatus === 403 || numericStatus === 404) {
-    return 'permanent';
-  }
-  if (
-    haystack.includes('unauthorized') ||
-    haystack.includes('forbidden') ||
-    haystack.includes('permission') ||
-    haystack.includes('authentication') ||
-    haystack.includes('not found') ||
-    haystack.includes('not-found') ||
-    name === 'enoent'
-  ) {
-    return 'permanent';
-  }
-
-  // Transient — rate limits, 429, network blips, timeouts.
-  if (numericStatus === 429 || (numericStatus !== null && numericStatus >= 500)) {
-    return 'transient';
-  }
-  if (
-    haystack.includes('rate limit') ||
-    haystack.includes('rate-limit') ||
-    haystack.includes('ratelimit') ||
-    haystack.includes('429') ||
-    haystack.includes('timeout') ||
-    haystack.includes('timed out') ||
-    haystack.includes('network') ||
-    haystack.includes('socket') ||
-    haystack.includes('econnreset') ||
-    haystack.includes('econnrefused') ||
-    haystack.includes('etimedout') ||
-    haystack.includes('enotfound') ||
-    haystack.includes('eai_again')
-  ) {
-    return 'transient';
-  }
-
-  // Model — the response itself was malformed / unparseable.
-  if (
-    haystack.includes('malformed') ||
-    haystack.includes('invalid json') ||
-    haystack.includes('invalid-json') ||
-    haystack.includes('unexpected token') ||
-    name === 'syntaxerror'
-  ) {
-    return 'model';
-  }
+  if (isResourceError(ctx)) return 'resource';
+  if (isPermanentError(ctx)) return 'permanent';
+  if (isTransientError(ctx)) return 'transient';
+  if (isModelError(ctx)) return 'model';
 
   // Unknown → do not retry.
   return 'permanent';
