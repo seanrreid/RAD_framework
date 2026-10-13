@@ -1,7 +1,10 @@
 # Plan: Refactor the Long cli.js Commands Under the Function-Length Ratchet (#252, part 5 of 6)
 Created: 2026-10-13
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-10-13T15:16:36.822Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/refactor-cli-commands
 Adopted-From: #252 part 5 of 6 (refactor five offenders in harness/cli.js; the issue stays open until plan 6 lands)
 Issue-Title: Refactor over-long core functions (runOneWave, createGitStateStore, deliverCommand, ...)
