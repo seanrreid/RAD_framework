@@ -4,9 +4,6 @@
 # shrinks (still over the limit) tighten its number; when it reaches the
 # limit or disappears, remove its line. The baseline can only shrink.
 # Regenerate with: scripts/lint-function-length.mjs --write-baseline
-harness/adapters/git-state-store.js::createGitStateStore	384
-harness/adapters/git-state-store.js::createGitStateStore>list	41
-harness/adapters/git-state-store.js::createGitStateStore>recordArchitectureApproved	43
 harness/adapters/worktree.js::makeWorktreeLifecycle	54
 harness/cli.js::architectureApproveCommand	81
 harness/cli.js::deliverCommand	215
