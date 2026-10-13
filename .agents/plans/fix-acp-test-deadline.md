@@ -1,7 +1,8 @@
 # Plan: Make the ACP Timeout Tests Robust Under Load (#275)
 Created: 2026-10-13
 Author: architect
-Status: in-progress
+Status: complete
+Completed-At: 2026-10-13T20:34:35.464Z
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-10-13T20:25:19.864Z
 Recorded-By: sean@torchcodelab.com
