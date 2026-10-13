@@ -77,6 +77,188 @@ const DEFAULT_TIMEOUT_MS = 600000;
 const DEFAULT_MAX_TURNS = 40;
 
 /**
+ * The SDK query options for one attempt. `allowedTools` is copied so the SDK
+ * can never mutate the wave's allow-list.
+ */
+function buildQueryOptions(ctx, abortController, { model: effectiveModel, allowedTools }) {
+  return {
+    env: buildSdkEnv(ctx.apiKey),
+    ...(effectiveModel ? { model: effectiveModel } : {}),
+    ...(ctx.repoRoot ? { cwd: ctx.repoRoot } : {}),
+    maxTurns: ctx.maxTurns,
+    abortController,
+    tools: { type: 'preset', preset: 'claude_code' },
+    allowedTools: [...allowedTools],
+    permissionMode: 'acceptEdits',
+    persistSession: false,
+  };
+}
+
+/** Append an assistant message's text blocks to `state.text`. */
+function collectAssistantText(message, state) {
+  if (!Array.isArray(message.message?.content)) return;
+  for (const block of message.message.content) {
+    if (block.type === 'text') state.text += block.text;
+  }
+}
+
+/**
+ * Fold a result message into `state`: capture usage, append a success string,
+ * or throw on an `is_error` result.
+ */
+function applyResultMessage(message, state) {
+  // Token usage rides on the result message (message.usage, with
+  // input_tokens/output_tokens). Normalize to { input, output, total };
+  // absent/unusable usage leaves `state.usage` undefined (optional field).
+  const normalized = normalizeUsage(message.usage);
+  if (normalized) state.usage = normalized;
+  if (!message.is_error && typeof message.result === 'string') {
+    state.text += message.result;
+  } else if (message.is_error) {
+    // Sanitize at CONSTRUCTION so the key can never reach a thrown/
+    // logged Error even if the SDK embeds it in message.errors.
+    const errSummary = sanitizeErrorMessage(
+      Array.isArray(message.errors)
+        ? message.errors.join('; ')
+        : 'SDK reported an error result',
+    );
+    throw new Error(errSummary);
+  }
+}
+
+/** Start the SDK query and drain its messages into `state`. */
+async function drainQuery(ctx, prompt, abortController, runOpts, state) {
+  const sdkQuery = ctx.query({
+    prompt,
+    options: buildQueryOptions(ctx, abortController, runOpts),
+  });
+
+  for await (const message of sdkQuery) {
+    if (message.type === 'assistant') collectAssistantText(message, state);
+    else if (message.type === 'result') applyResultMessage(message, state);
+  }
+  return { text: state.text, usage: state.usage };
+}
+
+/**
+ * Run a single SDK query to completion, collecting assistant text. Returns
+ * `{ text }` on success. Throws on a thrown SDK error OR on an `is_error`
+ * result (so the retry/classify layer above handles both uniformly). The
+ * thrown error carries the (sanitized) summary.
+ *
+ * @param {Object} ctx - adapter context (apiKey, repoRoot, maxTurns, timeoutMs, query)
+ * @param {string} prompt
+ * @param {{ model?: string, allowedTools: string[] }} runOpts - this wave's model and tool allow-list
+ * @returns {Promise<{ text: string }>}
+ */
+async function runQueryOnce(ctx, prompt, runOpts) {
+  const abortController = new AbortController();
+  const state = { text: '', usage: undefined };
+  const drain = drainQuery(ctx, prompt, abortController, runOpts, state);
+
+  try {
+    return await withTimeout(drain, ctx.timeoutMs, abortController);
+  } catch (err) {
+    // The drain may have already captured usage from a result message
+    // before throwing (is_error) or being aborted (timeout). Attach it so the
+    // retry layer can carry it into the terminal result and the budget counts
+    // tokens spent on a failed wave (conservative — usage is often absent here).
+    if (state.usage !== undefined && err && typeof err === 'object') err._usage = state.usage;
+    throw err;
+  }
+}
+
+/**
+ * Run one query with transient-retry + backoff. Returns `{ text }` on success
+ * or `{ terminal }` with a finished spine result when the run failed
+ * terminally (timeout/exhausted-transient/permanent/model/resource).
+ *
+ * @param {Object} ctx - adapter context (adds `delay`)
+ * @param {string} prompt
+ * @param {string|number} waveId
+ * @param {{ model?: string, allowedTools: string[] }} runOpts - per-wave model override and tool allow-list
+ */
+async function runWithRetry(ctx, prompt, waveId, runOpts) {
+  let attempt = 0;
+  // attempt 0 is the initial call; up to MAX_TRANSIENT_RETRIES retries follow.
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    try {
+      const once = await runQueryOnce(ctx, prompt, runOpts);
+      return { text: once.text, usage: once.usage };
+    } catch (err) {
+      const bucket = classifyError(err);
+      const safe = sanitizeErrorMessage(err?.message ?? String(err));
+
+      // A wall-clock timeout (sentinel-tagged by withTimeout) is terminal
+      // 'fail-timeout' for this adapter — do not retry past the deadline.
+      if (err && err._isRadTimeout) return { terminal: timeoutResult(waveId, safe, err) };
+
+      if (bucket === 'transient' && attempt < MAX_TRANSIENT_RETRIES) {
+        attempt += 1;
+        await ctx.delay(backoffWithJitter(attempt));
+        continue;
+      }
+
+      // Transient exhausted, or permanent/model/resource — terminal failure.
+      return { terminal: toWaveResult(syntheticFailure(waveId, safe), err._usage) };
+    }
+  }
+}
+
+/** The terminal 'fail-timeout' result, carrying any usage captured before the abort. */
+function timeoutResult(waveId, safe, err) {
+  return {
+    outcome: 'fail-timeout',
+    status: 'failed',
+    tasks: syntheticFailure(waveId, safe).tasks,
+    ...(err._usage ? { usage: err._usage } : {}),
+  };
+}
+
+const REPROMPT_SUFFIX =
+  '\n\nYour previous response did not include the required WAVE_RESULT block. ' +
+  'Re-run the wave and end your response with exactly one WAVE_RESULT ... ' +
+  'END_WAVE_RESULT block, and nothing after it.';
+
+/**
+ * Run one wave: a first attempt, then EXACTLY one reprompt if the WAVE_RESULT
+ * block is missing, then 'fail-protocol'.
+ */
+async function runSdkWave(ctx, wave, planCtx) {
+  const waveId = wave.n ?? wave.number ?? wave.id ?? '?';
+  const prompt = buildWavePrompt(wave, planCtx);
+
+  // Per-wave model tiering: a plan may declare `Model:` under `### Wave N`,
+  // surfaced as planCtx.waveModels[n] (keyed by NUMBER). Coerce waveId to a
+  // number for the lookup so a string wave id still matches; fall back to the
+  // construction-time (deliver default) model when this wave declares none.
+  const effectiveModel = planCtx?.waveModels?.[Number(waveId)] ?? ctx.model;
+
+  const tools = waveAllowedTools(planCtx, waveId);
+  if (!tools.ok) return toWaveResult(syntheticFailure(waveId, tools.error));
+  const runOpts = { model: effectiveModel, allowedTools: tools.tools };
+
+  const first = await runWithRetry(ctx, prompt, waveId, runOpts);
+  if (first.terminal) return first.terminal;
+
+  let block = extractWaveResultBlock(first.text);
+  if (block) return toWaveResult(parseWaveResult(block), first.usage);
+
+  const second = await runWithRetry(ctx, prompt + REPROMPT_SUFFIX, waveId, runOpts);
+  if (second.terminal) return second.terminal;
+
+  block = extractWaveResultBlock(second.text);
+  if (block) return toWaveResult(parseWaveResult(block), second.usage);
+
+  return {
+    outcome: 'fail-protocol',
+    status: 'failed',
+    tasks: syntheticFailure(waveId, 'No WAVE_RESULT block after one reprompt').tasks,
+  };
+}
+
+/**
  * Create a runWave function backed by the Claude Agent SDK.
  *
  * Same signature as the historical runwave.js factory. The ANTHROPIC_API_KEY
@@ -104,168 +286,7 @@ export function createRunWave({
 } = {}) {
   const delay =
     sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+  const ctx = { apiKey, repoRoot, maxTurns, timeoutMs, query, delay, model };
 
-  /**
-   * Run a single SDK query to completion, collecting assistant text. Returns
-   * `{ text }` on success. Throws on a thrown SDK error OR on an `is_error`
-   * result (so the retry/classify layer above handles both uniformly). The
-   * thrown error carries the (sanitized) summary.
-   *
-   * @param {string} prompt
-   * @param {{ model?: string, allowedTools: string[] }} runOpts - this wave's model and tool allow-list
-   * @returns {Promise<{ text: string }>}
-   */
-  async function runQueryOnce(prompt, { model: effectiveModel, allowedTools }) {
-    const abortController = new AbortController();
-    let fullText = '';
-    let usage;
-
-    const drain = (async () => {
-      const sdkQuery = query({
-        prompt,
-        options: {
-          env: buildSdkEnv(apiKey),
-          ...(effectiveModel ? { model: effectiveModel } : {}),
-          ...(repoRoot ? { cwd: repoRoot } : {}),
-          maxTurns,
-          abortController,
-          tools: { type: 'preset', preset: 'claude_code' },
-          allowedTools: [...allowedTools],
-          permissionMode: 'acceptEdits',
-          persistSession: false,
-        },
-      });
-
-      for await (const message of sdkQuery) {
-        if (message.type === 'assistant') {
-          if (Array.isArray(message.message?.content)) {
-            for (const block of message.message.content) {
-              if (block.type === 'text') fullText += block.text;
-            }
-          }
-        } else if (message.type === 'result') {
-          // Token usage rides on the result message (message.usage, with
-          // input_tokens/output_tokens). Normalize to { input, output, total };
-          // absent/unusable usage leaves `usage` undefined (optional field).
-          const normalized = normalizeUsage(message.usage);
-          if (normalized) usage = normalized;
-          if (!message.is_error && typeof message.result === 'string') {
-            fullText += message.result;
-          } else if (message.is_error) {
-            // Sanitize at CONSTRUCTION so the key can never reach a thrown/
-            // logged Error even if the SDK embeds it in message.errors.
-            const errSummary = sanitizeErrorMessage(
-              Array.isArray(message.errors)
-                ? message.errors.join('; ')
-                : 'SDK reported an error result',
-            );
-            throw new Error(errSummary);
-          }
-        }
-      }
-      return { text: fullText, usage };
-    })();
-
-    try {
-      return await withTimeout(drain, timeoutMs, abortController);
-    } catch (err) {
-      // The drain closure may have already captured usage from a result message
-      // before throwing (is_error) or being aborted (timeout). Attach it so the
-      // retry layer can carry it into the terminal result and the budget counts
-      // tokens spent on a failed wave (conservative — usage is often absent here).
-      if (usage !== undefined && err && typeof err === 'object') err._usage = usage;
-      throw err;
-    }
-  }
-
-  /**
-   * Run one query with transient-retry + backoff. Returns `{ text }` on success
-   * or `{ terminal }` with a finished spine result when the run failed
-   * terminally (timeout/exhausted-transient/permanent/model/resource).
-   *
-   * @param {string} prompt
-   * @param {string|number} waveId
-   * @param {{ model?: string, allowedTools: string[] }} runOpts - per-wave model override and tool allow-list
-   */
-  async function runWithRetry(prompt, waveId, runOpts) {
-    let attempt = 0;
-    // attempt 0 is the initial call; up to MAX_TRANSIENT_RETRIES retries follow.
-    // eslint-disable-next-line no-constant-condition
-    while (true) {
-      try {
-        const once = await runQueryOnce(prompt, runOpts);
-        return { text: once.text, usage: once.usage };
-      } catch (err) {
-        const bucket = classifyError(err);
-        const safe = sanitizeErrorMessage(err?.message ?? String(err));
-
-        // A wall-clock timeout (sentinel-tagged by withTimeout) is terminal
-        // 'fail-timeout' for this adapter — do not retry past the deadline.
-        if (err && err._isRadTimeout) {
-          return {
-            terminal: {
-              outcome: 'fail-timeout',
-              status: 'failed',
-              tasks: syntheticFailure(waveId, safe).tasks,
-              ...(err._usage ? { usage: err._usage } : {}),
-            },
-          };
-        }
-
-        if (bucket === 'transient' && attempt < MAX_TRANSIENT_RETRIES) {
-          attempt += 1;
-          await delay(backoffWithJitter(attempt));
-          continue;
-        }
-
-        // Transient exhausted, or permanent/model/resource — terminal failure.
-        return { terminal: toWaveResult(syntheticFailure(waveId, safe), err._usage) };
-      }
-    }
-  }
-
-  /**
-   * @param {Object} wave
-   * @param {Object} planCtx
-   * @returns {Promise<{ outcome: string, status: string, tasks?: Array, usage?: Object }>}
-   */
-  return async function runWave(wave, planCtx) {
-    const waveId = wave.n ?? wave.number ?? wave.id ?? '?';
-    const prompt = buildWavePrompt(wave, planCtx);
-
-    // Per-wave model tiering: a plan may declare `Model:` under `### Wave N`,
-    // surfaced as planCtx.waveModels[n] (keyed by NUMBER). Coerce waveId to a
-    // number for the lookup so a string wave id still matches; fall back to the
-    // construction-time (deliver default) model when this wave declares none.
-    const effectiveModel = planCtx?.waveModels?.[Number(waveId)] ?? model;
-
-    const tools = waveAllowedTools(planCtx, waveId);
-    if (!tools.ok) return toWaveResult(syntheticFailure(waveId, tools.error));
-    const runOpts = { model: effectiveModel, allowedTools: tools.tools };
-
-    const first = await runWithRetry(prompt, waveId, runOpts);
-    if (first.terminal) return first.terminal;
-
-    let block = extractWaveResultBlock(first.text);
-    if (block) return toWaveResult(parseWaveResult(block), first.usage);
-
-    // Missing WAVE_RESULT — reprompt EXACTLY once for the protocol block.
-    const reprompt =
-      prompt +
-      '\n\nYour previous response did not include the required WAVE_RESULT block. ' +
-      'Re-run the wave and end your response with exactly one WAVE_RESULT ... ' +
-      'END_WAVE_RESULT block, and nothing after it.';
-
-    const second = await runWithRetry(reprompt, waveId, runOpts);
-    if (second.terminal) return second.terminal;
-
-    block = extractWaveResultBlock(second.text);
-    if (block) return toWaveResult(parseWaveResult(block), second.usage);
-
-    return {
-      outcome: 'fail-protocol',
-      status: 'failed',
-      tasks: syntheticFailure(waveId, 'No WAVE_RESULT block after one reprompt').tasks,
-    };
-  };
+  return (wave, planCtx) => runSdkWave(ctx, wave, planCtx);
 }

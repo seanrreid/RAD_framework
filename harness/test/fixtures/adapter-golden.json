@@ -1,0 +1,2216 @@
+{
+  "command": {
+    "wave:success": {
+      "keys": [
+        "outcome",
+        "status",
+        "tasks"
+      ],
+      "result": {
+        "outcome": "success",
+        "status": "complete",
+        "tasks": [
+          {
+            "title": "Task one",
+            "status": "complete",
+            "commit": "abc1234",
+            "concern": "—",
+            "error": "—"
+          }
+        ]
+      }
+    },
+    "wave:success-usage": {
+      "keys": [
+        "outcome",
+        "status",
+        "tasks",
+        "usage"
+      ],
+      "result": {
+        "outcome": "success",
+        "status": "complete",
+        "tasks": [
+          {
+            "title": "Task one",
+            "status": "complete",
+            "commit": "abc1234",
+            "concern": "—",
+            "error": "—"
+          }
+        ],
+        "usage": {
+          "input": 10,
+          "output": 5,
+          "total": 15,
+          "cacheRead": 2,
+          "cacheWrite": 3,
+          "cost": 0.5
+        }
+      }
+    },
+    "wave:malformed-usage": {
+      "keys": [
+        "outcome",
+        "status",
+        "tasks"
+      ],
+      "result": {
+        "outcome": "success",
+        "status": "complete",
+        "tasks": [
+          {
+            "title": "Task one",
+            "status": "complete",
+            "commit": "abc1234",
+            "concern": "—",
+            "error": "—"
+          }
+        ]
+      }
+    },
+    "wave:block-only-on-reprompt": {
+      "keys": [
+        "outcome",
+        "status",
+        "tasks"
+      ],
+      "result": {
+        "outcome": "success",
+        "status": "complete",
+        "tasks": [
+          {
+            "title": "Task one",
+            "status": "complete",
+            "commit": "abc1234",
+            "concern": "—",
+            "error": "—"
+          }
+        ]
+      }
+    },
+    "wave:no-block-after-reprompt": {
+      "keys": [
+        "outcome",
+        "status",
+        "tasks"
+      ],
+      "result": {
+        "outcome": "fail-protocol",
+        "status": "failed",
+        "tasks": [
+          {
+            "title": "1",
+            "status": "blocked_code",
+            "commit": "—",
+            "concern": "—",
+            "error": "No WAVE_RESULT block after one reprompt"
+          }
+        ]
+      }
+    },
+    "wave:exit-nonzero-with-block": {
+      "keys": [
+        "outcome",
+        "status",
+        "tasks"
+      ],
+      "result": {
+        "outcome": "fail-tests",
+        "status": "failed",
+        "tasks": [
+          {
+            "title": "1",
+            "status": "blocked_code",
+            "commit": "—",
+            "concern": "—",
+            "error": "command exited with code 1: (stdout) WAVE_RESULT\nwave: 1\nstatus: complete\ntasks:\n  - title: Task one\n    status: complete\n    commit: abc1234\n    concern: —\n    error: —\nEND_WAVE_RESULT"
+          }
+        ]
+      }
+    },
+    "wave:exit-nonzero-stderr": {
+      "keys": [
+        "outcome",
+        "status",
+        "tasks"
+      ],
+      "result": {
+        "outcome": "fail-protocol",
+        "status": "failed",
+        "tasks": [
+          {
+            "title": "1",
+            "status": "blocked_code",
+            "commit": "—",
+            "concern": "—",
+            "error": "command exited with code 2: boom: bad flag"
+          }
+        ]
+      }
+    },
+    "wave:exit-nonzero-stdout-only": {
+      "keys": [
+        "outcome",
+        "status",
+        "tasks"
+      ],
+      "result": {
+        "outcome": "fail-protocol",
+        "status": "failed",
+        "tasks": [
+          {
+            "title": "1",
+            "status": "blocked_code",
+            "commit": "—",
+            "concern": "—",
+            "error": "command exited with code 1: (stdout) Not logged in"
+          }
+        ]
+      }
+    },
+    "wave:exit-nonzero-no-output": {
+      "keys": [
+        "outcome",
+        "status",
+        "tasks"
+      ],
+      "result": {
+        "outcome": "fail-protocol",
+        "status": "failed",
+        "tasks": [
+          {
+            "title": "1",
+            "status": "blocked_code",
+            "commit": "—",
+            "concern": "—",
+            "error": "command exited with code 3: (stdout)"
+          }
+        ]
+      }
+    },
+    "wave:enoent": {
+      "keys": [
+        "outcome",
+        "status",
+        "tasks"
+      ],
+      "result": {
+        "outcome": "fail-protocol",
+        "status": "failed",
+        "tasks": [
+          {
+            "title": "1",
+            "status": "blocked_code",
+            "commit": "—",
+            "concern": "—",
+            "error": "spawn /nonexistent/rad-binary ENOENT"
+          }
+        ]
+      }
+    },
+    "wave:whitespace-cmd": {
+      "keys": [
+        "outcome",
+        "status",
+        "tasks"
+      ],
+      "result": {
+        "outcome": "fail-protocol",
+        "status": "failed",
+        "tasks": [
+          {
+            "title": "1",
+            "status": "blocked_code",
+            "commit": "—",
+            "concern": "—",
+            "error": "command adapter: empty cmd"
+          }
+        ]
+      }
+    },
+    "wave:missing-cmd": {
+      "threw": {
+        "name": "Error",
+        "message": "createCommandAdapter: cmd is required"
+      }
+    },
+    "wave:timeout": {
+      "keys": [
+        "outcome",
+        "status",
+        "tasks"
+      ],
+      "result": {
+        "outcome": "fail-timeout",
+        "status": "failed",
+        "tasks": [
+          {
+            "title": "1",
+            "status": "blocked_code",
+            "commit": "—",
+            "concern": "—",
+            "error": "wave timed out after 400ms"
+          }
+        ]
+      }
+    },
+    "wave:output-overflow": {
+      "keys": [
+        "outcome",
+        "status",
+        "tasks"
+      ],
+      "result": {
+        "outcome": "fail-protocol",
+        "status": "failed",
+        "tasks": [
+          {
+            "title": "1",
+            "status": "blocked_code",
+            "commit": "—",
+            "concern": "—",
+            "error": "command output exceeded 10485760 bytes — process killed"
+          }
+        ]
+      }
+    },
+    "wave:model-token-default": {
+      "keys": [
+        "outcome",
+        "status",
+        "tasks"
+      ],
+      "result": {
+        "outcome": "success",
+        "status": "complete",
+        "tasks": [
+          {
+            "title": "model=m-default cwd=<TMP>",
+            "status": "complete",
+            "commit": "abc1234",
+            "concern": "—",
+            "error": "—"
+          }
+        ]
+      }
+    },
+    "wave:model-token-wave-override": {
+      "keys": [
+        "outcome",
+        "status",
+        "tasks"
+      ],
+      "result": {
+        "outcome": "success",
+        "status": "complete",
+        "tasks": [
+          {
+            "title": "model=m-wave cwd=<TMP>",
+            "status": "complete",
+            "commit": "abc1234",
+            "concern": "—",
+            "error": "—"
+          }
+        ]
+      }
+    },
+    "wave:model-token-unset": {
+      "keys": [
+        "outcome",
+        "status",
+        "tasks"
+      ],
+      "result": {
+        "outcome": "success",
+        "status": "complete",
+        "tasks": [
+          {
+            "title": "model={model} cwd=<TMP>",
+            "status": "complete",
+            "commit": "abc1234",
+            "concern": "—",
+            "error": "—"
+          }
+        ]
+      }
+    },
+    "wave:prompt-token": {
+      "keys": [
+        "outcome",
+        "status",
+        "tasks"
+      ],
+      "result": {
+        "outcome": "success",
+        "status": "complete",
+        "tasks": [
+          {
+            "title": "prompt=You are executing Wave 1 of a RAD delive",
+            "status": "complete",
+            "commit": "abc1234",
+            "concern": "—",
+            "error": "—"
+          }
+        ]
+      }
+    },
+    "wave:prompt-never-read": {
+      "keys": [
+        "outcome",
+        "status",
+        "tasks"
+      ],
+      "result": {
+        "outcome": "success",
+        "status": "complete",
+        "tasks": [
+          {
+            "title": "Task one",
+            "status": "complete",
+            "commit": "abc1234",
+            "concern": "—",
+            "error": "—"
+          }
+        ]
+      }
+    },
+    "wave:string-wave-id": {
+      "keys": [
+        "outcome",
+        "status",
+        "tasks"
+      ],
+      "result": {
+        "outcome": "success",
+        "status": "complete",
+        "tasks": [
+          {
+            "title": "Task one",
+            "status": "complete",
+            "commit": "abc1234",
+            "concern": "—",
+            "error": "—"
+          }
+        ]
+      }
+    },
+    "probe:ok": {
+      "keys": [
+        "ok"
+      ],
+      "result": {
+        "ok": true
+      }
+    },
+    "probe:exit-nonzero-stderr": {
+      "keys": [
+        "ok",
+        "error"
+      ],
+      "result": {
+        "ok": false,
+        "error": "command exited with code 2: boom: bad flag"
+      }
+    },
+    "probe:exit-nonzero-stdout-only": {
+      "keys": [
+        "ok",
+        "error"
+      ],
+      "result": {
+        "ok": false,
+        "error": "command exited with code 1: (stdout) Not logged in"
+      }
+    },
+    "probe:enoent": {
+      "keys": [
+        "ok",
+        "error"
+      ],
+      "result": {
+        "ok": false,
+        "error": "spawn /nonexistent/rad-binary ENOENT"
+      }
+    },
+    "probe:empty-cmd": {
+      "keys": [
+        "ok",
+        "error"
+      ],
+      "result": {
+        "ok": false,
+        "error": "probeCommand: cmd is required"
+      }
+    },
+    "probe:whitespace-cmd": {
+      "keys": [
+        "ok",
+        "error"
+      ],
+      "result": {
+        "ok": false,
+        "error": "command adapter: empty cmd"
+      }
+    },
+    "probe:timeout": {
+      "keys": [
+        "ok",
+        "error"
+      ],
+      "result": {
+        "ok": false,
+        "error": "agent preflight timed out after 400ms"
+      }
+    },
+    "probe:output-overflow": {
+      "keys": [
+        "ok",
+        "error"
+      ],
+      "result": {
+        "ok": false,
+        "error": "command output exceeded 10485760 bytes — process killed"
+      }
+    },
+    "prompt:ok-stdin": {
+      "keys": [
+        "ok",
+        "stdout"
+      ],
+      "result": {
+        "ok": true,
+        "stdout": "{\"stdin\":\"hello\",\"len\":5}"
+      }
+    },
+    "prompt:ok-prompt-token": {
+      "keys": [
+        "ok",
+        "stdout"
+      ],
+      "result": {
+        "ok": true,
+        "stdout": "WAVE_RESULT\nwave: 1\nstatus: complete\ntasks:\n  - title: prompt=hello\n    status: complete\n    commit: abc1234\n    concern: —\n    error: —\nEND_WAVE_RESULT"
+      }
+    },
+    "prompt:exit-nonzero-stderr": {
+      "keys": [
+        "ok",
+        "stdout",
+        "error"
+      ],
+      "result": {
+        "ok": false,
+        "stdout": "",
+        "error": "command exited with code 2: boom: bad flag"
+      }
+    },
+    "prompt:exit-nonzero-stdout-only": {
+      "keys": [
+        "ok",
+        "stdout",
+        "error"
+      ],
+      "result": {
+        "ok": false,
+        "stdout": "Not logged in",
+        "error": "command exited with code 1: (stdout) Not logged in"
+      }
+    },
+    "prompt:enoent": {
+      "keys": [
+        "ok",
+        "stdout",
+        "error"
+      ],
+      "result": {
+        "ok": false,
+        "stdout": "",
+        "error": "spawn /nonexistent/rad-binary ENOENT"
+      }
+    },
+    "prompt:timeout-label": {
+      "keys": [
+        "ok",
+        "stdout",
+        "error"
+      ],
+      "result": {
+        "ok": false,
+        "stdout": "",
+        "error": "review timed out after 400ms"
+      }
+    },
+    "prompt:output-overflow": {
+      "keys": [
+        "ok",
+        "stdout",
+        "error"
+      ],
+      "result": {
+        "ok": false,
+        "stdout": {
+          "withinCap": true
+        },
+        "error": "review output exceeded 10485760 bytes — process killed (output truncated)"
+      }
+    },
+    "prompt:blank-cmd-throws": {
+      "threw": {
+        "name": "TypeError",
+        "message": "runCommandPrompt: cmd must be a non-empty string"
+      }
+    },
+    "prompt:non-string-prompt-throws": {
+      "threw": {
+        "name": "TypeError",
+        "message": "runCommandPrompt: prompt must be a string"
+      }
+    }
+  },
+  "sdk": {
+    "success-assistant-text": {
+      "keys": [
+        "outcome",
+        "status",
+        "tasks"
+      ],
+      "result": {
+        "outcome": "success",
+        "status": "complete",
+        "tasks": [
+          {
+            "title": "Task one",
+            "status": "complete",
+            "commit": "abc1234",
+            "concern": "—",
+            "error": "—"
+          }
+        ]
+      },
+      "sleepCalls": 0,
+      "queryCalls": [
+        {
+          "promptSha": "60b86c9eb20bc884",
+          "hasAbortController": true,
+          "envKeys": [
+            "ANTHROPIC_API_KEY",
+            "HOME",
+            "LANG",
+            "LC_ALL",
+            "PATH",
+            "TERM",
+            "TMPDIR"
+          ],
+          "options": {
+            "maxTurns": 40,
+            "tools": {
+              "type": "preset",
+              "preset": "claude_code"
+            },
+            "allowedTools": [
+              "Read",
+              "Write",
+              "Edit",
+              "Bash",
+              "Glob",
+              "Grep"
+            ],
+            "permissionMode": "acceptEdits",
+            "persistSession": false
+          }
+        }
+      ]
+    },
+    "success-result-string": {
+      "keys": [
+        "outcome",
+        "status",
+        "tasks"
+      ],
+      "result": {
+        "outcome": "success",
+        "status": "complete",
+        "tasks": [
+          {
+            "title": "Task one",
+            "status": "complete",
+            "commit": "abc1234",
+            "concern": "—",
+            "error": "—"
+          }
+        ]
+      },
+      "sleepCalls": 0,
+      "queryCalls": [
+        {
+          "promptSha": "60b86c9eb20bc884",
+          "hasAbortController": true,
+          "envKeys": [
+            "ANTHROPIC_API_KEY",
+            "HOME",
+            "LANG",
+            "LC_ALL",
+            "PATH",
+            "TERM",
+            "TMPDIR"
+          ],
+          "options": {
+            "maxTurns": 40,
+            "tools": {
+              "type": "preset",
+              "preset": "claude_code"
+            },
+            "allowedTools": [
+              "Read",
+              "Write",
+              "Edit",
+              "Bash",
+              "Glob",
+              "Grep"
+            ],
+            "permissionMode": "acceptEdits",
+            "persistSession": false
+          }
+        }
+      ]
+    },
+    "usage-normalized": {
+      "keys": [
+        "outcome",
+        "status",
+        "tasks",
+        "usage"
+      ],
+      "result": {
+        "outcome": "success",
+        "status": "complete",
+        "tasks": [
+          {
+            "title": "Task one",
+            "status": "complete",
+            "commit": "abc1234",
+            "concern": "—",
+            "error": "—"
+          }
+        ],
+        "usage": {
+          "input": 100,
+          "output": 50,
+          "total": 150,
+          "cacheRead": 7,
+          "cacheWrite": 9
+        }
+      },
+      "sleepCalls": 0,
+      "queryCalls": [
+        {
+          "promptSha": "60b86c9eb20bc884",
+          "hasAbortController": true,
+          "envKeys": [
+            "ANTHROPIC_API_KEY",
+            "HOME",
+            "LANG",
+            "LC_ALL",
+            "PATH",
+            "TERM",
+            "TMPDIR"
+          ],
+          "options": {
+            "maxTurns": 40,
+            "tools": {
+              "type": "preset",
+              "preset": "claude_code"
+            },
+            "allowedTools": [
+              "Read",
+              "Write",
+              "Edit",
+              "Bash",
+              "Glob",
+              "Grep"
+            ],
+            "permissionMode": "acceptEdits",
+            "persistSession": false
+          }
+        }
+      ]
+    },
+    "usage-unusable": {
+      "keys": [
+        "outcome",
+        "status",
+        "tasks"
+      ],
+      "result": {
+        "outcome": "success",
+        "status": "complete",
+        "tasks": [
+          {
+            "title": "Task one",
+            "status": "complete",
+            "commit": "abc1234",
+            "concern": "—",
+            "error": "—"
+          }
+        ]
+      },
+      "sleepCalls": 0,
+      "queryCalls": [
+        {
+          "promptSha": "60b86c9eb20bc884",
+          "hasAbortController": true,
+          "envKeys": [
+            "ANTHROPIC_API_KEY",
+            "HOME",
+            "LANG",
+            "LC_ALL",
+            "PATH",
+            "TERM",
+            "TMPDIR"
+          ],
+          "options": {
+            "maxTurns": 40,
+            "tools": {
+              "type": "preset",
+              "preset": "claude_code"
+            },
+            "allowedTools": [
+              "Read",
+              "Write",
+              "Edit",
+              "Bash",
+              "Glob",
+              "Grep"
+            ],
+            "permissionMode": "acceptEdits",
+            "persistSession": false
+          }
+        }
+      ]
+    },
+    "error-result-with-key": {
+      "keys": [
+        "outcome",
+        "status",
+        "tasks"
+      ],
+      "result": {
+        "outcome": "fail-tests",
+        "status": "failed",
+        "tasks": [
+          {
+            "title": "1",
+            "status": "blocked_code",
+            "commit": "—",
+            "concern": "—",
+            "error": "bad credential [REDACTED] rejected"
+          }
+        ]
+      },
+      "sleepCalls": 0,
+      "queryCalls": [
+        {
+          "promptSha": "60b86c9eb20bc884",
+          "hasAbortController": true,
+          "envKeys": [
+            "ANTHROPIC_API_KEY",
+            "HOME",
+            "LANG",
+            "LC_ALL",
+            "PATH",
+            "TERM",
+            "TMPDIR"
+          ],
+          "options": {
+            "maxTurns": 40,
+            "tools": {
+              "type": "preset",
+              "preset": "claude_code"
+            },
+            "allowedTools": [
+              "Read",
+              "Write",
+              "Edit",
+              "Bash",
+              "Glob",
+              "Grep"
+            ],
+            "permissionMode": "acceptEdits",
+            "persistSession": false
+          }
+        }
+      ]
+    },
+    "error-result-without-key": {
+      "keys": [
+        "outcome",
+        "status",
+        "tasks"
+      ],
+      "result": {
+        "outcome": "fail-tests",
+        "status": "failed",
+        "tasks": [
+          {
+            "title": "1",
+            "status": "blocked_code",
+            "commit": "—",
+            "concern": "—",
+            "error": "something went wrong"
+          }
+        ]
+      },
+      "sleepCalls": 0,
+      "queryCalls": [
+        {
+          "promptSha": "60b86c9eb20bc884",
+          "hasAbortController": true,
+          "envKeys": [
+            "ANTHROPIC_API_KEY",
+            "HOME",
+            "LANG",
+            "LC_ALL",
+            "PATH",
+            "TERM",
+            "TMPDIR"
+          ],
+          "options": {
+            "maxTurns": 40,
+            "tools": {
+              "type": "preset",
+              "preset": "claude_code"
+            },
+            "allowedTools": [
+              "Read",
+              "Write",
+              "Edit",
+              "Bash",
+              "Glob",
+              "Grep"
+            ],
+            "permissionMode": "acceptEdits",
+            "persistSession": false
+          }
+        }
+      ]
+    },
+    "error-result-no-errors-array": {
+      "keys": [
+        "outcome",
+        "status",
+        "tasks"
+      ],
+      "result": {
+        "outcome": "fail-tests",
+        "status": "failed",
+        "tasks": [
+          {
+            "title": "1",
+            "status": "blocked_code",
+            "commit": "—",
+            "concern": "—",
+            "error": "SDK reported an error result"
+          }
+        ]
+      },
+      "sleepCalls": 0,
+      "queryCalls": [
+        {
+          "promptSha": "60b86c9eb20bc884",
+          "hasAbortController": true,
+          "envKeys": [
+            "ANTHROPIC_API_KEY",
+            "HOME",
+            "LANG",
+            "LC_ALL",
+            "PATH",
+            "TERM",
+            "TMPDIR"
+          ],
+          "options": {
+            "maxTurns": 40,
+            "tools": {
+              "type": "preset",
+              "preset": "claude_code"
+            },
+            "allowedTools": [
+              "Read",
+              "Write",
+              "Edit",
+              "Bash",
+              "Glob",
+              "Grep"
+            ],
+            "permissionMode": "acceptEdits",
+            "persistSession": false
+          }
+        }
+      ]
+    },
+    "error-result-with-usage": {
+      "keys": [
+        "outcome",
+        "status",
+        "tasks",
+        "usage"
+      ],
+      "result": {
+        "outcome": "fail-tests",
+        "status": "failed",
+        "tasks": [
+          {
+            "title": "1",
+            "status": "blocked_code",
+            "commit": "—",
+            "concern": "—",
+            "error": "quota exceeded: token limit"
+          }
+        ],
+        "usage": {
+          "input": 100,
+          "output": 50,
+          "total": 150,
+          "cacheRead": 7,
+          "cacheWrite": 9
+        }
+      },
+      "sleepCalls": 0,
+      "queryCalls": [
+        {
+          "promptSha": "60b86c9eb20bc884",
+          "hasAbortController": true,
+          "envKeys": [
+            "ANTHROPIC_API_KEY",
+            "HOME",
+            "LANG",
+            "LC_ALL",
+            "PATH",
+            "TERM",
+            "TMPDIR"
+          ],
+          "options": {
+            "maxTurns": 40,
+            "tools": {
+              "type": "preset",
+              "preset": "claude_code"
+            },
+            "allowedTools": [
+              "Read",
+              "Write",
+              "Edit",
+              "Bash",
+              "Glob",
+              "Grep"
+            ],
+            "permissionMode": "acceptEdits",
+            "persistSession": false
+          }
+        }
+      ]
+    },
+    "transient-then-success": {
+      "keys": [
+        "outcome",
+        "status",
+        "tasks"
+      ],
+      "result": {
+        "outcome": "success",
+        "status": "complete",
+        "tasks": [
+          {
+            "title": "Task one",
+            "status": "complete",
+            "commit": "abc1234",
+            "concern": "—",
+            "error": "—"
+          }
+        ]
+      },
+      "sleepCalls": 2,
+      "queryCalls": [
+        {
+          "promptSha": "60b86c9eb20bc884",
+          "hasAbortController": true,
+          "envKeys": [
+            "ANTHROPIC_API_KEY",
+            "HOME",
+            "LANG",
+            "LC_ALL",
+            "PATH",
+            "TERM",
+            "TMPDIR"
+          ],
+          "options": {
+            "maxTurns": 40,
+            "tools": {
+              "type": "preset",
+              "preset": "claude_code"
+            },
+            "allowedTools": [
+              "Read",
+              "Write",
+              "Edit",
+              "Bash",
+              "Glob",
+              "Grep"
+            ],
+            "permissionMode": "acceptEdits",
+            "persistSession": false
+          }
+        },
+        {
+          "promptSha": "60b86c9eb20bc884",
+          "hasAbortController": true,
+          "envKeys": [
+            "ANTHROPIC_API_KEY",
+            "HOME",
+            "LANG",
+            "LC_ALL",
+            "PATH",
+            "TERM",
+            "TMPDIR"
+          ],
+          "options": {
+            "maxTurns": 40,
+            "tools": {
+              "type": "preset",
+              "preset": "claude_code"
+            },
+            "allowedTools": [
+              "Read",
+              "Write",
+              "Edit",
+              "Bash",
+              "Glob",
+              "Grep"
+            ],
+            "permissionMode": "acceptEdits",
+            "persistSession": false
+          }
+        },
+        {
+          "promptSha": "60b86c9eb20bc884",
+          "hasAbortController": true,
+          "envKeys": [
+            "ANTHROPIC_API_KEY",
+            "HOME",
+            "LANG",
+            "LC_ALL",
+            "PATH",
+            "TERM",
+            "TMPDIR"
+          ],
+          "options": {
+            "maxTurns": 40,
+            "tools": {
+              "type": "preset",
+              "preset": "claude_code"
+            },
+            "allowedTools": [
+              "Read",
+              "Write",
+              "Edit",
+              "Bash",
+              "Glob",
+              "Grep"
+            ],
+            "permissionMode": "acceptEdits",
+            "persistSession": false
+          }
+        }
+      ]
+    },
+    "transient-exhausted": {
+      "keys": [
+        "outcome",
+        "status",
+        "tasks"
+      ],
+      "result": {
+        "outcome": "fail-tests",
+        "status": "failed",
+        "tasks": [
+          {
+            "title": "1",
+            "status": "blocked_code",
+            "commit": "—",
+            "concern": "—",
+            "error": "rate limit"
+          }
+        ]
+      },
+      "sleepCalls": 3,
+      "queryCalls": [
+        {
+          "promptSha": "60b86c9eb20bc884",
+          "hasAbortController": true,
+          "envKeys": [
+            "ANTHROPIC_API_KEY",
+            "HOME",
+            "LANG",
+            "LC_ALL",
+            "PATH",
+            "TERM",
+            "TMPDIR"
+          ],
+          "options": {
+            "maxTurns": 40,
+            "tools": {
+              "type": "preset",
+              "preset": "claude_code"
+            },
+            "allowedTools": [
+              "Read",
+              "Write",
+              "Edit",
+              "Bash",
+              "Glob",
+              "Grep"
+            ],
+            "permissionMode": "acceptEdits",
+            "persistSession": false
+          }
+        },
+        {
+          "promptSha": "60b86c9eb20bc884",
+          "hasAbortController": true,
+          "envKeys": [
+            "ANTHROPIC_API_KEY",
+            "HOME",
+            "LANG",
+            "LC_ALL",
+            "PATH",
+            "TERM",
+            "TMPDIR"
+          ],
+          "options": {
+            "maxTurns": 40,
+            "tools": {
+              "type": "preset",
+              "preset": "claude_code"
+            },
+            "allowedTools": [
+              "Read",
+              "Write",
+              "Edit",
+              "Bash",
+              "Glob",
+              "Grep"
+            ],
+            "permissionMode": "acceptEdits",
+            "persistSession": false
+          }
+        },
+        {
+          "promptSha": "60b86c9eb20bc884",
+          "hasAbortController": true,
+          "envKeys": [
+            "ANTHROPIC_API_KEY",
+            "HOME",
+            "LANG",
+            "LC_ALL",
+            "PATH",
+            "TERM",
+            "TMPDIR"
+          ],
+          "options": {
+            "maxTurns": 40,
+            "tools": {
+              "type": "preset",
+              "preset": "claude_code"
+            },
+            "allowedTools": [
+              "Read",
+              "Write",
+              "Edit",
+              "Bash",
+              "Glob",
+              "Grep"
+            ],
+            "permissionMode": "acceptEdits",
+            "persistSession": false
+          }
+        },
+        {
+          "promptSha": "60b86c9eb20bc884",
+          "hasAbortController": true,
+          "envKeys": [
+            "ANTHROPIC_API_KEY",
+            "HOME",
+            "LANG",
+            "LC_ALL",
+            "PATH",
+            "TERM",
+            "TMPDIR"
+          ],
+          "options": {
+            "maxTurns": 40,
+            "tools": {
+              "type": "preset",
+              "preset": "claude_code"
+            },
+            "allowedTools": [
+              "Read",
+              "Write",
+              "Edit",
+              "Bash",
+              "Glob",
+              "Grep"
+            ],
+            "permissionMode": "acceptEdits",
+            "persistSession": false
+          }
+        }
+      ]
+    },
+    "permanent-error": {
+      "keys": [
+        "outcome",
+        "status",
+        "tasks"
+      ],
+      "result": {
+        "outcome": "fail-tests",
+        "status": "failed",
+        "tasks": [
+          {
+            "title": "1",
+            "status": "blocked_code",
+            "commit": "—",
+            "concern": "—",
+            "error": "Unauthorized"
+          }
+        ]
+      },
+      "sleepCalls": 0,
+      "queryCalls": [
+        {
+          "promptSha": "60b86c9eb20bc884",
+          "hasAbortController": true,
+          "envKeys": [
+            "ANTHROPIC_API_KEY",
+            "HOME",
+            "LANG",
+            "LC_ALL",
+            "PATH",
+            "TERM",
+            "TMPDIR"
+          ],
+          "options": {
+            "maxTurns": 40,
+            "tools": {
+              "type": "preset",
+              "preset": "claude_code"
+            },
+            "allowedTools": [
+              "Read",
+              "Write",
+              "Edit",
+              "Bash",
+              "Glob",
+              "Grep"
+            ],
+            "permissionMode": "acceptEdits",
+            "persistSession": false
+          }
+        }
+      ]
+    },
+    "unknown-error": {
+      "keys": [
+        "outcome",
+        "status",
+        "tasks"
+      ],
+      "result": {
+        "outcome": "fail-tests",
+        "status": "failed",
+        "tasks": [
+          {
+            "title": "1",
+            "status": "blocked_code",
+            "commit": "—",
+            "concern": "—",
+            "error": "something odd"
+          }
+        ]
+      },
+      "sleepCalls": 0,
+      "queryCalls": [
+        {
+          "promptSha": "60b86c9eb20bc884",
+          "hasAbortController": true,
+          "envKeys": [
+            "ANTHROPIC_API_KEY",
+            "HOME",
+            "LANG",
+            "LC_ALL",
+            "PATH",
+            "TERM",
+            "TMPDIR"
+          ],
+          "options": {
+            "maxTurns": 40,
+            "tools": {
+              "type": "preset",
+              "preset": "claude_code"
+            },
+            "allowedTools": [
+              "Read",
+              "Write",
+              "Edit",
+              "Bash",
+              "Glob",
+              "Grep"
+            ],
+            "permissionMode": "acceptEdits",
+            "persistSession": false
+          }
+        }
+      ]
+    },
+    "model-error": {
+      "keys": [
+        "outcome",
+        "status",
+        "tasks"
+      ],
+      "result": {
+        "outcome": "fail-tests",
+        "status": "failed",
+        "tasks": [
+          {
+            "title": "1",
+            "status": "blocked_code",
+            "commit": "—",
+            "concern": "—",
+            "error": "malformed response from model"
+          }
+        ]
+      },
+      "sleepCalls": 0,
+      "queryCalls": [
+        {
+          "promptSha": "60b86c9eb20bc884",
+          "hasAbortController": true,
+          "envKeys": [
+            "ANTHROPIC_API_KEY",
+            "HOME",
+            "LANG",
+            "LC_ALL",
+            "PATH",
+            "TERM",
+            "TMPDIR"
+          ],
+          "options": {
+            "maxTurns": 40,
+            "tools": {
+              "type": "preset",
+              "preset": "claude_code"
+            },
+            "allowedTools": [
+              "Read",
+              "Write",
+              "Edit",
+              "Bash",
+              "Glob",
+              "Grep"
+            ],
+            "permissionMode": "acceptEdits",
+            "persistSession": false
+          }
+        }
+      ]
+    },
+    "resource-error": {
+      "keys": [
+        "outcome",
+        "status",
+        "tasks"
+      ],
+      "result": {
+        "outcome": "fail-tests",
+        "status": "failed",
+        "tasks": [
+          {
+            "title": "1",
+            "status": "blocked_code",
+            "commit": "—",
+            "concern": "—",
+            "error": "context length exceeded"
+          }
+        ]
+      },
+      "sleepCalls": 0,
+      "queryCalls": [
+        {
+          "promptSha": "60b86c9eb20bc884",
+          "hasAbortController": true,
+          "envKeys": [
+            "ANTHROPIC_API_KEY",
+            "HOME",
+            "LANG",
+            "LC_ALL",
+            "PATH",
+            "TERM",
+            "TMPDIR"
+          ],
+          "options": {
+            "maxTurns": 40,
+            "tools": {
+              "type": "preset",
+              "preset": "claude_code"
+            },
+            "allowedTools": [
+              "Read",
+              "Write",
+              "Edit",
+              "Bash",
+              "Glob",
+              "Grep"
+            ],
+            "permissionMode": "acceptEdits",
+            "persistSession": false
+          }
+        }
+      ]
+    },
+    "timeout-no-usage": {
+      "keys": [
+        "outcome",
+        "status",
+        "tasks"
+      ],
+      "result": {
+        "outcome": "fail-timeout",
+        "status": "failed",
+        "tasks": [
+          {
+            "title": "1",
+            "status": "blocked_code",
+            "commit": "—",
+            "concern": "—",
+            "error": "wave timed out after 50ms"
+          }
+        ]
+      },
+      "sleepCalls": 0,
+      "queryCalls": [
+        {
+          "promptSha": "60b86c9eb20bc884",
+          "hasAbortController": true,
+          "envKeys": [
+            "ANTHROPIC_API_KEY",
+            "HOME",
+            "LANG",
+            "LC_ALL",
+            "PATH",
+            "TERM",
+            "TMPDIR"
+          ],
+          "options": {
+            "maxTurns": 40,
+            "tools": {
+              "type": "preset",
+              "preset": "claude_code"
+            },
+            "allowedTools": [
+              "Read",
+              "Write",
+              "Edit",
+              "Bash",
+              "Glob",
+              "Grep"
+            ],
+            "permissionMode": "acceptEdits",
+            "persistSession": false
+          }
+        }
+      ]
+    },
+    "timeout-with-usage": {
+      "keys": [
+        "outcome",
+        "status",
+        "tasks",
+        "usage"
+      ],
+      "result": {
+        "outcome": "fail-timeout",
+        "status": "failed",
+        "tasks": [
+          {
+            "title": "1",
+            "status": "blocked_code",
+            "commit": "—",
+            "concern": "—",
+            "error": "wave timed out after 50ms"
+          }
+        ],
+        "usage": {
+          "input": 100,
+          "output": 50,
+          "total": 150,
+          "cacheRead": 7,
+          "cacheWrite": 9
+        }
+      },
+      "sleepCalls": 0,
+      "queryCalls": [
+        {
+          "promptSha": "60b86c9eb20bc884",
+          "hasAbortController": true,
+          "envKeys": [
+            "ANTHROPIC_API_KEY",
+            "HOME",
+            "LANG",
+            "LC_ALL",
+            "PATH",
+            "TERM",
+            "TMPDIR"
+          ],
+          "options": {
+            "maxTurns": 40,
+            "tools": {
+              "type": "preset",
+              "preset": "claude_code"
+            },
+            "allowedTools": [
+              "Read",
+              "Write",
+              "Edit",
+              "Bash",
+              "Glob",
+              "Grep"
+            ],
+            "permissionMode": "acceptEdits",
+            "persistSession": false
+          }
+        }
+      ]
+    },
+    "block-only-on-reprompt": {
+      "keys": [
+        "outcome",
+        "status",
+        "tasks"
+      ],
+      "result": {
+        "outcome": "success",
+        "status": "complete",
+        "tasks": [
+          {
+            "title": "Task one",
+            "status": "complete",
+            "commit": "abc1234",
+            "concern": "—",
+            "error": "—"
+          }
+        ]
+      },
+      "sleepCalls": 0,
+      "queryCalls": [
+        {
+          "promptSha": "60b86c9eb20bc884",
+          "hasAbortController": true,
+          "envKeys": [
+            "ANTHROPIC_API_KEY",
+            "HOME",
+            "LANG",
+            "LC_ALL",
+            "PATH",
+            "TERM",
+            "TMPDIR"
+          ],
+          "options": {
+            "maxTurns": 40,
+            "tools": {
+              "type": "preset",
+              "preset": "claude_code"
+            },
+            "allowedTools": [
+              "Read",
+              "Write",
+              "Edit",
+              "Bash",
+              "Glob",
+              "Grep"
+            ],
+            "permissionMode": "acceptEdits",
+            "persistSession": false
+          }
+        },
+        {
+          "promptSha": "62ebf82be0257aac",
+          "hasAbortController": true,
+          "envKeys": [
+            "ANTHROPIC_API_KEY",
+            "HOME",
+            "LANG",
+            "LC_ALL",
+            "PATH",
+            "TERM",
+            "TMPDIR"
+          ],
+          "options": {
+            "maxTurns": 40,
+            "tools": {
+              "type": "preset",
+              "preset": "claude_code"
+            },
+            "allowedTools": [
+              "Read",
+              "Write",
+              "Edit",
+              "Bash",
+              "Glob",
+              "Grep"
+            ],
+            "permissionMode": "acceptEdits",
+            "persistSession": false
+          }
+        }
+      ]
+    },
+    "no-block-after-reprompt": {
+      "keys": [
+        "outcome",
+        "status",
+        "tasks"
+      ],
+      "result": {
+        "outcome": "fail-protocol",
+        "status": "failed",
+        "tasks": [
+          {
+            "title": "1",
+            "status": "blocked_code",
+            "commit": "—",
+            "concern": "—",
+            "error": "No WAVE_RESULT block after one reprompt"
+          }
+        ]
+      },
+      "sleepCalls": 0,
+      "queryCalls": [
+        {
+          "promptSha": "60b86c9eb20bc884",
+          "hasAbortController": true,
+          "envKeys": [
+            "ANTHROPIC_API_KEY",
+            "HOME",
+            "LANG",
+            "LC_ALL",
+            "PATH",
+            "TERM",
+            "TMPDIR"
+          ],
+          "options": {
+            "maxTurns": 40,
+            "tools": {
+              "type": "preset",
+              "preset": "claude_code"
+            },
+            "allowedTools": [
+              "Read",
+              "Write",
+              "Edit",
+              "Bash",
+              "Glob",
+              "Grep"
+            ],
+            "permissionMode": "acceptEdits",
+            "persistSession": false
+          }
+        },
+        {
+          "promptSha": "62ebf82be0257aac",
+          "hasAbortController": true,
+          "envKeys": [
+            "ANTHROPIC_API_KEY",
+            "HOME",
+            "LANG",
+            "LC_ALL",
+            "PATH",
+            "TERM",
+            "TMPDIR"
+          ],
+          "options": {
+            "maxTurns": 40,
+            "tools": {
+              "type": "preset",
+              "preset": "claude_code"
+            },
+            "allowedTools": [
+              "Read",
+              "Write",
+              "Edit",
+              "Bash",
+              "Glob",
+              "Grep"
+            ],
+            "permissionMode": "acceptEdits",
+            "persistSession": false
+          }
+        }
+      ]
+    },
+    "transient-during-reprompt": {
+      "keys": [
+        "outcome",
+        "status",
+        "tasks"
+      ],
+      "result": {
+        "outcome": "success",
+        "status": "complete",
+        "tasks": [
+          {
+            "title": "Task one",
+            "status": "complete",
+            "commit": "abc1234",
+            "concern": "—",
+            "error": "—"
+          }
+        ]
+      },
+      "sleepCalls": 1,
+      "queryCalls": [
+        {
+          "promptSha": "60b86c9eb20bc884",
+          "hasAbortController": true,
+          "envKeys": [
+            "ANTHROPIC_API_KEY",
+            "HOME",
+            "LANG",
+            "LC_ALL",
+            "PATH",
+            "TERM",
+            "TMPDIR"
+          ],
+          "options": {
+            "maxTurns": 40,
+            "tools": {
+              "type": "preset",
+              "preset": "claude_code"
+            },
+            "allowedTools": [
+              "Read",
+              "Write",
+              "Edit",
+              "Bash",
+              "Glob",
+              "Grep"
+            ],
+            "permissionMode": "acceptEdits",
+            "persistSession": false
+          }
+        },
+        {
+          "promptSha": "62ebf82be0257aac",
+          "hasAbortController": true,
+          "envKeys": [
+            "ANTHROPIC_API_KEY",
+            "HOME",
+            "LANG",
+            "LC_ALL",
+            "PATH",
+            "TERM",
+            "TMPDIR"
+          ],
+          "options": {
+            "maxTurns": 40,
+            "tools": {
+              "type": "preset",
+              "preset": "claude_code"
+            },
+            "allowedTools": [
+              "Read",
+              "Write",
+              "Edit",
+              "Bash",
+              "Glob",
+              "Grep"
+            ],
+            "permissionMode": "acceptEdits",
+            "persistSession": false
+          }
+        },
+        {
+          "promptSha": "62ebf82be0257aac",
+          "hasAbortController": true,
+          "envKeys": [
+            "ANTHROPIC_API_KEY",
+            "HOME",
+            "LANG",
+            "LC_ALL",
+            "PATH",
+            "TERM",
+            "TMPDIR"
+          ],
+          "options": {
+            "maxTurns": 40,
+            "tools": {
+              "type": "preset",
+              "preset": "claude_code"
+            },
+            "allowedTools": [
+              "Read",
+              "Write",
+              "Edit",
+              "Bash",
+              "Glob",
+              "Grep"
+            ],
+            "permissionMode": "acceptEdits",
+            "persistSession": false
+          }
+        }
+      ]
+    },
+    "model-default": {
+      "keys": [
+        "outcome",
+        "status",
+        "tasks"
+      ],
+      "result": {
+        "outcome": "success",
+        "status": "complete",
+        "tasks": [
+          {
+            "title": "Task one",
+            "status": "complete",
+            "commit": "abc1234",
+            "concern": "—",
+            "error": "—"
+          }
+        ]
+      },
+      "sleepCalls": 0,
+      "queryCalls": [
+        {
+          "promptSha": "60b86c9eb20bc884",
+          "hasAbortController": true,
+          "envKeys": [
+            "ANTHROPIC_API_KEY",
+            "HOME",
+            "LANG",
+            "LC_ALL",
+            "PATH",
+            "TERM",
+            "TMPDIR"
+          ],
+          "options": {
+            "model": "m-default",
+            "cwd": "/repo/root",
+            "maxTurns": 7,
+            "tools": {
+              "type": "preset",
+              "preset": "claude_code"
+            },
+            "allowedTools": [
+              "Read",
+              "Write",
+              "Edit",
+              "Bash",
+              "Glob",
+              "Grep"
+            ],
+            "permissionMode": "acceptEdits",
+            "persistSession": false
+          }
+        }
+      ]
+    },
+    "model-wave-override": {
+      "keys": [
+        "outcome",
+        "status",
+        "tasks"
+      ],
+      "result": {
+        "outcome": "success",
+        "status": "complete",
+        "tasks": [
+          {
+            "title": "Task one",
+            "status": "complete",
+            "commit": "abc1234",
+            "concern": "—",
+            "error": "—"
+          }
+        ]
+      },
+      "sleepCalls": 0,
+      "queryCalls": [
+        {
+          "promptSha": "60b86c9eb20bc884",
+          "hasAbortController": true,
+          "envKeys": [
+            "ANTHROPIC_API_KEY",
+            "HOME",
+            "LANG",
+            "LC_ALL",
+            "PATH",
+            "TERM",
+            "TMPDIR"
+          ],
+          "options": {
+            "model": "m-wave",
+            "maxTurns": 40,
+            "tools": {
+              "type": "preset",
+              "preset": "claude_code"
+            },
+            "allowedTools": [
+              "Read",
+              "Write",
+              "Edit",
+              "Bash",
+              "Glob",
+              "Grep"
+            ],
+            "permissionMode": "acceptEdits",
+            "persistSession": false
+          }
+        }
+      ]
+    },
+    "model-unset-no-repo-root": {
+      "keys": [
+        "outcome",
+        "status",
+        "tasks"
+      ],
+      "result": {
+        "outcome": "success",
+        "status": "complete",
+        "tasks": [
+          {
+            "title": "Task one",
+            "status": "complete",
+            "commit": "abc1234",
+            "concern": "—",
+            "error": "—"
+          }
+        ]
+      },
+      "sleepCalls": 0,
+      "queryCalls": [
+        {
+          "promptSha": "60b86c9eb20bc884",
+          "hasAbortController": true,
+          "envKeys": [
+            "ANTHROPIC_API_KEY",
+            "HOME",
+            "LANG",
+            "LC_ALL",
+            "PATH",
+            "TERM",
+            "TMPDIR"
+          ],
+          "options": {
+            "maxTurns": 40,
+            "tools": {
+              "type": "preset",
+              "preset": "claude_code"
+            },
+            "allowedTools": [
+              "Read",
+              "Write",
+              "Edit",
+              "Bash",
+              "Glob",
+              "Grep"
+            ],
+            "permissionMode": "acceptEdits",
+            "persistSession": false
+          }
+        }
+      ]
+    },
+    "capabilities-unconstrained": {
+      "keys": [
+        "outcome",
+        "status",
+        "tasks"
+      ],
+      "result": {
+        "outcome": "success",
+        "status": "complete",
+        "tasks": [
+          {
+            "title": "Task one",
+            "status": "complete",
+            "commit": "abc1234",
+            "concern": "—",
+            "error": "—"
+          }
+        ]
+      },
+      "sleepCalls": 0,
+      "queryCalls": [
+        {
+          "promptSha": "60b86c9eb20bc884",
+          "hasAbortController": true,
+          "envKeys": [
+            "ANTHROPIC_API_KEY",
+            "HOME",
+            "LANG",
+            "LC_ALL",
+            "PATH",
+            "TERM",
+            "TMPDIR"
+          ],
+          "options": {
+            "maxTurns": 40,
+            "tools": {
+              "type": "preset",
+              "preset": "claude_code"
+            },
+            "allowedTools": [
+              "Read",
+              "Write",
+              "Edit",
+              "Bash",
+              "Glob",
+              "Grep"
+            ],
+            "permissionMode": "acceptEdits",
+            "persistSession": false
+          }
+        }
+      ]
+    },
+    "capabilities-constrained": {
+      "keys": [
+        "outcome",
+        "status",
+        "tasks"
+      ],
+      "result": {
+        "outcome": "success",
+        "status": "complete",
+        "tasks": [
+          {
+            "title": "Task one",
+            "status": "complete",
+            "commit": "abc1234",
+            "concern": "—",
+            "error": "—"
+          }
+        ]
+      },
+      "sleepCalls": 0,
+      "queryCalls": [
+        {
+          "promptSha": "60b86c9eb20bc884",
+          "hasAbortController": true,
+          "envKeys": [
+            "ANTHROPIC_API_KEY",
+            "HOME",
+            "LANG",
+            "LC_ALL",
+            "PATH",
+            "TERM",
+            "TMPDIR"
+          ],
+          "options": {
+            "maxTurns": 40,
+            "tools": {
+              "type": "preset",
+              "preset": "claude_code"
+            },
+            "allowedTools": [
+              "Read",
+              "Glob",
+              "Grep",
+              "WebFetch",
+              "WebSearch"
+            ],
+            "permissionMode": "acceptEdits",
+            "persistSession": false
+          }
+        }
+      ]
+    },
+    "capabilities-unmappable": {
+      "keys": [
+        "outcome",
+        "status",
+        "tasks"
+      ],
+      "result": {
+        "outcome": "fail-tests",
+        "status": "failed",
+        "tasks": [
+          {
+            "title": "1",
+            "status": "blocked_code",
+            "commit": "—",
+            "concern": "—",
+            "error": "wave 1 capabilities: capability 'mcp' cannot be granted: the sdk adapter configures no MCP servers"
+          }
+        ]
+      },
+      "sleepCalls": 0,
+      "queryCalls": []
+    },
+    "string-wave-id": {
+      "keys": [
+        "outcome",
+        "status",
+        "tasks"
+      ],
+      "result": {
+        "outcome": "success",
+        "status": "complete",
+        "tasks": [
+          {
+            "title": "Task one",
+            "status": "complete",
+            "commit": "abc1234",
+            "concern": "—",
+            "error": "—"
+          }
+        ]
+      },
+      "sleepCalls": 0,
+      "queryCalls": [
+        {
+          "promptSha": "9a3163bd29ce2987",
+          "hasAbortController": true,
+          "envKeys": [
+            "ANTHROPIC_API_KEY",
+            "HOME",
+            "LANG",
+            "LC_ALL",
+            "PATH",
+            "TERM",
+            "TMPDIR"
+          ],
+          "options": {
+            "maxTurns": 40,
+            "tools": {
+              "type": "preset",
+              "preset": "claude_code"
+            },
+            "allowedTools": [
+              "Read",
+              "Write",
+              "Edit",
+              "Bash",
+              "Glob",
+              "Grep"
+            ],
+            "permissionMode": "acceptEdits",
+            "persistSession": false
+          }
+        }
+      ]
+    }
+  }
+}
