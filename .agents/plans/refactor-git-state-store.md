@@ -1,7 +1,10 @@
 # Plan: Refactor the Git State Store Under the Function-Length Ratchet (#252, part 3 of 6)
 Created: 2026-10-13
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-10-13T14:15:55.503Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/refactor-git-state-store
 Adopted-From: #252 part 3 of 6 (refactor harness/adapters/git-state-store.js; the issue stays open until all six plans land)
 Issue-Title: Refactor over-long core functions (runOneWave, createGitStateStore, deliverCommand, ...)
