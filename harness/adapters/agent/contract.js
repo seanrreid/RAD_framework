@@ -596,22 +596,6 @@ export function normalizeUsage(raw) {
 
 // ── Shared resilience helpers (used by every provider adapter in Wave 2) ──
 
-/**
- * Classify a thrown/returned error into a coarse retry bucket. The bucket drives
- * whether (and how) a provider adapter retries:
- *   - 'transient'  → safe to retry with backoff (rate-limit / 429 / network / timeout)
- *   - 'permanent'  → do not retry (auth / permission / not-found)
- *   - 'model'      → the model produced something unusable (malformed / invalid JSON)
- *   - 'resource'   → ran out of a hard resource (OOM / token-limit)
- *
- * Classification is best-effort and string-based: it inspects an explicit
- * numeric `status`/`code` when present, then falls back to keyword matching over
- * the error name + message. Unknown errors default to 'permanent' (fail closed —
- * we do not retry something we cannot recognise).
- *
- * @param {unknown} err
- * @returns {'transient'|'permanent'|'model'|'resource'}
- */
 /** Keyword lists per retry bucket, matched against the lowercased haystack. */
 const RESOURCE_KEYWORDS = [
   'out of memory',
@@ -660,7 +644,7 @@ function includesAny(haystack, keywords) {
 
 /**
  * Pull the three facts classifyError reasons over: the numeric status (or null),
- * the RAW error name (not lowercased), and the lowercased keyword haystack.
+ * the lowercased error name, and the lowercased keyword haystack.
  */
 function errorContext(err) {
   const status = (err && (err.status ?? err.statusCode ?? err.code)) ?? null;
@@ -672,19 +656,18 @@ function errorContext(err) {
   // identifier — fold it into the keyword haystack so it can be matched.
   const codeStr = err && typeof err.code === 'string' ? err.code : '';
   const haystack = `${name} ${message} ${codeStr}`.toLowerCase();
-  return { numericStatus, name, haystack };
+  return { numericStatus, lowerName: name.toLowerCase(), haystack };
 }
 
 function isResourceError({ haystack }) {
   return /\boom\b/.test(haystack) || includesAny(haystack, RESOURCE_KEYWORDS);
 }
 
-// The raw-name comparison is deliberately against the un-lowercased name.
-function isPermanentError({ numericStatus, name, haystack }) {
+function isPermanentError({ numericStatus, lowerName, haystack }) {
   return (
     PERMANENT_STATUSES.has(numericStatus) ||
     includesAny(haystack, PERMANENT_KEYWORDS) ||
-    name === 'enoent'
+    lowerName === 'enoent'
   );
 }
 
@@ -696,10 +679,26 @@ function isTransientError({ numericStatus, haystack }) {
   );
 }
 
-function isModelError({ name, haystack }) {
-  return includesAny(haystack, MODEL_KEYWORDS) || name === 'syntaxerror';
+function isModelError({ lowerName, haystack }) {
+  return includesAny(haystack, MODEL_KEYWORDS) || lowerName === 'syntaxerror';
 }
 
+/**
+ * Classify a thrown/returned error into a coarse retry bucket. The bucket drives
+ * whether (and how) a provider adapter retries:
+ *   - 'transient'  → safe to retry with backoff (rate-limit / 429 / network / timeout)
+ *   - 'permanent'  → do not retry (auth / permission / not-found)
+ *   - 'model'      → the model produced something unusable (malformed / invalid JSON)
+ *   - 'resource'   → ran out of a hard resource (OOM / token-limit)
+ *
+ * Classification is best-effort and string-based: it inspects an explicit
+ * numeric `status`/`code` when present, then falls back to keyword matching over
+ * the error name + message. Unknown errors default to 'permanent' (fail closed —
+ * we do not retry something we cannot recognise).
+ *
+ * @param {unknown} err
+ * @returns {'transient'|'permanent'|'model'|'resource'}
+ */
 export function classifyError(err) {
   const ctx = errorContext(err);
 
