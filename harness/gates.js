@@ -65,6 +65,63 @@ function eventHasRole(role, requiredRole, roleOf) {
   return role === requiredRole;
 }
 
+/** Look up the declared rule for `name`; an undeclared gate is an error. */
+function requireRule(gates, name) {
+  const rule = gates[name];
+  if (rule === undefined) {
+    throw new Error(`No gate rule declared for gate '${name}'`);
+  }
+  return rule;
+}
+
+/** Only the `role-equals` condition is supported; anything else is an error. */
+function requireSupportedCondition(name, condition) {
+  if (condition !== 'role-equals') {
+    throw new Error(
+      `Gate '${name}' declares unsupported condition '${condition}'`,
+    );
+  }
+}
+
+/**
+ * First event of `eventType` whose frozen `role` field satisfies the required
+ * role. `actor` identifies the human; `role` carries authority.
+ */
+function findSatisfyingEvent(events, eventType, requiredRole, roleOf) {
+  return events.find(
+    (e) =>
+      e &&
+      e.type === eventType &&
+      eventHasRole(e.role, requiredRole, roleOf),
+  );
+}
+
+/** GateResult for a satisfied gate; `recordedBy` is surfaced only when present. */
+function satisfiedResult(match, eventType, requiredRole) {
+  return {
+    passed: true,
+    reason: `satisfied by ${eventType} event from role:${requiredRole}`,
+    requiredRole,
+    satisfiedBy: {
+      actor: match.actor,
+      role: match.role,
+      ...(match.recordedBy !== undefined
+        ? { recordedBy: match.recordedBy }
+        : {}),
+    },
+  };
+}
+
+/** GateResult for an unsatisfied gate. */
+function unsatisfiedResult(reason, requiredRole) {
+  return {
+    passed: false,
+    reason,
+    requiredRole,
+    satisfiedBy: null,
+  };
+}
+
 /**
  * Evaluate a named gate against an event history.
  *
@@ -75,48 +132,12 @@ function eventHasRole(role, requiredRole, roleOf) {
  * @returns {GateResult}
  */
 export function evaluateGate(name, history, gates = loadGates(), opts = {}) {
-  const rule = gates[name];
-  if (rule === undefined) {
-    throw new Error(`No gate rule declared for gate '${name}'`);
-  }
-
+  const rule = requireRule(gates, name);
   const { eventType, requiredRole, condition, reason } = rule;
   const events = Array.isArray(history) ? history : [];
+  requireSupportedCondition(name, condition);
 
-  if (condition !== 'role-equals') {
-    throw new Error(
-      `Gate '${name}' declares unsupported condition '${condition}'`,
-    );
-  }
-
-  // Match on the event's frozen `role` field (written once at write-time by
-  // recordApproval). `actor` identifies the human; `role` carries authority.
-  const match = events.find(
-    (e) =>
-      e &&
-      e.type === eventType &&
-      eventHasRole(e.role, requiredRole, opts.roleOf),
-  );
-
-  if (match) {
-    return {
-      passed: true,
-      reason: `satisfied by ${eventType} event from role:${requiredRole}`,
-      requiredRole,
-      satisfiedBy: {
-        actor: match.actor,
-        role: match.role,
-        ...(match.recordedBy !== undefined
-          ? { recordedBy: match.recordedBy }
-          : {}),
-      },
-    };
-  }
-
-  return {
-    passed: false,
-    reason,
-    requiredRole,
-    satisfiedBy: null,
-  };
+  const match = findSatisfyingEvent(events, eventType, requiredRole, opts.roleOf);
+  if (match) return satisfiedResult(match, eventType, requiredRole);
+  return unsatisfiedResult(reason, requiredRole);
 }
