@@ -1,7 +1,10 @@
 # Plan: Fix the First-Wave Approval Mutant and Make the Eval Runner Reject Crashing Mutants (#269)
 Created: 2026-10-13
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-10-13T18:38:11.635Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/fix-first-wave-mutant-and-runner
 Issue: 269
 Adopted-From: https://github.com/seanrreid/RAD_framework/issues/269
