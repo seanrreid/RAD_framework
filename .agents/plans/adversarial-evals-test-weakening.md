@@ -1,7 +1,7 @@
 # Plan: Adversarial Evals for the Test-Weakening Guard
 Created: 2026-10-13
 Author: architect
-Status: approved
+Status: in-progress
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-10-13T18:11:12.007Z
 Recorded-By: sean@torchcodelab.com
