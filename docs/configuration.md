@@ -288,6 +288,21 @@ When `RAD_TOKEN_BUDGET` is unset or not a positive integer, `rad deliver` writes
 line to stderr at start (before any wave) saying no token cap applies; the breaker
 itself is unchanged.
 
+When `RAD_TOKEN_BUDGET` is valid but a wave reports no `usage`, the breaker cannot
+trip; `rad deliver` writes one stderr line naming the variable and the wave (once
+per run). To meter the `claude` CLI, use the usage wrapper:
+
+```yaml
+agent:
+  adapter: command
+  command: "node scripts/claude-usage.mjs"
+```
+
+Do not hard-code `{model}` in that command (it is substituted only when a model is
+set). With the wrapper, `RAD_TOKEN_BUDGET` counts input + output + cache creation +
+cache read tokens per wave, so a trivial call already costs about 27K; `cost` is
+reported separately and is not counted. See `docs/rad-wave-contract.md`.
+
 `RAD_MAX_FAILED_ATTEMPTS` (opt-in) stops deliver with `failed-attempt-cap` once the
 non-success wave-attempts since the latest `deliver-stopped` reach it; a malformed
 value (non-numeric, zero, negative) is a hard error — **exit 2** before any event.
