@@ -690,22 +690,46 @@ function waveForAgent(wave, waveTasks) {
   return { ...wave, type: entry.type, tasks: entry.tasks };
 }
 
-/**
- * Run ONE wave (a plan wave, or the synthetic end-of-run test wave) through the
- * per-wave body: approval re-check, token budget, resume verify, orphan
- * convergence, the bounded attempt loop (hooks, runWave, presence/Verify/scope
- * gates, push guard, matrix, doom loop) and wave-complete. Extracted verbatim
- * from the deliverSpine loop; the run-wide mutable counters live on `loop`
- * (`spent`, `failedAttempts`, `resumeVerified`, `operatorContextPending`).
- * Returns the stopRun result of a terminal stop, or null when the wave advanced.
- */
-async function runOneWave(wave, loop) {
-  const {
-    state, feature, now, matrix, runWave, sh, maxAttempts, tokenBudget, waveVerify, waveModels,
-    waveCapabilities, runHooks, approvalIntact, maxFailedAttempts, resume, pushGuard, testsByWave,
-    waveTasks, waves, completed, history, stopCtx,
-  } = loop;
+/** Token-budget breaker: stops BEFORE any further model work when spent >= budget. */
+function tokenBudgetStop(wave, loop) {
+  const { state, feature, now, tokenBudget, stopCtx } = loop;
+  if (!(tokenBudget > 0 && loop.spent >= tokenBudget)) return null;
+  state.append({
+    feature,
+    type: 'wave-failed',
+    actor: 'harness',
+    ts: now(),
+    data: { wave: wave.n, reason: 'token-budget', spent: loop.spent, budget: tokenBudget },
+  });
+  return stopRun({ stopped: 'token-budget', ok: false, wave: wave.n, spent: loop.spent, budget: tokenBudget }, stopCtx);
+}
 
+/** Resume verify: on a resumed run, once before the first non-skipped wave. */
+function resumeVerifyStop(loop) {
+  const { sh, feature, testsByWave, waves, completed, stopCtx } = loop;
+  if (completed.size === 0 || loop.resumeVerified) return null;
+  loop.resumeVerified = true; // run exactly once, before the first non-skipped wave
+  const promised =
+    testsByWave == null ? null : promisedUnion(testsByWave, waves, (n) => completed.has(n));
+  const verify = presenceGate({ sh, feature, testsByWave, promised });
+  return verify.status !== 0 ? stopRun({ stopped: 'resume-verify', ok: false }, stopCtx) : null;
+}
+
+/** ── Orphan convergence (#119): an attempt whose process died mid-agent left
+ * a `wave-started` with no `wave-attempt`. Surface it to the operator via
+ * the matrix before any new attempt runs. Its token spend was never
+ * recorded, so the budget breaker under-counts it — that is unrecoverable. ── */
+function orphanStop(wave, loop) {
+  const { history, matrix, state, feature, now, runHooks, stopCtx } = loop;
+  const orphaned = convergeOrphans({ history, wave, matrix, state, feature, now, runHooks });
+  return orphaned ? stopRun(orphaned, stopCtx) : null;
+}
+
+/** Stages that must pass before any attempt of `wave`, in order: approval
+ * re-check, token budget, resume verify, orphan convergence. Returns the stopRun
+ * result of a stop, or null. */
+async function preWaveStop(wave, loop) {
+  const { state, feature, approvalIntact, stopCtx } = loop;
   // Approval re-check fires before EVERY wave — the run's first included —
   // ahead of the budget check and any wave-started: an edited (or
   // un-approved) plan must stop before any agent runs. #151 exempted the
@@ -716,413 +740,556 @@ async function runOneWave(wave, loop) {
   if (reason) {
     return stopRun({ stopped: 'approval-changed', ok: false, wave: wave.n, reason }, stopCtx);
   }
-
   // Budget check fires before running THIS wave (and before resume-verify) so
   // an over-budget run stops without doing any further model work.
-  if (tokenBudget > 0 && loop.spent >= tokenBudget) {
-    state.append({
-      feature,
-      type: 'wave-failed',
-      actor: 'harness',
-      ts: now(),
-      data: { wave: wave.n, reason: 'token-budget', spent: loop.spent, budget: tokenBudget },
-    });
-    return stopRun({ stopped: 'token-budget', ok: false, wave: wave.n, spent: loop.spent, budget: tokenBudget }, stopCtx);
-  }
+  return tokenBudgetStop(wave, loop) ?? resumeVerifyStop(loop) ?? orphanStop(wave, loop);
+}
 
-  if (completed.size > 0 && !loop.resumeVerified) {
-    loop.resumeVerified = true; // run exactly once, before the first non-skipped wave
-    const promised =
-      testsByWave == null ? null : promisedUnion(testsByWave, waves, (n) => completed.has(n));
-    const verify = presenceGate({ sh, feature, testsByWave, promised });
-    if (verify.status !== 0) {
-      return stopRun({ stopped: 'resume-verify', ok: false }, stopCtx);
-    }
-  }
+/** ── Failed-attempt cap (#77): checked before the pre-wave hooks and any
+ * wave-started, so a capped run does no further agent work. ── */
+function attemptCapStop(wave, loop) {
+  const { maxFailedAttempts, stopCtx } = loop;
+  if (!(capEnabled(maxFailedAttempts) && loop.failedAttempts >= maxFailedAttempts)) return null;
+  return stopRun(
+    { stopped: 'failed-attempt-cap', ok: false, wave: wave.n, failed: loop.failedAttempts, cap: maxFailedAttempts },
+    stopCtx,
+  );
+}
 
-  // ── Orphan convergence (#119): an attempt whose process died mid-agent left
-  // a `wave-started` with no `wave-attempt`. Surface it to the operator via
-  // the matrix before any new attempt runs. Its token spend was never
-  // recorded, so the budget breaker under-counts it — that is unrecoverable. ──
-  const orphaned = convergeOrphans({ history, wave, matrix, state, feature, now, runHooks });
-  if (orphaned) return stopRun(orphaned, stopCtx);
+/** ── Hook: pre-wave (veto-capable point). Fired BEFORE runWave. A veto here
+ * aborts the wave without running the agent: route the veto outcome through
+ * the existing matrix and terminate the same way an agent-emitted outcome
+ * would. The veto outcome is validated against the frozen vocabulary first
+ * (fail-closed → 'abort-user') so an unknown token never reaches the matrix.
+ * First-veto-wins is enforced in the runner. ── */
+function preWaveVetoStop(wave, loop) {
+  const { state, feature, now, matrix, runHooks, stopCtx } = loop;
+  const preVeto = fireHooks(
+    runHooks,
+    'pre-wave',
+    { feature, wave: wave.n, outcome: null },
+    { state, feature, now },
+  ).veto;
+  if (!preVeto) return null;
+  const vetoOutcome = safeVetoOutcome(preVeto.outcome);
+  const provenance = { point: 'pre-wave', hook: preVeto.hook, outcome: vetoOutcome, source: 'hook' };
+  state.append({ feature, type: 'hook-veto', actor: 'harness', ts: now(), data: provenance });
+  const { action } = resolveOutcome('implement', vetoOutcome, matrix);
+  state.append({
+    feature,
+    type: 'wave-failed',
+    actor: 'harness',
+    ts: now(),
+    data: { wave: wave.n, action, outcome: vetoOutcome, source: 'hook', point: 'pre-wave', hook: preVeto.hook },
+  });
+  return stopRun(
+    { stopped: 'hook-veto', ok: false, wave: wave.n, action, outcome: vetoOutcome, point: 'pre-wave', hook: preVeto.hook },
+    stopCtx,
+  );
+}
+
+/** Record wave-started, run the agent between the two push-guard tip reads and
+ * record an unavailable tip. Returns { result, tipBefore, tipAfter }. */
+async function invokeWave(wave, loop, attempt, priorFailure) {
+  const { state, feature, now, runWave, sh, waveModels, waveCapabilities, resume, pushGuard, waveTasks } = loop;
+  appendWaveStarted({ state, feature, now, wave, attempt, waveModels, waveCapabilities });
+
+  // ADDITIVE second argument: attempt context. A runWave that ignores it is
+  // unchanged; one that reads it can make attempt N+1 differ from attempt N.
+  const attemptCtx = { attempt, priorFailure };
+  if (loop.operatorContextPending) {
+    attemptCtx.operatorContext = { context: resume.context, stop: resume.stop };
+    loop.operatorContextPending = false;
+  }
+  const tipBefore = pushGuard ? sh(PUSH_GUARD_SCRIPT, feature) : null;
+  const result = await runWave(waveForAgent(wave, waveTasks), attemptCtx);
+  const tipAfter = pushGuard ? sh(PUSH_GUARD_SCRIPT, feature) : null;
+  if (pushGuard) {
+    recordPushCheckUnavailable({ state, feature, now, wave, attempt, before: tipBefore, after: tipAfter });
+  }
+  return { result, tipBefore, tipAfter };
+}
+
+/** A post-wave veto is authoritative: it REPLACES the model's outcome with
+ * the (validated, fail-closed) veto outcome and routes THAT through the
+ * matrix — exactly generalizing the check-tests-present demotion to any
+ * outcome. It supersedes the per-wave test-presence gate (the operator has
+ * already decided). */
+function postWaveVetoGate(postVeto, { state, feature, now }) {
+  const vetoOutcome = safeVetoOutcome(postVeto.outcome);
+  state.append({
+    feature,
+    type: 'hook-veto',
+    actor: 'harness',
+    ts: now(),
+    data: { point: 'post-wave', hook: postVeto.hook, outcome: vetoOutcome, source: 'hook' },
+  });
+  return {
+    outcome: vetoOutcome,
+    gated: {
+      outcome: vetoOutcome,
+      categories: ['hook-veto'],
+      summary: `post-wave hook veto (${postVeto.hook})`,
+    },
+    vetoSource: { point: 'post-wave', hook: postVeto.hook },
+  };
+}
+
+/** Demotion for a failed presence gate. Fingerprint STABLE, gate-derived
+ * fields — NOT the model's variable result text. Two consecutive gate failures
+ * must hash equally so the doom-loop breaker trips at the cap instead of
+ * burning every attempt when the model merely rewords its output between
+ * identical failures. */
+function presenceDemotion(gate) {
+  const outcome = 'fail-tests';
+  return {
+    outcome,
+    gateOutput: gate.stdout ?? '',
+    gated: {
+      outcome,
+      gateStatus: gate.status,
+      categories: ['check-tests'],
+      summary: `check-tests gate failed (status ${gate.status})`,
+    },
+  };
+}
+
+/** Per-wave EXECUTING gate: the harness runs the plan's `Verify:` command and
+ * reads its REAL exit code — the one thing the presence gate cannot tell us.
+ * The command is arbitrary shell from a human-approved plan, so the spine never
+ * executes it: check-verify.sh does, through the SAME `sh` port every other
+ * guardrail uses, and owns the allow-listed env, the timeout, and the output
+ * cap. A failure supplies a different INPUT TOKEN to the matrix; it never adds
+ * a branch here and never invents an outcome. `verifyEvidence` is always set so
+ * the attempt records what really ran; the demotion keys only on failure. */
+function verifyGate(sh, command) {
+  const run = sh(VERIFY_SCRIPT, command);
+  const verifyEvidence = { verify: { command, status: run.status, passed: run.status === 0 } };
+  if (run.status === 0) return { verifyEvidence };
+  // A killed-on-timeout command is NOT a retryable test failure: a
+  // retry cannot fix a hang, so it takes the existing `fail-timeout`
+  // token (matrix action `surface`) instead of `fail-tests`.
+  const outcome = run.status === VERIFY_TIMEOUT_STATUS ? 'fail-timeout' : 'fail-tests';
+  // check-verify.sh already bounds this excerpt (40 lines / 8000 bytes); the
+  // prompt renderer caps it again, unconditionally. Gate-derived fields only,
+  // so two identical failures hash equally.
+  return {
+    verifyEvidence,
+    outcome,
+    gateOutput: run.stdout ?? '',
+    gated: {
+      outcome,
+      gateStatus: run.status,
+      categories: ['check-verify'],
+      summary: `check-verify gate failed (status ${run.status})`,
+    },
+  };
+}
+
+/** The Verify gate then the SCOPE gate (#77). Only an outcome still advancing
+ * after the presence and Verify gates is scope-checked; a failure demotes it to
+ * fail-scope BEFORE the attempt is recorded or the matrix resolves. */
+function executingGates(gates, wave, loop) {
+  const { sh, feature, matrix, waveVerify } = loop;
+  const command = waveVerify[wave.n];
+  const verified = command ? { ...gates, ...verifyGate(sh, command) } : gates;
+  if (resolveOutcome('implement', verified.outcome, matrix).action !== 'advance') return verified;
+  const demoted = scopeDemotion(sh, feature);
+  return demoted ? { ...verified, ...demoted } : verified;
+}
+
+/**
+ * The post-wave gates, in order: the post-wave hook (a veto supersedes
+ * everything below), then — only for an outcome the matrix would advance — the
+ * per-wave test-PRESENCE gate, the Verify gate and the scope gate. A wave the
+ * model thinks succeeded only advances if every test file the plan promised
+ * exists on disk at THIS point; a failure DEMOTES it to fail-tests so the
+ * existing retry/revision path (bounded budget + doom-loop fingerprint) handles
+ * it. The presence guarantee is narrow: it never executes a test, so a
+ * present-but-empty or failing test satisfies it. The EXECUTING gate closes that
+ * hole (issue #89) for waves declaring a `Verify:` command; the two stay
+ * separate checks and neither replaces the other (issue #91).
+ *
+ * Returns { outcome, gated, gateOutput, verifyEvidence, vetoSource }.
+ * `verifyEvidence` is spread (not assigned) onto the attempt event so the key is
+ * ABSENT when no command ran. `gateOutput` is the failing gate's captured
+ * stdout, fed forward as the retry prompt's excerpt: prompt input ONLY — never
+ * recorded on an event and never in the fingerprint.
+ */
+function applyPostWaveGates(wave, loop, result) {
+  const { state, feature, now, matrix, sh, runHooks, testsByWave, waves } = loop;
+  const postVeto = fireHooks(
+    runHooks,
+    'post-wave',
+    { feature, wave: wave.n, outcome: result.outcome },
+    { state, feature, now },
+  ).veto;
+  const gates = { outcome: result.outcome, gated: result, verifyEvidence: {}, gateOutput: '', vetoSource: null };
+  if (postVeto) return { ...gates, ...postWaveVetoGate(postVeto, loop) };
+  if (resolveOutcome('implement', gates.outcome, matrix).action !== 'advance') return gates;
+  const presence = wavePresenceGate({ sh, feature, testsByWave, waves, wave });
+  if (presence.status !== 0) return { ...gates, ...presenceDemotion(presence) };
+  return executingGates(gates, wave, loop);
+}
+
+/**
+ * Apply the push guard, resolve the matrix action, append the `wave-attempt`
+ * event and accumulate the run-wide counters. The push guard is applied
+ * REGARDLESS of the reported outcome (a push to the default branch is a protocol
+ * violation even on a failing attempt) and LAST, so it overrides every demotion
+ * and veto; the outcome is then no longer the veto's, so the veto provenance tag
+ * is dropped. Returns { outcome, action, print, gateOutput, vetoSource }.
+ */
+function recordAttempt(wave, loop, attempt, { result, tipBefore, tipAfter }, gates) {
+  const { state, feature, now, matrix, pushGuard } = loop;
+  let { outcome, gated, gateOutput, vetoSource } = gates;
+  const pushDemoted = pushGuard ? pushGuardDemotion(tipBefore, tipAfter) : null;
+  if (pushDemoted) {
+    ({ outcome, gateOutput, gated } = pushDemoted);
+    vetoSource = null;
+  }
+  // `tasks` rides on the same REAL runWave result as `usage` and is likewise
+  // OPTIONAL. Spread, not assigned, so the key is ABSENT rather than
+  // present-and-undefined when the result carries none. DATA-ONLY — no fold in
+  // events.js reads it.
+  const taskEvidence = result.tasks ? { tasks: result.tasks } : {};
+  // The MATRIX decides what happens next — never inline retry arithmetic.
+  // Resolved BEFORE the attempt is recorded so a failing (retry/revision)
+  // attempt carries the SAME fingerprint the doom-loop breaker compares —
+  // which lets a resumed run seed `lastPrint` from the log (issue #119).
+  const { action } = resolveOutcome('implement', outcome, matrix);
+  const print = FINGERPRINTED_ACTIONS.has(action) ? fingerprint(gated) : null;
+  // Usage is recorded even when a gate demoted `outcome` (the demoted `gated`
+  // object carries no usage); it is OPTIONAL, so a missing one is undefined.
+  state.append({
+    feature,
+    type: 'wave-attempt',
+    actor: 'harness',
+    ts: now(),
+    data: attemptData({
+      wave, attempt, outcome, result, evidence: { ...taskEvidence, ...gates.verifyEvidence }, vetoSource, print,
+    }),
+  });
+  // Accumulate this attempt's token spend for the budget breaker. A missing
+  // total contributes 0, never NaN.
+  loop.spent += result.usage?.total ?? 0;
+  if (outcome !== SUCCESS_OUTCOME) loop.failedAttempts += 1;
+  return { outcome, action, print, gateOutput, vetoSource };
+}
+
+/** ── Hook: wave-complete (observe-only), fired in the advance block as the wave
+ * is recorded complete; then the `wave-complete` event. Returns null (advanced). */
+function advanceWave(wave, loop, outcome) {
+  const { state, feature, now, runHooks } = loop;
+  fireHooks(
+    runHooks,
+    'wave-complete',
+    { feature, wave: wave.n, outcome },
+    { state, feature, now },
+  );
+  state.append({
+    feature,
+    type: 'wave-complete',
+    actor: 'harness',
+    ts: now(),
+    data: { wave: wave.n },
+  });
+  return null;
+}
+
+/** ── Hook: on-error (observe-only), fired at the doom-loop wave-failed terminal;
+ * then the `wave-failed` event (tagged with the veto provenance, if any). */
+function doomLoopStop(wave, loop, { outcome, vetoSource }) {
+  const { state, feature, now, runHooks, stopCtx } = loop;
+  fireHooks(
+    runHooks,
+    'on-error',
+    { feature, wave: wave.n, outcome },
+    { state, feature, now },
+  );
+  state.append({
+    feature,
+    type: 'wave-failed',
+    actor: 'harness',
+    ts: now(),
+    data: vetoSource
+      ? { wave: wave.n, reason: 'doom-loop', source: 'hook', point: vetoSource.point, hook: vetoSource.hook }
+      : { wave: wave.n, reason: 'doom-loop' },
+  });
+  return stopRun({ stopped: 'doom-loop', ok: false, wave: wave.n, outcome }, stopCtx);
+}
+
+/** 'abort' | 'surface' (and any other declared terminal action). ── Hook: on-error
+ * (observe-only), fired at this wave-failed terminal (matrix abort/surface). */
+function terminalStop(wave, loop, { outcome, action, vetoSource }) {
+  const { state, feature, now, runHooks, stopCtx } = loop;
+  fireHooks(
+    runHooks,
+    'on-error',
+    { feature, wave: wave.n, outcome },
+    { state, feature, now },
+  );
+  state.append({
+    feature,
+    type: 'wave-failed',
+    actor: 'harness',
+    ts: now(),
+    data: vetoSource
+      ? { wave: wave.n, action, outcome, source: 'hook', point: vetoSource.point, hook: vetoSource.hook }
+      : { wave: wave.n, action },
+  });
+  return stopRun({ stopped: 'matrix', ok: false, wave: wave.n, action, outcome }, stopCtx);
+}
+
+/**
+ * Dispatch a non-advancing attempt. A terminal action stops the run. A
+ * retry/revision fires the observe-only on-retry hook, then the doom-loop
+ * breaker: an identical *failure* fingerprint twice in a row means the retry is
+ * provably stuck — abort rather than burn the budget. Only failing outcomes are
+ * fingerprinted, so a genuine success can never trip it. Otherwise the attempt's
+ * failure is captured for the NEXT attempt (back-pressure, issue #90) —
+ * deliberately AFTER the doom-loop verdict: the capture is prompt input only and
+ * never participates in that verdict or in MAX_ATTEMPTS. `run` carries the
+ * per-wave `lastPrint`/`priorFailure`. Returns a stop result, or null to retry
+ * within the bounded budget (the cap is the hard ceiling).
+ */
+function retryOrStop(wave, loop, attempt, rec, run, result) {
+  const { state, feature, now, runHooks } = loop;
+  const { outcome, action, print, gateOutput } = rec;
+  if (action !== 'retry' && action !== 'revision') return terminalStop(wave, loop, rec);
+  fireHooks(
+    runHooks,
+    'on-retry',
+    { feature, wave: wave.n, outcome },
+    { state, feature, now },
+  );
+  if (print === run.lastPrint) return doomLoopStop(wave, loop, rec);
+  run.lastPrint = print;
+  run.priorFailure = capturePriorFailure({
+    attempt, outcome, output: gateOutput, result, wave, state, feature, now,
+  });
+  return null;
+}
+
+/** Budget exhausted without an advance (and without a doom-loop trip).
+ * ── Hook: on-error (observe-only), fired at this wave-failed terminal. */
+function exhaustedStop(wave, loop) {
+  const { state, feature, now, runHooks, stopCtx } = loop;
+  fireHooks(
+    runHooks,
+    'on-error',
+    { feature, wave: wave.n, outcome: null },
+    { state, feature, now },
+  );
+  state.append({
+    feature,
+    type: 'wave-failed',
+    actor: 'harness',
+    ts: now(),
+    data: { wave: wave.n, reason: 'budget-exhausted' },
+  });
+  return stopRun({ stopped: 'budget', ok: false, wave: wave.n }, stopCtx);
+}
+
+/**
+ * Run ONE wave (a plan wave, or the synthetic end-of-run test wave) through the
+ * per-wave body: approval re-check, token budget, resume verify, orphan
+ * convergence, the bounded attempt loop (hooks, runWave, presence/Verify/scope
+ * gates, push guard, matrix, doom loop) and wave-complete. Extracted verbatim
+ * from the deliverSpine loop; the run-wide mutable counters live on `loop`
+ * (`spent`, `failedAttempts`, `resumeVerified`, `operatorContextPending`).
+ * Returns the stopRun result of a terminal stop, or null when the wave advanced.
+ */
+async function runOneWave(wave, loop) {
+  const { state, feature, now, runHooks, maxAttempts, history } = loop;
+  const preStop = await preWaveStop(wave, loop);
+  if (preStop) return preStop;
 
   // ── Resume seeding (#119): continue the attempt budget and the doom-loop
   // fingerprint from attempts recorded since the wave's last terminal
   // wave-failed. After a terminal stop the wave re-runs with a full budget; a
   // legacy log (no fingerprint) seeds null and cannot trip the breaker. ──
   const prior = priorAttemptState(history, wave.n);
-  let lastPrint = prior.lastPrint;
-  let advanced = false;
-  // Back-pressure (issue #90): the previous attempt's captured failure, fed to
-  // the NEXT attempt so a retry differs by more than model nondeterminism.
-  // Scoped per wave and null on the first attempt — a retry that carries no
-  // capture is exactly today's behavior.
-  let priorFailure = null;
+  // `priorFailure` (back-pressure, issue #90): the previous attempt's captured
+  // failure, fed to the NEXT attempt so a retry differs by more than model
+  // nondeterminism. Scoped per wave and null on the first attempt.
+  const run = { lastPrint: prior.lastPrint, priorFailure: null };
 
   for (let attempt = prior.attempts + 1; attempt <= maxAttempts; attempt += 1) {
-    // ── Failed-attempt cap (#77): checked before the pre-wave hooks and any
-    // wave-started, so a capped run does no further agent work. ──
-    if (capEnabled(maxFailedAttempts) && loop.failedAttempts >= maxFailedAttempts) {
-      return stopRun(
-        { stopped: 'failed-attempt-cap', ok: false, wave: wave.n, failed: loop.failedAttempts, cap: maxFailedAttempts },
-        stopCtx,
-      );
-    }
-
-    // ── Hook: pre-wave (veto-capable point). Fired BEFORE runWave. A veto here
-    // aborts the wave without running the agent: route the veto outcome through
-    // the existing matrix and terminate the same way an agent-emitted outcome
-    // would. The veto outcome is validated against the frozen vocabulary first
-    // (fail-closed → 'abort-user') so an unknown token never reaches the matrix.
-    // First-veto-wins is enforced in the runner. ──
-    const preVeto = fireHooks(
-      runHooks,
-      'pre-wave',
-      { feature, wave: wave.n, outcome: null },
-      { state, feature, now },
-    ).veto;
-    if (preVeto) {
-      const vetoOutcome = safeVetoOutcome(preVeto.outcome);
-      const provenance = { point: 'pre-wave', hook: preVeto.hook, outcome: vetoOutcome, source: 'hook' };
-      state.append({ feature, type: 'hook-veto', actor: 'harness', ts: now(), data: provenance });
-      const { action } = resolveOutcome('implement', vetoOutcome, matrix);
-      state.append({
-        feature,
-        type: 'wave-failed',
-        actor: 'harness',
-        ts: now(),
-        data: { wave: wave.n, action, outcome: vetoOutcome, source: 'hook', point: 'pre-wave', hook: preVeto.hook },
-      });
-      return stopRun(
-        { stopped: 'hook-veto', ok: false, wave: wave.n, action, outcome: vetoOutcome, point: 'pre-wave', hook: preVeto.hook },
-        stopCtx,
-      );
-    }
-
-    appendWaveStarted({ state, feature, now, wave, attempt, waveModels, waveCapabilities });
-
-    // ADDITIVE second argument: attempt context. A runWave that ignores it is
-    // unchanged; one that reads it can make attempt N+1 differ from attempt N.
-    const attemptCtx = { attempt, priorFailure };
-    if (loop.operatorContextPending) {
-      attemptCtx.operatorContext = { context: resume.context, stop: resume.stop };
-      loop.operatorContextPending = false;
-    }
-    const tipBefore = pushGuard ? sh(PUSH_GUARD_SCRIPT, feature) : null;
-    const result = await runWave(waveForAgent(wave, waveTasks), attemptCtx);
-    const tipAfter = pushGuard ? sh(PUSH_GUARD_SCRIPT, feature) : null;
-    if (pushGuard) {
-      recordPushCheckUnavailable({ state, feature, now, wave, attempt, before: tipBefore, after: tipAfter });
-    }
-
-    // ── Hook: post-wave (veto-capable point). Fired after the wave result,
-    // before the per-wave test-presence gate. A veto here REPLACES the wave's
-    // outcome with the veto outcome and routes it through the existing matrix —
-    // generalizing the check-tests-present success→fail-tests demotion below to
-    // any fixed-vocabulary outcome. Validated fail-closed first; first-veto-wins
-    // is enforced in the runner. ──
-    const postVeto = fireHooks(
-      runHooks,
-      'post-wave',
-      { feature, wave: wave.n, outcome: result.outcome },
-      { state, feature, now },
-    ).veto;
-    let vetoSource = null; // { point, hook } when a post-wave veto drove the outcome
-
-    // ── Per-wave test-PRESENCE gate. A wave the model thinks succeeded only
-    // advances if every test file the plan promised exists on disk at THIS
-    // point — otherwise the wave claimed test work it never wrote. DEMOTE it to
-    // fail-tests so the existing retry/revision path (bounded budget +
-    // doom-loop fingerprint) handles it; the wave then blocks here instead of
-    // advancing on an unwritten test.
-    //
-    // The presence guarantee is narrow, and worth stating plainly: a wave does
-    // not advance if a promised test file is ABSENT. That gate never executes a
-    // test and never consults a test runner, so a present-but-empty or outright
-    // failing test satisfies it. The EXECUTING gate below closes that hole
-    // (issue #89) for waves that declare a `Verify:` command — the two stay
-    // separate checks, and neither replaces the other (issue #91). ──
-    let { outcome } = result;
-    let gated = result;
-    // Evidence of an executed verification, spread (not assigned) onto the
-    // attempt event so the key is ABSENT — never present-and-undefined — when
-    // no command ran. A wave with no `Verify:` line must append an event
-    // byte-identical to a pre-verification one.
-    let verifyEvidence = {};
-    // The failing gate's captured stdout, fed forward as the retry prompt's
-    // excerpt. Prompt input ONLY — it is never recorded on an event and never
-    // reaches the fingerprint, so it cannot change the doom-loop verdict.
-    let gateOutput = '';
-    if (postVeto) {
-      // A post-wave veto is authoritative: it REPLACES the model's outcome with
-      // the (validated, fail-closed) veto outcome and routes THAT through the
-      // matrix — exactly generalizing the check-tests-present demotion to any
-      // outcome. It supersedes the per-wave test-presence gate (the operator has
-      // already decided).
-      const vetoOutcome = safeVetoOutcome(postVeto.outcome);
-      vetoSource = { point: 'post-wave', hook: postVeto.hook };
-      state.append({
-        feature,
-        type: 'hook-veto',
-        actor: 'harness',
-        ts: now(),
-        data: { point: 'post-wave', hook: postVeto.hook, outcome: vetoOutcome, source: 'hook' },
-      });
-      outcome = vetoOutcome;
-      gated = {
-        outcome,
-        categories: ['hook-veto'],
-        summary: `post-wave hook veto (${postVeto.hook})`,
-      };
-    } else if (resolveOutcome('implement', outcome, matrix).action === 'advance') {
-      const gate = wavePresenceGate({ sh, feature, testsByWave, waves, wave });
-      if (gate.status !== 0) {
-        outcome = 'fail-tests';
-        gateOutput = gate.stdout ?? '';
-        // Fingerprint STABLE, gate-derived fields — NOT the model's variable
-        // result text. Two consecutive gate failures must hash equally so the
-        // doom-loop breaker trips at the cap instead of burning every attempt
-        // when the model merely rewords its output between identical failures.
-        gated = {
-          outcome,
-          gateStatus: gate.status,
-          categories: ['check-tests'],
-          summary: `check-tests gate failed (status ${gate.status})`,
-        };
-      } else {
-        // ── Per-wave EXECUTING gate. When the plan declared a `Verify:` command
-        // for this wave, the harness runs it and reads its REAL exit code — the
-        // one thing the presence gate cannot tell us. The command itself is
-        // arbitrary shell from a human-approved plan, so the spine never
-        // executes it: check-verify.sh does, through the SAME `sh` port every
-        // other guardrail uses (unchanged shape), and owns the allow-listed env,
-        // the timeout, and the output cap.
-        //
-        // A failure supplies a different INPUT TOKEN to the matrix; it never
-        // adds a branch here and never invents an outcome. The matrix stays the
-        // sole authority on what happens next. ──
-        const command = waveVerify[wave.n];
-        if (command) {
-          const run = sh(VERIFY_SCRIPT, command);
-          verifyEvidence = {
-            verify: { command, status: run.status, passed: run.status === 0 },
-          };
-          if (run.status !== 0) {
-            // A killed-on-timeout command is NOT a retryable test failure: a
-            // retry cannot fix a hang, so it takes the existing `fail-timeout`
-            // token (matrix action `surface`) instead of `fail-tests`.
-            outcome = run.status === VERIFY_TIMEOUT_STATUS ? 'fail-timeout' : 'fail-tests';
-            // check-verify.sh already bounds this excerpt (40 lines / 8000
-            // bytes); the prompt renderer caps it again, unconditionally.
-            gateOutput = run.stdout ?? '';
-            // Same stable-fingerprint discipline as the presence gate above:
-            // gate-derived fields only, so two identical failures hash equally.
-            gated = {
-              outcome,
-              gateStatus: run.status,
-              categories: ['check-verify'],
-              summary: `check-verify gate failed (status ${run.status})`,
-            };
-          }
-        }
-        // ── Per-wave SCOPE gate (#77). Only an outcome still advancing after
-        // the presence and Verify gates is checked; a failure demotes it to
-        // fail-scope BEFORE the attempt is recorded or the matrix resolves. ──
-        if (resolveOutcome('implement', outcome, matrix).action === 'advance') {
-          const demoted = scopeDemotion(sh, feature);
-          if (demoted) ({ outcome, gateOutput, gated } = demoted);
-        }
-      }
-    }
-
-    // ── Push guard. Applied REGARDLESS of the reported outcome (a push to the
-    // default branch is a protocol violation even on a failing attempt) and
-    // LAST, so it overrides every demotion and veto above; the outcome is then
-    // no longer the veto's, so the veto provenance tag is dropped. ──
-    const pushDemoted = pushGuard ? pushGuardDemotion(tipBefore, tipAfter) : null;
-    if (pushDemoted) {
-      ({ outcome, gateOutput, gated } = pushDemoted);
-      vetoSource = null;
-    }
-
-    // `tasks` rides on the same REAL runWave result as `usage` and is likewise
-    // OPTIONAL — the adapter contract (docs/rad-wave-contract.md) attaches it
-    // only when the agent reported a non-empty task list. Spread, not assigned,
-    // so the key is ABSENT rather than present-and-undefined when the result
-    // carries none: a tasks-free result must append an event byte-identical to
-    // a pre-tasks one. It is DATA-ONLY — no fold in events.js reads it.
-    const taskEvidence = result.tasks ? { tasks: result.tasks } : {};
-
-    // The MATRIX decides what happens next — never inline retry arithmetic.
-    // Resolved BEFORE the attempt is recorded so a failing (retry/revision)
-    // attempt can carry the SAME fingerprint the doom-loop breaker compares —
-    // which lets a resumed run seed `lastPrint` from the log (issue #119).
-    const { action } = resolveOutcome('implement', outcome, matrix);
-    const print = FINGERPRINTED_ACTIONS.has(action) ? fingerprint(gated) : null;
-
-    state.append({
-      feature,
-      type: 'wave-attempt',
-      actor: 'harness',
-      ts: now(),
-      // Usage rides on the REAL runWave result — record it even when the
-      // per-wave gate demoted `outcome` to fail-tests above (the demoted
-      // `gated` object carries no usage). Usage is OPTIONAL: an adapter that
-      // emits none leaves `result.usage` undefined and the key is included as
-      // undefined, which folds/serializes the same as a legacy event.
-      //
-      // Provenance (Task 3.2): when a post-wave veto drove the outcome, tag the
-      // attempt with source/point/hook so a veto-originated outcome is
-      // distinguishable from an agent-emitted one. Absent a veto the shape is
-      // unchanged — no provenance keys are added.
-      //
-      // Verification evidence (Task 3.3): when the wave declared a `Verify:`
-      // command and it actually ran, record { command, status, passed } so the
-      // event log carries what was executed and what really happened — not a
-      // self-classification. Spread, so a wave that declared none appends an
-      // event with NO `verify` key at all.
-      //
-      // Durability (#119): `attempt` always; `fingerprint` only on retry/revision.
-      data: attemptData({
-        wave,
-        attempt,
-        outcome,
-        result,
-        evidence: { ...taskEvidence, ...verifyEvidence },
-        vetoSource,
-        print,
-      }),
-    });
-
-    // Accumulate this attempt's token spend for the budget breaker. Usage is
-    // OPTIONAL (a command adapter may emit none) — a missing total contributes
-    // 0, never NaN.
-    loop.spent += result.usage?.total ?? 0;
-    if (outcome !== SUCCESS_OUTCOME) loop.failedAttempts += 1;
-
+    const attemptStop = attemptCapStop(wave, loop) ?? preWaveVetoStop(wave, loop);
+    if (attemptStop) return attemptStop;
+    const ran = await invokeWave(wave, loop, attempt, run.priorFailure);
+    const gates = applyPostWaveGates(wave, loop, ran.result);
+    const rec = recordAttempt(wave, loop, attempt, ran, gates);
     // ── Hook: on-outcome (observe-only). Fired after the matrix resolves the
     // outcome, before the action is dispatched. Observe + emit only. ──
     fireHooks(
       runHooks,
       'on-outcome',
-      { feature, wave: wave.n, outcome },
+      { feature, wave: wave.n, outcome: rec.outcome },
       { state, feature, now },
     );
-
-    if (action === 'advance') {
-      // ── Hook: wave-complete (observe-only). Fired in the advance block as the
-      // wave is recorded complete. Observe + emit only. ──
-      fireHooks(
-        runHooks,
-        'wave-complete',
-        { feature, wave: wave.n, outcome },
-        { state, feature, now },
-      );
-      state.append({
-        feature,
-        type: 'wave-complete',
-        actor: 'harness',
-        ts: now(),
-        data: { wave: wave.n },
-      });
-      advanced = true;
-      break;
-    }
-
-    if (action === 'retry' || action === 'revision') {
-      // ── Hook: on-retry (observe-only). Fired in the retry/revision branch.
-      // Observe + emit only. ──
-      fireHooks(
-        runHooks,
-        'on-retry',
-        { feature, wave: wave.n, outcome },
-        { state, feature, now },
-      );
-      // Doom-loop breaker: an identical *failure* fingerprint twice in a row
-      // means the retry is provably stuck — abort rather than burn the budget.
-      // Only failing (retry/revision) outcomes are fingerprinted here, so a
-      // genuine success can never trip the breaker (it advances above first).
-      // `print` was computed above, before the attempt was recorded.
-      if (print === lastPrint) {
-        // ── Hook: on-error (observe-only). Fired at this wave-failed terminal
-        // (doom-loop). Observe + emit only. ──
-        fireHooks(
-          runHooks,
-          'on-error',
-          { feature, wave: wave.n, outcome },
-          { state, feature, now },
-        );
-        state.append({
-          feature,
-          type: 'wave-failed',
-          actor: 'harness',
-          ts: now(),
-          data: vetoSource
-            ? { wave: wave.n, reason: 'doom-loop', source: 'hook', point: vetoSource.point, hook: vetoSource.hook }
-            : { wave: wave.n, reason: 'doom-loop' },
-        });
-        return stopRun({ stopped: 'doom-loop', ok: false, wave: wave.n, outcome }, stopCtx);
-      }
-      lastPrint = print;
-      // Back-pressure (issue #90): carry THIS attempt's failure into the next
-      // one so the retry prompt differs. Deliberately placed AFTER the
-      // fingerprint/doom-loop decision above — the capture is prompt input
-      // only and never participates in that verdict or in MAX_ATTEMPTS.
-      priorFailure = capturePriorFailure({
-        attempt,
-        outcome,
-        output: gateOutput,
-        result,
-        wave,
-        state,
-        feature,
-        now,
-      });
-      continue; // within the bounded budget; the cap is the hard ceiling.
-    }
-
-    // 'abort' | 'surface' (and any other declared terminal action).
-    // ── Hook: on-error (observe-only). Fired at this wave-failed terminal
-    // (matrix abort/surface). Observe + emit only. ──
-    fireHooks(
-      runHooks,
-      'on-error',
-      { feature, wave: wave.n, outcome },
-      { state, feature, now },
-    );
-    state.append({
-      feature,
-      type: 'wave-failed',
-      actor: 'harness',
-      ts: now(),
-      data: vetoSource
-        ? { wave: wave.n, action, outcome, source: 'hook', point: vetoSource.point, hook: vetoSource.hook }
-        : { wave: wave.n, action },
-    });
-    return stopRun({ stopped: 'matrix', ok: false, wave: wave.n, action, outcome }, stopCtx);
+    if (rec.action === 'advance') return advanceWave(wave, loop, rec.outcome);
+    const stopped = retryOrStop(wave, loop, attempt, rec, run, ran.result);
+    if (stopped) return stopped;
   }
+  return exhaustedStop(wave, loop);
+}
 
-  if (!advanced) {
-    // Budget exhausted without an advance (and without a doom-loop trip).
-    // ── Hook: on-error (observe-only). Fired at this wave-failed terminal
-    // (budget-exhausted). Observe + emit only. ──
-    fireHooks(
-      runHooks,
-      'on-error',
-      { feature, wave: wave.n, outcome: null },
-      { state, feature, now },
-    );
-    state.append({
-      feature,
-      type: 'wave-failed',
-      actor: 'harness',
-      ts: now(),
-      data: { wave: wave.n, reason: 'budget-exhausted' },
-    });
-    return stopRun({ stopped: 'budget', ok: false, wave: wave.n }, stopCtx);
+/** The four run-wide counters, seeded from the event log and the resume flag. */
+function seedCounters(history, resume) {
+  // ── Resume verify (cheap, once): if a prior run already advanced one or more
+  // waves, the per-wave gate that guarded THIS run never ran for them. Before
+  // touching the first non-skipped wave, run ONE cumulative test-PRESENCE check
+  // to confirm every test file the plan promised so far exists on disk. If one
+  // is absent, escalate — don't build on a base with unwritten tests. Nothing
+  // here executes a test, so this says nothing about whether the prior work
+  // behaves correctly; execution-based verification does not exist yet (see
+  // issue #89). A fresh run (nothing skipped) does not run this. ──
+  const resumeVerified = false;
+
+  // ── Token-budget circuit breaker. OPTIONAL: a non-positive `tokenBudget`
+  // (unset/0/negative) fully disables it. Otherwise we accumulate each wave's
+  // recorded usage (`result.usage.total`, missing → 0) and, BEFORE starting the
+  // next wave, graceful-abort if cumulative spend has reached/exceeded the
+  // budget — a terminal return in the style of the other `stopped:` paths.
+  //
+  // Seeded from prior runs' recorded usage so a RESUMED deliver INHERITS earlier
+  // spend: the budget is a lifetime ceiling for the feature, not a fresh
+  // per-invocation allowance (a crash-looping deliver can't blow past it by
+  // resuming). On a fresh run the log carries no wave-attempt usage, so this is 0. ──
+  const spent = totalUsage(history).total;
+
+  // Cumulative failed-attempt count for the cap, seeded from the log so it
+  // spans resumed runs until a deliver-stopped resets it.
+  const failedAttempts = failedAttemptsSinceStop(history);
+
+  // Operator resume context rides on the FIRST runWave call of this run only —
+  // not attempt===1: skipped waves and resumed attempt counts make that wrong.
+  const operatorContextPending = Boolean(resume);
+  return { resumeVerified, spent, failedAttempts, operatorContextPending };
+}
+
+/**
+ * Seed the run-wide state onto `loop` from the plan and the event log, and
+ * return the wave list with the set of waves a prior run already advanced.
+ */
+function seedRun(loop) {
+  const { state, feature, resume } = loop;
+  const plan = state.plan(feature);
+  const waves = (plan && plan.waves) || [];
+
+  // ── Resume: waves that already advanced on a prior run carry a `wave-complete`
+  // event. Skip them — never re-run runWave or append duplicate attempt/complete
+  // events. Keyed strictly off `wave-complete`, so a wave that crashed mid-run
+  // (attempt logged, never advanced) is NOT skipped and resumes here. ──
+  const history = state.history(feature);
+  const completed = resumeFrom(history);
+
+  // The per-wave body (runOneWave) reads the run's ports from `loop` and
+  // MUTATES its four run-wide counters in place, so they carry across waves.
+  Object.assign(loop, { waves, completed, history }, seedCounters(history, resume));
+  return { waves, completed };
+}
+
+/**
+ * Record the run start, validate the hooks dir and run the prepare port, then
+ * seed `loop`. Returns `{ stop }` (a stopRun result) or `{ waves, completed }`.
+ */
+async function startRun(loop) {
+  const { state, feature, now, resume, hookPreflight, prepare } = loop;
+  state.append({ feature, type: 'deliver-started', actor: 'harness', ts: now() });
+  if (resume) appendRunResumed({ state, feature, now, resume });
+  // Every return after this line is a stop (except success) and MUST go
+  // through stopRun so the run's last event is exactly one `deliver-stopped`.
+  loop.stopCtx = { state, feature, now };
+
+  // ── Hook pre-flight (Task 2.2). Validate the hooks dir ONCE up front so an
+  // unreadable/malformed dir surfaces deterministically here rather than mid-wave.
+  // Reuses the runner's discovery (injected) — no duplicated FS logic. An ABSENT
+  // dir is a silent no-op (default NOOP_PREFLIGHT): nothing to validate, nothing
+  // changes. A malformed dir is allowed to throw to the caller. ──
+  hookPreflight();
+
+  // ── Prepare (sync/merge/in-progress). OPTIONAL injected port: absent changes
+  // nothing. Runs before orphan convergence and every wave, so a conflict stops
+  // the run before any agent touches the branch. ──
+  if (prepare) {
+    const prepStop = await runPrepare({ prepare, state, feature, now });
+    if (prepStop) return { stop: stopRun(prepStop, loop.stopCtx) };
+  }
+  return seedRun(loop);
+}
+
+/**
+ * An approval recorded during the LAST wave has no next pre-wave re-check to
+ * catch it: refuse to post-check or open the PR on it (#158). History-only —
+ * the approvalIntact port is deliberately NOT called here (one call per wave).
+ */
+function approvalDuringRunStop(loop) {
+  const { state, feature, waves, stopCtx } = loop;
+  if (approvedDuringRun(state.history(feature)).length === 0) return null;
+  const lastWave = waves.length > 0 ? waves[waves.length - 1].n : undefined;
+  return stopRun(
+    { stopped: 'approval-changed', ok: false, wave: lastWave, reason: APPROVED_DURING_RUN_REASON },
+    stopCtx,
+  );
+}
+
+/**
+ * DET post-checks: existing bash guardrails, called by path via the injected
+ * `sh`. A non-zero exit halts the spine before the PR is recorded. Returns the
+ * stopRun result of a failed check (or beforePr finish step), else null.
+ */
+async function runPostChecks(loop, finish) {
+  const { sh, feature, stopCtx } = loop;
+  for (const script of POST_CHECKS) {
+    if (finish && script === FINISH_BEFORE_SCRIPT) {
+      const failure = await runFinishStep(finish.beforePr);
+      if (failure) {
+        const { detail } = failure;
+        return stopRun({ stopped: FINISH_FAILED, ok: false, detail, reason: detail }, stopCtx);
+      }
+    }
+    const check = sh(`scripts/${script}`, feature);
+    if (check.status !== 0) {
+      return stopRun({ stopped: 'post-check', ok: false, check: script, status: check.status }, stopCtx);
+    }
   }
   return null;
+}
+
+/**
+ * Everything after the wave loop: the end-of-run test wave and final guard
+ * (only when `testWave` is supplied; also runs on resume, so a run whose plan
+ * waves all completed earlier still cannot reach the PR with listed tests
+ * missing), the approval-during-run check, the post-checks, `pr-opened`, and
+ * the afterPr finish step.
+ */
+async function finishRun(loop) {
+  const { state, feature, now, waves, testWave, finish } = loop;
+  if (testWave) {
+    const stop = await runTestWaveAndGuard(testWave, loop);
+    if (stop) return stop;
+  }
+  const approvalStop = approvalDuringRunStop(loop);
+  if (approvalStop) return approvalStop;
+  const checkStop = await runPostChecks(loop, finish);
+  if (checkStop) return checkStop;
+
+  state.append({ feature, type: 'pr-opened', actor: 'harness', ts: now() });
+
+  // `pr-opened` moves the run to the terminal `delivered` phase: an afterPr
+  // failure is reported in the result only — appending here would throw.
+  if (finish) {
+    const failure = await runFinishStep(finish.afterPr);
+    if (failure) {
+      const { detail } = failure;
+      return { ok: false, stopped: FINISH_FAILED, detail, reason: detail, afterPr: true };
+    }
+  }
+
+  return { ok: true, waves: waves.length };
 }
 
 /**
@@ -1267,137 +1434,17 @@ export async function deliverSpine({
   testWave = null,
   waveTasks = {},
 }) {
-  // ── DET gate: approval. The human (or proxy) decided earlier; here we ENFORCE
-  // it. A blocked gate is a normal outcome — return structured, append nothing
-  // destructive, and never call runWave. ──
   const g = await state.gate(feature, 'approved');
   if (!g.passed) {
     return { stopped: 'gate', gate: 'approved', reason: g.reason };
   }
-
-  state.append({ feature, type: 'deliver-started', actor: 'harness', ts: now() });
-  if (resume) appendRunResumed({ state, feature, now, resume });
-  // Every return below this line is a stop (except success) and MUST go
-  // through stopRun so the run's last event is exactly one `deliver-stopped`.
-  const stopCtx = { state, feature, now };
-
-  // ── Hook pre-flight (Task 2.2). Validate the hooks dir ONCE up front so an
-  // unreadable/malformed dir surfaces deterministically here rather than mid-wave.
-  // Reuses the runner's discovery (injected) — no duplicated FS logic. An ABSENT
-  // dir is a silent no-op (default NOOP_PREFLIGHT): nothing to validate, nothing
-  // changes. A malformed dir is allowed to throw to the caller. ──
-  hookPreflight();
-
-  // ── Prepare (sync/merge/in-progress). OPTIONAL injected port: absent changes
-  // nothing. Runs before orphan convergence and every wave, so a conflict stops
-  // the run before any agent touches the branch. ──
-  if (prepare) {
-    const prepStop = await runPrepare({ prepare, state, feature, now });
-    if (prepStop) return stopRun(prepStop, stopCtx);
-  }
-
-  const plan = state.plan(feature);
-  const waves = (plan && plan.waves) || [];
-
-  // ── Resume: waves that already advanced on a prior run carry a `wave-complete`
-  // event. Skip them — never re-run runWave or append duplicate attempt/complete
-  // events. Keyed strictly off `wave-complete`, so a wave that crashed mid-run
-  // (attempt logged, never advanced) is NOT skipped and resumes here. ──
-  const history = state.history(feature);
-  const completed = resumeFrom(history);
-
-  // ── Resume verify (cheap, once): if a prior run already advanced one or more
-  // waves, the per-wave gate that guarded THIS run never ran for them. Before
-  // touching the first non-skipped wave, run ONE cumulative test-PRESENCE check
-  // to confirm every test file the plan promised so far exists on disk. If one
-  // is absent, escalate — don't build on a base with unwritten tests. Nothing
-  // here executes a test, so this says nothing about whether the prior work
-  // behaves correctly; execution-based verification does not exist yet (see
-  // issue #89). A fresh run (nothing skipped) does not run this. ──
-  const resumeVerified = false;
-
-  // ── Token-budget circuit breaker. OPTIONAL: a non-positive `tokenBudget`
-  // (unset/0/negative) fully disables it. Otherwise we accumulate each wave's
-  // recorded usage (`result.usage.total`, missing → 0) and, BEFORE starting the
-  // next wave, graceful-abort if cumulative spend has reached/exceeded the
-  // budget — a terminal return in the style of the other `stopped:` paths.
-  //
-  // Seeded from prior runs' recorded usage so a RESUMED deliver INHERITS earlier
-  // spend: the budget is a lifetime ceiling for the feature, not a fresh
-  // per-invocation allowance (a crash-looping deliver can't blow past it by
-  // resuming). On a fresh run the log carries no wave-attempt usage, so this is 0. ──
-  const spent = totalUsage(history).total;
-
-  // Cumulative failed-attempt count for the cap, seeded from the log so it
-  // spans resumed runs until a deliver-stopped resets it.
-  const failedAttempts = failedAttemptsSinceStop(history);
-
-  // Operator resume context rides on the FIRST runWave call of this run only —
-  // not attempt===1: skipped waves and resumed attempt counts make that wrong.
-  const operatorContextPending = Boolean(resume);
-
-  // ── DET wave loop — the MATRIX decides what happens next, not a counter. ──
-  // The per-wave body (runOneWave) reads the run's ports from `loop` and
-  // MUTATES its four run-wide counters in place, so they carry across waves.
-  const loop = {
-    state, feature, now, matrix, runWave, sh, maxAttempts, tokenBudget, waveVerify, waveModels,
-    waveCapabilities, runHooks, approvalIntact, maxFailedAttempts, resume, pushGuard, testsByWave,
-    waveTasks, waves, completed, history, stopCtx,
-    resumeVerified, spent, failedAttempts, operatorContextPending,
-  };
-
+  const loop = { state, feature, now, matrix, runWave, sh, maxAttempts, tokenBudget, waveVerify, waveModels, waveCapabilities,
+    runHooks, approvalIntact, maxFailedAttempts, resume, pushGuard, testsByWave, waveTasks, hookPreflight, prepare, finish, testWave };
+  const { stop, waves, completed } = await startRun(loop);
+  if (stop) return stop;
   for (const wave of waves) {
-    if (completed.has(wave.n)) continue;
-    const stop = await runOneWave(wave, loop);
-    if (stop) return stop;
+    const halt = completed.has(wave.n) ? null : await runOneWave(wave, loop);
+    if (halt) return halt;
   }
-
-  // ── End-of-run test wave N+1 + final guard (only when `testWave` is supplied;
-  // absent, nothing here runs). Also runs on resume, so a run whose plan waves
-  // all completed earlier still cannot reach the PR with listed tests missing. ──
-  if (testWave) {
-    const stop = await runTestWaveAndGuard(testWave, loop);
-    if (stop) return stop;
-  }
-
-  // An approval recorded during the LAST wave has no next pre-wave re-check to
-  // catch it: refuse to post-check or open the PR on it (#158). History-only —
-  // the approvalIntact port is deliberately NOT called here (one call per wave).
-  if (approvedDuringRun(state.history(feature)).length > 0) {
-    const lastWave = waves.length > 0 ? waves[waves.length - 1].n : undefined;
-    return stopRun(
-      { stopped: 'approval-changed', ok: false, wave: lastWave, reason: APPROVED_DURING_RUN_REASON },
-      stopCtx,
-    );
-  }
-
-  // ── DET post-checks: existing bash guardrails, called by path via the injected
-  // `sh`. A non-zero exit halts the spine before the PR is recorded. ──
-  for (const script of POST_CHECKS) {
-    if (finish && script === FINISH_BEFORE_SCRIPT) {
-      const failure = await runFinishStep(finish.beforePr);
-      if (failure) {
-        const { detail } = failure;
-        return stopRun({ stopped: FINISH_FAILED, ok: false, detail, reason: detail }, stopCtx);
-      }
-    }
-    const check = sh(`scripts/${script}`, feature);
-    if (check.status !== 0) {
-      return stopRun({ stopped: 'post-check', ok: false, check: script, status: check.status }, stopCtx);
-    }
-  }
-
-  state.append({ feature, type: 'pr-opened', actor: 'harness', ts: now() });
-
-  // `pr-opened` moves the run to the terminal `delivered` phase: an afterPr
-  // failure is reported in the result only — appending here would throw.
-  if (finish) {
-    const failure = await runFinishStep(finish.afterPr);
-    if (failure) {
-      const { detail } = failure;
-      return { ok: false, stopped: FINISH_FAILED, detail, reason: detail, afterPr: true };
-    }
-  }
-
-  return { ok: true, waves: waves.length };
+  return finishRun(loop);
 }
