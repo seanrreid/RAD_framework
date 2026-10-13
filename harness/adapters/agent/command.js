@@ -192,62 +192,87 @@ function spawnOnce(cmd, prompt, repoRoot, effectiveModel, { signal, killGraceMs 
       reject(new Error('command adapter: empty cmd'));
       return;
     }
-    const [file, ...args] = argv;
-
     let child;
     try {
-      child = spawn(file, args, {
-        cwd: repoRoot,
-        env: buildChildEnv(),
-        stdio: ['pipe', 'pipe', 'pipe'],
-        ...spawnOptions(),
-      });
+      child = startAgentProcess(argv, repoRoot, signal, killGraceMs);
     } catch (err) {
       reject(err);
       return;
     }
-    if (child.pid !== undefined) trackGroup(child);
-    killOnAbort(child, signal, killGraceMs);
-
-    let stdout = '';
-    let stderr = '';
-    let total = 0;
-    let truncated = false;
-    // Cap combined output: a misbehaving agent must not OOM the orchestrator
-    // while we wait for the wall-clock timeout. On overflow, kill the child and
-    // surface `truncated` so the caller routes a terminal protocol failure.
-    const capture = (chunk, append) => {
-      if (truncated) return;
-      const s = chunk.toString();
-      total += Buffer.byteLength(s);
-      if (total > MAX_OUTPUT_BYTES) {
-        truncated = true;
-        signalGroup(child, 'SIGKILL');
-        return;
-      }
-      append(s);
-    };
-    child.stdout.on('data', (d) => capture(d, (s) => { stdout += s; }));
-    child.stderr.on('data', (d) => capture(d, (s) => { stderr += s; }));
-    child.on('error', (err) => { untrackGroup(child); reject(err); });
-    child.on('close', (code) => { untrackGroup(child); resolve({ code, stdout, stderr, truncated }); });
-
-    // Attach before writing: an agent that exits without reading stdin makes
-    // the write fail asynchronously. Only EPIPE is expected — 'close' settles
-    // the promise with the child's real exit. Anything else is a real fault.
-    child.stdin.on('error', (err) => {
-      if (err?.code === STDIN_CLOSED_EARLY_CODE) return;
-      reject(new Error(
-        `command adapter: writing the prompt to the agent's stdin failed: ${err?.code ?? err?.message ?? String(err)}`,
-      ));
-    });
-
-    // Feed the prompt on stdin unless it was already substituted into argv.
-    if (!usedPlaceholder) {
-      child.stdin.write(prompt);
-    }
-    child.stdin.end();
+    const snapshot = captureOutput(child);
+    wireSettle(child, snapshot, resolve, reject);
+    feedPrompt(child, prompt, usedPlaceholder);
   });
+}
+
+/**
+ * Spawn the agent, then register its process group and the abort handler, in
+ * that order. Throws on a synchronous spawn failure; the caller rejects.
+ */
+function startAgentProcess(argv, repoRoot, signal, killGraceMs) {
+  const [file, ...args] = argv;
+  const child = spawn(file, args, {
+    cwd: repoRoot,
+    env: buildChildEnv(),
+    stdio: ['pipe', 'pipe', 'pipe'],
+    ...spawnOptions(),
+  });
+  if (child.pid !== undefined) trackGroup(child);
+  killOnAbort(child, signal, killGraceMs);
+  return child;
+}
+
+/**
+ * Capture stdout/stderr under a combined byte cap: a misbehaving agent must not
+ * OOM the orchestrator while we wait for the wall-clock timeout. On overflow,
+ * kill the child and surface `truncated` so the caller routes a terminal
+ * protocol failure. Returns a snapshot function over the captured state.
+ */
+function captureOutput(child) {
+  let stdout = '';
+  let stderr = '';
+  let total = 0;
+  let truncated = false;
+  const capture = (chunk, append) => {
+    if (truncated) return;
+    const s = chunk.toString();
+    total += Buffer.byteLength(s);
+    if (total > MAX_OUTPUT_BYTES) {
+      truncated = true;
+      signalGroup(child, 'SIGKILL');
+      return;
+    }
+    append(s);
+  };
+  child.stdout.on('data', (d) => capture(d, (s) => { stdout += s; }));
+  child.stderr.on('data', (d) => capture(d, (s) => { stderr += s; }));
+  return () => ({ stdout, stderr, truncated });
+}
+
+/**
+ * Settle the spawn promise: 'error' rejects, 'close' resolves with the captured
+ * output and the child's real exit code. The stdin handler is attached before
+ * the prompt write: an agent that exits without reading stdin makes the write
+ * fail asynchronously. Only EPIPE is expected — 'close' settles the promise
+ * with the child's real exit. Anything else is a real fault.
+ */
+function wireSettle(child, snapshot, resolve, reject) {
+  child.on('error', (err) => { untrackGroup(child); reject(err); });
+  child.on('close', (code) => { untrackGroup(child); resolve({ code, ...snapshot() }); });
+  child.stdin.on('error', (err) => {
+    if (err?.code === STDIN_CLOSED_EARLY_CODE) return;
+    reject(new Error(
+      `command adapter: writing the prompt to the agent's stdin failed: ${err?.code ?? err?.message ?? String(err)}`,
+    ));
+  });
+}
+
+/** Feed the prompt on stdin unless it was already substituted into argv. */
+function feedPrompt(child, prompt, usedPlaceholder) {
+  if (!usedPlaceholder) {
+    child.stdin.write(prompt);
+  }
+  child.stdin.end();
 }
 
 /**
@@ -344,6 +369,114 @@ export async function runCommandPrompt({
 }
 
 /**
+ * Best-effort usage extraction from a CLI's stdout. Most agent CLIs emit NO
+ * machine-readable usage, in which case this returns undefined and the field
+ * is omitted. A wrapper that DOES know its token counts can emit a single
+ * `RAD_USAGE {json}` line (e.g. `RAD_USAGE {"input_tokens":10,"output_tokens":5}`)
+ * which is normalized to `{ input, output, total }`. The line may also carry
+ * the OPTIONAL keys `cache_read_input_tokens` (or `cacheRead`),
+ * `cache_creation_input_tokens` (or `cacheWrite`), and `cost`; each is passed
+ * through as `cacheRead` / `cacheWrite` / `cost` only when it is a finite
+ * non-negative number, and is otherwise absent (see `normalizeUsage`).
+ *
+ * @param {string} stdout
+ * @returns {{ input: number, output: number, total: number,
+ *   cacheRead?: number, cacheWrite?: number, cost?: number } | undefined}
+ */
+function extractUsage(stdout) {
+  const match = /^RAD_USAGE\s+(\{.*\})\s*$/m.exec(stdout || '');
+  if (!match) return undefined;
+  try {
+    return normalizeUsage(JSON.parse(match[1]));
+  } catch {
+    // Malformed usage line is non-fatal: usage stays optional, omit it.
+    return undefined;
+  }
+}
+
+/**
+ * Classify a finished run: a non-null terminal result for an output-cap
+ * overflow or a non-zero exit, null for a clean exit.
+ */
+function classifyRunFailure(run, waveId) {
+  // A runaway agent that blew the output cap was killed — terminal protocol fail.
+  if (run.truncated) {
+    const message = `command output exceeded ${MAX_OUTPUT_BYTES} bytes — process killed`;
+    return terminalFailure('fail-protocol', waveId, message);
+  }
+  if (run.code === 0) return null;
+  const message = describeExitFailure(run);
+  // With a WAVE_RESULT block the agent ran and reported, so the failure stays
+  // on today's retryable path; without one it never got going — no retry.
+  if (extractWaveResultBlock(run.stdout || '')) {
+    return toWaveResult(syntheticFailure(waveId, message));
+  }
+  return terminalFailure(STARTUP_FAILURE_OUTCOME, waveId, message);
+}
+
+/**
+ * Run the command once and return { stdout, terminal } where `terminal` is a
+ * non-null result when the run itself failed (timeout / spawn error /
+ * non-zero exit) and should short-circuit. A successful run returns stdout
+ * with terminal === null.
+ *
+ * @param {{ cmd: string, repoRoot?: string, timeoutMs: number, killGraceMs: number }} ctx
+ */
+async function runCommandOnce(ctx, prompt, waveId, effectiveModel) {
+  // A timed-out wave must not leave the agent editing the tree (#129).
+  const abortController = new AbortController();
+  const spawned = spawnOnce(ctx.cmd, prompt, ctx.repoRoot, effectiveModel, {
+    signal: abortController.signal, killGraceMs: ctx.killGraceMs,
+  });
+  let run;
+  try {
+    run = await withTimeout(spawned, ctx.timeoutMs, abortController);
+  } catch (err) {
+    const message = sanitizeErrorMessage(err?.message ?? String(err));
+    // A wall-clock timeout (sentinel-tagged by withTimeout) is terminal
+    // 'fail-timeout' for this driven adapter — never misread a spawn-level
+    // ETIMEDOUT as our deadline by parsing the message string.
+    if (err && err._isRadTimeout) {
+      return { stdout: '', terminal: terminalFailure('fail-timeout', waveId, message) };
+    }
+    // Spawn-level failure (ENOENT, empty cmd): the agent never started.
+    return { stdout: '', terminal: terminalFailure(STARTUP_FAILURE_OUTCOME, waveId, message) };
+  }
+  return { stdout: run.stdout, terminal: classifyRunFailure(run, waveId) };
+}
+
+/**
+ * First attempt, then EXACTLY one reprompt asking specifically for the missing
+ * WAVE_RESULT block, then a terminal protocol failure.
+ */
+async function runWithReprompt(ctx, prompt, waveId, effectiveModel) {
+  const first = await runCommandOnce(ctx, prompt, waveId, effectiveModel);
+  if (first.terminal) return first.terminal;
+
+  let block = extractWaveResultBlock(first.stdout);
+  if (block) return toWaveResult(parseWaveResult(block), extractUsage(first.stdout));
+
+  const reprompt =
+    prompt +
+    '\n\nYour previous response did not include the required WAVE_RESULT block. ' +
+    'Re-run the wave and end your response with exactly one WAVE_RESULT ... ' +
+    'END_WAVE_RESULT block, and nothing after it.';
+
+  const second = await runCommandOnce(ctx, reprompt, waveId, effectiveModel);
+  if (second.terminal) return second.terminal;
+
+  block = extractWaveResultBlock(second.stdout);
+  if (block) return toWaveResult(parseWaveResult(block), extractUsage(second.stdout));
+
+  // Still no protocol block after one reprompt — terminal protocol failure.
+  return {
+    outcome: 'fail-protocol',
+    status: 'failed',
+    tasks: syntheticFailure(waveId, 'No WAVE_RESULT block after one reprompt').tasks,
+  };
+}
+
+/**
  * Create a command-backed runWave.
  *
  * @param {Object} opts
@@ -359,78 +492,7 @@ export function createCommandAdapter({
   cmd, repoRoot, model, timeoutMs = 600000, killGraceMs = KILL_GRACE_MS,
 } = {}) {
   if (!cmd) throw new Error('createCommandAdapter: cmd is required');
-
-  /**
-   * Best-effort usage extraction from a CLI's stdout. Most agent CLIs emit NO
-   * machine-readable usage, in which case this returns undefined and the field
-   * is omitted. A wrapper that DOES know its token counts can emit a single
-   * `RAD_USAGE {json}` line (e.g. `RAD_USAGE {"input_tokens":10,"output_tokens":5}`)
-   * which is normalized to `{ input, output, total }`. The line may also carry
-   * the OPTIONAL keys `cache_read_input_tokens` (or `cacheRead`),
-   * `cache_creation_input_tokens` (or `cacheWrite`), and `cost`; each is passed
-   * through as `cacheRead` / `cacheWrite` / `cost` only when it is a finite
-   * non-negative number, and is otherwise absent (see `normalizeUsage`).
-   *
-   * @param {string} stdout
-   * @returns {{ input: number, output: number, total: number,
-   *   cacheRead?: number, cacheWrite?: number, cost?: number } | undefined}
-   */
-  function extractUsage(stdout) {
-    const match = /^RAD_USAGE\s+(\{.*\})\s*$/m.exec(stdout || '');
-    if (!match) return undefined;
-    try {
-      return normalizeUsage(JSON.parse(match[1]));
-    } catch {
-      // Malformed usage line is non-fatal: usage stays optional, omit it.
-      return undefined;
-    }
-  }
-
-  /**
-   * Run the command once and return { stdout, terminal } where `terminal` is a
-   * non-null result when the run itself failed (timeout / spawn error /
-   * non-zero exit) and should short-circuit. A successful run returns stdout
-   * with terminal === null.
-   */
-  async function runCommand(prompt, waveId, effectiveModel) {
-    // A timed-out wave must not leave the agent editing the tree (#129).
-    const abortController = new AbortController();
-    const spawned = spawnOnce(cmd, prompt, repoRoot, effectiveModel, {
-      signal: abortController.signal, killGraceMs,
-    });
-    let run;
-    try {
-      run = await withTimeout(spawned, timeoutMs, abortController);
-    } catch (err) {
-      const message = sanitizeErrorMessage(err?.message ?? String(err));
-      // A wall-clock timeout (sentinel-tagged by withTimeout) is terminal
-      // 'fail-timeout' for this driven adapter — never misread a spawn-level
-      // ETIMEDOUT as our deadline by parsing the message string.
-      if (err && err._isRadTimeout) {
-        return { stdout: '', terminal: terminalFailure('fail-timeout', waveId, message) };
-      }
-      // Spawn-level failure (ENOENT, empty cmd): the agent never started.
-      return { stdout: '', terminal: terminalFailure(STARTUP_FAILURE_OUTCOME, waveId, message) };
-    }
-
-    // A runaway agent that blew the output cap was killed — terminal protocol fail.
-    if (run.truncated) {
-      const message = `command output exceeded ${MAX_OUTPUT_BYTES} bytes — process killed`;
-      return { stdout: run.stdout, terminal: terminalFailure('fail-protocol', waveId, message) };
-    }
-
-    if (run.code !== 0) {
-      const message = describeExitFailure(run);
-      // With a WAVE_RESULT block the agent ran and reported, so the failure stays
-      // on today's retryable path; without one it never got going — no retry.
-      if (extractWaveResultBlock(run.stdout || '')) {
-        return { stdout: run.stdout, terminal: toWaveResult(syntheticFailure(waveId, message)) };
-      }
-      return { stdout: run.stdout, terminal: terminalFailure(STARTUP_FAILURE_OUTCOME, waveId, message) };
-    }
-
-    return { stdout: run.stdout, terminal: null };
-  }
+  const ctx = { cmd, repoRoot, timeoutMs, killGraceMs };
 
   /**
    * @param {Object} wave
@@ -446,32 +508,6 @@ export function createCommandAdapter({
     // meaningful when `cmd` contains a `{model}` token — otherwise model
     // selection is the configured CLI's own concern and this is a no-op.
     const effectiveModel = planCtx?.waveModels?.[Number(waveId)] ?? model;
-
-    // First attempt.
-    const first = await runCommand(prompt, waveId, effectiveModel);
-    if (first.terminal) return first.terminal;
-
-    let block = extractWaveResultBlock(first.stdout);
-    if (block) return toWaveResult(parseWaveResult(block), extractUsage(first.stdout));
-
-    // Missing WAVE_RESULT — re-prompt EXACTLY once, asking specifically for it.
-    const reprompt =
-      prompt +
-      '\n\nYour previous response did not include the required WAVE_RESULT block. ' +
-      'Re-run the wave and end your response with exactly one WAVE_RESULT ... ' +
-      'END_WAVE_RESULT block, and nothing after it.';
-
-    const second = await runCommand(reprompt, waveId, effectiveModel);
-    if (second.terminal) return second.terminal;
-
-    block = extractWaveResultBlock(second.stdout);
-    if (block) return toWaveResult(parseWaveResult(block), extractUsage(second.stdout));
-
-    // Still no protocol block after one reprompt — terminal protocol failure.
-    return {
-      outcome: 'fail-protocol',
-      status: 'failed',
-      tasks: syntheticFailure(waveId, 'No WAVE_RESULT block after one reprompt').tasks,
-    };
+    return runWithReprompt(ctx, prompt, waveId, effectiveModel);
   };
 }
