@@ -94,8 +94,8 @@
     "raw name enoent lowercase": "permanent",
     "raw name ENOENT uppercase": "permanent",
     "raw name syntaxerror lowercase": "model",
-    "raw name SyntaxError": "permanent",
-    "raw name SyntaxError with message": "permanent",
+    "raw name SyntaxError": "model",
+    "raw name SyntaxError with message": "model",
     "name TimeoutError": "transient",
     "empty object": "permanent"
   },
