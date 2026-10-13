@@ -169,6 +169,45 @@ test('classifyError — resource: token / context limit', () => {
   assert.equal(classifyError(new Error('maximum context length exceeded')), 'resource');
 });
 
+const named = (name, message = '', extra = {}) =>
+  Object.assign(new Error(message), { name }, extra);
+
+test('classifyError — a real SyntaxError is a model error', () => {
+  let parseError;
+  try {
+    JSON.parse('{');
+  } catch (e) {
+    parseError = e;
+  }
+  assert.equal(classifyError(parseError), 'model');
+  assert.equal(classifyError(new SyntaxError('bad input')), 'model');
+});
+
+test('classifyError — name matching is case-insensitive', () => {
+  for (const name of ['SyntaxError', 'syntaxerror', 'SYNTAXERROR']) {
+    assert.equal(classifyError(named(name, 'bad input')), 'model', name);
+  }
+  for (const name of ['ENOENT', 'enoent', 'Enoent']) {
+    assert.equal(classifyError(named(name, 'bad input')), 'permanent', name);
+  }
+});
+
+test('classifyError — SyntaxError keeps the existing precedence', () => {
+  assert.equal(classifyError(new SyntaxError('token limit reached')), 'resource');
+  assert.equal(classifyError(new SyntaxError('forbidden')), 'permanent');
+  assert.equal(classifyError(new SyntaxError('timeout')), 'transient');
+  assert.equal(classifyError(named('SyntaxError', 'bad input', { status: 503 })), 'transient');
+  assert.equal(classifyError(named('SyntaxError', 'bad input', { status: 401 })), 'permanent');
+});
+
+test('classifyError — unknown and degenerate inputs stay permanent', () => {
+  assert.equal(classifyError(named('TypeError', 'bad input')), 'permanent');
+  assert.equal(classifyError(null), 'permanent');
+  assert.equal(classifyError(undefined), 'permanent');
+  assert.equal(classifyError('plain string'), 'permanent');
+  assert.equal(classifyError({}), 'permanent');
+});
+
 // ---------------------------------------------------------------------------
 // withTimeout — AC#2 aborts a never-resolving promise past the deadline
 // ---------------------------------------------------------------------------
