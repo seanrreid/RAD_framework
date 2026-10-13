@@ -23,7 +23,10 @@ PR. The cases live in `approval.eval.js`, `delivery.eval.js`, `repo.eval.js` and
 **Mutation rule.** Every case that exercises a guard declares a `mutate` function,
 which disables that guard in the fixture copy. The runner registers a
 `[mutated]` twin of the case, and that twin **must fail**. If the twin still
-passes, the assertion never depended on the guard it claims to test.
+passes, the assertion never depended on the guard it claims to test. A mutant
+must also fail its assertion rather than crash: the runner fails a twin whose
+result carries crash text (`ReferenceError`, `command not found` and the like)
+in any `stderr`, so a broken mutation anchor cannot masquerade as a kill.
 
 **Fixtures.** `harness/evals/lib/fixture.js` builds a hermetic, real-git repo for
 each case. It has its own `scripts/`, a local bare `origin`, a git identity, and an
