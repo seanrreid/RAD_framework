@@ -810,6 +810,173 @@ async function invokeWave(wave, loop, attempt, priorFailure) {
   return { result, tipBefore, tipAfter };
 }
 
+/** A post-wave veto is authoritative: it REPLACES the model's outcome with
+ * the (validated, fail-closed) veto outcome and routes THAT through the
+ * matrix — exactly generalizing the check-tests-present demotion to any
+ * outcome. It supersedes the per-wave test-presence gate (the operator has
+ * already decided). */
+function postWaveVetoGate(postVeto, { state, feature, now }) {
+  const vetoOutcome = safeVetoOutcome(postVeto.outcome);
+  state.append({
+    feature,
+    type: 'hook-veto',
+    actor: 'harness',
+    ts: now(),
+    data: { point: 'post-wave', hook: postVeto.hook, outcome: vetoOutcome, source: 'hook' },
+  });
+  return {
+    outcome: vetoOutcome,
+    gated: {
+      outcome: vetoOutcome,
+      categories: ['hook-veto'],
+      summary: `post-wave hook veto (${postVeto.hook})`,
+    },
+    vetoSource: { point: 'post-wave', hook: postVeto.hook },
+  };
+}
+
+/** Demotion for a failed presence gate. Fingerprint STABLE, gate-derived
+ * fields — NOT the model's variable result text. Two consecutive gate failures
+ * must hash equally so the doom-loop breaker trips at the cap instead of
+ * burning every attempt when the model merely rewords its output between
+ * identical failures. */
+function presenceDemotion(gate) {
+  const outcome = 'fail-tests';
+  return {
+    outcome,
+    gateOutput: gate.stdout ?? '',
+    gated: {
+      outcome,
+      gateStatus: gate.status,
+      categories: ['check-tests'],
+      summary: `check-tests gate failed (status ${gate.status})`,
+    },
+  };
+}
+
+/** Per-wave EXECUTING gate: the harness runs the plan's `Verify:` command and
+ * reads its REAL exit code — the one thing the presence gate cannot tell us.
+ * The command is arbitrary shell from a human-approved plan, so the spine never
+ * executes it: check-verify.sh does, through the SAME `sh` port every other
+ * guardrail uses, and owns the allow-listed env, the timeout, and the output
+ * cap. A failure supplies a different INPUT TOKEN to the matrix; it never adds
+ * a branch here and never invents an outcome. `verifyEvidence` is always set so
+ * the attempt records what really ran; the demotion keys only on failure. */
+function verifyGate(sh, command) {
+  const run = sh(VERIFY_SCRIPT, command);
+  const verifyEvidence = { verify: { command, status: run.status, passed: run.status === 0 } };
+  if (run.status === 0) return { verifyEvidence };
+  // A killed-on-timeout command is NOT a retryable test failure: a
+  // retry cannot fix a hang, so it takes the existing `fail-timeout`
+  // token (matrix action `surface`) instead of `fail-tests`.
+  const outcome = run.status === VERIFY_TIMEOUT_STATUS ? 'fail-timeout' : 'fail-tests';
+  // check-verify.sh already bounds this excerpt (40 lines / 8000 bytes); the
+  // prompt renderer caps it again, unconditionally. Gate-derived fields only,
+  // so two identical failures hash equally.
+  return {
+    verifyEvidence,
+    outcome,
+    gateOutput: run.stdout ?? '',
+    gated: {
+      outcome,
+      gateStatus: run.status,
+      categories: ['check-verify'],
+      summary: `check-verify gate failed (status ${run.status})`,
+    },
+  };
+}
+
+/** The Verify gate then the SCOPE gate (#77). Only an outcome still advancing
+ * after the presence and Verify gates is scope-checked; a failure demotes it to
+ * fail-scope BEFORE the attempt is recorded or the matrix resolves. */
+function executingGates(gates, wave, loop) {
+  const { sh, feature, matrix, waveVerify } = loop;
+  const command = waveVerify[wave.n];
+  const verified = command ? { ...gates, ...verifyGate(sh, command) } : gates;
+  if (resolveOutcome('implement', verified.outcome, matrix).action !== 'advance') return verified;
+  const demoted = scopeDemotion(sh, feature);
+  return demoted ? { ...verified, ...demoted } : verified;
+}
+
+/**
+ * The post-wave gates, in order: the post-wave hook (a veto supersedes
+ * everything below), then — only for an outcome the matrix would advance — the
+ * per-wave test-PRESENCE gate, the Verify gate and the scope gate. A wave the
+ * model thinks succeeded only advances if every test file the plan promised
+ * exists on disk at THIS point; a failure DEMOTES it to fail-tests so the
+ * existing retry/revision path (bounded budget + doom-loop fingerprint) handles
+ * it. The presence guarantee is narrow: it never executes a test, so a
+ * present-but-empty or failing test satisfies it. The EXECUTING gate closes that
+ * hole (issue #89) for waves declaring a `Verify:` command; the two stay
+ * separate checks and neither replaces the other (issue #91).
+ *
+ * Returns { outcome, gated, gateOutput, verifyEvidence, vetoSource }.
+ * `verifyEvidence` is spread (not assigned) onto the attempt event so the key is
+ * ABSENT when no command ran. `gateOutput` is the failing gate's captured
+ * stdout, fed forward as the retry prompt's excerpt: prompt input ONLY — never
+ * recorded on an event and never in the fingerprint.
+ */
+function applyPostWaveGates(wave, loop, result) {
+  const { state, feature, now, matrix, sh, runHooks, testsByWave, waves } = loop;
+  const postVeto = fireHooks(
+    runHooks,
+    'post-wave',
+    { feature, wave: wave.n, outcome: result.outcome },
+    { state, feature, now },
+  ).veto;
+  const gates = { outcome: result.outcome, gated: result, verifyEvidence: {}, gateOutput: '', vetoSource: null };
+  if (postVeto) return { ...gates, ...postWaveVetoGate(postVeto, loop) };
+  if (resolveOutcome('implement', gates.outcome, matrix).action !== 'advance') return gates;
+  const presence = wavePresenceGate({ sh, feature, testsByWave, waves, wave });
+  if (presence.status !== 0) return { ...gates, ...presenceDemotion(presence) };
+  return executingGates(gates, wave, loop);
+}
+
+/**
+ * Apply the push guard, resolve the matrix action, append the `wave-attempt`
+ * event and accumulate the run-wide counters. The push guard is applied
+ * REGARDLESS of the reported outcome (a push to the default branch is a protocol
+ * violation even on a failing attempt) and LAST, so it overrides every demotion
+ * and veto; the outcome is then no longer the veto's, so the veto provenance tag
+ * is dropped. Returns { outcome, action, print, gateOutput, vetoSource }.
+ */
+function recordAttempt(wave, loop, attempt, { result, tipBefore, tipAfter }, gates) {
+  const { state, feature, now, matrix, pushGuard } = loop;
+  let { outcome, gated, gateOutput, vetoSource } = gates;
+  const pushDemoted = pushGuard ? pushGuardDemotion(tipBefore, tipAfter) : null;
+  if (pushDemoted) {
+    ({ outcome, gateOutput, gated } = pushDemoted);
+    vetoSource = null;
+  }
+  // `tasks` rides on the same REAL runWave result as `usage` and is likewise
+  // OPTIONAL. Spread, not assigned, so the key is ABSENT rather than
+  // present-and-undefined when the result carries none. DATA-ONLY — no fold in
+  // events.js reads it.
+  const taskEvidence = result.tasks ? { tasks: result.tasks } : {};
+  // The MATRIX decides what happens next — never inline retry arithmetic.
+  // Resolved BEFORE the attempt is recorded so a failing (retry/revision)
+  // attempt carries the SAME fingerprint the doom-loop breaker compares —
+  // which lets a resumed run seed `lastPrint` from the log (issue #119).
+  const { action } = resolveOutcome('implement', outcome, matrix);
+  const print = FINGERPRINTED_ACTIONS.has(action) ? fingerprint(gated) : null;
+  // Usage is recorded even when a gate demoted `outcome` (the demoted `gated`
+  // object carries no usage); it is OPTIONAL, so a missing one is undefined.
+  state.append({
+    feature,
+    type: 'wave-attempt',
+    actor: 'harness',
+    ts: now(),
+    data: attemptData({
+      wave, attempt, outcome, result, evidence: { ...taskEvidence, ...gates.verifyEvidence }, vetoSource, print,
+    }),
+  });
+  // Accumulate this attempt's token spend for the budget breaker. A missing
+  // total contributes 0, never NaN.
+  loop.spent += result.usage?.total ?? 0;
+  if (outcome !== SUCCESS_OUTCOME) loop.failedAttempts += 1;
+  return { outcome, action, print, gateOutput, vetoSource };
+}
+
 /**
  * Run ONE wave (a plan wave, or the synthetic end-of-run test wave) through the
  * per-wave body: approval re-check, token budget, resume verify, orphan
@@ -844,192 +1011,11 @@ async function runOneWave(wave, loop) {
   for (let attempt = prior.attempts + 1; attempt <= maxAttempts; attempt += 1) {
     const attemptStop = attemptCapStop(wave, loop) ?? preWaveVetoStop(wave, loop);
     if (attemptStop) return attemptStop;
-    const { result, tipBefore, tipAfter } = await invokeWave(wave, loop, attempt, priorFailure);
+    const ran = await invokeWave(wave, loop, attempt, priorFailure);
 
-    // ── Hook: post-wave (veto-capable point). Fired after the wave result,
-    // before the per-wave test-presence gate. A veto here REPLACES the wave's
-    // outcome with the veto outcome and routes it through the existing matrix —
-    // generalizing the check-tests-present success→fail-tests demotion below to
-    // any fixed-vocabulary outcome. Validated fail-closed first; first-veto-wins
-    // is enforced in the runner. ──
-    const postVeto = fireHooks(
-      runHooks,
-      'post-wave',
-      { feature, wave: wave.n, outcome: result.outcome },
-      { state, feature, now },
-    ).veto;
-    let vetoSource = null; // { point, hook } when a post-wave veto drove the outcome
-
-    // ── Per-wave test-PRESENCE gate. A wave the model thinks succeeded only
-    // advances if every test file the plan promised exists on disk at THIS
-    // point — otherwise the wave claimed test work it never wrote. DEMOTE it to
-    // fail-tests so the existing retry/revision path (bounded budget +
-    // doom-loop fingerprint) handles it; the wave then blocks here instead of
-    // advancing on an unwritten test.
-    //
-    // The presence guarantee is narrow, and worth stating plainly: a wave does
-    // not advance if a promised test file is ABSENT. That gate never executes a
-    // test and never consults a test runner, so a present-but-empty or outright
-    // failing test satisfies it. The EXECUTING gate below closes that hole
-    // (issue #89) for waves that declare a `Verify:` command — the two stay
-    // separate checks, and neither replaces the other (issue #91). ──
-    let { outcome } = result;
-    let gated = result;
-    // Evidence of an executed verification, spread (not assigned) onto the
-    // attempt event so the key is ABSENT — never present-and-undefined — when
-    // no command ran. A wave with no `Verify:` line must append an event
-    // byte-identical to a pre-verification one.
-    let verifyEvidence = {};
-    // The failing gate's captured stdout, fed forward as the retry prompt's
-    // excerpt. Prompt input ONLY — it is never recorded on an event and never
-    // reaches the fingerprint, so it cannot change the doom-loop verdict.
-    let gateOutput = '';
-    if (postVeto) {
-      // A post-wave veto is authoritative: it REPLACES the model's outcome with
-      // the (validated, fail-closed) veto outcome and routes THAT through the
-      // matrix — exactly generalizing the check-tests-present demotion to any
-      // outcome. It supersedes the per-wave test-presence gate (the operator has
-      // already decided).
-      const vetoOutcome = safeVetoOutcome(postVeto.outcome);
-      vetoSource = { point: 'post-wave', hook: postVeto.hook };
-      state.append({
-        feature,
-        type: 'hook-veto',
-        actor: 'harness',
-        ts: now(),
-        data: { point: 'post-wave', hook: postVeto.hook, outcome: vetoOutcome, source: 'hook' },
-      });
-      outcome = vetoOutcome;
-      gated = {
-        outcome,
-        categories: ['hook-veto'],
-        summary: `post-wave hook veto (${postVeto.hook})`,
-      };
-    } else if (resolveOutcome('implement', outcome, matrix).action === 'advance') {
-      const gate = wavePresenceGate({ sh, feature, testsByWave, waves, wave });
-      if (gate.status !== 0) {
-        outcome = 'fail-tests';
-        gateOutput = gate.stdout ?? '';
-        // Fingerprint STABLE, gate-derived fields — NOT the model's variable
-        // result text. Two consecutive gate failures must hash equally so the
-        // doom-loop breaker trips at the cap instead of burning every attempt
-        // when the model merely rewords its output between identical failures.
-        gated = {
-          outcome,
-          gateStatus: gate.status,
-          categories: ['check-tests'],
-          summary: `check-tests gate failed (status ${gate.status})`,
-        };
-      } else {
-        // ── Per-wave EXECUTING gate. When the plan declared a `Verify:` command
-        // for this wave, the harness runs it and reads its REAL exit code — the
-        // one thing the presence gate cannot tell us. The command itself is
-        // arbitrary shell from a human-approved plan, so the spine never
-        // executes it: check-verify.sh does, through the SAME `sh` port every
-        // other guardrail uses (unchanged shape), and owns the allow-listed env,
-        // the timeout, and the output cap.
-        //
-        // A failure supplies a different INPUT TOKEN to the matrix; it never
-        // adds a branch here and never invents an outcome. The matrix stays the
-        // sole authority on what happens next. ──
-        const command = waveVerify[wave.n];
-        if (command) {
-          const run = sh(VERIFY_SCRIPT, command);
-          verifyEvidence = {
-            verify: { command, status: run.status, passed: run.status === 0 },
-          };
-          if (run.status !== 0) {
-            // A killed-on-timeout command is NOT a retryable test failure: a
-            // retry cannot fix a hang, so it takes the existing `fail-timeout`
-            // token (matrix action `surface`) instead of `fail-tests`.
-            outcome = run.status === VERIFY_TIMEOUT_STATUS ? 'fail-timeout' : 'fail-tests';
-            // check-verify.sh already bounds this excerpt (40 lines / 8000
-            // bytes); the prompt renderer caps it again, unconditionally.
-            gateOutput = run.stdout ?? '';
-            // Same stable-fingerprint discipline as the presence gate above:
-            // gate-derived fields only, so two identical failures hash equally.
-            gated = {
-              outcome,
-              gateStatus: run.status,
-              categories: ['check-verify'],
-              summary: `check-verify gate failed (status ${run.status})`,
-            };
-          }
-        }
-        // ── Per-wave SCOPE gate (#77). Only an outcome still advancing after
-        // the presence and Verify gates is checked; a failure demotes it to
-        // fail-scope BEFORE the attempt is recorded or the matrix resolves. ──
-        if (resolveOutcome('implement', outcome, matrix).action === 'advance') {
-          const demoted = scopeDemotion(sh, feature);
-          if (demoted) ({ outcome, gateOutput, gated } = demoted);
-        }
-      }
-    }
-
-    // ── Push guard. Applied REGARDLESS of the reported outcome (a push to the
-    // default branch is a protocol violation even on a failing attempt) and
-    // LAST, so it overrides every demotion and veto above; the outcome is then
-    // no longer the veto's, so the veto provenance tag is dropped. ──
-    const pushDemoted = pushGuard ? pushGuardDemotion(tipBefore, tipAfter) : null;
-    if (pushDemoted) {
-      ({ outcome, gateOutput, gated } = pushDemoted);
-      vetoSource = null;
-    }
-
-    // `tasks` rides on the same REAL runWave result as `usage` and is likewise
-    // OPTIONAL — the adapter contract (docs/rad-wave-contract.md) attaches it
-    // only when the agent reported a non-empty task list. Spread, not assigned,
-    // so the key is ABSENT rather than present-and-undefined when the result
-    // carries none: a tasks-free result must append an event byte-identical to
-    // a pre-tasks one. It is DATA-ONLY — no fold in events.js reads it.
-    const taskEvidence = result.tasks ? { tasks: result.tasks } : {};
-
-    // The MATRIX decides what happens next — never inline retry arithmetic.
-    // Resolved BEFORE the attempt is recorded so a failing (retry/revision)
-    // attempt can carry the SAME fingerprint the doom-loop breaker compares —
-    // which lets a resumed run seed `lastPrint` from the log (issue #119).
-    const { action } = resolveOutcome('implement', outcome, matrix);
-    const print = FINGERPRINTED_ACTIONS.has(action) ? fingerprint(gated) : null;
-
-    state.append({
-      feature,
-      type: 'wave-attempt',
-      actor: 'harness',
-      ts: now(),
-      // Usage rides on the REAL runWave result — record it even when the
-      // per-wave gate demoted `outcome` to fail-tests above (the demoted
-      // `gated` object carries no usage). Usage is OPTIONAL: an adapter that
-      // emits none leaves `result.usage` undefined and the key is included as
-      // undefined, which folds/serializes the same as a legacy event.
-      //
-      // Provenance (Task 3.2): when a post-wave veto drove the outcome, tag the
-      // attempt with source/point/hook so a veto-originated outcome is
-      // distinguishable from an agent-emitted one. Absent a veto the shape is
-      // unchanged — no provenance keys are added.
-      //
-      // Verification evidence (Task 3.3): when the wave declared a `Verify:`
-      // command and it actually ran, record { command, status, passed } so the
-      // event log carries what was executed and what really happened — not a
-      // self-classification. Spread, so a wave that declared none appends an
-      // event with NO `verify` key at all.
-      //
-      // Durability (#119): `attempt` always; `fingerprint` only on retry/revision.
-      data: attemptData({
-        wave,
-        attempt,
-        outcome,
-        result,
-        evidence: { ...taskEvidence, ...verifyEvidence },
-        vetoSource,
-        print,
-      }),
-    });
-
-    // Accumulate this attempt's token spend for the budget breaker. Usage is
-    // OPTIONAL (a command adapter may emit none) — a missing total contributes
-    // 0, never NaN.
-    loop.spent += result.usage?.total ?? 0;
-    if (outcome !== SUCCESS_OUTCOME) loop.failedAttempts += 1;
+    const gates = applyPostWaveGates(wave, loop, ran.result);
+    const { result } = ran;
+    const { outcome, action, print, gateOutput, vetoSource } = recordAttempt(wave, loop, attempt, ran, gates);
 
     // ── Hook: on-outcome (observe-only). Fired after the matrix resolves the
     // outcome, before the action is dispatched. Observe + emit only. ──
