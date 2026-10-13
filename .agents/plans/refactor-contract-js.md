@@ -1,7 +1,10 @@
 # Plan: Refactor contract.js Under the Function-Length Ratchet (#252, part 1 of 6)
 Created: 2026-10-13
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-10-13T13:05:50.117Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/refactor-contract-js
 Adopted-From: #252 part 1 of 6 (refactor harness/adapters/agent/contract.js; the issue stays open until all six plans land)
 Issue-Title: Refactor over-long core functions (runOneWave, createGitStateStore, deliverCommand, ...)
