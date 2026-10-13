@@ -803,14 +803,34 @@ function parseUnpromisedTests(text, testsByWave) {
  *   executionNotes: { doNotTouch: string[], keyFiles: string[], reminders: string[] } }}
  */
 export function parsePlanCtx(text) {
-  // Branch: extract from `Branch: rad/feature` header line
-  let branch = '';
+  const testsByWave = parseTestsByWave(text);
+  return {
+    branch: parseBranchHeader(text),
+    acceptanceCriteria: parseAcceptanceCriteria(text),
+    waveModels: parseWaveModels(text),
+    waveVerify: parseWaveVerify(text),
+    verifyTimeoutSeconds: resolveVerifyTimeoutSeconds(),
+    testsByWave,
+    unpromisedTests: parseUnpromisedTests(text, testsByWave),
+    // Per-wave `#### Task N.M:` blocks (taskBlocksByWave), handed to runWave
+    // so each wave's prompt carries its tasks.
+    waveTasks: Object.fromEntries(taskBlocksByWave(text)),
+    ...parseCapabilities(text),
+    executionNotes: parseExecutionNotes(text),
+  };
+}
+
+/** The `Branch: rad/feature` header value, or '' when absent. */
+function parseBranchHeader(text) {
   for (const line of text.split('\n')) {
     const m = /^Branch:\s*(.+)$/.exec(line.trim());
-    if (m) { branch = m[1].trim(); break; }
+    if (m) return m[1].trim();
   }
+  return '';
+}
 
-  // Acceptance Criteria: numbered list lines in `## Acceptance Criteria`
+/** Numbered list lines under `## Acceptance Criteria`, up to the next `##`. */
+function parseAcceptanceCriteria(text) {
   const acLines = [];
   let inAc = false;
   for (const line of text.split('\n')) {
@@ -821,37 +841,23 @@ export function parsePlanCtx(text) {
       if (/^[0-9]+\./.test(trimmed)) acLines.push(trimmed);
     }
   }
+  return acLines;
+}
 
-  // Execution Notes sub-sections
-  const doNotTouch = subSectionLines(text, 'Do Not Touch')
+/** The `- ` bullet items of one Execution Notes sub-section. */
+function executionNoteItems(text, heading) {
+  return subSectionLines(text, heading)
     .map((l) => l.trim())
     .filter((l) => l.startsWith('- '))
     .map((l) => l.slice(2));
+}
 
-  const keyFiles = subSectionLines(text, 'Key Files')
-    .map((l) => l.trim())
-    .filter((l) => l.startsWith('- '))
-    .map((l) => l.slice(2));
-
-  const reminders = subSectionLines(text, 'Reminders')
-    .map((l) => l.trim())
-    .filter((l) => l.startsWith('- '))
-    .map((l) => l.slice(2));
-
-  const testsByWave = parseTestsByWave(text);
+/** Execution Notes sub-sections: Do Not Touch, Key Files, Reminders. */
+function parseExecutionNotes(text) {
   return {
-    branch,
-    acceptanceCriteria: acLines,
-    waveModels: parseWaveModels(text),
-    waveVerify: parseWaveVerify(text),
-    verifyTimeoutSeconds: resolveVerifyTimeoutSeconds(),
-    testsByWave,
-    unpromisedTests: parseUnpromisedTests(text, testsByWave),
-    // Per-wave `#### Task N.M:` blocks (taskBlocksByWave), handed to runWave
-    // so each wave's prompt carries its tasks.
-    waveTasks: Object.fromEntries(taskBlocksByWave(text)),
-    ...parseCapabilities(text),
-    executionNotes: { doNotTouch, keyFiles, reminders },
+    doNotTouch: executionNoteItems(text, 'Do Not Touch'),
+    keyFiles: executionNoteItems(text, 'Key Files'),
+    reminders: executionNoteItems(text, 'Reminders'),
   };
 }
 
@@ -1967,25 +1973,17 @@ function makeRunHooks({ hookShell, root, hooksDir, now }) {
 }
 
 /**
- * `deliver <feature> [--model <model-id>]`.
+ * Pre-setup phase 1: help, argument parse, feature check.
  *
- * Reads the approved plan, constructs an SDK-backed runWave, and drives
- * deliverSpine to completion. Returns an integer exit code — never calls
- * process.exit() directly.
- *
- * @param {string[]} argv - args after `deliver`
- * @param {{ repoRoot: string, sh?: typeof defaultSh, runWave?: Function }} ctx
- * @returns {Promise<number>}
+ * @param {string[]} argv
+ * @returns {{ code: number } | { parsed: object }}
  */
-export async function deliverCommand(argv, ctx) {
-  const { repoRoot } = ctx;
-  const sh = ctx.sh ?? defaultSh;
-
+function validateDeliverRequest(argv) {
   // Subcommand-level help: print usage and exit 0.
   if (argv.includes('--help') || argv.includes('-h')) {
     process.stdout.write(`Usage: ${DELIVER_USAGE}\n`);
     process.stdout.write('\nRun approved plan wave execution via Claude Agent SDK.\n');
-    return 0;
+    return { code: 0 };
   }
 
   let parsed;
@@ -1994,17 +1992,24 @@ export async function deliverCommand(argv, ctx) {
   } catch (err) {
     process.stderr.write(`rad deliver: ${err.message}\n`);
     process.stderr.write(`Usage: ${DELIVER_USAGE}\n`);
-    return err.exitCode ?? 1;
+    return { code: err.exitCode ?? 1 };
   }
 
-  const { feature, modelExplicit } = parsed;
-
-  if (!isNonEmpty(feature)) {
+  if (!isNonEmpty(parsed.feature)) {
     process.stderr.write('rad deliver: a feature name is required\n');
     process.stderr.write(`Usage: ${DELIVER_USAGE}\n`);
-    return 1;
+    return { code: 1 };
   }
+  return { parsed };
+}
 
+/**
+ * Pre-setup phase 2: config load, agent selection, failed-attempts cap, config
+ * and hooks-directory validation. Nothing here creates a worktree or an event.
+ *
+ * @returns {Promise<{ code: number } | { selection: object, model: string|undefined, failedCap: object, settings: object }>}
+ */
+async function resolveDeliverSettings(ctx, repoRoot, parsed) {
   // Adapter selection. The environment (RAD_AGENT / RAD_AGENT_CMD) wins outright
   // when either is set; otherwise `agent:` in .rad/config.yml applies. The kind
   // picks the runner: 'command' (vendor-neutral CLI), 'sdk' (Anthropic SDK) or
@@ -2013,11 +2018,11 @@ export async function deliverCommand(argv, ctx) {
   // skips construction and the credential check. Config is read once, here.
   const configLoad = await loadDeliverConfig(repoRoot);
   const selected = selectDeliverAgent(ctx, configLoad);
-  if (selected.code !== undefined) return selected.code;
+  if (selected.code !== undefined) return { code: selected.code };
   const { selection } = selected;
   // acp honours no model (ACP v1 has no stable selector), so only an explicit
   // --model reaches it, where createAcpAdapter turns it into its one warning.
-  const model = selection.kind === 'acp' && !modelExplicit ? undefined : parsed.model;
+  const model = selection.kind === 'acp' && !parsed.modelExplicit ? undefined : parsed.model;
 
   // Failed-attempt cap: parsed BEFORE setup so a malformed value exits 2 with
   // no worktree created and no event appended.
@@ -2026,27 +2031,37 @@ export async function deliverCommand(argv, ctx) {
     process.stderr.write(
       `rad deliver: ${MAX_FAILED_ATTEMPTS_ENV} must be a positive integer (got '${failedCap.raw}')\n`,
     );
-    return USAGE_EXIT_CODE;
+    return { code: USAGE_EXIT_CODE };
   }
 
   // Settings + hooks dir: validated BEFORE setup so an invalid config or a
   // malformed hooks dir exits 2 with no worktree created and no event appended.
   // Uses the config loaded once above, from repoRoot.
-  if (!configLoad.ok) return refuseInvalidDeliverConfig(configLoad.errors);
+  if (!configLoad.ok) return { code: refuseInvalidDeliverConfig(configLoad.errors) };
   const settings = configLoad.doc?.settings ?? {};
   const hooksCheck = resolveHooksDir(process.env, repoRoot, settings);
   if (!hooksCheck.ok) {
     process.stderr.write(
       `rad deliver: ${hooksCheck.source} must be a directory path (got ${JSON.stringify(hooksCheck.raw)})\n`,
     );
-    return USAGE_EXIT_CODE;
+    return { code: USAGE_EXIT_CODE };
   }
+  return { selection, model, failedCap, settings };
+}
 
+/**
+ * Pre-spine phase 3: delivered short-circuit, --resume eligibility, then setup
+ * (worktree or main checkout).
+ *
+ * @returns {Promise<{ code: number } | { setup: object, resume: object|null }>}
+ */
+async function resolveDeliverMode({ ctx, sh, repoRoot, parsed, cfg }) {
+  const { feature } = parsed;
   // Delivered rerun: BEFORE --resume eligibility (a delivered feature has no
   // stopped run to resume) and before setup — it never calls the spine, so
   // nothing is appended after pr-opened.
   const delivered = await deliveredShortCircuit({ ctx, sh, repoRoot, feature });
-  if (delivered !== null) return delivered;
+  if (delivered !== null) return { code: delivered };
 
   // --resume eligibility: BEFORE setup, so a refusal exits 2 with no worktree
   // created and no event appended. Without --resume this yields resume: null
@@ -2054,7 +2069,7 @@ export async function deliverCommand(argv, ctx) {
   const eligibility = resolveResume({ ...parsed, feature, repoRoot, sh });
   if (eligibility.refusal !== undefined) {
     process.stderr.write(`rad deliver: ${eligibility.refusal}\n`);
-    return USAGE_EXIT_CODE;
+    return { code: USAGE_EXIT_CODE };
   }
   const { resume } = eligibility;
 
@@ -2065,11 +2080,23 @@ export async function deliverCommand(argv, ctx) {
   // check-*.sh / open-pr.sh run are rooted at an isolated git worktree on the
   // work branch. RAD_WORKTREE_DIR (optional base dir) is read by the lifecycle
   // script itself, so we just let it flow through the environment.
-  const setupOpts = { ctx, feature, model, selection, repoRoot, sh };
+  const setupOpts = { ctx, feature, model: cfg.model, selection: cfg.selection, repoRoot, sh };
   const setup = worktreeEnabled()
     ? await setupWorktreeRun({ ...setupOpts, resume })
     : await setupMainRun(setupOpts);
-  if (setup.code !== undefined) return setup.code;
+  if (setup.code !== undefined) return { code: setup.code };
+  return { setup, resume };
+}
+
+/**
+ * Assemble everything the spine call needs once setup has succeeded: matrix,
+ * token budget (with its unarmed warning), work branch, script context, the
+ * prepare/finish ports and the hook runner.
+ *
+ * @returns {{ code: number } | object} the run, or the exit code of a port failure
+ */
+function buildDeliverRun({ ctx, sh, repoRoot, feature, cfg, mode }) {
+  const { setup, resume } = mode;
   const { root, planCtx, state, runWave, worktree } = setup;
 
   const matrix = loadMatrix();
@@ -2089,84 +2116,107 @@ export async function deliverCommand(argv, ctx) {
   if (finishPort.code !== undefined) {
     // Before the spine, like a setup failure: keep the worktree for inspection.
     if (worktree) preserveAfterSetupFailure(worktree, feature, root);
-    return finishPort.code;
+    return { code: finishPort.code };
   }
   const runHooks = makeRunHooks({
-    hookShell: ctx.sh ?? spawnHook, root, hooksDir: resolveHooksDir(process.env, root, settings).dir, now,
+    hookShell: ctx.sh ?? spawnHook, root, hooksDir: resolveHooksDir(process.env, root, cfg.settings).dir, now,
   });
+  return {
+    feature, state, matrix, runWave, port, finishPort, sh, repoRoot, root, scriptCtx, now, runHooks,
+    tokenBudget, planCtx, failedCap: cfg.failedCap, resume, worktree, workBranch,
+  };
+}
 
-  let result;
+/**
+ * The plan-derived keys of the spine call, in call order.
+ */
+function planSpineArgs(planCtx, root) {
+  return {
+    // Per-wave `Verify:` commands, passed through exactly as tokenBudget is.
+    // Empty for a plan that declares none, which leaves the spine's behavior
+    // and its event sequence unchanged.
+    waveVerify: planCtx.waveVerify,
+    // Per-wave { type, tasks } from the plan's task blocks; the spine folds
+    // them onto each wave it hands runWave, so every prompt lists its tasks.
+    waveTasks: planCtx.waveTasks,
+    // Per-wave promised test files (parseTestsByWave): the presence gate after
+    // wave k checks only waves <= k's promises; {} skips the gate entirely.
+    testsByWave: planCtx.testsByWave,
+    // Unpromised Tests-to-Write files: when any is missing after the plan
+    // waves, the spine runs one synthetic test wave N+1 (default model and
+    // plan-level capabilities — it has no per-wave entry) and then stops
+    // tests-missing on any file still absent. None → null: today's run.
+    testWave: endOfRunTestWave(planCtx.unpromisedTests, root),
+    // Per-wave `Model:` ids (parseWaveModels — the sole Model: parser), recorded
+    // on each wave-started. Empty for a plan that declares none.
+    waveModels: planCtx.waveModels,
+    // Effective capability classes of constrained waves only, recorded on each
+    // wave-started. Empty for an undeclared plan with no deny list.
+    waveCapabilities: planCtx.waveEffective,
+  };
+}
+
+/**
+ * The deliverSpine argument object, key for key.
+ *
+ * @param {object} run - the object buildDeliverRun returns
+ */
+function buildSpineArgs(run) {
+  const { feature, state, matrix, runWave, port, finishPort, planCtx, root, resume } = run;
+  return {
+    feature,
+    state,
+    docs: null,
+    matrix,
+    gates: null,
+    runWave,
+    // Sync/merge/in-progress before any wave; a stop exits via reportStop.
+    prepare: port.prepare,
+    // Mark the plan complete before open-pr.sh; publish pr-opened after it.
+    finish: finishPort.finish,
+    // Scripts run with cwd = root: repoRoot today, the worktree when isolated.
+    // Each gets its real argv from SCRIPT_ARGS; an unknown script throws.
+    sh: makeSpineScriptPort({ sh: run.sh, repoRoot: run.repoRoot, root, scriptCtx: run.scriptCtx }),
+    now: run.now,
+    runHooks: run.runHooks,
+    pushGuard: true,
+    tokenBudget: run.tokenBudget,
+    ...planSpineArgs(planCtx, root),
+    approvalIntact: makeApprovalIntact({ root, state, feature }),
+    maxFailedAttempts: run.failedCap.cap,
+    // Only a --resume run passes the key; otherwise the call is today's.
+    ...(resume ? { resume } : {}),
+  };
+}
+
+/**
+ * Drive the spine. An unexpected throw preserves the worktree and becomes exit 1.
+ *
+ * @returns {Promise<{ result: object } | { code: number }>}
+ */
+async function runSpine(run) {
   try {
-    result = await deliverSpine({
-      feature,
-      state,
-      docs: null,
-      matrix,
-      gates: null,
-      runWave,
-      // Sync/merge/in-progress before any wave; a stop exits via reportStop.
-      prepare: port.prepare,
-      // Mark the plan complete before open-pr.sh; publish pr-opened after it.
-      finish: finishPort.finish,
-      // Scripts run with cwd = root: repoRoot today, the worktree when isolated.
-      // Each gets its real argv from SCRIPT_ARGS; an unknown script throws.
-      sh: makeSpineScriptPort({ sh, repoRoot, root, scriptCtx }),
-      now,
-      runHooks,
-      pushGuard: true,
-      tokenBudget,
-      // Per-wave `Verify:` commands, passed through exactly as tokenBudget is.
-      // Empty for a plan that declares none, which leaves the spine's behavior
-      // and its event sequence unchanged.
-      waveVerify: planCtx.waveVerify,
-      // Per-wave { type, tasks } from the plan's task blocks; the spine folds
-      // them onto each wave it hands runWave, so every prompt lists its tasks.
-      waveTasks: planCtx.waveTasks,
-      // Per-wave promised test files (parseTestsByWave): the presence gate after
-      // wave k checks only waves <= k's promises; {} skips the gate entirely.
-      testsByWave: planCtx.testsByWave,
-      // Unpromised Tests-to-Write files: when any is missing after the plan
-      // waves, the spine runs one synthetic test wave N+1 (default model and
-      // plan-level capabilities — it has no per-wave entry) and then stops
-      // tests-missing on any file still absent. None → null: today's run.
-      testWave: endOfRunTestWave(planCtx.unpromisedTests, root),
-      // Per-wave `Model:` ids (parseWaveModels — the sole Model: parser), recorded
-      // on each wave-started. Empty for a plan that declares none.
-      waveModels: planCtx.waveModels,
-      // Effective capability classes of constrained waves only, recorded on each
-      // wave-started. Empty for an undeclared plan with no deny list.
-      waveCapabilities: planCtx.waveEffective,
-      approvalIntact: makeApprovalIntact({ root, state, feature }),
-      maxFailedAttempts: failedCap.cap,
-      // Only a --resume run passes the key; otherwise the call is today's.
-      ...(resume ? { resume } : {}),
-    });
+    return { result: await deliverSpine(buildSpineArgs(run)) };
   } catch (err) {
     // Unexpected spine throw: still preserve the worktree (so the operator can
     // inspect it) before rethrowing-as-exit. Cleanup is keyed off the returned
     // terminal object below for the normal path; this guards the abnormal one.
-    if (worktree) preserveAfterSetupFailure(worktree, feature, root);
+    if (run.worktree) preserveAfterSetupFailure(run.worktree, run.feature, run.root);
     // Sanitize: a deep spine/SDK error could otherwise surface a credential.
     const safe = sanitizeErrorMessage(err?.message ?? String(err));
     process.stderr.write(`rad deliver: unexpected error — ${safe}\n`);
-    return 1;
+    return { code: 1 };
   }
+}
 
-  const evidence = completionEvidence(result, state, feature);
-  // An afterPr failure comes after pr-opened: the run is delivered, so its
-  // worktree is torn down like a completed one; the exit still reports the stop.
-  const deliveredButUnpublished = result.afterPr === true;
-
-  // Worktree cleanup: complete (tear down) only on EVIDENCED success or a
-  // delivered run, preserve (keep for inspection) on any other stop or an ok
-  // the log does not confirm.
-  if (worktree) {
-    const completed = evidence.completed || deliveredButUnpublished;
-    const cleanupCode = finishWorktree({ worktree, completed, sh, root, feature });
-    if (cleanupCode !== null) return cleanupCode;
-  }
-  if (deliveredButUnpublished) return reportStop({ result, feature, worktree: null, root });
-
+/**
+ * Final report once the worktree is dealt with: ok line, unevidenced-ok refusal,
+ * or the stop-class report.
+ *
+ * @returns {number} exit code
+ */
+function reportDeliverOutcome(result, evidence, run) {
+  const { feature, worktree, root, sh, repoRoot, workBranch } = run;
   if (evidence.completed) {
     // Best-effort publish (RAD_SYNC-gated): deliver recorded wave events on the
     // work-branch tip; push it so the process memory is portable across machines.
@@ -2194,6 +2244,64 @@ export async function deliverCommand(argv, ctx) {
 }
 
 /**
+ * Post-spine phase: evidence, worktree cleanup and the final report.
+ *
+ * @returns {number} exit code
+ */
+function concludeDeliver(result, run) {
+  const { feature, state, worktree, root, sh, repoRoot, workBranch } = run;
+  const evidence = completionEvidence(result, state, feature);
+  // An afterPr failure comes after pr-opened: the run is delivered, so its
+  // worktree is torn down like a completed one; the exit still reports the stop.
+  const deliveredButUnpublished = result.afterPr === true;
+
+  // Worktree cleanup: complete (tear down) only on EVIDENCED success or a
+  // delivered run, preserve (keep for inspection) on any other stop or an ok
+  // the log does not confirm.
+  if (worktree) {
+    const completed = evidence.completed || deliveredButUnpublished;
+    const cleanupCode = finishWorktree({ worktree, completed, sh, root, feature });
+    if (cleanupCode !== null) return cleanupCode;
+  }
+  if (deliveredButUnpublished) return reportStop({ result, feature, worktree: null, root });
+
+  return reportDeliverOutcome(result, evidence, run);
+}
+
+/**
+ * `deliver <feature> [--model <model-id>]`.
+ *
+ * Reads the approved plan, constructs an SDK-backed runWave, and drives
+ * deliverSpine to completion. Returns an integer exit code — never calls
+ * process.exit() directly.
+ *
+ * @param {string[]} argv - args after `deliver`
+ * @param {{ repoRoot: string, sh?: typeof defaultSh, runWave?: Function }} ctx
+ * @returns {Promise<number>}
+ */
+export async function deliverCommand(argv, ctx) {
+  const { repoRoot } = ctx;
+  const sh = ctx.sh ?? defaultSh;
+
+  const request = validateDeliverRequest(argv);
+  if (request.code !== undefined) return request.code;
+  const { parsed } = request;
+
+  const cfg = await resolveDeliverSettings(ctx, repoRoot, parsed);
+  if (cfg.code !== undefined) return cfg.code;
+
+  const mode = await resolveDeliverMode({ ctx, sh, repoRoot, parsed, cfg });
+  if (mode.code !== undefined) return mode.code;
+
+  const run = buildDeliverRun({ ctx, sh, repoRoot, feature: parsed.feature, cfg, mode });
+  if (run.code !== undefined) return run.code;
+
+  const spine = await runSpine(run);
+  if (spine.code !== undefined) return spine.code;
+  return concludeDeliver(spine.result, run);
+}
+
+/**
  * Bootstrap dual-write part (b): write the plan-doc Status header fields — the
  * human-readable mirror of the approval, written for the reader of the plan, not
  * for any gate. Updates `Status`, `Approved-By`, `Approved-At` in place, and in
@@ -2211,50 +2319,49 @@ export async function deliverCommand(argv, ctx) {
  * @returns {string} the header's resulting `Status:` value ('' when absent)
  */
 function writePlanStatus(planFile, fields) {
-  const text = readFileSync(planFile, 'utf8');
-  const lines = text.split('\n');
+  const lines = readFileSync(planFile, 'utf8').split('\n');
+  const header = { lines, anchor: lines.findIndex((l) => /^Status:\s*.*$/.test(l)) };
+  upsertApprovalFields(header, fields);
+  writeFileSync(planFile, lines.join('\n'), 'utf8');
+  return planHeaderStatus(lines.join('\n'));
+}
 
+/**
+ * Set a header field in place if it exists, else insert it just after
+ * `header.anchor` (keeping the header block contiguous, or prepend when there
+ * is no header at all). `anchor` tracks the last header line touched, seeded
+ * to the `Status:` line, so freshly-inserted fields stay grouped.
+ */
+function upsertHeaderField(header, key, value) {
+  const re = new RegExp(`^${key}:\\s*.*$`);
+  const idx = header.lines.findIndex((l) => re.test(l));
+  if (idx !== -1) {
+    header.lines[idx] = `${key}: ${value}`;
+    if (idx > header.anchor) header.anchor = idx;
+    return;
+  }
+  const at = header.anchor === -1 ? 0 : header.anchor + 1;
+  header.lines.splice(at, 0, `${key}: ${value}`);
+  header.anchor = at;
+}
+
+/** Upsert the approval mirror fields in order; proxy and direct modes differ in the recorder lines. */
+function upsertApprovalFields(header, fields) {
   const approvedByValue = fields.proxy
     ? `${fields.approvedBy} (out-of-band)`
     : fields.approvedBy;
-
-  // Track the end of the header block so freshly-inserted fields stay grouped
-  // with the existing headers. Seeded to the `Status:` line; advanced as we add.
-  let anchor = lines.findIndex((l) => /^Status:\s*.*$/.test(l));
-
-  // Set a header field in place if it exists, else insert it just after the
-  // current anchor (keeping the header block contiguous). Returns nothing; keeps
-  // `anchor` pointing at the last header line touched.
-  const upsert = (key, value) => {
-    const re = new RegExp(`^${key}:\\s*.*$`);
-    const idx = lines.findIndex((l) => re.test(l));
-    if (idx !== -1) {
-      lines[idx] = `${key}: ${value}`;
-      if (idx > anchor) anchor = idx;
-      return;
-    }
-    // Missing: insert after the anchor (or prepend if there is no header at all).
-    const at = anchor === -1 ? 0 : anchor + 1;
-    lines.splice(at, 0, `${key}: ${value}`);
-    anchor = at;
-  };
-
   // A delivered feature keeps its Status (e.g. `complete`); only provenance moves (#228).
-  if (!fields.keepStatus) upsert('Status', 'approved');
-  upsert('Approved-By', approvedByValue);
-  upsert('Approved-At', fields.approvedAt);
-
+  if (!fields.keepStatus) upsertHeaderField(header, 'Status', 'approved');
+  upsertHeaderField(header, 'Approved-By', approvedByValue);
+  upsertHeaderField(header, 'Approved-At', fields.approvedAt);
   if (fields.proxy) {
-    upsert('Recorded-By', fields.recordedBy);
-    upsert('Approval-Evidence', fields.evidence);
+    upsertHeaderField(header, 'Recorded-By', fields.recordedBy);
+    upsertHeaderField(header, 'Approval-Evidence', fields.evidence);
   } else if (isNonEmpty(fields.recordedBy)) {
     // Non-proxy mirror of the recorder: direct human approval passes
     // recordedBy = the running architect (recorder == approver), mirrored here.
-    upsert('Recorded-By', fields.recordedBy);
+    upsertHeaderField(header, 'Recorded-By', fields.recordedBy);
   }
-
-  writeFileSync(planFile, lines.join('\n'), 'utf8');
-  return planHeaderStatus(lines.join('\n'));
 }
 
 /** The plan header's `Status:` value ('' when the header is absent). */
@@ -2663,56 +2770,15 @@ export async function architectureApproveCommand(argv, ctx) {
   const { repoRoot } = ctx;
   const sh = ctx.sh ?? defaultSh;
 
-  let parsed;
-  try {
-    // Reuse the approve parser: same positional + --on-behalf-of/--evidence shape.
-    parsed = parseApproveArgs(argv);
-  } catch (err) {
-    process.stderr.write(`rad architecture-approve: ${err.message}\n`);
-    process.stderr.write('Usage: rad architecture-approve <slug> [--on-behalf-of <name>] [--evidence <text>]\n');
-    return 1;
-  }
-
-  const { feature: slug, onBehalfOf, evidence } = parsed;
-
-  if (!isNonEmpty(slug)) {
-    process.stderr.write('rad architecture-approve: a slug is required\n');
-    process.stderr.write('Usage: rad architecture-approve <slug> [--on-behalf-of <name>] [--evidence <text>]\n');
-    return 1;
-  }
-
-  // `--evidence` is only meaningful in proxy mode, mirroring approve.
-  if (!isNonEmpty(onBehalfOf) && isNonEmpty(evidence)) {
-    process.stderr.write('rad architecture-approve: --evidence is only valid with --on-behalf-of\n');
-    return 1;
-  }
+  const parsed = parseArchitectureApproveArgs(argv);
+  if (!parsed) return 1;
+  const { slug, onBehalfOf, evidence } = parsed;
 
   const store = createGitStateStore({ repoRoot, sh });
 
-  // Resolve the running git user (the recorder).
-  const userResult = sh('git', ['config', 'user.email'], { cwd: repoRoot });
-  const runningUser = (userResult.stdout || '').trim();
-  if (!isNonEmpty(runningUser)) {
-    process.stderr.write('rad architecture-approve: cannot determine git user.email — set your git identity first\n');
-    return 1;
-  }
-
-  // architect identity (role-checked by the store) and recorder provenance.
-  let architect;
-  let recordedBy;
-  let proxy = false;
-  if (isNonEmpty(onBehalfOf)) {
-    proxy = true;
-    if (!isNonEmpty(evidence)) {
-      process.stderr.write('rad architecture-approve: --on-behalf-of requires --evidence (cite where the architect approved)\n');
-      return 1;
-    }
-    architect = onBehalfOf;
-    recordedBy = runningUser;
-  } else {
-    architect = runningUser;
-    recordedBy = runningUser;
-  }
+  const identity = resolveArchitectureIdentity({ sh, repoRoot, onBehalfOf, evidence });
+  if (!identity) return 1;
+  const { architect, recordedBy, proxy } = identity;
 
   const ts = new Date().toISOString();
 
@@ -2729,16 +2795,77 @@ export async function architectureApproveCommand(argv, ctx) {
     return 1;
   }
 
-  if (proxy) {
-    process.stdout.write(
-      `rad architecture-approve: ok slug=${slug} approved-by=${architect} recorded-by=${recordedBy} approved-at=${ts} proxy=true\n`,
-    );
-  } else {
-    process.stdout.write(
-      `rad architecture-approve: ok slug=${slug} approved-by=${architect} approved-at=${ts} proxy=false\n`,
-    );
-  }
+  process.stdout.write(formatArchitectureApproved({ slug, architect, recordedBy, ts, proxy }));
   return 0;
+}
+
+/** Usage line printed after an `architecture-approve` argument refusal. */
+const ARCHITECTURE_APPROVE_USAGE = 'Usage: rad architecture-approve <slug> [--on-behalf-of <name>] [--evidence <text>]\n';
+
+/** Write an `architecture-approve` refusal (message + usage when `withUsage`). */
+function refuseArchitectureApprove(message, withUsage) {
+  process.stderr.write(`rad architecture-approve: ${message}\n`);
+  if (withUsage) process.stderr.write(ARCHITECTURE_APPROVE_USAGE);
+}
+
+/**
+ * Parse and check `architecture-approve` arguments, reusing the approve parser
+ * (same positional + --on-behalf-of/--evidence shape). Writes the refusal and
+ * returns null on any argument error.
+ *
+ * @returns {{ slug: string, onBehalfOf?: string, evidence?: string } | null}
+ */
+function parseArchitectureApproveArgs(argv) {
+  let parsed;
+  try {
+    parsed = parseApproveArgs(argv);
+  } catch (err) {
+    refuseArchitectureApprove(err.message, true);
+    return null;
+  }
+  const { feature: slug, onBehalfOf, evidence } = parsed;
+  if (!isNonEmpty(slug)) {
+    refuseArchitectureApprove('a slug is required', true);
+    return null;
+  }
+  // `--evidence` is only meaningful in proxy mode, mirroring approve.
+  if (!isNonEmpty(onBehalfOf) && isNonEmpty(evidence)) {
+    refuseArchitectureApprove('--evidence is only valid with --on-behalf-of', false);
+    return null;
+  }
+  return { slug, onBehalfOf, evidence };
+}
+
+/**
+ * Resolve the running git user (the recorder) and the architect identity the
+ * store role-checks. Proxy mode (--on-behalf-of) requires --evidence. Writes the
+ * refusal and returns null when the identity is undetermined or evidence is missing.
+ *
+ * @returns {{ architect: string, recordedBy: string, proxy: boolean } | null}
+ */
+function resolveArchitectureIdentity({ sh, repoRoot, onBehalfOf, evidence }) {
+  const userResult = sh('git', ['config', 'user.email'], { cwd: repoRoot });
+  const runningUser = (userResult.stdout || '').trim();
+  if (!isNonEmpty(runningUser)) {
+    refuseArchitectureApprove('cannot determine git user.email — set your git identity first', false);
+    return null;
+  }
+  if (!isNonEmpty(onBehalfOf)) {
+    return { architect: runningUser, recordedBy: runningUser, proxy: false };
+  }
+  if (!isNonEmpty(evidence)) {
+    refuseArchitectureApprove('--on-behalf-of requires --evidence (cite where the architect approved)', false);
+    return null;
+  }
+  return { architect: onBehalfOf, recordedBy: runningUser, proxy: true };
+}
+
+/** The single `architecture-approve` success line (proxy mode also names the recorder). */
+function formatArchitectureApproved({ slug, architect, recordedBy, ts, proxy }) {
+  if (proxy) {
+    return `rad architecture-approve: ok slug=${slug} approved-by=${architect} recorded-by=${recordedBy} approved-at=${ts} proxy=true\n`;
+  }
+  return `rad architecture-approve: ok slug=${slug} approved-by=${architect} approved-at=${ts} proxy=false\n`;
 }
 
 /**
@@ -2907,49 +3034,67 @@ export async function gateCommand(argv, ctx) {
   const { repoRoot } = ctx;
   const sh = ctx.sh ?? defaultSh;
 
-  let parsed;
-  try {
-    parsed = parseGateArgs(argv);
-  } catch (err) {
-    process.stderr.write(`rad gate: ${err.message}\n`);
-    process.stderr.write('Usage: rad gate <feature> <name> [--stdin]\n');
-    return 1;
-  }
-
+  const parsed = parseGateArgsOrRefuse(argv);
+  if (!parsed) return 1;
   const { feature, name, stdin } = parsed;
-
-  if (!isNonEmpty(feature) || !isNonEmpty(name)) {
-    process.stderr.write('rad gate: a feature name and a gate name are required\n');
-    process.stderr.write('Usage: rad gate <feature> <name> [--stdin]\n');
-    return 1;
-  }
 
   let result;
   try {
-    if (stdin) {
-      // Feed the piped JSONL through the SAME pure fold the on-disk path uses.
-      result = evaluateGate(name, readEventsFromStdin());
-    } else {
-      const state = createGitStateStore({ repoRoot, sh });
-      result = await state.gate(feature, name);
-    }
+    result = await evaluateGateSource({ feature, name, stdin, repoRoot, sh });
   } catch (err) {
     // Unknown gate name, missing rules, or stdin read failure — fail closed.
     process.stderr.write(`rad gate: ${err.message}\n`);
     return 1;
   }
 
-  // Structured success/result line (machine-greppable single line).
+  process.stdout.write(formatGateResult({ feature, name, stdin, result }));
+  return result.passed ? 0 : 1;
+}
+
+/** Usage line printed after a `gate` argument refusal. */
+const GATE_USAGE = 'Usage: rad gate <feature> <name> [--stdin]\n';
+
+/**
+ * Parse `gate` arguments and require both the feature and the gate name.
+ * Writes the refusal and returns null on any argument error.
+ *
+ * @returns {{ feature: string, name: string, stdin: boolean } | null}
+ */
+function parseGateArgsOrRefuse(argv) {
+  let parsed;
+  try {
+    parsed = parseGateArgs(argv);
+  } catch (err) {
+    process.stderr.write(`rad gate: ${err.message}\n`);
+    process.stderr.write(GATE_USAGE);
+    return null;
+  }
+  if (!isNonEmpty(parsed.feature) || !isNonEmpty(parsed.name)) {
+    process.stderr.write('rad gate: a feature name and a gate name are required\n');
+    process.stderr.write(GATE_USAGE);
+    return null;
+  }
+  return parsed;
+}
+
+/**
+ * Evaluate the named gate: --stdin feeds the piped JSONL through the SAME pure
+ * fold the on-disk path uses; otherwise the local log via state.gate.
+ */
+async function evaluateGateSource({ feature, name, stdin, repoRoot, sh }) {
+  if (stdin) return evaluateGate(name, readEventsFromStdin());
+  const state = createGitStateStore({ repoRoot, sh });
+  return state.gate(feature, name);
+}
+
+/** The structured, machine-greppable single result line for `rad gate`. */
+function formatGateResult({ feature, name, stdin, result }) {
   const satisfiedBy = result.satisfiedBy
     ? `${result.satisfiedBy.role}:${result.satisfiedBy.actor}`
     : 'none';
-  process.stdout.write(
-    `rad gate: feature=${feature} gate=${name} passed=${result.passed} ` +
+  return `rad gate: feature=${feature} gate=${name} passed=${result.passed} ` +
     `required-role=${result.requiredRole} satisfied-by=${satisfiedBy} ` +
-    `source=${stdin ? 'stdin' : 'log'}\n`,
-  );
-
-  return result.passed ? 0 : 1;
+    `source=${stdin ? 'stdin' : 'log'}\n`;
 }
 
 /**

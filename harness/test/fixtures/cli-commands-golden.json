@@ -1,0 +1,2688 @@
+{
+  "parsePlanCtx — empty": {
+    "keys": [
+      "branch",
+      "acceptanceCriteria",
+      "waveModels",
+      "waveVerify",
+      "verifyTimeoutSeconds",
+      "testsByWave",
+      "unpromisedTests",
+      "waveTasks",
+      "planCapabilities",
+      "waveCapabilities",
+      "capabilityErrors",
+      "waveNumbers",
+      "executionNotes"
+    ],
+    "keysWithUndefined": [
+      "planCapabilities"
+    ],
+    "value": {
+      "branch": "",
+      "acceptanceCriteria": [],
+      "waveModels": {},
+      "waveVerify": {},
+      "verifyTimeoutSeconds": 600,
+      "testsByWave": {},
+      "unpromisedTests": [],
+      "waveTasks": {},
+      "waveCapabilities": {},
+      "capabilityErrors": [],
+      "waveNumbers": [],
+      "executionNotes": {
+        "doNotTouch": [],
+        "keyFiles": [],
+        "reminders": []
+      }
+    }
+  },
+  "parsePlanCtx — no-header-prose": {
+    "keys": [
+      "branch",
+      "acceptanceCriteria",
+      "waveModels",
+      "waveVerify",
+      "verifyTimeoutSeconds",
+      "testsByWave",
+      "unpromisedTests",
+      "waveTasks",
+      "planCapabilities",
+      "waveCapabilities",
+      "capabilityErrors",
+      "waveNumbers",
+      "executionNotes"
+    ],
+    "keysWithUndefined": [
+      "planCapabilities"
+    ],
+    "value": {
+      "branch": "",
+      "acceptanceCriteria": [],
+      "waveModels": {},
+      "waveVerify": {},
+      "verifyTimeoutSeconds": 600,
+      "testsByWave": {},
+      "unpromisedTests": [],
+      "waveTasks": {},
+      "waveCapabilities": {},
+      "capabilityErrors": [],
+      "waveNumbers": [],
+      "executionNotes": {
+        "doNotTouch": [],
+        "keyFiles": [],
+        "reminders": []
+      }
+    }
+  },
+  "parsePlanCtx — branch-only": {
+    "keys": [
+      "branch",
+      "acceptanceCriteria",
+      "waveModels",
+      "waveVerify",
+      "verifyTimeoutSeconds",
+      "testsByWave",
+      "unpromisedTests",
+      "waveTasks",
+      "planCapabilities",
+      "waveCapabilities",
+      "capabilityErrors",
+      "waveNumbers",
+      "executionNotes"
+    ],
+    "keysWithUndefined": [
+      "planCapabilities"
+    ],
+    "value": {
+      "branch": "rad/x",
+      "acceptanceCriteria": [],
+      "waveModels": {},
+      "waveVerify": {},
+      "verifyTimeoutSeconds": 600,
+      "testsByWave": {},
+      "unpromisedTests": [],
+      "waveTasks": {},
+      "waveCapabilities": {},
+      "capabilityErrors": [],
+      "waveNumbers": [],
+      "executionNotes": {
+        "doNotTouch": [],
+        "keyFiles": [],
+        "reminders": []
+      }
+    }
+  },
+  "parsePlanCtx — branch-indented-and-repeated": {
+    "keys": [
+      "branch",
+      "acceptanceCriteria",
+      "waveModels",
+      "waveVerify",
+      "verifyTimeoutSeconds",
+      "testsByWave",
+      "unpromisedTests",
+      "waveTasks",
+      "planCapabilities",
+      "waveCapabilities",
+      "capabilityErrors",
+      "waveNumbers",
+      "executionNotes"
+    ],
+    "keysWithUndefined": [
+      "planCapabilities"
+    ],
+    "value": {
+      "branch": "rad/first",
+      "acceptanceCriteria": [],
+      "waveModels": {},
+      "waveVerify": {},
+      "verifyTimeoutSeconds": 600,
+      "testsByWave": {},
+      "unpromisedTests": [],
+      "waveTasks": {},
+      "waveCapabilities": {},
+      "capabilityErrors": [],
+      "waveNumbers": [],
+      "executionNotes": {
+        "doNotTouch": [],
+        "keyFiles": [],
+        "reminders": []
+      }
+    }
+  },
+  "parsePlanCtx — ac-section-ends-at-next-heading": {
+    "keys": [
+      "branch",
+      "acceptanceCriteria",
+      "waveModels",
+      "waveVerify",
+      "verifyTimeoutSeconds",
+      "testsByWave",
+      "unpromisedTests",
+      "waveTasks",
+      "planCapabilities",
+      "waveCapabilities",
+      "capabilityErrors",
+      "waveNumbers",
+      "executionNotes"
+    ],
+    "keysWithUndefined": [
+      "planCapabilities"
+    ],
+    "value": {
+      "branch": "",
+      "acceptanceCriteria": [
+        "1. a",
+        "2. b"
+      ],
+      "waveModels": {},
+      "waveVerify": {},
+      "verifyTimeoutSeconds": 600,
+      "testsByWave": {},
+      "unpromisedTests": [],
+      "waveTasks": {},
+      "waveCapabilities": {},
+      "capabilityErrors": [],
+      "waveNumbers": [],
+      "executionNotes": {
+        "doNotTouch": [],
+        "keyFiles": [],
+        "reminders": []
+      }
+    }
+  },
+  "parsePlanCtx — ac-section-absent": {
+    "keys": [
+      "branch",
+      "acceptanceCriteria",
+      "waveModels",
+      "waveVerify",
+      "verifyTimeoutSeconds",
+      "testsByWave",
+      "unpromisedTests",
+      "waveTasks",
+      "planCapabilities",
+      "waveCapabilities",
+      "capabilityErrors",
+      "waveNumbers",
+      "executionNotes"
+    ],
+    "keysWithUndefined": [
+      "planCapabilities"
+    ],
+    "value": {
+      "branch": "",
+      "acceptanceCriteria": [],
+      "waveModels": {},
+      "waveVerify": {},
+      "verifyTimeoutSeconds": 600,
+      "testsByWave": {},
+      "unpromisedTests": [],
+      "waveTasks": {},
+      "waveCapabilities": {},
+      "capabilityErrors": [],
+      "waveNumbers": [],
+      "executionNotes": {
+        "doNotTouch": [],
+        "keyFiles": [],
+        "reminders": []
+      }
+    }
+  },
+  "parsePlanCtx — ac-lines-non-numbered": {
+    "keys": [
+      "branch",
+      "acceptanceCriteria",
+      "waveModels",
+      "waveVerify",
+      "verifyTimeoutSeconds",
+      "testsByWave",
+      "unpromisedTests",
+      "waveTasks",
+      "planCapabilities",
+      "waveCapabilities",
+      "capabilityErrors",
+      "waveNumbers",
+      "executionNotes"
+    ],
+    "keysWithUndefined": [
+      "planCapabilities"
+    ],
+    "value": {
+      "branch": "",
+      "acceptanceCriteria": [
+        "10. ten",
+        "7. indented"
+      ],
+      "waveModels": {},
+      "waveVerify": {},
+      "verifyTimeoutSeconds": 600,
+      "testsByWave": {},
+      "unpromisedTests": [],
+      "waveTasks": {},
+      "waveCapabilities": {},
+      "capabilityErrors": [],
+      "waveNumbers": [],
+      "executionNotes": {
+        "doNotTouch": [],
+        "keyFiles": [],
+        "reminders": []
+      }
+    }
+  },
+  "parsePlanCtx — notes-all-present": {
+    "keys": [
+      "branch",
+      "acceptanceCriteria",
+      "waveModels",
+      "waveVerify",
+      "verifyTimeoutSeconds",
+      "testsByWave",
+      "unpromisedTests",
+      "waveTasks",
+      "planCapabilities",
+      "waveCapabilities",
+      "capabilityErrors",
+      "waveNumbers",
+      "executionNotes"
+    ],
+    "keysWithUndefined": [
+      "planCapabilities"
+    ],
+    "value": {
+      "branch": "",
+      "acceptanceCriteria": [],
+      "waveModels": {},
+      "waveVerify": {},
+      "verifyTimeoutSeconds": 600,
+      "testsByWave": {},
+      "unpromisedTests": [],
+      "waveTasks": {},
+      "waveCapabilities": {},
+      "capabilityErrors": [],
+      "waveNumbers": [],
+      "executionNotes": {
+        "doNotTouch": [
+          "a"
+        ],
+        "keyFiles": [
+          "b",
+          "c"
+        ],
+        "reminders": [
+          "d"
+        ]
+      }
+    }
+  },
+  "parsePlanCtx — notes-empty-subsections": {
+    "keys": [
+      "branch",
+      "acceptanceCriteria",
+      "waveModels",
+      "waveVerify",
+      "verifyTimeoutSeconds",
+      "testsByWave",
+      "unpromisedTests",
+      "waveTasks",
+      "planCapabilities",
+      "waveCapabilities",
+      "capabilityErrors",
+      "waveNumbers",
+      "executionNotes"
+    ],
+    "keysWithUndefined": [
+      "planCapabilities"
+    ],
+    "value": {
+      "branch": "",
+      "acceptanceCriteria": [],
+      "waveModels": {},
+      "waveVerify": {},
+      "verifyTimeoutSeconds": 600,
+      "testsByWave": {},
+      "unpromisedTests": [],
+      "waveTasks": {},
+      "waveCapabilities": {},
+      "capabilityErrors": [],
+      "waveNumbers": [],
+      "executionNotes": {
+        "doNotTouch": [],
+        "keyFiles": [],
+        "reminders": []
+      }
+    }
+  },
+  "parsePlanCtx — notes-absent": {
+    "keys": [
+      "branch",
+      "acceptanceCriteria",
+      "waveModels",
+      "waveVerify",
+      "verifyTimeoutSeconds",
+      "testsByWave",
+      "unpromisedTests",
+      "waveTasks",
+      "planCapabilities",
+      "waveCapabilities",
+      "capabilityErrors",
+      "waveNumbers",
+      "executionNotes"
+    ],
+    "keysWithUndefined": [
+      "planCapabilities"
+    ],
+    "value": {
+      "branch": "",
+      "acceptanceCriteria": [],
+      "waveModels": {},
+      "waveVerify": {},
+      "verifyTimeoutSeconds": 600,
+      "testsByWave": {},
+      "unpromisedTests": [],
+      "waveTasks": {
+        "1": {
+          "type": "sequential",
+          "tasks": []
+        }
+      },
+      "waveCapabilities": {},
+      "capabilityErrors": [],
+      "waveNumbers": [
+        1
+      ],
+      "executionNotes": {
+        "doNotTouch": [],
+        "keyFiles": [],
+        "reminders": []
+      }
+    }
+  },
+  "parsePlanCtx — notes-stop-at-deeper-heading": {
+    "keys": [
+      "branch",
+      "acceptanceCriteria",
+      "waveModels",
+      "waveVerify",
+      "verifyTimeoutSeconds",
+      "testsByWave",
+      "unpromisedTests",
+      "waveTasks",
+      "planCapabilities",
+      "waveCapabilities",
+      "capabilityErrors",
+      "waveNumbers",
+      "executionNotes"
+    ],
+    "keysWithUndefined": [
+      "planCapabilities"
+    ],
+    "value": {
+      "branch": "",
+      "acceptanceCriteria": [],
+      "waveModels": {},
+      "waveVerify": {},
+      "verifyTimeoutSeconds": 600,
+      "testsByWave": {},
+      "unpromisedTests": [],
+      "waveTasks": {},
+      "waveCapabilities": {},
+      "capabilityErrors": [],
+      "waveNumbers": [],
+      "executionNotes": {
+        "doNotTouch": [],
+        "keyFiles": [],
+        "reminders": [
+          "a"
+        ]
+      }
+    }
+  },
+  "parsePlanCtx — wave-verify-model-capabilities": {
+    "keys": [
+      "branch",
+      "acceptanceCriteria",
+      "waveModels",
+      "waveVerify",
+      "verifyTimeoutSeconds",
+      "testsByWave",
+      "unpromisedTests",
+      "waveTasks",
+      "planCapabilities",
+      "waveCapabilities",
+      "capabilityErrors",
+      "waveNumbers",
+      "executionNotes"
+    ],
+    "keysWithUndefined": [],
+    "value": {
+      "branch": "rad/feature",
+      "acceptanceCriteria": [
+        "1. first criterion",
+        "2. second criterion"
+      ],
+      "waveModels": {
+        "1": "claude-haiku-5-5"
+      },
+      "waveVerify": {
+        "1": "node --test a.test.js",
+        "3": "second"
+      },
+      "verifyTimeoutSeconds": 600,
+      "testsByWave": {
+        "1": [
+          "tests/a.test.js"
+        ]
+      },
+      "unpromisedTests": [
+        "tests/orphan.test.js"
+      ],
+      "waveTasks": {
+        "1": {
+          "type": "sequential",
+          "tasks": [
+            {
+              "title": "First",
+              "files": [
+                "src/a.js"
+              ],
+              "what": "do it",
+              "validate": "AC#1"
+            },
+            {
+              "title": "Second",
+              "files": [
+                "tests/a.test.js"
+              ],
+              "what": "test it",
+              "validate": ""
+            }
+          ]
+        },
+        "2": {
+          "type": "sequential",
+          "tasks": [
+            {
+              "title": "Third",
+              "files": [
+                "src/b.js"
+              ],
+              "what": "",
+              "validate": ""
+            }
+          ]
+        },
+        "3": {
+          "type": "sequential",
+          "tasks": []
+        }
+      },
+      "planCapabilities": [
+        "fs_read",
+        "shell"
+      ],
+      "waveCapabilities": {
+        "1": [
+          "fs_read"
+        ]
+      },
+      "capabilityErrors": [],
+      "waveNumbers": [
+        1,
+        2,
+        3
+      ],
+      "executionNotes": {
+        "doNotTouch": [
+          "harness/spine.js",
+          "harness/gates.js"
+        ],
+        "keyFiles": [
+          "harness/cli.js"
+        ],
+        "reminders": [
+          "run the linter",
+          "keep order"
+        ]
+      }
+    }
+  },
+  "parsePlanCtx — verify-none-clears-earlier": {
+    "keys": [
+      "branch",
+      "acceptanceCriteria",
+      "waveModels",
+      "waveVerify",
+      "verifyTimeoutSeconds",
+      "testsByWave",
+      "unpromisedTests",
+      "waveTasks",
+      "planCapabilities",
+      "waveCapabilities",
+      "capabilityErrors",
+      "waveNumbers",
+      "executionNotes"
+    ],
+    "keysWithUndefined": [
+      "planCapabilities"
+    ],
+    "value": {
+      "branch": "",
+      "acceptanceCriteria": [],
+      "waveModels": {},
+      "waveVerify": {},
+      "verifyTimeoutSeconds": 600,
+      "testsByWave": {},
+      "unpromisedTests": [],
+      "waveTasks": {
+        "1": {
+          "type": "sequential",
+          "tasks": []
+        },
+        "2": {
+          "type": "sequential",
+          "tasks": []
+        }
+      },
+      "waveCapabilities": {},
+      "capabilityErrors": [],
+      "waveNumbers": [
+        1,
+        2
+      ],
+      "executionNotes": {
+        "doNotTouch": [],
+        "keyFiles": [],
+        "reminders": []
+      }
+    }
+  },
+  "parsePlanCtx — verify-empty-and-subheading": {
+    "keys": [
+      "branch",
+      "acceptanceCriteria",
+      "waveModels",
+      "waveVerify",
+      "verifyTimeoutSeconds",
+      "testsByWave",
+      "unpromisedTests",
+      "waveTasks",
+      "planCapabilities",
+      "waveCapabilities",
+      "capabilityErrors",
+      "waveNumbers",
+      "executionNotes"
+    ],
+    "keysWithUndefined": [
+      "planCapabilities"
+    ],
+    "value": {
+      "branch": "",
+      "acceptanceCriteria": [],
+      "waveModels": {},
+      "waveVerify": {
+        "1": "inside"
+      },
+      "verifyTimeoutSeconds": 600,
+      "testsByWave": {},
+      "unpromisedTests": [],
+      "waveTasks": {
+        "1": {
+          "type": "sequential",
+          "tasks": [
+            {
+              "title": "t",
+              "files": [],
+              "what": "",
+              "validate": ""
+            }
+          ]
+        }
+      },
+      "waveCapabilities": {},
+      "capabilityErrors": [],
+      "waveNumbers": [
+        1
+      ],
+      "executionNotes": {
+        "doNotTouch": [],
+        "keyFiles": [],
+        "reminders": []
+      }
+    }
+  },
+  "parsePlanCtx — model-after-non-wave-heading": {
+    "keys": [
+      "branch",
+      "acceptanceCriteria",
+      "waveModels",
+      "waveVerify",
+      "verifyTimeoutSeconds",
+      "testsByWave",
+      "unpromisedTests",
+      "waveTasks",
+      "planCapabilities",
+      "waveCapabilities",
+      "capabilityErrors",
+      "waveNumbers",
+      "executionNotes"
+    ],
+    "keysWithUndefined": [
+      "planCapabilities"
+    ],
+    "value": {
+      "branch": "",
+      "acceptanceCriteria": [],
+      "waveModels": {
+        "1": "m1"
+      },
+      "waveVerify": {},
+      "verifyTimeoutSeconds": 600,
+      "testsByWave": {},
+      "unpromisedTests": [],
+      "waveTasks": {
+        "1": {
+          "type": "sequential",
+          "tasks": []
+        }
+      },
+      "waveCapabilities": {},
+      "capabilityErrors": [],
+      "waveNumbers": [
+        1
+      ],
+      "executionNotes": {
+        "doNotTouch": [],
+        "keyFiles": [],
+        "reminders": []
+      }
+    }
+  },
+  "parsePlanCtx — capabilities-plan-level-only": {
+    "keys": [
+      "branch",
+      "acceptanceCriteria",
+      "waveModels",
+      "waveVerify",
+      "verifyTimeoutSeconds",
+      "testsByWave",
+      "unpromisedTests",
+      "waveTasks",
+      "planCapabilities",
+      "waveCapabilities",
+      "capabilityErrors",
+      "waveNumbers",
+      "executionNotes"
+    ],
+    "keysWithUndefined": [],
+    "value": {
+      "branch": "",
+      "acceptanceCriteria": [],
+      "waveModels": {},
+      "waveVerify": {},
+      "verifyTimeoutSeconds": 600,
+      "testsByWave": {},
+      "unpromisedTests": [],
+      "waveTasks": {
+        "1": {
+          "type": "sequential",
+          "tasks": []
+        }
+      },
+      "planCapabilities": [
+        "fs_write",
+        "net"
+      ],
+      "waveCapabilities": {},
+      "capabilityErrors": [],
+      "waveNumbers": [
+        1
+      ],
+      "executionNotes": {
+        "doNotTouch": [],
+        "keyFiles": [],
+        "reminders": []
+      }
+    }
+  },
+  "parsePlanCtx — capabilities-malformed-empty": {
+    "keys": [
+      "branch",
+      "acceptanceCriteria",
+      "waveModels",
+      "waveVerify",
+      "verifyTimeoutSeconds",
+      "testsByWave",
+      "unpromisedTests",
+      "waveTasks",
+      "planCapabilities",
+      "waveCapabilities",
+      "capabilityErrors",
+      "waveNumbers",
+      "executionNotes"
+    ],
+    "keysWithUndefined": [
+      "planCapabilities"
+    ],
+    "value": {
+      "branch": "",
+      "acceptanceCriteria": [],
+      "waveModels": {},
+      "waveVerify": {},
+      "verifyTimeoutSeconds": 600,
+      "testsByWave": {},
+      "unpromisedTests": [],
+      "waveTasks": {
+        "1": {
+          "type": "sequential",
+          "tasks": []
+        }
+      },
+      "waveCapabilities": {},
+      "capabilityErrors": [
+        "plan header: Capabilities: value is empty; name at least one of fs_read, fs_write, shell, net, mcp",
+        "wave 1: Capabilities: value is empty; name at least one of fs_read, fs_write, shell, net, mcp"
+      ],
+      "waveNumbers": [
+        1
+      ],
+      "executionNotes": {
+        "doNotTouch": [],
+        "keyFiles": [],
+        "reminders": []
+      }
+    }
+  },
+  "parsePlanCtx — capabilities-malformed-unknown": {
+    "keys": [
+      "branch",
+      "acceptanceCriteria",
+      "waveModels",
+      "waveVerify",
+      "verifyTimeoutSeconds",
+      "testsByWave",
+      "unpromisedTests",
+      "waveTasks",
+      "planCapabilities",
+      "waveCapabilities",
+      "capabilityErrors",
+      "waveNumbers",
+      "executionNotes"
+    ],
+    "keysWithUndefined": [
+      "planCapabilities"
+    ],
+    "value": {
+      "branch": "",
+      "acceptanceCriteria": [],
+      "waveModels": {},
+      "waveVerify": {},
+      "verifyTimeoutSeconds": 600,
+      "testsByWave": {},
+      "unpromisedTests": [],
+      "waveTasks": {
+        "1": {
+          "type": "sequential",
+          "tasks": []
+        }
+      },
+      "waveCapabilities": {},
+      "capabilityErrors": [
+        "plan header: Capabilities: unknown class 'bogus'; expected one of fs_read, fs_write, shell, net, mcp",
+        "wave 1: Capabilities: unknown class 'wat'; expected one of fs_read, fs_write, shell, net, mcp"
+      ],
+      "waveNumbers": [
+        1
+      ],
+      "executionNotes": {
+        "doNotTouch": [],
+        "keyFiles": [],
+        "reminders": []
+      }
+    }
+  },
+  "parsePlanCtx — capabilities-duplicate-declarations": {
+    "keys": [
+      "branch",
+      "acceptanceCriteria",
+      "waveModels",
+      "waveVerify",
+      "verifyTimeoutSeconds",
+      "testsByWave",
+      "unpromisedTests",
+      "waveTasks",
+      "planCapabilities",
+      "waveCapabilities",
+      "capabilityErrors",
+      "waveNumbers",
+      "executionNotes"
+    ],
+    "keysWithUndefined": [],
+    "value": {
+      "branch": "",
+      "acceptanceCriteria": [],
+      "waveModels": {},
+      "waveVerify": {},
+      "verifyTimeoutSeconds": 600,
+      "testsByWave": {},
+      "unpromisedTests": [],
+      "waveTasks": {
+        "1": {
+          "type": "sequential",
+          "tasks": []
+        }
+      },
+      "planCapabilities": [
+        "shell"
+      ],
+      "waveCapabilities": {
+        "1": [
+          "mcp"
+        ]
+      },
+      "capabilityErrors": [
+        "plan header: Capabilities: is declared more than once",
+        "wave 1: Capabilities: is declared more than once"
+      ],
+      "waveNumbers": [
+        1
+      ],
+      "executionNotes": {
+        "doNotTouch": [],
+        "keyFiles": [],
+        "reminders": []
+      }
+    }
+  },
+  "parsePlanCtx — capabilities-case-and-order": {
+    "keys": [
+      "branch",
+      "acceptanceCriteria",
+      "waveModels",
+      "waveVerify",
+      "verifyTimeoutSeconds",
+      "testsByWave",
+      "unpromisedTests",
+      "waveTasks",
+      "planCapabilities",
+      "waveCapabilities",
+      "capabilityErrors",
+      "waveNumbers",
+      "executionNotes"
+    ],
+    "keysWithUndefined": [],
+    "value": {
+      "branch": "",
+      "acceptanceCriteria": [],
+      "waveModels": {},
+      "waveVerify": {},
+      "verifyTimeoutSeconds": 600,
+      "testsByWave": {},
+      "unpromisedTests": [],
+      "waveTasks": {
+        "1": {
+          "type": "sequential",
+          "tasks": []
+        },
+        "2": {
+          "type": "sequential",
+          "tasks": []
+        }
+      },
+      "planCapabilities": [
+        "fs_read",
+        "shell",
+        "mcp"
+      ],
+      "waveCapabilities": {},
+      "capabilityErrors": [],
+      "waveNumbers": [
+        2,
+        1
+      ],
+      "executionNotes": {
+        "doNotTouch": [],
+        "keyFiles": [],
+        "reminders": []
+      }
+    }
+  },
+  "parsePlanCtx — tests-promised-by-task-file": {
+    "keys": [
+      "branch",
+      "acceptanceCriteria",
+      "waveModels",
+      "waveVerify",
+      "verifyTimeoutSeconds",
+      "testsByWave",
+      "unpromisedTests",
+      "waveTasks",
+      "planCapabilities",
+      "waveCapabilities",
+      "capabilityErrors",
+      "waveNumbers",
+      "executionNotes"
+    ],
+    "keysWithUndefined": [
+      "planCapabilities"
+    ],
+    "value": {
+      "branch": "",
+      "acceptanceCriteria": [],
+      "waveModels": {},
+      "waveVerify": {},
+      "verifyTimeoutSeconds": 600,
+      "testsByWave": {
+        "1": [
+          "tests/p.test.js"
+        ]
+      },
+      "unpromisedTests": [],
+      "waveTasks": {
+        "1": {
+          "type": "sequential",
+          "tasks": [
+            {
+              "title": "x",
+              "files": [
+                "tests/p.test.js"
+              ],
+              "what": "",
+              "validate": ""
+            }
+          ]
+        }
+      },
+      "waveCapabilities": {},
+      "capabilityErrors": [],
+      "waveNumbers": [
+        1
+      ],
+      "executionNotes": {
+        "doNotTouch": [],
+        "keyFiles": [],
+        "reminders": []
+      }
+    }
+  },
+  "parsePlanCtx — tests-unpromised-only": {
+    "keys": [
+      "branch",
+      "acceptanceCriteria",
+      "waveModels",
+      "waveVerify",
+      "verifyTimeoutSeconds",
+      "testsByWave",
+      "unpromisedTests",
+      "waveTasks",
+      "planCapabilities",
+      "waveCapabilities",
+      "capabilityErrors",
+      "waveNumbers",
+      "executionNotes"
+    ],
+    "keysWithUndefined": [
+      "planCapabilities"
+    ],
+    "value": {
+      "branch": "",
+      "acceptanceCriteria": [],
+      "waveModels": {},
+      "waveVerify": {},
+      "verifyTimeoutSeconds": 600,
+      "testsByWave": {},
+      "unpromisedTests": [
+        "tests/q.test.js"
+      ],
+      "waveTasks": {},
+      "waveCapabilities": {},
+      "capabilityErrors": [],
+      "waveNumbers": [],
+      "executionNotes": {
+        "doNotTouch": [],
+        "keyFiles": [],
+        "reminders": []
+      }
+    }
+  },
+  "parsePlanCtx — tests-no-section": {
+    "keys": [
+      "branch",
+      "acceptanceCriteria",
+      "waveModels",
+      "waveVerify",
+      "verifyTimeoutSeconds",
+      "testsByWave",
+      "unpromisedTests",
+      "waveTasks",
+      "planCapabilities",
+      "waveCapabilities",
+      "capabilityErrors",
+      "waveNumbers",
+      "executionNotes"
+    ],
+    "keysWithUndefined": [
+      "planCapabilities"
+    ],
+    "value": {
+      "branch": "",
+      "acceptanceCriteria": [],
+      "waveModels": {},
+      "waveVerify": {},
+      "verifyTimeoutSeconds": 600,
+      "testsByWave": {},
+      "unpromisedTests": [],
+      "waveTasks": {
+        "1": {
+          "type": "sequential",
+          "tasks": [
+            {
+              "title": "x",
+              "files": [
+                "tests/p.test.js"
+              ],
+              "what": "",
+              "validate": ""
+            }
+          ]
+        }
+      },
+      "waveCapabilities": {},
+      "capabilityErrors": [],
+      "waveNumbers": [
+        1
+      ],
+      "executionNotes": {
+        "doNotTouch": [],
+        "keyFiles": [],
+        "reminders": []
+      }
+    }
+  },
+  "parsePlanCtx — tasks-without-waves": {
+    "keys": [
+      "branch",
+      "acceptanceCriteria",
+      "waveModels",
+      "waveVerify",
+      "verifyTimeoutSeconds",
+      "testsByWave",
+      "unpromisedTests",
+      "waveTasks",
+      "planCapabilities",
+      "waveCapabilities",
+      "capabilityErrors",
+      "waveNumbers",
+      "executionNotes"
+    ],
+    "keysWithUndefined": [
+      "planCapabilities"
+    ],
+    "value": {
+      "branch": "",
+      "acceptanceCriteria": [],
+      "waveModels": {},
+      "waveVerify": {},
+      "verifyTimeoutSeconds": 600,
+      "testsByWave": {},
+      "unpromisedTests": [],
+      "waveTasks": {},
+      "waveCapabilities": {},
+      "capabilityErrors": [],
+      "waveNumbers": [],
+      "executionNotes": {
+        "doNotTouch": [],
+        "keyFiles": [],
+        "reminders": []
+      }
+    }
+  },
+  "parsePlanCtx — verify timeout unset": {
+    "keys": [
+      "branch",
+      "acceptanceCriteria",
+      "waveModels",
+      "waveVerify",
+      "verifyTimeoutSeconds",
+      "testsByWave",
+      "unpromisedTests",
+      "waveTasks",
+      "planCapabilities",
+      "waveCapabilities",
+      "capabilityErrors",
+      "waveNumbers",
+      "executionNotes"
+    ],
+    "verifyTimeoutSeconds": 600
+  },
+  "parsePlanCtx — verify timeout valid": {
+    "keys": [
+      "branch",
+      "acceptanceCriteria",
+      "waveModels",
+      "waveVerify",
+      "verifyTimeoutSeconds",
+      "testsByWave",
+      "unpromisedTests",
+      "waveTasks",
+      "planCapabilities",
+      "waveCapabilities",
+      "capabilityErrors",
+      "waveNumbers",
+      "executionNotes"
+    ],
+    "verifyTimeoutSeconds": 1800
+  },
+  "parsePlanCtx — verify timeout malformed": {
+    "keys": [
+      "branch",
+      "acceptanceCriteria",
+      "waveModels",
+      "waveVerify",
+      "verifyTimeoutSeconds",
+      "testsByWave",
+      "unpromisedTests",
+      "waveTasks",
+      "planCapabilities",
+      "waveCapabilities",
+      "capabilityErrors",
+      "waveNumbers",
+      "executionNotes"
+    ],
+    "verifyTimeoutSeconds": 600
+  },
+  "approve header mirror — direct-status-present": {
+    "code": 0,
+    "output": [
+      {
+        "stream": "stdout",
+        "text": "rad approve: ok feature=char-feature status=approved approved-by=architect@example.com approved-at=<TS> proxy=false\n"
+      }
+    ],
+    "planText": "# char-feature\nStatus: approved\nApproved-By: architect@example.com\nApproved-At: <TS>\nRecorded-By: architect@example.com\nBranch: rad/char-feature\n\n## Waves\n\n### Wave 1\n\n#### Task 1.1: A\nValidate: ok\n",
+    "events": "{\"feature\":\"char-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"recordedBy\":\"architect@example.com\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n"
+  },
+  "approve header mirror — direct-status-absent": {
+    "code": 0,
+    "output": [
+      {
+        "stream": "stdout",
+        "text": "rad approve: ok feature=char-feature status=approved approved-by=architect@example.com approved-at=<TS> proxy=false\n"
+      }
+    ],
+    "planText": "Status: approved\nApproved-By: architect@example.com\nApproved-At: <TS>\nRecorded-By: architect@example.com\n# char-feature\nBranch: rad/char-feature\n\n## Waves\n\n### Wave 1\n\n#### Task 1.1: A\nValidate: ok\n",
+    "events": "{\"feature\":\"char-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"recordedBy\":\"architect@example.com\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n"
+  },
+  "approve header mirror — direct-no-header-block": {
+    "code": 0,
+    "output": [
+      {
+        "stream": "stdout",
+        "text": "rad approve: ok feature=char-feature status=approved approved-by=architect@example.com approved-at=<TS> proxy=false\n"
+      }
+    ],
+    "planText": "Status: approved\nApproved-By: architect@example.com\nApproved-At: <TS>\nRecorded-By: architect@example.com\n# char-feature\n\n## Waves\n\n### Wave 1\n\n#### Task 1.1: A\nValidate: ok\n",
+    "events": "{\"feature\":\"char-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"recordedBy\":\"architect@example.com\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n"
+  },
+  "approve header mirror — direct-empty-file": {
+    "code": 0,
+    "output": [
+      {
+        "stream": "stdout",
+        "text": "rad approve: ok feature=char-feature status=approved approved-by=architect@example.com approved-at=<TS> proxy=false\n"
+      }
+    ],
+    "planText": "Status: approved\nApproved-By: architect@example.com\nApproved-At: <TS>\nRecorded-By: architect@example.com\n",
+    "events": "{\"feature\":\"char-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"recordedBy\":\"architect@example.com\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n"
+  },
+  "approve header mirror — direct-no-trailing-newline": {
+    "code": 0,
+    "output": [
+      {
+        "stream": "stdout",
+        "text": "rad approve: ok feature=char-feature status=approved approved-by=architect@example.com approved-at=<TS> proxy=false\n"
+      }
+    ],
+    "planText": "# char-feature\nStatus: approved\nApproved-By: architect@example.com\nApproved-At: <TS>\nRecorded-By: architect@example.com\n\n## Waves\n\n### Wave 1\n\n#### Task 1.1: A\nValidate: ok",
+    "events": "{\"feature\":\"char-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"recordedBy\":\"architect@example.com\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n"
+  },
+  "approve header mirror — direct-all-headers-present": {
+    "code": 0,
+    "output": [
+      {
+        "stream": "stdout",
+        "text": "rad approve: ok feature=char-feature status=approved approved-by=architect@example.com approved-at=<TS> proxy=false\n"
+      }
+    ],
+    "planText": "# char-feature\nStatus: approved\nApproved-By: architect@example.com\nApproved-At: <TS>\nRecorded-By: architect@example.com\nApproval-Evidence: old evidence\n\n## Waves\n\n### Wave 1\n\n#### Task 1.1: A\nValidate: ok\n",
+    "events": "{\"feature\":\"char-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"recordedBy\":\"architect@example.com\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n"
+  },
+  "approve header mirror — direct-only-approved-by-present": {
+    "code": 0,
+    "output": [
+      {
+        "stream": "stdout",
+        "text": "rad approve: ok feature=char-feature status=approved approved-by=architect@example.com approved-at=<TS> proxy=false\n"
+      }
+    ],
+    "planText": "# char-feature\nStatus: approved\nApproved-By: architect@example.com\nApproved-At: <TS>\nRecorded-By: architect@example.com\n\n## Waves\n\n### Wave 1\n\n#### Task 1.1: A\nValidate: ok\n",
+    "events": "{\"feature\":\"char-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"recordedBy\":\"architect@example.com\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n"
+  },
+  "approve header mirror — direct-only-recorded-by-present": {
+    "code": 0,
+    "output": [
+      {
+        "stream": "stdout",
+        "text": "rad approve: ok feature=char-feature status=approved approved-by=architect@example.com approved-at=<TS> proxy=false\n"
+      }
+    ],
+    "planText": "# char-feature\nStatus: approved\nApproved-By: architect@example.com\nApproved-At: <TS>\nRecorded-By: architect@example.com\n\n## Waves\n\n### Wave 1\n\n#### Task 1.1: A\nValidate: ok\n",
+    "events": "{\"feature\":\"char-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"recordedBy\":\"architect@example.com\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n"
+  },
+  "approve header mirror — proxy-status-present": {
+    "code": 0,
+    "output": [
+      {
+        "stream": "stdout",
+        "text": "rad approve: ok feature=char-feature status=approved approved-by=boss@example.com recorded-by=architect@example.com approved-at=<TS> proxy=true\n"
+      }
+    ],
+    "planText": "# char-feature\nStatus: approved\nApproved-By: boss@example.com (out-of-band)\nApproved-At: <TS>\nRecorded-By: architect@example.com\nApproval-Evidence: slack thread\nBranch: rad/char-feature\n\n## Waves\n\n### Wave 1\n\n#### Task 1.1: A\nValidate: ok\n",
+    "events": "{\"feature\":\"char-feature\",\"type\":\"approved\",\"actor\":\"boss@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"recordedBy\":\"architect@example.com\",\"data\":{\"evidence\":\"slack thread\",\"fingerprint\":\"<SHA>\"}}\n"
+  },
+  "approve header mirror — proxy-status-absent": {
+    "code": 0,
+    "output": [
+      {
+        "stream": "stdout",
+        "text": "rad approve: ok feature=char-feature status=approved approved-by=boss@example.com recorded-by=architect@example.com approved-at=<TS> proxy=true\n"
+      }
+    ],
+    "planText": "Status: approved\nApproved-By: boss@example.com (out-of-band)\nApproved-At: <TS>\nRecorded-By: architect@example.com\nApproval-Evidence: slack thread\n# char-feature\nBranch: rad/char-feature\n\n## Waves\n\n### Wave 1\n\n#### Task 1.1: A\nValidate: ok\n",
+    "events": "{\"feature\":\"char-feature\",\"type\":\"approved\",\"actor\":\"boss@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"recordedBy\":\"architect@example.com\",\"data\":{\"evidence\":\"slack thread\",\"fingerprint\":\"<SHA>\"}}\n"
+  },
+  "approve header mirror — proxy-all-headers-present": {
+    "code": 0,
+    "output": [
+      {
+        "stream": "stdout",
+        "text": "rad approve: ok feature=char-feature status=approved approved-by=boss@example.com recorded-by=architect@example.com approved-at=<TS> proxy=true\n"
+      }
+    ],
+    "planText": "# char-feature\nStatus: approved\nApproved-By: boss@example.com (out-of-band)\nApproved-At: <TS>\nRecorded-By: architect@example.com\nApproval-Evidence: email\n\n## Waves\n\n### Wave 1\n\n#### Task 1.1: A\nValidate: ok\n",
+    "events": "{\"feature\":\"char-feature\",\"type\":\"approved\",\"actor\":\"boss@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"recordedBy\":\"architect@example.com\",\"data\":{\"evidence\":\"email\",\"fingerprint\":\"<SHA>\"}}\n"
+  },
+  "approve header mirror — proxy-no-header-block": {
+    "code": 0,
+    "output": [
+      {
+        "stream": "stdout",
+        "text": "rad approve: ok feature=char-feature status=approved approved-by=boss@example.com recorded-by=architect@example.com approved-at=<TS> proxy=true\n"
+      }
+    ],
+    "planText": "Status: approved\nApproved-By: boss@example.com (out-of-band)\nApproved-At: <TS>\nRecorded-By: architect@example.com\nApproval-Evidence: call\n# char-feature\n\n## Waves\n\n### Wave 1\n\n#### Task 1.1: A\nValidate: ok\n",
+    "events": "{\"feature\":\"char-feature\",\"type\":\"approved\",\"actor\":\"boss@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"recordedBy\":\"architect@example.com\",\"data\":{\"evidence\":\"call\",\"fingerprint\":\"<SHA>\"}}\n"
+  },
+  "approve header mirror — proxy-no-trailing-newline": {
+    "code": 0,
+    "output": [
+      {
+        "stream": "stdout",
+        "text": "rad approve: ok feature=char-feature status=approved approved-by=boss@example.com recorded-by=architect@example.com approved-at=<TS> proxy=true\n"
+      }
+    ],
+    "planText": "# char-feature\nStatus: approved\nApproved-By: boss@example.com (out-of-band)\nApproved-At: <TS>\nRecorded-By: architect@example.com\nApproval-Evidence: call\n\n## Waves\n\n### Wave 1\n\n#### Task 1.1: A\nValidate: ok",
+    "events": "{\"feature\":\"char-feature\",\"type\":\"approved\",\"actor\":\"boss@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"recordedBy\":\"architect@example.com\",\"data\":{\"evidence\":\"call\",\"fingerprint\":\"<SHA>\"}}\n"
+  },
+  "approve header mirror — delivered feature keeps its status (re-approval)": {
+    "code": 1,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad approve: cannot record approval — Cannot append a duplicate approved event — an approval already exists\n"
+      }
+    ],
+    "planText": "# char-feature\nStatus: complete\nApproved-By: old@example.com\n\n## Waves\n\n### Wave 1\n\n#### Task 1.1: A\nValidate: ok\n",
+    "events": "{\"feature\":\"char-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\"}\n{\"feature\":\"char-feature\",\"type\":\"pr-opened\",\"actor\":\"architect@example.com\",\"ts\":\"<TS>\"}\n"
+  },
+  "approve header mirror — delivered feature, proxy, status absent": {
+    "code": 1,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad approve: cannot record approval — Cannot append a duplicate approved event — an approval already exists\n"
+      }
+    ],
+    "planText": "# char-feature\n\n## Waves\n\n### Wave 1\n\n#### Task 1.1: A\nValidate: ok\n",
+    "events": "{\"feature\":\"char-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\"}\n{\"feature\":\"char-feature\",\"type\":\"pr-opened\",\"actor\":\"architect@example.com\",\"ts\":\"<TS>\"}\n"
+  },
+  "approve header mirror — non-delivered re-approval resets status": {
+    "code": 1,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad approve: cannot record approval — Cannot append a duplicate approved event — an approval already exists\n"
+      }
+    ],
+    "planText": "# char-feature\nStatus: complete\n\n## Waves\n\n### Wave 1\n\n#### Task 1.1: A\nValidate: ok\n",
+    "events": "{\"feature\":\"char-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\"}\n"
+  },
+  "approve header mirror — role check refused writes nothing": {
+    "code": 1,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad approve: permission denied — direct approval requires the architect role\n"
+      }
+    ],
+    "planText": "# char-feature\nStatus: draft\n\n## Waves\n\n### Wave 1\n\n#### Task 1.1: A\nValidate: ok\n",
+    "events": null
+  },
+  "gate — no arguments": {
+    "code": 1,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad gate: a feature name and a gate name are required\n"
+      },
+      {
+        "stream": "stderr",
+        "text": "Usage: rad gate <feature> <name> [--stdin]\n"
+      }
+    ],
+    "filesUnchanged": true
+  },
+  "gate — feature only": {
+    "code": 1,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad gate: a feature name and a gate name are required\n"
+      },
+      {
+        "stream": "stderr",
+        "text": "Usage: rad gate <feature> <name> [--stdin]\n"
+      }
+    ],
+    "filesUnchanged": true
+  },
+  "gate — unknown option": {
+    "code": 1,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad gate: unknown option '--bogus'\n"
+      },
+      {
+        "stream": "stderr",
+        "text": "Usage: rad gate <feature> <name> [--stdin]\n"
+      }
+    ],
+    "filesUnchanged": true
+  },
+  "gate — extra argument": {
+    "code": 1,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad gate: unexpected argument 'extra'\n"
+      },
+      {
+        "stream": "stderr",
+        "text": "Usage: rad gate <feature> <name> [--stdin]\n"
+      }
+    ],
+    "filesUnchanged": true
+  },
+  "gate — unknown gate name": {
+    "code": 1,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad gate: No gate rule declared for gate 'no-such-gate'\n"
+      }
+    ],
+    "filesUnchanged": true
+  },
+  "gate — missing log": {
+    "code": 1,
+    "output": [
+      {
+        "stream": "stdout",
+        "text": "rad gate: feature=gate-feature gate=approved passed=false required-role=architect satisfied-by=none source=log\n"
+      }
+    ],
+    "filesUnchanged": true
+  },
+  "gate — empty log": {
+    "code": 1,
+    "output": [
+      {
+        "stream": "stdout",
+        "text": "rad gate: feature=gate-feature gate=approved passed=false required-role=architect satisfied-by=none source=log\n"
+      }
+    ],
+    "filesUnchanged": true
+  },
+  "gate — approved log": {
+    "code": 0,
+    "output": [
+      {
+        "stream": "stdout",
+        "text": "rad gate: feature=gate-feature gate=approved passed=true required-role=architect satisfied-by=architect:architect@example.com source=log\n"
+      }
+    ],
+    "filesUnchanged": true
+  },
+  "gate — log with several events": {
+    "code": 0,
+    "output": [
+      {
+        "stream": "stdout",
+        "text": "rad gate: feature=gate-feature gate=approved passed=true required-role=architect satisfied-by=architect:architect@example.com source=log\n"
+      }
+    ],
+    "filesUnchanged": true
+  },
+  "gate — log with only a wrong-role approval": {
+    "code": 1,
+    "output": [
+      {
+        "stream": "stdout",
+        "text": "rad gate: feature=gate-feature gate=approved passed=false required-role=architect satisfied-by=none source=log\n"
+      }
+    ],
+    "filesUnchanged": true
+  },
+  "gate — stdin valid approved log": {
+    "code": 0,
+    "stdout": "rad gate: feature=gate-feature gate=approved passed=true required-role=architect satisfied-by=architect:architect@example.com source=stdin\n",
+    "stderr": "",
+    "filesUnchanged": true
+  },
+  "gate — stdin empty": {
+    "code": 1,
+    "stdout": "rad gate: feature=gate-feature gate=approved passed=false required-role=architect satisfied-by=none source=stdin\n",
+    "stderr": "",
+    "filesUnchanged": true
+  },
+  "gate — stdin malformed lines are dropped": {
+    "code": 0,
+    "stdout": "rad gate: feature=gate-feature gate=approved passed=true required-role=architect satisfied-by=architect:architect@example.com source=stdin\n",
+    "stderr": "",
+    "filesUnchanged": true
+  },
+  "gate — stdin only malformed": {
+    "code": 1,
+    "stdout": "rad gate: feature=gate-feature gate=approved passed=false required-role=architect satisfied-by=none source=stdin\n",
+    "stderr": "",
+    "filesUnchanged": true
+  },
+  "gate — stdin unknown gate": {
+    "code": 1,
+    "stdout": "",
+    "stderr": "rad gate: No gate rule declared for gate 'no-such-gate'\n",
+    "filesUnchanged": true
+  },
+  "architecture-approve — no arguments": {
+    "code": 1,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad architecture-approve: a slug is required\n"
+      },
+      {
+        "stream": "stderr",
+        "text": "Usage: rad architecture-approve <slug> [--on-behalf-of <name>] [--evidence <text>]\n"
+      }
+    ],
+    "events": null,
+    "files": []
+  },
+  "architecture-approve — unknown option": {
+    "code": 1,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad architecture-approve: unknown option '--bogus'\n"
+      },
+      {
+        "stream": "stderr",
+        "text": "Usage: rad architecture-approve <slug> [--on-behalf-of <name>] [--evidence <text>]\n"
+      }
+    ],
+    "events": null,
+    "files": []
+  },
+  "architecture-approve — extra positional": {
+    "code": 1,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad architecture-approve: unexpected argument 'other'\n"
+      },
+      {
+        "stream": "stderr",
+        "text": "Usage: rad architecture-approve <slug> [--on-behalf-of <name>] [--evidence <text>]\n"
+      }
+    ],
+    "events": null,
+    "files": []
+  },
+  "architecture-approve — option missing its value": {
+    "code": 1,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad architecture-approve: --on-behalf-of requires a value\n"
+      },
+      {
+        "stream": "stderr",
+        "text": "Usage: rad architecture-approve <slug> [--on-behalf-of <name>] [--evidence <text>]\n"
+      }
+    ],
+    "events": null,
+    "files": []
+  },
+  "architecture-approve — evidence without on-behalf-of": {
+    "code": 1,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad architecture-approve: --evidence is only valid with --on-behalf-of\n"
+      }
+    ],
+    "events": null,
+    "files": []
+  },
+  "architecture-approve — undetermined git identity": {
+    "code": 1,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad architecture-approve: cannot determine git user.email — set your git identity first\n"
+      }
+    ],
+    "events": null,
+    "files": []
+  },
+  "architecture-approve — on-behalf-of without evidence": {
+    "code": 1,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad architecture-approve: --on-behalf-of requires --evidence (cite where the architect approved)\n"
+      }
+    ],
+    "events": null,
+    "files": []
+  },
+  "architecture-approve — direct mode": {
+    "code": 0,
+    "output": [
+      {
+        "stream": "stdout",
+        "text": "rad architecture-approve: ok slug=slug approved-by=architect@example.com approved-at=<TS> proxy=false\n"
+      }
+    ],
+    "events": "{\"feature\":\"_architecture\",\"type\":\"architecture-approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"slug\":\"slug\"},\"recordedBy\":\"architect@example.com\"}\n",
+    "files": [
+      ".agents/state/_architecture/events.jsonl:202"
+    ]
+  },
+  "architecture-approve — proxy mode": {
+    "code": 0,
+    "output": [
+      {
+        "stream": "stdout",
+        "text": "rad architecture-approve: ok slug=slug approved-by=boss@example.com recorded-by=architect@example.com approved-at=<TS> proxy=true\n"
+      }
+    ],
+    "events": "{\"feature\":\"_architecture\",\"type\":\"architecture-approved\",\"actor\":\"boss@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"slug\":\"slug\",\"evidence\":\"standup notes\"},\"recordedBy\":\"architect@example.com\"}\n",
+    "files": [
+      ".agents/state/_architecture/events.jsonl:224"
+    ]
+  },
+  "architecture-approve — failed role check (direct)": {
+    "code": 1,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad architecture-approve: cannot record architecture approval — recordArchitectureApproved: role check failed — actor 'architect@example.com' does not hold role 'architect': stub: not an architect\n"
+      }
+    ],
+    "events": null,
+    "files": []
+  },
+  "architecture-approve — failed role check (proxy)": {
+    "code": 1,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad architecture-approve: cannot record architecture approval — recordArchitectureApproved: role check failed — actor 'boss@example.com' does not hold role 'architect': stub: not an architect\n"
+      }
+    ],
+    "events": null,
+    "files": []
+  },
+  "deliver — --help": {
+    "code": 0,
+    "output": [
+      {
+        "stream": "stdout",
+        "text": "Usage: rad deliver <feature> [--model <model-id>] [--resume --context <text>]\n"
+      },
+      {
+        "stream": "stdout",
+        "text": "\nRun approved plan wave execution via Claude Agent SDK.\n"
+      }
+    ],
+    "events": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n",
+    "filesChanged": [],
+    "eventsBefore": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n",
+    "worktreeCreated": false
+  },
+  "deliver — -h with a feature": {
+    "code": 0,
+    "output": [
+      {
+        "stream": "stdout",
+        "text": "Usage: rad deliver <feature> [--model <model-id>] [--resume --context <text>]\n"
+      },
+      {
+        "stream": "stdout",
+        "text": "\nRun approved plan wave execution via Claude Agent SDK.\n"
+      }
+    ],
+    "events": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n",
+    "filesChanged": [],
+    "eventsBefore": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n",
+    "worktreeCreated": false
+  },
+  "deliver — unknown option": {
+    "code": 1,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad deliver: unknown option '--bogus'\n"
+      },
+      {
+        "stream": "stderr",
+        "text": "Usage: rad deliver <feature> [--model <model-id>] [--resume --context <text>]\n"
+      }
+    ],
+    "events": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n",
+    "filesChanged": [],
+    "eventsBefore": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n",
+    "worktreeCreated": false
+  },
+  "deliver — --model without value": {
+    "code": 1,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad deliver: --model requires a value\n"
+      },
+      {
+        "stream": "stderr",
+        "text": "Usage: rad deliver <feature> [--model <model-id>] [--resume --context <text>]\n"
+      }
+    ],
+    "events": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n",
+    "filesChanged": [],
+    "eventsBefore": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n",
+    "worktreeCreated": false
+  },
+  "deliver — --context without value (exit 2)": {
+    "code": 2,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad deliver: --context requires a value\n"
+      },
+      {
+        "stream": "stderr",
+        "text": "Usage: rad deliver <feature> [--model <model-id>] [--resume --context <text>]\n"
+      }
+    ],
+    "events": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n",
+    "filesChanged": [],
+    "eventsBefore": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n",
+    "worktreeCreated": false
+  },
+  "deliver — unexpected second positional": {
+    "code": 1,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad deliver: unexpected argument 'other'\n"
+      },
+      {
+        "stream": "stderr",
+        "text": "Usage: rad deliver <feature> [--model <model-id>] [--resume --context <text>]\n"
+      }
+    ],
+    "events": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n",
+    "filesChanged": [],
+    "eventsBefore": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n",
+    "worktreeCreated": false
+  },
+  "deliver — no feature": {
+    "code": 1,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad deliver: a feature name is required\n"
+      },
+      {
+        "stream": "stderr",
+        "text": "Usage: rad deliver <feature> [--model <model-id>] [--resume --context <text>]\n"
+      }
+    ],
+    "events": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n",
+    "filesChanged": [],
+    "eventsBefore": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n",
+    "worktreeCreated": false
+  },
+  "deliver — blank feature": {
+    "code": 1,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad deliver: a feature name is required\n"
+      },
+      {
+        "stream": "stderr",
+        "text": "Usage: rad deliver <feature> [--model <model-id>] [--resume --context <text>]\n"
+      }
+    ],
+    "events": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n",
+    "filesChanged": [],
+    "eventsBefore": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n",
+    "worktreeCreated": false
+  },
+  "deliver — no agent configured": {
+    "code": 2,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad deliver: no agent configured — set agent: in .rad/config.yml (rad config init --agent claude|codex) or RAD_AGENT/RAD_AGENT_CMD\n"
+      }
+    ],
+    "events": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n",
+    "filesChanged": [],
+    "eventsBefore": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n",
+    "worktreeCreated": false
+  },
+  "deliver — unknown RAD_AGENT": {
+    "code": 1,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad deliver: unknown RAD_AGENT 'bogus' (expected command | sdk | acp)\n"
+      }
+    ],
+    "events": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n",
+    "filesChanged": [],
+    "eventsBefore": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n",
+    "worktreeCreated": false
+  },
+  "deliver — RAD_AGENT=command without RAD_AGENT_CMD": {
+    "code": 1,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad deliver: RAD_AGENT_CMD is required when RAD_AGENT=command\n"
+      }
+    ],
+    "events": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n",
+    "filesChanged": [],
+    "eventsBefore": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n",
+    "worktreeCreated": false
+  },
+  "deliver — invalid config and no environment agent": {
+    "code": 2,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad deliver: .rad/config.yml is invalid:\n"
+      },
+      {
+        "stream": "stderr",
+        "text": "  - cannot parse .rad/config.yml: unexpected end of the stream within a flow collection (3:1)\n"
+      }
+    ],
+    "events": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n",
+    "filesChanged": [],
+    "eventsBefore": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n",
+    "worktreeCreated": false
+  },
+  "deliver — invalid RAD_MAX_FAILED_ATTEMPTS abc": {
+    "code": 2,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad deliver: RAD_MAX_FAILED_ATTEMPTS must be a positive integer (got 'abc')\n"
+      }
+    ],
+    "events": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n",
+    "filesChanged": [],
+    "eventsBefore": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n",
+    "worktreeCreated": false
+  },
+  "deliver — invalid RAD_MAX_FAILED_ATTEMPTS 0": {
+    "code": 2,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad deliver: RAD_MAX_FAILED_ATTEMPTS must be a positive integer (got '0')\n"
+      }
+    ],
+    "events": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n",
+    "filesChanged": [],
+    "eventsBefore": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n",
+    "worktreeCreated": false
+  },
+  "deliver — invalid RAD_MAX_FAILED_ATTEMPTS -3": {
+    "code": 2,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad deliver: RAD_MAX_FAILED_ATTEMPTS must be a positive integer (got '-3')\n"
+      }
+    ],
+    "events": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n",
+    "filesChanged": [],
+    "eventsBefore": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n",
+    "worktreeCreated": false
+  },
+  "deliver — invalid RAD_MAX_FAILED_ATTEMPTS 1.5": {
+    "code": 2,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad deliver: RAD_MAX_FAILED_ATTEMPTS must be a positive integer (got '1.5')\n"
+      }
+    ],
+    "events": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n",
+    "filesChanged": [],
+    "eventsBefore": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n",
+    "worktreeCreated": false
+  },
+  "deliver — invalid configuration with an injected wave runner": {
+    "code": 2,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad deliver: .rad/config.yml is invalid:\n"
+      },
+      {
+        "stream": "stderr",
+        "text": "  - cannot parse .rad/config.yml: unexpected end of the stream within a flow collection (3:1)\n"
+      }
+    ],
+    "events": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n",
+    "filesChanged": [],
+    "eventsBefore": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n",
+    "worktreeCreated": false
+  },
+  "deliver — invalid hooks directory (RAD_HOOKS_DIR)": {
+    "code": 2,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad deliver: RAD_HOOKS_DIR must be a directory path (got \"-bad\")\n"
+      }
+    ],
+    "events": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n",
+    "filesChanged": [],
+    "eventsBefore": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n",
+    "worktreeCreated": false
+  },
+  "deliver — invalid hooks directory (config settings)": {
+    "code": 2,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad deliver: .rad/config.yml is invalid:\n"
+      },
+      {
+        "stream": "stderr",
+        "text": "  - settings.hooks_dir must not start with '-' or contain a line break\n"
+      }
+    ],
+    "events": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n",
+    "filesChanged": [],
+    "eventsBefore": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n",
+    "worktreeCreated": false
+  },
+  "deliver — delivered rerun short-circuits": {
+    "code": 0,
+    "output": [
+      {
+        "stream": "stdout",
+        "text": "rad deliver: already delivered feature=stop-feature\n"
+      }
+    ],
+    "events": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n{\"feature\":\"stop-feature\",\"type\":\"pr-opened\",\"actor\":\"architect@example.com\",\"ts\":\"<TS>\"}\n",
+    "filesChanged": [],
+    "eventsBefore": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n{\"feature\":\"stop-feature\",\"type\":\"pr-opened\",\"actor\":\"architect@example.com\",\"ts\":\"<TS>\"}\n"
+  },
+  "deliver — delivered rerun whose republish fails": {
+    "code": 1,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad deliver: finishing the delivered run failed: push rejected\n"
+      }
+    ],
+    "events": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n{\"feature\":\"stop-feature\",\"type\":\"pr-opened\",\"actor\":\"architect@example.com\",\"ts\":\"<TS>\"}\n",
+    "filesChanged": [],
+    "eventsBefore": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n{\"feature\":\"stop-feature\",\"type\":\"pr-opened\",\"actor\":\"architect@example.com\",\"ts\":\"<TS>\"}\n"
+  },
+  "deliver — --resume without --context": {
+    "code": 2,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad deliver: --resume requires --context \"<text>\"\n"
+      }
+    ],
+    "events": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n",
+    "filesChanged": [],
+    "eventsBefore": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n",
+    "worktreeCreated": false
+  },
+  "deliver — --context without --resume": {
+    "code": 2,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad deliver: --context requires --resume\n"
+      }
+    ],
+    "events": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n",
+    "filesChanged": [],
+    "eventsBefore": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n",
+    "worktreeCreated": false
+  },
+  "deliver — --resume with an empty context": {
+    "code": 2,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad deliver: --context must not be empty\n"
+      }
+    ],
+    "events": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n",
+    "filesChanged": [],
+    "eventsBefore": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n",
+    "worktreeCreated": false
+  },
+  "deliver — --resume with an oversized context": {
+    "code": 2,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad deliver: --context exceeds 8000 characters (8001)\n"
+      }
+    ],
+    "events": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n",
+    "filesChanged": [],
+    "eventsBefore": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n",
+    "worktreeCreated": false
+  },
+  "deliver — --resume with nothing to resume": {
+    "code": 2,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad deliver: nothing to resume: stop-feature has no deliver-stopped event\n"
+      }
+    ],
+    "events": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n",
+    "filesChanged": [],
+    "eventsBefore": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n",
+    "worktreeCreated": false
+  },
+  "deliver — --resume after a failed stop": {
+    "code": 2,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad deliver: cannot resume a failed stop (fail-scope): wave 1: fail-scope — the work is wrong for the plan; fix the plan or the code and re-run\n"
+      }
+    ],
+    "events": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n{\"feature\":\"stop-feature\",\"type\":\"deliver-stopped\",\"actor\":\"dev@example.com\",\"ts\":\"<TS>\",\"data\":{\"class\":\"failed\",\"reason\":\"fail-scope\",\"decision\":\"wave 1: fail-scope — the work is wrong for the plan; fix the plan or the code and re-run\"}}\n",
+    "filesChanged": [],
+    "eventsBefore": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n{\"feature\":\"stop-feature\",\"type\":\"deliver-stopped\",\"actor\":\"dev@example.com\",\"ts\":\"<TS>\",\"data\":{\"class\":\"failed\",\"reason\":\"fail-scope\",\"decision\":\"wave 1: fail-scope — the work is wrong for the plan; fix the plan or the code and re-run\"}}\n"
+  },
+  "deliver — --resume without a git identity": {
+    "code": 2,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad deliver: cannot resolve git user.email for run-resumed.recordedBy\n"
+      }
+    ],
+    "events": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n{\"feature\":\"stop-feature\",\"type\":\"deliver-stopped\",\"actor\":\"dev@example.com\",\"ts\":\"<TS>\",\"data\":{\"class\":\"needs-decision\",\"reason\":\"fail-timeout\",\"decision\":\"wave 1: fail-timeout — non-deterministic failure\",\"wave\":1}}\n",
+    "filesChanged": [],
+    "eventsBefore": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n{\"feature\":\"stop-feature\",\"type\":\"deliver-stopped\",\"actor\":\"dev@example.com\",\"ts\":\"<TS>\",\"data\":{\"class\":\"needs-decision\",\"reason\":\"fail-timeout\",\"decision\":\"wave 1: fail-timeout — non-deterministic failure\",\"wave\":1}}\n"
+  },
+  "deliver — --resume after a needs-decision stop": {
+    "code": 0,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad deliver: RAD_TOKEN_BUDGET is unset or not a positive integer; no token cap applies to this run\n"
+      },
+      {
+        "stream": "stdout",
+        "text": "rad deliver: ok feature=stop-feature waves=2 status=complete\n"
+      }
+    ],
+    "events": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n{\"feature\":\"stop-feature\",\"type\":\"deliver-stopped\",\"actor\":\"dev@example.com\",\"ts\":\"<TS>\",\"data\":{\"class\":\"needs-decision\",\"reason\":\"fail-timeout\",\"decision\":\"wave 1: fail-timeout — non-deterministic failure\",\"wave\":1}}\n{\"feature\":\"stop-feature\",\"type\":\"deliver-started\",\"actor\":\"harness\",\"ts\":\"<TS>\"}\n{\"feature\":\"stop-feature\",\"type\":\"run-resumed\",\"actor\":\"harness\",\"recordedBy\":\"dev@example.com\",\"ts\":\"<TS>\",\"data\":{\"context\":\"raised the limit\",\"recordedBy\":\"dev@example.com\",\"stop\":{\"class\":\"needs-decision\",\"reason\":\"fail-timeout\",\"wave\":1}}}\n{\"feature\":\"stop-feature\",\"type\":\"run-prepared\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-started\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1,\"attempt\":1}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-attempt\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1,\"attempt\":1,\"outcome\":\"success\"}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-complete\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-started\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":2,\"attempt\":1}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-attempt\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":2,\"attempt\":1,\"outcome\":\"success\"}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-complete\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":2}}\n{\"feature\":\"stop-feature\",\"type\":\"pr-opened\",\"actor\":\"harness\",\"ts\":\"<TS>\"}\n",
+    "filesChanged": [
+      ".agents/state/stop-feature/events.jsonl:1821"
+    ],
+    "eventsBefore": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n{\"feature\":\"stop-feature\",\"type\":\"deliver-stopped\",\"actor\":\"dev@example.com\",\"ts\":\"<TS>\",\"data\":{\"class\":\"needs-decision\",\"reason\":\"fail-timeout\",\"decision\":\"wave 1: fail-timeout — non-deterministic failure\",\"wave\":1}}\n"
+  },
+  "deliver — setup failure: gate not passed": {
+    "code": 1,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad deliver: gate not passed for 'stop-feature' — needs an approved event with role:architect frozen at write-time\n"
+      }
+    ],
+    "events": null,
+    "filesChanged": [],
+    "eventsBefore": null
+  },
+  "deliver — setup failure: no plan doc": {
+    "code": 1,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad deliver: no plan doc at .agents/plans/stop-feature.md\n"
+      }
+    ],
+    "events": null,
+    "filesChanged": [],
+    "eventsBefore": null
+  },
+  "deliver — setup failure: plan with a task-less wave": {
+    "code": 2,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad deliver: wave 1 has no tasks in the plan — each wave needs '#### Task N.M: <title>' blocks with File:/What:/Validate: lines\n"
+      }
+    ],
+    "events": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n",
+    "filesChanged": [],
+    "eventsBefore": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n"
+  },
+  "deliver — setup failure: malformed capabilities": {
+    "code": 2,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad deliver: malformed Capabilities: line in .agents/plans/stop-feature.md: plan header: Capabilities: unknown class 'bogus'; expected one of fs_read, fs_write, shell, net, mcp\n"
+      }
+    ],
+    "events": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n",
+    "filesChanged": [],
+    "eventsBefore": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n"
+  },
+  "deliver — setup failure in worktree mode (stub sh fails)": {
+    "code": 1,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad deliver: gate not passed for 'stop-feature' — no event log at rad/stop-feature:.agents/state/stop-feature/events.jsonl (stub: boom)\n"
+      }
+    ],
+    "events": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n",
+    "filesChanged": [],
+    "eventsBefore": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n"
+  },
+  "deliver — unarmed budget warns once": {
+    "code": 0,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad deliver: RAD_TOKEN_BUDGET is unset or not a positive integer; no token cap applies to this run\n"
+      },
+      {
+        "stream": "stdout",
+        "text": "rad deliver: ok feature=stop-feature waves=2 status=complete\n"
+      }
+    ],
+    "events": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n{\"feature\":\"stop-feature\",\"type\":\"deliver-started\",\"actor\":\"harness\",\"ts\":\"<TS>\"}\n{\"feature\":\"stop-feature\",\"type\":\"run-prepared\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-started\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1,\"attempt\":1}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-attempt\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1,\"attempt\":1,\"outcome\":\"success\"}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-complete\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-started\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":2,\"attempt\":1}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-attempt\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":2,\"attempt\":1,\"outcome\":\"success\"}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-complete\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":2}}\n{\"feature\":\"stop-feature\",\"type\":\"pr-opened\",\"actor\":\"harness\",\"ts\":\"<TS>\"}\n",
+    "filesChanged": [
+      ".agents/state/stop-feature/events.jsonl:1317"
+    ],
+    "eventsBefore": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n"
+  },
+  "deliver — malformed budget warns once": {
+    "code": 0,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad deliver: RAD_TOKEN_BUDGET is unset or not a positive integer; no token cap applies to this run\n"
+      },
+      {
+        "stream": "stdout",
+        "text": "rad deliver: ok feature=stop-feature waves=2 status=complete\n"
+      }
+    ],
+    "events": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n{\"feature\":\"stop-feature\",\"type\":\"deliver-started\",\"actor\":\"harness\",\"ts\":\"<TS>\"}\n{\"feature\":\"stop-feature\",\"type\":\"run-prepared\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-started\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1,\"attempt\":1}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-attempt\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1,\"attempt\":1,\"outcome\":\"success\"}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-complete\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-started\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":2,\"attempt\":1}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-attempt\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":2,\"attempt\":1,\"outcome\":\"success\"}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-complete\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":2}}\n{\"feature\":\"stop-feature\",\"type\":\"pr-opened\",\"actor\":\"harness\",\"ts\":\"<TS>\"}\n",
+    "filesChanged": [
+      ".agents/state/stop-feature/events.jsonl:1317"
+    ],
+    "eventsBefore": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n"
+  },
+  "deliver — armed budget does not warn": {
+    "code": 0,
+    "output": [
+      {
+        "stream": "stdout",
+        "text": "rad deliver: ok feature=stop-feature waves=2 status=complete\n"
+      }
+    ],
+    "events": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n{\"feature\":\"stop-feature\",\"type\":\"deliver-started\",\"actor\":\"harness\",\"ts\":\"<TS>\"}\n{\"feature\":\"stop-feature\",\"type\":\"run-prepared\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-started\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1,\"attempt\":1}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-attempt\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1,\"attempt\":1,\"outcome\":\"success\"}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-complete\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-started\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":2,\"attempt\":1}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-attempt\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":2,\"attempt\":1,\"outcome\":\"success\"}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-complete\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":2}}\n{\"feature\":\"stop-feature\",\"type\":\"pr-opened\",\"actor\":\"harness\",\"ts\":\"<TS>\"}\n",
+    "filesChanged": [
+      ".agents/state/stop-feature/events.jsonl:1317"
+    ],
+    "eventsBefore": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n"
+  },
+  "deliver — prepare port cannot resolve default branch": {
+    "code": 1,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad deliver: RAD_TOKEN_BUDGET is unset or not a positive integer; no token cap applies to this run\n"
+      },
+      {
+        "stream": "stderr",
+        "text": "rad deliver: cannot resolve default branch (scripts/get-default-branch.sh exited 7)\n"
+      }
+    ],
+    "events": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n",
+    "filesChanged": [],
+    "eventsBefore": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n"
+  },
+  "deliver — prepare port stops with merge-conflict": {
+    "code": 3,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad deliver: RAD_TOKEN_BUDGET is unset or not a positive integer; no token cap applies to this run\n"
+      },
+      {
+        "stream": "stderr",
+        "text": "rad deliver: failed feature=stop-feature stopped=merge-conflict class=needs-decision decision=\"merging origin/main into rad/x conflicts (a.js); resolve the conflict on the branch, commit, and re-run with --resume\" detail=\"a.js\"\n"
+      }
+    ],
+    "events": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n{\"feature\":\"stop-feature\",\"type\":\"deliver-started\",\"actor\":\"harness\",\"ts\":\"<TS>\"}\n{\"feature\":\"stop-feature\",\"type\":\"deliver-stopped\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"class\":\"needs-decision\",\"reason\":\"merge-conflict\",\"decision\":\"merging origin/main into rad/x conflicts (a.js); resolve the conflict on the branch, commit, and re-run with --resume\",\"detail\":\"a.js\"}}\n",
+    "filesChanged": [
+      ".agents/state/stop-feature/events.jsonl:629"
+    ],
+    "eventsBefore": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n"
+  },
+  "deliver — prepare port stops with prepare-failed": {
+    "code": 1,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad deliver: RAD_TOKEN_BUDGET is unset or not a positive integer; no token cap applies to this run\n"
+      },
+      {
+        "stream": "stderr",
+        "text": "rad deliver: failed feature=stop-feature stopped=prepare-failed class=failed decision=\"prepare failed: cannot reach origin\" detail=\"cannot reach origin\"\n"
+      }
+    ],
+    "events": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n{\"feature\":\"stop-feature\",\"type\":\"deliver-started\",\"actor\":\"harness\",\"ts\":\"<TS>\"}\n{\"feature\":\"stop-feature\",\"type\":\"deliver-stopped\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"class\":\"failed\",\"reason\":\"prepare-failed\",\"decision\":\"prepare failed: cannot reach origin\",\"detail\":\"cannot reach origin\"}}\n",
+    "filesChanged": [
+      ".agents/state/stop-feature/events.jsonl:554"
+    ],
+    "eventsBefore": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n"
+  },
+  "deliver — finish port beforePr fails": {
+    "code": 1,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad deliver: RAD_TOKEN_BUDGET is unset or not a positive integer; no token cap applies to this run\n"
+      },
+      {
+        "stream": "stderr",
+        "text": "rad deliver: failed feature=stop-feature stopped=finish-failed class=failed decision=\"finishing the run failed: commit refused; re-run rad deliver to finish\" detail=\"commit refused\"\n"
+      }
+    ],
+    "events": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n{\"feature\":\"stop-feature\",\"type\":\"deliver-started\",\"actor\":\"harness\",\"ts\":\"<TS>\"}\n{\"feature\":\"stop-feature\",\"type\":\"run-prepared\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-started\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1,\"attempt\":1}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-attempt\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1,\"attempt\":1,\"outcome\":\"success\"}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-complete\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-started\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":2,\"attempt\":1}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-attempt\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":2,\"attempt\":1,\"outcome\":\"success\"}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-complete\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":2}}\n{\"feature\":\"stop-feature\",\"type\":\"deliver-stopped\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"class\":\"failed\",\"reason\":\"finish-failed\",\"decision\":\"finishing the run failed: commit refused; re-run rad deliver to finish\",\"detail\":\"commit refused\"}}\n",
+    "filesChanged": [
+      ".agents/state/stop-feature/events.jsonl:1484"
+    ],
+    "eventsBefore": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n"
+  },
+  "deliver — finish port afterPr fails after the PR": {
+    "code": 1,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad deliver: RAD_TOKEN_BUDGET is unset or not a positive integer; no token cap applies to this run\n"
+      },
+      {
+        "stream": "stderr",
+        "text": "rad deliver: failed feature=stop-feature stopped=finish-failed class=failed decision=\"finishing the run failed: label failed; re-run rad deliver to finish\" detail=\"label failed\"\n"
+      }
+    ],
+    "events": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n{\"feature\":\"stop-feature\",\"type\":\"deliver-started\",\"actor\":\"harness\",\"ts\":\"<TS>\"}\n{\"feature\":\"stop-feature\",\"type\":\"run-prepared\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-started\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1,\"attempt\":1}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-attempt\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1,\"attempt\":1,\"outcome\":\"success\"}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-complete\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-started\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":2,\"attempt\":1}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-attempt\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":2,\"attempt\":1,\"outcome\":\"success\"}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-complete\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":2}}\n{\"feature\":\"stop-feature\",\"type\":\"pr-opened\",\"actor\":\"harness\",\"ts\":\"<TS>\"}\n",
+    "filesChanged": [
+      ".agents/state/stop-feature/events.jsonl:1317"
+    ],
+    "eventsBefore": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n"
+  },
+  "deliver — spine throws (wave runner returns nothing)": {
+    "code": 1,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad deliver: RAD_TOKEN_BUDGET is unset or not a positive integer; no token cap applies to this run\n"
+      },
+      {
+        "stream": "stderr",
+        "text": "rad deliver: unexpected error — Cannot read properties of undefined (reading 'outcome')\n"
+      }
+    ],
+    "events": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n{\"feature\":\"stop-feature\",\"type\":\"deliver-started\",\"actor\":\"harness\",\"ts\":\"<TS>\"}\n{\"feature\":\"stop-feature\",\"type\":\"run-prepared\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-started\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1,\"attempt\":1}}\n",
+    "filesChanged": [
+      ".agents/state/stop-feature/events.jsonl:558"
+    ],
+    "eventsBefore": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n"
+  },
+  "deliver — spine throws with a credential-looking message": {
+    "code": 1,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad deliver: RAD_TOKEN_BUDGET is unset or not a positive integer; no token cap applies to this run\n"
+      },
+      {
+        "stream": "stderr",
+        "text": "rad deliver: unexpected error — boom [REDACTED]\n"
+      }
+    ],
+    "events": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n{\"feature\":\"stop-feature\",\"type\":\"deliver-started\",\"actor\":\"harness\",\"ts\":\"<TS>\"}\n{\"feature\":\"stop-feature\",\"type\":\"run-prepared\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-started\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1,\"attempt\":1}}\n",
+    "filesChanged": [
+      ".agents/state/stop-feature/events.jsonl:558"
+    ],
+    "eventsBefore": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n"
+  },
+  "deliver — ok run with evidence": {
+    "code": 0,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad deliver: RAD_TOKEN_BUDGET is unset or not a positive integer; no token cap applies to this run\n"
+      },
+      {
+        "stream": "stdout",
+        "text": "rad deliver: ok feature=stop-feature waves=2 status=complete\n"
+      }
+    ],
+    "events": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n{\"feature\":\"stop-feature\",\"type\":\"deliver-started\",\"actor\":\"harness\",\"ts\":\"<TS>\"}\n{\"feature\":\"stop-feature\",\"type\":\"run-prepared\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-started\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1,\"attempt\":1}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-attempt\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1,\"attempt\":1,\"outcome\":\"success\"}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-complete\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-started\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":2,\"attempt\":1}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-attempt\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":2,\"attempt\":1,\"outcome\":\"success\"}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-complete\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":2}}\n{\"feature\":\"stop-feature\",\"type\":\"pr-opened\",\"actor\":\"harness\",\"ts\":\"<TS>\"}\n",
+    "filesChanged": [
+      ".agents/state/stop-feature/events.jsonl:1317"
+    ],
+    "eventsBefore": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n"
+  },
+  "deliver — ok run with --model and a per-wave plan": {
+    "code": 0,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad deliver: RAD_TOKEN_BUDGET is unset or not a positive integer; no token cap applies to this run\n"
+      },
+      {
+        "stream": "stdout",
+        "text": "rad deliver: ok feature=stop-feature waves=2 status=complete\n"
+      }
+    ],
+    "events": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n{\"feature\":\"stop-feature\",\"type\":\"deliver-started\",\"actor\":\"harness\",\"ts\":\"<TS>\"}\n{\"feature\":\"stop-feature\",\"type\":\"run-prepared\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-started\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1,\"attempt\":1}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-attempt\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1,\"attempt\":1,\"outcome\":\"success\"}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-complete\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-started\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":2,\"attempt\":1}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-attempt\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":2,\"attempt\":1,\"outcome\":\"success\"}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-complete\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":2}}\n{\"feature\":\"stop-feature\",\"type\":\"pr-opened\",\"actor\":\"harness\",\"ts\":\"<TS>\"}\n",
+    "filesChanged": [
+      ".agents/state/stop-feature/events.jsonl:1317"
+    ],
+    "eventsBefore": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n"
+  },
+  "deliver — ok run the log does not evidence": {
+    "code": 1,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad deliver: RAD_TOKEN_BUDGET is unset or not a positive integer; no token cap applies to this run\n"
+      },
+      {
+        "stream": "stderr",
+        "text": "rad deliver: failed feature=stop-feature completion not evidenced (event log lacks wave-complete/pr-opened)\n"
+      }
+    ],
+    "events": "",
+    "filesChanged": [
+      ".agents/state/stop-feature/events.jsonl:0"
+    ],
+    "eventsBefore": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n"
+  },
+  "deliver — ok run with a promised test file that exists": {
+    "code": 0,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad deliver: RAD_TOKEN_BUDGET is unset or not a positive integer; no token cap applies to this run\n"
+      },
+      {
+        "stream": "stdout",
+        "text": "rad deliver: ok feature=stop-feature waves=2 status=complete\n"
+      }
+    ],
+    "events": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n{\"feature\":\"stop-feature\",\"type\":\"deliver-started\",\"actor\":\"harness\",\"ts\":\"<TS>\"}\n{\"feature\":\"stop-feature\",\"type\":\"run-prepared\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-started\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1,\"attempt\":1}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-attempt\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1,\"attempt\":1,\"outcome\":\"success\"}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-complete\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-started\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":2,\"attempt\":1}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-attempt\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":2,\"attempt\":1,\"outcome\":\"success\"}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-complete\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":2}}\n{\"feature\":\"stop-feature\",\"type\":\"pr-opened\",\"actor\":\"harness\",\"ts\":\"<TS>\"}\n",
+    "filesChanged": [
+      ".agents/state/stop-feature/events.jsonl:1317"
+    ],
+    "eventsBefore": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n"
+  },
+  "deliver — stop: matrix surface (needs-decision)": {
+    "code": 3,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad deliver: RAD_TOKEN_BUDGET is unset or not a positive integer; no token cap applies to this run\n"
+      },
+      {
+        "stream": "stderr",
+        "text": "rad deliver: failed feature=stop-feature stopped=matrix wave=1 action=surface class=needs-decision decision=\"wave 1: fail-timeout — non-deterministic failure (e.g. timeout/orphaned attempt); retry, raise the limit, or split the wave\"\n"
+      }
+    ],
+    "events": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n{\"feature\":\"stop-feature\",\"type\":\"deliver-started\",\"actor\":\"harness\",\"ts\":\"<TS>\"}\n{\"feature\":\"stop-feature\",\"type\":\"run-prepared\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-started\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1,\"attempt\":1}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-attempt\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1,\"attempt\":1,\"outcome\":\"fail-timeout\"}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-failed\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1,\"action\":\"surface\"}}\n{\"feature\":\"stop-feature\",\"type\":\"deliver-stopped\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"class\":\"needs-decision\",\"reason\":\"fail-timeout\",\"decision\":\"wave 1: fail-timeout — non-deterministic failure (e.g. timeout/orphaned attempt); retry, raise the limit, or split the wave\",\"wave\":1,\"action\":\"surface\",\"outcome\":\"fail-timeout\"}}\n",
+    "filesChanged": [
+      ".agents/state/stop-feature/events.jsonl:1197"
+    ],
+    "eventsBefore": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n"
+  },
+  "deliver — stop: matrix abort (failed)": {
+    "code": 1,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad deliver: RAD_TOKEN_BUDGET is unset or not a positive integer; no token cap applies to this run\n"
+      },
+      {
+        "stream": "stderr",
+        "text": "rad deliver: failed feature=stop-feature stopped=matrix wave=1 action=abort class=failed decision=\"wave 1: fail-scope — the work is wrong for the plan; fix the plan or the code and re-run\"\n"
+      }
+    ],
+    "events": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n{\"feature\":\"stop-feature\",\"type\":\"deliver-started\",\"actor\":\"harness\",\"ts\":\"<TS>\"}\n{\"feature\":\"stop-feature\",\"type\":\"run-prepared\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-started\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1,\"attempt\":1}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-attempt\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1,\"attempt\":1,\"outcome\":\"fail-scope\"}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-failed\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1,\"action\":\"abort\"}}\n{\"feature\":\"stop-feature\",\"type\":\"deliver-stopped\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"class\":\"failed\",\"reason\":\"fail-scope\",\"decision\":\"wave 1: fail-scope — the work is wrong for the plan; fix the plan or the code and re-run\",\"wave\":1,\"action\":\"abort\",\"outcome\":\"fail-scope\"}}\n",
+    "filesChanged": [
+      ".agents/state/stop-feature/events.jsonl:1144"
+    ],
+    "eventsBefore": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n"
+  },
+  "deliver — stop: repeated fail-tests": {
+    "code": 1,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad deliver: RAD_TOKEN_BUDGET is unset or not a positive integer; no token cap applies to this run\n"
+      },
+      {
+        "stream": "stderr",
+        "text": "rad deliver: failed feature=stop-feature stopped=doom-loop wave=1 class=failed decision=\"wave 1 failed identically twice — a retry cannot fix it\"\n"
+      }
+    ],
+    "events": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n{\"feature\":\"stop-feature\",\"type\":\"deliver-started\",\"actor\":\"harness\",\"ts\":\"<TS>\"}\n{\"feature\":\"stop-feature\",\"type\":\"run-prepared\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-started\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1,\"attempt\":1}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-attempt\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1,\"attempt\":1,\"outcome\":\"fail-tests\",\"fingerprint\":\"<SHA>\"}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-started\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1,\"attempt\":2}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-attempt\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1,\"attempt\":2,\"outcome\":\"fail-tests\",\"fingerprint\":\"<SHA>\"}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-failed\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1,\"reason\":\"doom-loop\"}}\n{\"feature\":\"stop-feature\",\"type\":\"deliver-stopped\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"class\":\"failed\",\"reason\":\"doom-loop\",\"decision\":\"wave 1 failed identically twice — a retry cannot fix it\",\"wave\":1,\"outcome\":\"fail-tests\"}}\n",
+    "filesChanged": [
+      ".agents/state/stop-feature/events.jsonl:1540"
+    ],
+    "eventsBefore": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n"
+  },
+  "deliver — stop: token budget": {
+    "code": 3,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad deliver: failed feature=stop-feature stopped=token-budget wave=2 spent=100 budget=50 class=needs-decision decision=\"token budget 50 reached (spent 100); raise RAD_TOKEN_BUDGET or stop\"\n"
+      }
+    ],
+    "events": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n{\"feature\":\"stop-feature\",\"type\":\"deliver-started\",\"actor\":\"harness\",\"ts\":\"<TS>\"}\n{\"feature\":\"stop-feature\",\"type\":\"run-prepared\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-started\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1,\"attempt\":1}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-attempt\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1,\"attempt\":1,\"outcome\":\"success\",\"usage\":{\"total\":100}}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-complete\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-failed\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":2,\"reason\":\"token-budget\",\"spent\":100,\"budget\":50}}\n{\"feature\":\"stop-feature\",\"type\":\"deliver-stopped\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"class\":\"needs-decision\",\"reason\":\"token-budget\",\"decision\":\"token budget 50 reached (spent 100); raise RAD_TOKEN_BUDGET or stop\",\"wave\":2}}\n",
+    "filesChanged": [
+      ".agents/state/stop-feature/events.jsonl:1261"
+    ],
+    "eventsBefore": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n"
+  },
+  "deliver — stop: failed-attempt cap": {
+    "code": 3,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad deliver: RAD_TOKEN_BUDGET is unset or not a positive integer; no token cap applies to this run\n"
+      },
+      {
+        "stream": "stderr",
+        "text": "rad deliver: failed feature=stop-feature stopped=failed-attempt-cap wave=1 class=needs-decision decision=\"1 failed attempts reached RAD_MAX_FAILED_ATTEMPTS=1; raise the cap, re-plan, or stop\"\n"
+      }
+    ],
+    "events": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n{\"feature\":\"stop-feature\",\"type\":\"deliver-started\",\"actor\":\"harness\",\"ts\":\"<TS>\"}\n{\"feature\":\"stop-feature\",\"type\":\"run-prepared\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-started\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1,\"attempt\":1}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-attempt\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1,\"attempt\":1,\"outcome\":\"fail-tests\",\"fingerprint\":\"<SHA>\"}}\n{\"feature\":\"stop-feature\",\"type\":\"deliver-stopped\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"class\":\"needs-decision\",\"reason\":\"failed-attempt-cap\",\"decision\":\"1 failed attempts reached RAD_MAX_FAILED_ATTEMPTS=1; raise the cap, re-plan, or stop\",\"wave\":1}}\n",
+    "filesChanged": [
+      ".agents/state/stop-feature/events.jsonl:1064"
+    ],
+    "eventsBefore": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n"
+  },
+  "deliver — stop: approval changed during the run": {
+    "code": 3,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad deliver: RAD_TOKEN_BUDGET is unset or not a positive integer; no token cap applies to this run\n"
+      },
+      {
+        "stream": "stderr",
+        "text": "rad deliver: failed feature=stop-feature stopped=approval-changed wave=2 class=needs-decision decision=\"the plan changed since approval (or approval no longer holds); re-approve before re-running\" detail=\"approval not intact: plan fingerprint <SHA> differs from approved <SHA>\"\n"
+      }
+    ],
+    "events": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n{\"feature\":\"stop-feature\",\"type\":\"deliver-started\",\"actor\":\"harness\",\"ts\":\"<TS>\"}\n{\"feature\":\"stop-feature\",\"type\":\"run-prepared\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-started\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1,\"attempt\":1}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-attempt\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1,\"attempt\":1,\"outcome\":\"success\"}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-complete\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1}}\n{\"feature\":\"stop-feature\",\"type\":\"deliver-stopped\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"class\":\"needs-decision\",\"reason\":\"approval-changed\",\"decision\":\"the plan changed since approval (or approval no longer holds); re-approve before re-running\",\"wave\":2,\"detail\":\"approval not intact: plan fingerprint <SHA> differs from approved <SHA>\"}}\n",
+    "filesChanged": [
+      ".agents/plans/stop-feature.md:236",
+      ".agents/state/stop-feature/events.jsonl:1304"
+    ],
+    "eventsBefore": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n"
+  },
+  "deliver — stop: post-check fails": {
+    "code": 1,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad deliver: RAD_TOKEN_BUDGET is unset or not a positive integer; no token cap applies to this run\n"
+      },
+      {
+        "stream": "stderr",
+        "text": "rad deliver: failed feature=stop-feature stopped=post-check check=open-pr.sh class=failed decision=\"post-check open-pr.sh exited 1\"\n"
+      }
+    ],
+    "events": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n{\"feature\":\"stop-feature\",\"type\":\"deliver-started\",\"actor\":\"harness\",\"ts\":\"<TS>\"}\n{\"feature\":\"stop-feature\",\"type\":\"run-prepared\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-started\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1,\"attempt\":1}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-attempt\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1,\"attempt\":1,\"outcome\":\"success\"}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-complete\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-started\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":2,\"attempt\":1}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-attempt\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":2,\"attempt\":1,\"outcome\":\"success\"}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-complete\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":2}}\n{\"feature\":\"stop-feature\",\"type\":\"deliver-stopped\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"class\":\"failed\",\"reason\":\"post-check\",\"decision\":\"post-check open-pr.sh exited 1\"}}\n",
+    "filesChanged": [
+      ".agents/state/stop-feature/events.jsonl:1415"
+    ],
+    "eventsBefore": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n"
+  },
+  "deliver — stop: tests still missing after the test wave": {
+    "code": 1,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad deliver: RAD_TOKEN_BUDGET is unset or not a positive integer; no token cap applies to this run\n"
+      },
+      {
+        "stream": "stderr",
+        "text": "rad deliver: failed feature=stop-feature stopped=tests-missing class=failed decision=\"test files still missing after the test wave: tests/never-written.test.js; write them on the branch and re-run rad deliver\" detail=\"tests/never-written.test.js\"\n"
+      }
+    ],
+    "events": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n{\"feature\":\"stop-feature\",\"type\":\"deliver-started\",\"actor\":\"harness\",\"ts\":\"<TS>\"}\n{\"feature\":\"stop-feature\",\"type\":\"run-prepared\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-started\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1,\"attempt\":1}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-attempt\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1,\"attempt\":1,\"outcome\":\"success\"}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-complete\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-started\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":2,\"attempt\":1}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-attempt\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":2,\"attempt\":1,\"outcome\":\"success\"}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-complete\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":2}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-started\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":3,\"attempt\":1,\"kind\":\"tests\"}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-attempt\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":3,\"attempt\":1,\"outcome\":\"success\"}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-complete\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":3}}\n{\"feature\":\"stop-feature\",\"type\":\"deliver-stopped\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"class\":\"failed\",\"reason\":\"tests-missing\",\"decision\":\"test files still missing after the test wave: tests/never-written.test.js; write them on the branch and re-run rad deliver\",\"detail\":\"tests/never-written.test.js\"}}\n",
+    "filesChanged": [
+      ".agents/state/stop-feature/events.jsonl:1960"
+    ],
+    "eventsBefore": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n"
+  },
+  "deliver — stop: needs-decision then resumed to success": {
+    "first": {
+      "code": 3,
+      "output": [
+        {
+          "stream": "stderr",
+          "text": "rad deliver: RAD_TOKEN_BUDGET is unset or not a positive integer; no token cap applies to this run\n"
+        },
+        {
+          "stream": "stderr",
+          "text": "rad deliver: failed feature=stop-feature stopped=matrix wave=1 action=surface class=needs-decision decision=\"wave 1: fail-timeout — non-deterministic failure (e.g. timeout/orphaned attempt); retry, raise the limit, or split the wave\"\n"
+        }
+      ]
+    },
+    "second": {
+      "code": 0,
+      "output": [
+        {
+          "stream": "stderr",
+          "text": "rad deliver: RAD_TOKEN_BUDGET is unset or not a positive integer; no token cap applies to this run\n"
+        },
+        {
+          "stream": "stdout",
+          "text": "rad deliver: ok feature=stop-feature waves=2 status=complete\n"
+        }
+      ]
+    },
+    "events": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n{\"feature\":\"stop-feature\",\"type\":\"deliver-started\",\"actor\":\"harness\",\"ts\":\"<TS>\"}\n{\"feature\":\"stop-feature\",\"type\":\"run-prepared\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-started\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1,\"attempt\":1}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-attempt\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1,\"attempt\":1,\"outcome\":\"fail-timeout\"}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-failed\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1,\"action\":\"surface\"}}\n{\"feature\":\"stop-feature\",\"type\":\"deliver-stopped\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"class\":\"needs-decision\",\"reason\":\"fail-timeout\",\"decision\":\"wave 1: fail-timeout — non-deterministic failure (e.g. timeout/orphaned attempt); retry, raise the limit, or split the wave\",\"wave\":1,\"action\":\"surface\",\"outcome\":\"fail-timeout\"}}\n{\"feature\":\"stop-feature\",\"type\":\"deliver-started\",\"actor\":\"harness\",\"ts\":\"<TS>\"}\n{\"feature\":\"stop-feature\",\"type\":\"run-resumed\",\"actor\":\"harness\",\"recordedBy\":\"dev@example.com\",\"ts\":\"<TS>\",\"data\":{\"context\":\"raised the limit\",\"recordedBy\":\"dev@example.com\",\"stop\":{\"class\":\"needs-decision\",\"reason\":\"fail-timeout\",\"wave\":1}}}\n{\"feature\":\"stop-feature\",\"type\":\"run-prepared\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-started\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1,\"attempt\":1}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-attempt\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1,\"attempt\":1,\"outcome\":\"success\"}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-complete\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-started\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":2,\"attempt\":1}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-attempt\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":2,\"attempt\":1,\"outcome\":\"success\"}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-complete\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":2}}\n{\"feature\":\"stop-feature\",\"type\":\"pr-opened\",\"actor\":\"harness\",\"ts\":\"<TS>\"}\n"
+  },
+  "deliver — stop: failed stop cannot be resumed": {
+    "first": {
+      "code": 1,
+      "output": [
+        {
+          "stream": "stderr",
+          "text": "rad deliver: RAD_TOKEN_BUDGET is unset or not a positive integer; no token cap applies to this run\n"
+        },
+        {
+          "stream": "stderr",
+          "text": "rad deliver: failed feature=stop-feature stopped=matrix wave=1 action=abort class=failed decision=\"wave 1: fail-scope — the work is wrong for the plan; fix the plan or the code and re-run\"\n"
+        }
+      ]
+    },
+    "second": {
+      "code": 2,
+      "output": [
+        {
+          "stream": "stderr",
+          "text": "rad deliver: cannot resume a failed stop (fail-scope): wave 1: fail-scope — the work is wrong for the plan; fix the plan or the code and re-run\n"
+        }
+      ]
+    },
+    "events": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n{\"feature\":\"stop-feature\",\"type\":\"deliver-started\",\"actor\":\"harness\",\"ts\":\"<TS>\"}\n{\"feature\":\"stop-feature\",\"type\":\"run-prepared\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-started\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1,\"attempt\":1}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-attempt\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1,\"attempt\":1,\"outcome\":\"fail-scope\"}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-failed\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1,\"action\":\"abort\"}}\n{\"feature\":\"stop-feature\",\"type\":\"deliver-stopped\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"class\":\"failed\",\"reason\":\"fail-scope\",\"decision\":\"wave 1: fail-scope — the work is wrong for the plan; fix the plan or the code and re-run\",\"wave\":1,\"action\":\"abort\",\"outcome\":\"fail-scope\"}}\n"
+  },
+  "deliver worktree — ok run tears the worktree down": {
+    "code": 0,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad deliver: switched the main checkout from rad/demo to main so the worktree can use rad/demo\n"
+      },
+      {
+        "stream": "stderr",
+        "text": "rad deliver: RAD_TOKEN_BUDGET is unset or not a positive integer; no token cap applies to this run\n"
+      },
+      {
+        "stream": "stdout",
+        "text": "rad deliver: ok feature=demo waves=1 status=complete\n"
+      }
+    ],
+    "worktreeDirExists": false,
+    "worktreeEvents": null,
+    "branchEvents": "{\"feature\":\"demo\",\"type\":\"approved\",\"actor\":\"architect@evals.invalid\",\"role\":\"architect\",\"ts\":\"<TS>\",\"recordedBy\":\"architect@evals.invalid\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n{\"feature\":\"demo\",\"type\":\"deliver-started\",\"actor\":\"harness\",\"ts\":\"<TS>\"}\n{\"feature\":\"demo\",\"type\":\"run-prepared\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{}}\n{\"feature\":\"demo\",\"type\":\"wave-started\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1,\"attempt\":1}}\n{\"feature\":\"demo\",\"type\":\"wave-attempt\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1,\"attempt\":1,\"outcome\":\"success\"}}\n{\"feature\":\"demo\",\"type\":\"wave-complete\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1}}\n{\"feature\":\"demo\",\"type\":\"pr-opened\",\"actor\":\"harness\",\"ts\":\"<TS>\"}\n",
+    "branchSubjects": "deliver(demo): record deliver run events\nfeature\napprove: demo\nfixture: seed\n"
+  },
+  "deliver worktree — stop preserves the worktree": {
+    "code": 1,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad deliver: switched the main checkout from rad/demo to main so the worktree can use rad/demo\n"
+      },
+      {
+        "stream": "stderr",
+        "text": "rad deliver: RAD_TOKEN_BUDGET is unset or not a positive integer; no token cap applies to this run\n"
+      },
+      {
+        "stream": "stderr",
+        "text": "rad deliver: worktree preserved at <WT>/demo\nrad deliver: to remove it (from the main checkout): scripts/worktree-lifecycle.sh remove demo <WT>/demo\n"
+      },
+      {
+        "stream": "stderr",
+        "text": "rad deliver: failed feature=demo stopped=matrix wave=1 action=abort worktree=<WT>/demo class=failed decision=\"wave 1: fail-scope — the work is wrong for the plan; fix the plan or the code and re-run\"\n"
+      }
+    ],
+    "worktreeDirExists": true,
+    "worktreeEvents": "{\"feature\":\"demo\",\"type\":\"approved\",\"actor\":\"architect@evals.invalid\",\"role\":\"architect\",\"ts\":\"<TS>\",\"recordedBy\":\"architect@evals.invalid\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n{\"feature\":\"demo\",\"type\":\"deliver-started\",\"actor\":\"harness\",\"ts\":\"<TS>\"}\n{\"feature\":\"demo\",\"type\":\"run-prepared\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{}}\n{\"feature\":\"demo\",\"type\":\"wave-started\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1,\"attempt\":1}}\n{\"feature\":\"demo\",\"type\":\"wave-attempt\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1,\"attempt\":1,\"outcome\":\"fail-scope\"}}\n{\"feature\":\"demo\",\"type\":\"wave-failed\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1,\"action\":\"abort\"}}\n{\"feature\":\"demo\",\"type\":\"deliver-stopped\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"class\":\"failed\",\"reason\":\"fail-scope\",\"decision\":\"wave 1: fail-scope — the work is wrong for the plan; fix the plan or the code and re-run\",\"wave\":1,\"action\":\"abort\",\"outcome\":\"fail-scope\"}}\n",
+    "branchEvents": "{\"feature\":\"demo\",\"type\":\"approved\",\"actor\":\"architect@evals.invalid\",\"role\":\"architect\",\"ts\":\"<TS>\",\"recordedBy\":\"architect@evals.invalid\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n{\"feature\":\"demo\",\"type\":\"deliver-started\",\"actor\":\"harness\",\"ts\":\"<TS>\"}\n{\"feature\":\"demo\",\"type\":\"run-prepared\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{}}\n{\"feature\":\"demo\",\"type\":\"wave-started\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1,\"attempt\":1}}\n{\"feature\":\"demo\",\"type\":\"wave-attempt\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1,\"attempt\":1,\"outcome\":\"fail-scope\"}}\n{\"feature\":\"demo\",\"type\":\"wave-failed\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1,\"action\":\"abort\"}}\n{\"feature\":\"demo\",\"type\":\"deliver-stopped\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"class\":\"failed\",\"reason\":\"fail-scope\",\"decision\":\"wave 1: fail-scope — the work is wrong for the plan; fix the plan or the code and re-run\",\"wave\":1,\"action\":\"abort\",\"outcome\":\"fail-scope\"}}\n",
+    "branchSubjects": "deliver(demo): record stopped run\napprove: demo\nfixture: seed\n"
+  },
+  "deliver worktree — spine throw preserves the worktree": {
+    "code": 1,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad deliver: switched the main checkout from rad/demo to main so the worktree can use rad/demo\n"
+      },
+      {
+        "stream": "stderr",
+        "text": "rad deliver: RAD_TOKEN_BUDGET is unset or not a positive integer; no token cap applies to this run\n"
+      },
+      {
+        "stream": "stderr",
+        "text": "rad deliver: worktree preserved at <WT>/demo\nrad deliver: to remove it (from the main checkout): scripts/worktree-lifecycle.sh remove demo <WT>/demo\n"
+      },
+      {
+        "stream": "stderr",
+        "text": "rad deliver: unexpected error — Cannot read properties of undefined (reading 'outcome')\n"
+      }
+    ],
+    "worktreeDirExists": true,
+    "worktreeEvents": "{\"feature\":\"demo\",\"type\":\"approved\",\"actor\":\"architect@evals.invalid\",\"role\":\"architect\",\"ts\":\"<TS>\",\"recordedBy\":\"architect@evals.invalid\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n{\"feature\":\"demo\",\"type\":\"deliver-started\",\"actor\":\"harness\",\"ts\":\"<TS>\"}\n{\"feature\":\"demo\",\"type\":\"run-prepared\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{}}\n{\"feature\":\"demo\",\"type\":\"wave-started\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1,\"attempt\":1}}\n",
+    "branchEvents": "{\"feature\":\"demo\",\"type\":\"approved\",\"actor\":\"architect@evals.invalid\",\"role\":\"architect\",\"ts\":\"<TS>\",\"recordedBy\":\"architect@evals.invalid\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n",
+    "branchSubjects": "approve: demo\nfixture: seed\n"
+  },
+  "deliver worktree — prepare port failure preserves the worktree": {
+    "code": 1,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad deliver: switched the main checkout from rad/demo to main so the worktree can use rad/demo\n"
+      },
+      {
+        "stream": "stderr",
+        "text": "rad deliver: RAD_TOKEN_BUDGET is unset or not a positive integer; no token cap applies to this run\n"
+      },
+      {
+        "stream": "stderr",
+        "text": "rad deliver: cannot resolve default branch (scripts/get-default-branch.sh exited 9)\n"
+      },
+      {
+        "stream": "stderr",
+        "text": "rad deliver: worktree preserved at <WT>/demo\nrad deliver: to remove it (from the main checkout): scripts/worktree-lifecycle.sh remove demo <WT>/demo\n"
+      }
+    ],
+    "worktreeDirExists": true,
+    "worktreeEvents": "{\"feature\":\"demo\",\"type\":\"approved\",\"actor\":\"architect@evals.invalid\",\"role\":\"architect\",\"ts\":\"<TS>\",\"recordedBy\":\"architect@evals.invalid\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n",
+    "branchEvents": "{\"feature\":\"demo\",\"type\":\"approved\",\"actor\":\"architect@evals.invalid\",\"role\":\"architect\",\"ts\":\"<TS>\",\"recordedBy\":\"architect@evals.invalid\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n",
+    "branchSubjects": "approve: demo\nfixture: seed\n"
+  }
+}
