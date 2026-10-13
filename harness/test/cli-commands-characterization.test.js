@@ -520,6 +520,13 @@ scenario('deliver — setup failure in worktree mode (stub sh fails)', () => obs
 scenario('deliver — unarmed budget warns once', () => observeDeliver({ ctx: withWave }));
 scenario('deliver — malformed budget warns once', () => observeDeliver({ ctx: withWave, env: { RAD_TOKEN_BUDGET: 'abc' } }));
 scenario('deliver — armed budget does not warn', () => observeDeliver({ ctx: withWave, env: { RAD_TOKEN_BUDGET: '200000' } }));
+scenario('deliver — armed budget with a usage-reporting wave does not warn', () => observeDeliver({
+  ctx: { ...withWave, runWave: async () => ({ outcome: 'success', usage: { total: 100 } }) }, env: { RAD_TOKEN_BUDGET: '200000' },
+}));
+scenario('deliver — armed budget with several usage-less waves warns once', () => observeDeliver({
+  argv: [DELIVER_FEATURE, '--model', 'claude-sonnet-5-5'], ctx: withWave,
+  seed: { plan: twoWavePlan() }, env: { RAD_TOKEN_BUDGET: '200000' },
+}));
 
 // Prepare / finish port failures ----------------------------------------------------
 const failingDefaultBranchSh = (file) => (String(file).endsWith('get-default-branch.sh')

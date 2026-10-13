@@ -122,6 +122,28 @@ RAD_USAGE {"input_tokens":10,"output_tokens":5,"cache_read_input_tokens":800,"co
 - **Malformed line** — unparseable JSON, or no usable `input` / `output` /
   `total`, is non-fatal: `usage` is omitted and the wave outcome is unaffected.
 
+#### The `claude` wrapper (`scripts/claude-usage.mjs`)
+
+The `claude` CLI prints its token counts in `--output-format json`, not as a
+`RAD_USAGE` line. `scripts/claude-usage.mjs` runs `claude -p --output-format json`
+(forwarding its own arguments and the prompt on stdin) and rewrites the result:
+
+- **First line** — the wrapper prints `RAD_USAGE {json}` as the first line of
+  stdout, then the result text, in one write. The adapter takes the first match,
+  so a `RAD_USAGE` line inside the agent's own text cannot spoof usage.
+- **Explicit `total`** — `total` is `input_tokens + output_tokens +
+  cache_creation_input_tokens + cache_read_input_tokens`, so cached context
+  counts: a trivial call is already about 27K. `cost` is `total_cost_usd`,
+  carried separately and not part of `total`.
+- **Omitted, never guessed** — a field that is missing or not a finite
+  non-negative number is dropped; with no usable token field the line is omitted.
+- **Honest exit** — the CLI's non-zero status is passed through; an `is_error`
+  result prints the usage line and text and exits 1; a signal or spawn failure
+  exits non-zero with a stderr message.
+- **Transparent on failure** — if stdout is not a `result` object with a string
+  `result`, the CLI's raw stdout and stderr are passed through unchanged with no
+  `RAD_USAGE` line.
+
 A malformed, absent, or unparseable `tasks` block **degrades to omission of the
 key** — it is never a thrown error, and it never by itself produces
 `fail-protocol`. (An entirely missing or empty `WAVE_RESULT` block is a separate
