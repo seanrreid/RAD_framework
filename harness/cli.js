@@ -2668,56 +2668,15 @@ export async function architectureApproveCommand(argv, ctx) {
   const { repoRoot } = ctx;
   const sh = ctx.sh ?? defaultSh;
 
-  let parsed;
-  try {
-    // Reuse the approve parser: same positional + --on-behalf-of/--evidence shape.
-    parsed = parseApproveArgs(argv);
-  } catch (err) {
-    process.stderr.write(`rad architecture-approve: ${err.message}\n`);
-    process.stderr.write('Usage: rad architecture-approve <slug> [--on-behalf-of <name>] [--evidence <text>]\n');
-    return 1;
-  }
-
-  const { feature: slug, onBehalfOf, evidence } = parsed;
-
-  if (!isNonEmpty(slug)) {
-    process.stderr.write('rad architecture-approve: a slug is required\n');
-    process.stderr.write('Usage: rad architecture-approve <slug> [--on-behalf-of <name>] [--evidence <text>]\n');
-    return 1;
-  }
-
-  // `--evidence` is only meaningful in proxy mode, mirroring approve.
-  if (!isNonEmpty(onBehalfOf) && isNonEmpty(evidence)) {
-    process.stderr.write('rad architecture-approve: --evidence is only valid with --on-behalf-of\n');
-    return 1;
-  }
+  const parsed = parseArchitectureApproveArgs(argv);
+  if (!parsed) return 1;
+  const { slug, onBehalfOf, evidence } = parsed;
 
   const store = createGitStateStore({ repoRoot, sh });
 
-  // Resolve the running git user (the recorder).
-  const userResult = sh('git', ['config', 'user.email'], { cwd: repoRoot });
-  const runningUser = (userResult.stdout || '').trim();
-  if (!isNonEmpty(runningUser)) {
-    process.stderr.write('rad architecture-approve: cannot determine git user.email — set your git identity first\n');
-    return 1;
-  }
-
-  // architect identity (role-checked by the store) and recorder provenance.
-  let architect;
-  let recordedBy;
-  let proxy = false;
-  if (isNonEmpty(onBehalfOf)) {
-    proxy = true;
-    if (!isNonEmpty(evidence)) {
-      process.stderr.write('rad architecture-approve: --on-behalf-of requires --evidence (cite where the architect approved)\n');
-      return 1;
-    }
-    architect = onBehalfOf;
-    recordedBy = runningUser;
-  } else {
-    architect = runningUser;
-    recordedBy = runningUser;
-  }
+  const identity = resolveArchitectureIdentity({ sh, repoRoot, onBehalfOf, evidence });
+  if (!identity) return 1;
+  const { architect, recordedBy, proxy } = identity;
 
   const ts = new Date().toISOString();
 
@@ -2734,16 +2693,77 @@ export async function architectureApproveCommand(argv, ctx) {
     return 1;
   }
 
-  if (proxy) {
-    process.stdout.write(
-      `rad architecture-approve: ok slug=${slug} approved-by=${architect} recorded-by=${recordedBy} approved-at=${ts} proxy=true\n`,
-    );
-  } else {
-    process.stdout.write(
-      `rad architecture-approve: ok slug=${slug} approved-by=${architect} approved-at=${ts} proxy=false\n`,
-    );
-  }
+  process.stdout.write(formatArchitectureApproved({ slug, architect, recordedBy, ts, proxy }));
   return 0;
+}
+
+/** Usage line printed after an `architecture-approve` argument refusal. */
+const ARCHITECTURE_APPROVE_USAGE = 'Usage: rad architecture-approve <slug> [--on-behalf-of <name>] [--evidence <text>]\n';
+
+/** Write an `architecture-approve` refusal (message + usage when `withUsage`). */
+function refuseArchitectureApprove(message, withUsage) {
+  process.stderr.write(`rad architecture-approve: ${message}\n`);
+  if (withUsage) process.stderr.write(ARCHITECTURE_APPROVE_USAGE);
+}
+
+/**
+ * Parse and check `architecture-approve` arguments, reusing the approve parser
+ * (same positional + --on-behalf-of/--evidence shape). Writes the refusal and
+ * returns null on any argument error.
+ *
+ * @returns {{ slug: string, onBehalfOf?: string, evidence?: string } | null}
+ */
+function parseArchitectureApproveArgs(argv) {
+  let parsed;
+  try {
+    parsed = parseApproveArgs(argv);
+  } catch (err) {
+    refuseArchitectureApprove(err.message, true);
+    return null;
+  }
+  const { feature: slug, onBehalfOf, evidence } = parsed;
+  if (!isNonEmpty(slug)) {
+    refuseArchitectureApprove('a slug is required', true);
+    return null;
+  }
+  // `--evidence` is only meaningful in proxy mode, mirroring approve.
+  if (!isNonEmpty(onBehalfOf) && isNonEmpty(evidence)) {
+    refuseArchitectureApprove('--evidence is only valid with --on-behalf-of', false);
+    return null;
+  }
+  return { slug, onBehalfOf, evidence };
+}
+
+/**
+ * Resolve the running git user (the recorder) and the architect identity the
+ * store role-checks. Proxy mode (--on-behalf-of) requires --evidence. Writes the
+ * refusal and returns null when the identity is undetermined or evidence is missing.
+ *
+ * @returns {{ architect: string, recordedBy: string, proxy: boolean } | null}
+ */
+function resolveArchitectureIdentity({ sh, repoRoot, onBehalfOf, evidence }) {
+  const userResult = sh('git', ['config', 'user.email'], { cwd: repoRoot });
+  const runningUser = (userResult.stdout || '').trim();
+  if (!isNonEmpty(runningUser)) {
+    refuseArchitectureApprove('cannot determine git user.email — set your git identity first', false);
+    return null;
+  }
+  if (!isNonEmpty(onBehalfOf)) {
+    return { architect: runningUser, recordedBy: runningUser, proxy: false };
+  }
+  if (!isNonEmpty(evidence)) {
+    refuseArchitectureApprove('--on-behalf-of requires --evidence (cite where the architect approved)', false);
+    return null;
+  }
+  return { architect: onBehalfOf, recordedBy: runningUser, proxy: true };
+}
+
+/** The single `architecture-approve` success line (proxy mode also names the recorder). */
+function formatArchitectureApproved({ slug, architect, recordedBy, ts, proxy }) {
+  if (proxy) {
+    return `rad architecture-approve: ok slug=${slug} approved-by=${architect} recorded-by=${recordedBy} approved-at=${ts} proxy=true\n`;
+  }
+  return `rad architecture-approve: ok slug=${slug} approved-by=${architect} approved-at=${ts} proxy=false\n`;
 }
 
 /**
@@ -2912,49 +2932,67 @@ export async function gateCommand(argv, ctx) {
   const { repoRoot } = ctx;
   const sh = ctx.sh ?? defaultSh;
 
-  let parsed;
-  try {
-    parsed = parseGateArgs(argv);
-  } catch (err) {
-    process.stderr.write(`rad gate: ${err.message}\n`);
-    process.stderr.write('Usage: rad gate <feature> <name> [--stdin]\n');
-    return 1;
-  }
-
+  const parsed = parseGateArgsOrRefuse(argv);
+  if (!parsed) return 1;
   const { feature, name, stdin } = parsed;
-
-  if (!isNonEmpty(feature) || !isNonEmpty(name)) {
-    process.stderr.write('rad gate: a feature name and a gate name are required\n');
-    process.stderr.write('Usage: rad gate <feature> <name> [--stdin]\n');
-    return 1;
-  }
 
   let result;
   try {
-    if (stdin) {
-      // Feed the piped JSONL through the SAME pure fold the on-disk path uses.
-      result = evaluateGate(name, readEventsFromStdin());
-    } else {
-      const state = createGitStateStore({ repoRoot, sh });
-      result = await state.gate(feature, name);
-    }
+    result = await evaluateGateSource({ feature, name, stdin, repoRoot, sh });
   } catch (err) {
     // Unknown gate name, missing rules, or stdin read failure — fail closed.
     process.stderr.write(`rad gate: ${err.message}\n`);
     return 1;
   }
 
-  // Structured success/result line (machine-greppable single line).
+  process.stdout.write(formatGateResult({ feature, name, stdin, result }));
+  return result.passed ? 0 : 1;
+}
+
+/** Usage line printed after a `gate` argument refusal. */
+const GATE_USAGE = 'Usage: rad gate <feature> <name> [--stdin]\n';
+
+/**
+ * Parse `gate` arguments and require both the feature and the gate name.
+ * Writes the refusal and returns null on any argument error.
+ *
+ * @returns {{ feature: string, name: string, stdin: boolean } | null}
+ */
+function parseGateArgsOrRefuse(argv) {
+  let parsed;
+  try {
+    parsed = parseGateArgs(argv);
+  } catch (err) {
+    process.stderr.write(`rad gate: ${err.message}\n`);
+    process.stderr.write(GATE_USAGE);
+    return null;
+  }
+  if (!isNonEmpty(parsed.feature) || !isNonEmpty(parsed.name)) {
+    process.stderr.write('rad gate: a feature name and a gate name are required\n');
+    process.stderr.write(GATE_USAGE);
+    return null;
+  }
+  return parsed;
+}
+
+/**
+ * Evaluate the named gate: --stdin feeds the piped JSONL through the SAME pure
+ * fold the on-disk path uses; otherwise the local log via state.gate.
+ */
+async function evaluateGateSource({ feature, name, stdin, repoRoot, sh }) {
+  if (stdin) return evaluateGate(name, readEventsFromStdin());
+  const state = createGitStateStore({ repoRoot, sh });
+  return state.gate(feature, name);
+}
+
+/** The structured, machine-greppable single result line for `rad gate`. */
+function formatGateResult({ feature, name, stdin, result }) {
   const satisfiedBy = result.satisfiedBy
     ? `${result.satisfiedBy.role}:${result.satisfiedBy.actor}`
     : 'none';
-  process.stdout.write(
-    `rad gate: feature=${feature} gate=${name} passed=${result.passed} ` +
+  return `rad gate: feature=${feature} gate=${name} passed=${result.passed} ` +
     `required-role=${result.requiredRole} satisfied-by=${satisfiedBy} ` +
-    `source=${stdin ? 'stdin' : 'log'}\n`,
-  );
-
-  return result.passed ? 0 : 1;
+    `source=${stdin ? 'stdin' : 'log'}\n`;
 }
 
 /**
