@@ -1,7 +1,8 @@
 # Plan: Refactor the Long cli.js Commands Under the Function-Length Ratchet (#252, part 5 of 6)
 Created: 2026-10-13
 Author: architect
-Status: in-progress
+Status: complete
+Completed-At: 2026-10-13T15:56:47.627Z
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-10-13T15:41:21.866Z
 Recorded-By: sean@torchcodelab.com
