@@ -333,6 +333,64 @@ async function evaluateNamedGate(ctx, feature, name) {
 }
 
 /**
+ * Names of features backed by an event log (state directories first) and/or a
+ * plan doc, in first-seen order. Unsafe names and `README.md` are excluded.
+ *
+ * @returns {Set<string>}
+ */
+function collectFeatureNames(repoRoot) {
+  const features = new Set();
+
+  const stateDir = join(repoRoot, '.agents', 'state');
+  if (existsSync(stateDir)) {
+    for (const entry of readdirSync(stateDir, { withFileTypes: true })) {
+      if (
+        entry.isDirectory() &&
+        isSafeFeature(entry.name) &&
+        existsSync(eventsPath(repoRoot, entry.name))
+      ) {
+        features.add(entry.name);
+      }
+    }
+  }
+
+  const plansDir = join(repoRoot, '.agents', 'plans');
+  if (existsSync(plansDir)) {
+    for (const entry of readdirSync(plansDir)) {
+      if (entry.endsWith('.md') && entry !== 'README.md') {
+        const name = entry.replace(/\.md$/, '');
+        if (isSafeFeature(name)) features.add(name);
+      }
+    }
+  }
+
+  return features;
+}
+
+/**
+ * Enumerate features that have an event log and/or a plan doc — no per-branch
+ * fan-out. Returns one descriptor per feature with its derived phase and
+ * whether each backing file is present. Optional filter narrows by phase.
+ *
+ * @param {{ phase?: string }} [filter]
+ */
+function listFeatures(ctx, filter = {}) {
+  const out = [];
+  for (const feature of collectFeatureNames(ctx.repoRoot)) {
+    out.push({
+      feature,
+      phase: phaseFor(ctx, feature),
+      hasLog: existsSync(eventsPath(ctx.repoRoot, feature)),
+      hasPlan: existsSync(planPath(ctx.repoRoot, feature)),
+    });
+  }
+
+  return filter.phase
+    ? out.filter((f) => f.phase === filter.phase)
+    : out;
+}
+
+/**
  * Create a Git StateStore.
  *
  * @param {{ repoRoot: string, sh?: typeof defaultSh, configRoot?: string }} opts
@@ -359,55 +417,7 @@ export function createGitStateStore({
   const phase = (feature) => phaseFor(ctx, feature);
   const plan = (feature) => readPlan(ctx, feature);
   const gate = (feature, name) => evaluateNamedGate(ctx, feature, name);
-
-  /**
-   * Enumerate features that have an event log and/or a plan doc — no per-branch
-   * fan-out. Returns one descriptor per feature with its derived phase and
-   * whether each backing file is present. Optional filter narrows by phase.
-   *
-   * @param {{ phase?: string }} [filter]
-   */
-  function list(filter = {}) {
-    const features = new Set();
-
-    const stateDir = join(repoRoot, '.agents', 'state');
-    if (existsSync(stateDir)) {
-      for (const entry of readdirSync(stateDir, { withFileTypes: true })) {
-        if (
-          entry.isDirectory() &&
-          isSafeFeature(entry.name) &&
-          existsSync(eventsPath(repoRoot, entry.name))
-        ) {
-          features.add(entry.name);
-        }
-      }
-    }
-
-    const plansDir = join(repoRoot, '.agents', 'plans');
-    if (existsSync(plansDir)) {
-      for (const entry of readdirSync(plansDir)) {
-        if (entry.endsWith('.md') && entry !== 'README.md') {
-          const name = entry.replace(/\.md$/, '');
-          if (isSafeFeature(name)) features.add(name);
-        }
-      }
-    }
-
-    const out = [];
-    for (const feature of features) {
-      const featurePhase = phase(feature);
-      out.push({
-        feature,
-        phase: featurePhase,
-        hasLog: existsSync(eventsPath(repoRoot, feature)),
-        hasPlan: existsSync(planPath(repoRoot, feature)),
-      });
-    }
-
-    return filter.phase
-      ? out.filter((f) => f.phase === filter.phase)
-      : out;
-  }
+  const list = (filter) => listFeatures(ctx, filter);
 
   /**
    * Proxy-aware approval. Constructs and appends an `approved` event carrying
