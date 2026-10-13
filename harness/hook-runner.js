@@ -113,6 +113,130 @@ function parseOutcomeToken(stdout) {
 }
 
 /**
+ * Context passed to each hook as positional argv (mirrors
+ * check-tests-present.sh's $1=feature) plus RAD_HOOK_* env for hooks that
+ * prefer named inputs.
+ */
+function hookInputs(point, ctx) {
+  const feature = ctx.feature ?? '';
+  const wave = ctx.wave ?? '';
+  const current = ctx.outcome ?? '';
+  const argv = [String(feature), String(wave), point, String(current)];
+  const env = {
+    RAD_HOOK_FEATURE: String(feature),
+    RAD_HOOK_WAVE: String(wave),
+    RAD_HOOK_POINT: point,
+    RAD_HOOK_OUTCOME: String(current),
+  };
+  return { argv, env };
+}
+
+/** Run one hook through `sh`; a throw folds to a failed run with `threw` set. */
+function invokeHook(sh, hook, argv, env) {
+  let res;
+  let threw = false;
+  try {
+    res = sh(hook, argv, { env });
+  } catch (err) {
+    threw = true;
+    res = { status: 1, stdout: '', stderr: String(err && err.message) };
+  }
+  const status = res && typeof res.status === 'number' ? res.status : 1;
+  const stdout = res && typeof res.stdout === 'string' ? res.stdout : '';
+  return { threw, status, stdout };
+}
+
+/** FAIL-OPEN: record a failure signal but never veto, never change flow. */
+function applyObservedHook(result, hook, { threw, status }) {
+  const ok = !threw && status === 0;
+  result.ran.push({ hook, exit: status, vetoed: false, outcome: null });
+  if (!ok) {
+    result.failures.push({
+      hook,
+      reason: threw ? 'threw' : `exit ${status}`,
+    });
+  }
+}
+
+/** Record a fail-closed veto with the fixed aborting outcome. */
+function recordAbortVeto(result, hook, status, reason) {
+  result.failures.push({ hook, reason });
+  result.ran.push({
+    hook,
+    exit: status,
+    vetoed: true,
+    outcome: VETO_ABORT_OUTCOME,
+  });
+  result.veto = { hook, outcome: VETO_ABORT_OUTCOME };
+}
+
+/**
+ * Veto-capable point: FAIL-CLOSED. A crash, a non-zero exit, or unusable /
+ * out-of-vocabulary stdout all become a veto with the fixed aborting outcome.
+ * A clean exit with a valid in-vocabulary token vetoes with THAT operator-named
+ * outcome; a clean exit whose token is 'success' is an explicit pass.
+ *
+ * @returns {boolean} true when the hook vetoed (the caller stops: first veto wins).
+ */
+function applyVetoHook(result, hook, { threw, status, stdout }) {
+  if (threw || status !== 0) {
+    recordAbortVeto(result, hook, status, threw ? 'threw' : `exit ${status}`);
+    return true;
+  }
+
+  const token = parseOutcomeToken(stdout);
+  if (token === '' || !OUTCOME_VOCAB.has(token)) {
+    // Empty or out-of-vocabulary on a veto point → fail-closed veto.
+    recordAbortVeto(
+      result,
+      hook,
+      status,
+      token === '' ? 'empty-stdout' : `bad-token:${token}`,
+    );
+    return true;
+  }
+
+  if (token === 'success') {
+    // An explicit pass: the hook ran clean and approves the wave.
+    result.ran.push({ hook, exit: status, vetoed: false, outcome: 'success' });
+    return false;
+  }
+
+  // A valid, non-success outcome token is a deliberate operator veto.
+  result.ran.push({ hook, exit: status, vetoed: true, outcome: token });
+  result.veto = { hook, outcome: token };
+  return true;
+}
+
+/** Run every hook registered at `point`, in lexical order. */
+function runHooksAt({ sh, hooksDir, discover }, point, ctx = {}) {
+  const isVeto = VETO_POINTS.has(point);
+  const isObserve = OBSERVE_POINTS.has(point);
+
+  const result = { point, ran: [], veto: null, failures: [] };
+
+  // An unknown point and an absent hooks dir both fold to a clean no-op: the
+  // runner observes, it does not police the spine's point vocabulary.
+  if (!isVeto && !isObserve) return result;
+
+  const scripts = discover(hooksDir, point);
+  if (scripts.length === 0) return result;
+
+  const { argv, env } = hookInputs(point, ctx);
+
+  for (const hook of scripts) {
+    const run = invokeHook(sh, hook, argv, env);
+    if (isObserve) {
+      applyObservedHook(result, hook, run);
+      continue;
+    }
+    if (applyVetoHook(result, hook, run)) break; // first-veto-wins
+  }
+
+  return result;
+}
+
+/**
  * Create a hook runner.
  *
  * @param {Object} [opts]
@@ -125,6 +249,8 @@ function parseOutcomeToken(stdout) {
  * @param {Function} [opts.discover] - `(hooksDir, point) => string[]`; injectable
  *   discovery so tests avoid real-FS coupling. Defaults to {@link defaultDiscover}.
  * @returns {{ runHooks: (point: string, ctx: Object) => Object }}
+ *   `runHooks` returns `{ point, ran, veto, failures }`: a neutral result
+ *   (`ran: [], veto: null, failures: []`) when no hooks exist.
  */
 export function createHookRunner({
   sh,
@@ -132,120 +258,8 @@ export function createHookRunner({
   hooksDir = DEFAULT_HOOKS_DIR,
   discover = defaultDiscover,
 } = {}) {
-  /**
-   * Run every hook registered at `point`, in lexical order.
-   *
-   * @param {string} point - one of the veto-capable or observe-only points.
-   * @param {Object} [ctx]
-   * @param {string} [ctx.feature]
-   * @param {(number|string)} [ctx.wave]
-   * @param {string} [ctx.outcome] - the wave's current outcome (passed as $4).
-   * @returns {{ point: string, ran: Array, veto: (Object|null), failures: Array }}
-   *   A neutral result (`ran: [], veto: null, failures: []`) when no hooks exist.
-   */
-  function runHooks(point, ctx = {}) {
-    const isVeto = VETO_POINTS.has(point);
-    const isObserve = OBSERVE_POINTS.has(point);
-
-    const result = { point, ran: [], veto: null, failures: [] };
-
-    // An unknown point and an absent hooks dir both fold to a clean no-op: the
-    // runner observes, it does not police the spine's point vocabulary.
-    if (!isVeto && !isObserve) return result;
-
-    const scripts = discover(hooksDir, point);
-    if (scripts.length === 0) return result;
-
-    // Context passed to each hook as positional argv (mirrors
-    // check-tests-present.sh's $1=feature) plus RAD_HOOK_* env for hooks that
-    // prefer named inputs.
-    const feature = ctx.feature ?? '';
-    const wave = ctx.wave ?? '';
-    const current = ctx.outcome ?? '';
-    const argv = [String(feature), String(wave), point, String(current)];
-    const env = {
-      RAD_HOOK_FEATURE: String(feature),
-      RAD_HOOK_WAVE: String(wave),
-      RAD_HOOK_POINT: point,
-      RAD_HOOK_OUTCOME: String(current),
-    };
-
-    for (const hook of scripts) {
-      let res;
-      let threw = false;
-      try {
-        res = sh(hook, argv, { env });
-      } catch (err) {
-        threw = true;
-        res = { status: 1, stdout: '', stderr: String(err && err.message) };
-      }
-      const status = res && typeof res.status === 'number' ? res.status : 1;
-      const stdout = res && typeof res.stdout === 'string' ? res.stdout : '';
-
-      if (isObserve) {
-        // FAIL-OPEN: record a failure signal but never veto, never change flow.
-        const ok = !threw && status === 0;
-        result.ran.push({ hook, exit: status, vetoed: false, outcome: null });
-        if (!ok) {
-          result.failures.push({
-            hook,
-            reason: threw ? 'threw' : `exit ${status}`,
-          });
-        }
-        continue;
-      }
-
-      // ── veto-capable point: FAIL-CLOSED ──────────────────────────────────
-      // A crash, a non-zero exit, or unusable/out-of-vocabulary stdout all
-      // become a veto with the fixed aborting outcome. A clean exit with a
-      // valid in-vocabulary token vetoes with THAT operator-named outcome;
-      // a clean exit whose token is 'success' is an explicit pass (no veto).
-      if (threw || status !== 0) {
-        const reason = threw ? 'threw' : `exit ${status}`;
-        result.failures.push({ hook, reason });
-        result.ran.push({
-          hook,
-          exit: status,
-          vetoed: true,
-          outcome: VETO_ABORT_OUTCOME,
-        });
-        result.veto = { hook, outcome: VETO_ABORT_OUTCOME };
-        break; // first-veto-wins (AC short-circuit)
-      }
-
-      const token = parseOutcomeToken(stdout);
-      if (token === '' || !OUTCOME_VOCAB.has(token)) {
-        // Empty or out-of-vocabulary on a veto point → fail-closed veto.
-        result.failures.push({
-          hook,
-          reason: token === '' ? 'empty-stdout' : `bad-token:${token}`,
-        });
-        result.ran.push({
-          hook,
-          exit: status,
-          vetoed: true,
-          outcome: VETO_ABORT_OUTCOME,
-        });
-        result.veto = { hook, outcome: VETO_ABORT_OUTCOME };
-        break;
-      }
-
-      if (token === 'success') {
-        // An explicit pass: the hook ran clean and approves the wave.
-        result.ran.push({ hook, exit: status, vetoed: false, outcome: 'success' });
-        continue;
-      }
-
-      // A valid, non-success outcome token is a deliberate operator veto.
-      result.ran.push({ hook, exit: status, vetoed: true, outcome: token });
-      result.veto = { hook, outcome: token };
-      break; // first-veto-wins
-    }
-
-    return result;
-  }
-
-  return { runHooks };
+  const deps = { sh, hooksDir, discover };
+  return { runHooks: (point, ctx) => runHooksAt(deps, point, ctx) };
 }
 
 export { OUTCOME_VOCAB, VETO_POINTS, OBSERVE_POINTS, VETO_ABORT_OUTCOME };

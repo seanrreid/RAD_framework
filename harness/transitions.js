@@ -52,22 +52,10 @@ const EVALUATOR_TYPES = new Set([
  * @property {import('./events.js').Event[]} history - the feature's events so far
  */
 
-/**
- * Validate that `event` is a legal next transition given `currentState`.
- * Returns normally (void) on a legal move; throws {@link TransitionError} on an
- * illegal one.
- *
- * @param {import('./events.js').Event} event - the event about to be appended
- * @param {CurrentState} currentState - state derived from the existing history
- * @returns {void}
- */
-export function validateTransition(event, currentState) {
-  const history = (currentState && currentState.history) || [];
-  const phase = phaseOf(history);
-
-  // (a) No event may follow a terminal done/delivered state — except a
-  // re-approval after delivery (#228): `approved` is legal when delivered, and
-  // rules (d) fingerprint and (e) role still apply to it. Never after `done`.
+/** (a) No event may follow a terminal done/delivered state — except a
+ * re-approval after delivery (#228): `approved` is legal when delivered, and
+ * rules (d) fingerprint and (e) role still apply to it. Never after `done`. */
+function checkAfterTerminal(event, phase) {
   const isReapprovalAfterDelivery = event.type === 'approved' && phase === DELIVERED_PHASE;
   if (TERMINAL_PHASES.has(phase) && !isReapprovalAfterDelivery) {
     throw new TransitionError(
@@ -75,55 +63,64 @@ export function validateTransition(event, currentState) {
       { event, rule: 'after-terminal' },
     );
   }
+}
 
-  // (b) wave-complete is only legal while in-progress.
+/** (b) wave-complete is only legal while in-progress. */
+function checkWaveComplete(event, phase) {
   if (event.type === 'wave-complete' && phase !== 'in-progress') {
     throw new TransitionError(
       `Cannot record 'wave-complete' when phase is '${phase}' (expected 'in-progress')`,
       { event, rule: 'wave-complete-not-in-progress' },
     );
   }
+}
 
-  // (c) revision-requested requires preceding reviewer/verifier output.
-  if (event.type === 'revision-requested') {
-    const hasEvaluatorOutput = history.some((e) => EVALUATOR_TYPES.has(e.type));
-    if (!hasEvaluatorOutput) {
-      throw new TransitionError(
-        "Cannot request revision without preceding evaluator output",
-        { event, rule: 'revision-without-evaluator' },
-      );
-    }
+/** (c) revision-requested requires preceding reviewer/verifier output. */
+function checkRevisionRequested(event, history) {
+  if (event.type !== 'revision-requested') return;
+  const hasEvaluatorOutput = history.some((e) => EVALUATOR_TYPES.has(e.type));
+  if (!hasEvaluatorOutput) {
+    throw new TransitionError(
+      "Cannot request revision without preceding evaluator output",
+      { event, rule: 'revision-without-evaluator' },
+    );
   }
+}
 
-  // (d) A duplicate approved would silently shadow an earlier authority — but a
-  // RE-attestation after a plan edit is legitimate. Block a second `approved`
-  // ONLY when its plan fingerprint EQUALS the most recent prior approved's
-  // fingerprint (a true duplicate); ALLOW it when the fingerprints differ (the
-  // approver is re-attesting a changed plan body). Fail-closed for the legacy
-  // case: if EITHER fingerprint is absent/undefined, preserve today's behavior
-  // and block — we cannot prove the bodies differ, so we treat it as a duplicate.
-  if (event.type === 'approved') {
-    const priorApproved = history.filter((e) => e.type === 'approved');
-    if (priorApproved.length > 0) {
-      const prior = priorApproved[priorApproved.length - 1];
-      const priorFp = prior.data && prior.data.fingerprint;
-      const nextFp = event.data && event.data.fingerprint;
-      const differs =
-        priorFp !== undefined && nextFp !== undefined && nextFp !== priorFp;
-      if (!differs) {
-        throw new TransitionError(
-          'Cannot append a duplicate approved event — an approval already exists',
-          { event, rule: 'duplicate-approved' },
-        );
-      }
-    }
+/**
+ * (d) A duplicate approved would silently shadow an earlier authority — but a
+ * RE-attestation after a plan edit is legitimate. Block a second `approved`
+ * ONLY when its plan fingerprint EQUALS the most recent prior approved's
+ * fingerprint (a true duplicate); ALLOW it when the fingerprints differ (the
+ * approver is re-attesting a changed plan body). Fail-closed for the legacy
+ * case: if EITHER fingerprint is absent/undefined, preserve today's behavior
+ * and block — we cannot prove the bodies differ, so we treat it as a duplicate.
+ */
+function checkDuplicateApproved(event, history) {
+  if (event.type !== 'approved') return;
+  const priorApproved = history.filter((e) => e.type === 'approved');
+  if (priorApproved.length === 0) return;
+  const prior = priorApproved[priorApproved.length - 1];
+  const priorFp = prior.data && prior.data.fingerprint;
+  const nextFp = event.data && event.data.fingerprint;
+  const differs =
+    priorFp !== undefined && nextFp !== undefined && nextFp !== priorFp;
+  if (!differs) {
+    throw new TransitionError(
+      'Cannot append a duplicate approved event — an approval already exists',
+      { event, rule: 'duplicate-approved' },
+    );
   }
+}
 
-  // (e) An approved or architecture-approved event must carry a frozen role —
-  // recordApproval / recordArchitectureApproved are the canonical constructors and
-  // always stamp role at write-time. A role-less such event means write-time
-  // authority was bypassed (e.g. a direct append() call) — reject it as an illegal
-  // transition.
+/**
+ * (e) An approved or architecture-approved event must carry a frozen role —
+ * recordApproval / recordArchitectureApproved are the canonical constructors and
+ * always stamp role at write-time. A role-less such event means write-time
+ * authority was bypassed (e.g. a direct append() call) — reject it as an illegal
+ * transition.
+ */
+function checkApprovedHasRole(event) {
   if (
     (event.type === 'approved' || event.type === 'architecture-approved') &&
     !event.role
@@ -133,4 +130,24 @@ export function validateTransition(event, currentState) {
       { event, rule: 'approved-missing-role' },
     );
   }
+}
+
+/**
+ * Validate that `event` is a legal next transition given `currentState`.
+ * Returns normally (void) on a legal move; throws {@link TransitionError} on an
+ * illegal one. Rules run in order (a)-(e); the first throw wins.
+ *
+ * @param {import('./events.js').Event} event - the event about to be appended
+ * @param {CurrentState} currentState - state derived from the existing history
+ * @returns {void}
+ */
+export function validateTransition(event, currentState) {
+  const history = (currentState && currentState.history) || [];
+  const phase = phaseOf(history);
+
+  checkAfterTerminal(event, phase);
+  checkWaveComplete(event, phase);
+  checkRevisionRequested(event, history);
+  checkDuplicateApproved(event, history);
+  checkApprovedHasRole(event);
 }
