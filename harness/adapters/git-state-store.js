@@ -243,6 +243,342 @@ function parsePlan(text) {
 }
 
 /**
+ * Per-store context threaded through the hoisted operations. `evaluateGate` is
+ * the cached gate evaluator (injected, or resolved lazily at most once).
+ *
+ * @typedef {{ repoRoot: string, sh: typeof defaultSh, roleConfigRoot: string, evaluateGate?: Function }} StoreContext
+ */
+
+/** Read + parse a feature's event log (crash-tolerant). */
+function readHistory(ctx, feature) {
+  assertSafeFeature(feature);
+  return readEvents(eventsPath(ctx.repoRoot, feature));
+}
+
+/**
+ * Append one event. Validates the transition against the current state
+ * (derived by reduce over existing history) BEFORE writing — an illegal move
+ * throws TransitionError and nothing is written. Stamps `ts` if absent, but
+ * accepts a caller-injected `ts` (the store never overrides one the caller
+ * passed).
+ */
+function appendEvent(ctx, event) {
+  if (!event || typeof event !== 'object') {
+    throw new TypeError('append(event): event must be an object');
+  }
+  const { feature } = event;
+  if (!feature) throw new Error('append(event): event.feature is required');
+  assertSafeFeature(feature);
+  if (!event.type) throw new Error('append(event): event.type is required');
+  if (!event.actor) throw new Error('append(event): event.actor is required');
+
+  const existing = readHistory(ctx, feature);
+  // reduce derives the current state; transition validation reads its history.
+  reduce(existing); // pure fold (also asserts the history shape)
+  // The hook lifecycle events (hook-observed / hook-veto / hook-failed) are
+  // in-progress observations recorded alongside wave events. They carry a
+  // provenance payload on `event.data` ({ point, hook, outcome, source:'hook' })
+  // and are permitted exactly like wave-attempt/wave-failed — validateTransition
+  // gates illegal MOVES (post-terminal, duplicate approval, …), not a type
+  // allowlist, so these three pass while no other event is loosened.
+  validateTransition(event, { history: existing });
+
+  // Only reached on a legal transition — now safe to persist.
+  const stamped = { ...event, ts: event.ts ?? new Date().toISOString() };
+
+  const file = eventsPath(ctx.repoRoot, feature);
+  mkdirSync(dirname(file), { recursive: true });
+  appendFileSync(file, JSON.stringify(stamped) + '\n', 'utf8');
+}
+
+/** Derived current phase (pure fold over the log). */
+function phaseFor(ctx, feature) {
+  return phaseOf(readHistory(ctx, feature));
+}
+
+/** Parse the feature's plan doc structured sections, or null if none. */
+function readPlan(ctx, feature) {
+  assertSafeFeature(feature);
+  const file = planPath(ctx.repoRoot, feature);
+  if (!existsSync(file)) return null;
+  return parsePlan(readFileSync(file, 'utf8'));
+}
+
+/**
+ * Evaluate a named gate. Delegates the predicate to evaluateGate() over the
+ * event history — a pure fold over the frozen event log. No shell-outs are
+ * performed here; all authority (role verification) is established at
+ * WRITE-TIME by recordApproval (which calls check-role.sh and freezes the
+ * verified role into the event). Gate evaluation reads only what is already
+ * frozen in the log.
+ *
+ * TRANSITIONAL NOTE — doc-Status authority (check-plan-approved.sh):
+ *   The branch-tip doc-Status check (scripts/check-plan-approved.sh) is a
+ *   complementary guardrail that was previously performed here at read-time.
+ *   It is now run by the Claude deliver-gate hook
+ *   (scripts/deliver-gate-hook.mjs) before /team:rad-deliver. It must NOT be
+ *   re-introduced into this function; doing so would couple the pure gate
+ *   fold to external filesystem/git state.
+ *
+ * Async: the gate-rule evaluator is loaded lazily (it pulls in the YAML
+ * policy parser), so callers `await state.gate(...)`. The dynamic import only
+ * happens the first time a gate is evaluated on a store without an injected
+ * `evaluateGate`.
+ */
+async function evaluateNamedGate(ctx, feature, name) {
+  if (!ctx.evaluateGate) {
+    ({ evaluateGate: ctx.evaluateGate } = await import('../gates.js'));
+  }
+  return ctx.evaluateGate(name, readHistory(ctx, feature));
+}
+
+/**
+ * Names of features backed by an event log (state directories first) and/or a
+ * plan doc, in first-seen order. Unsafe names and `README.md` are excluded.
+ *
+ * @returns {Set<string>}
+ */
+function collectFeatureNames(repoRoot) {
+  const features = new Set();
+
+  const stateDir = join(repoRoot, '.agents', 'state');
+  if (existsSync(stateDir)) {
+    for (const entry of readdirSync(stateDir, { withFileTypes: true })) {
+      if (
+        entry.isDirectory() &&
+        isSafeFeature(entry.name) &&
+        existsSync(eventsPath(repoRoot, entry.name))
+      ) {
+        features.add(entry.name);
+      }
+    }
+  }
+
+  const plansDir = join(repoRoot, '.agents', 'plans');
+  if (existsSync(plansDir)) {
+    for (const entry of readdirSync(plansDir)) {
+      if (entry.endsWith('.md') && entry !== 'README.md') {
+        const name = entry.replace(/\.md$/, '');
+        if (isSafeFeature(name)) features.add(name);
+      }
+    }
+  }
+
+  return features;
+}
+
+/**
+ * Enumerate features that have an event log and/or a plan doc — no per-branch
+ * fan-out. Returns one descriptor per feature with its derived phase and
+ * whether each backing file is present. Optional filter narrows by phase.
+ *
+ * @param {{ phase?: string }} [filter]
+ */
+function listFeatures(ctx, filter = {}) {
+  const out = [];
+  for (const feature of collectFeatureNames(ctx.repoRoot)) {
+    out.push({
+      feature,
+      phase: phaseFor(ctx, feature),
+      hasLog: existsSync(eventsPath(ctx.repoRoot, feature)),
+      hasPlan: existsSync(planPath(ctx.repoRoot, feature)),
+    });
+  }
+
+  return filter.phase
+    ? out.filter((f) => f.phase === filter.phase)
+    : out;
+}
+
+/**
+ * Verify role at write-time via check-role.sh. `actor` is the identity whose
+ * authority is being frozen — in proxy mode the runner is not the one checked.
+ * Throws (so the caller writes nothing) on a non-zero exit; `label` names the
+ * calling operation in the error text.
+ */
+function requireRole(ctx, label, requiredRole, actor) {
+  const roleScript = join(ctx.repoRoot, 'scripts', 'check-role.sh');
+  const roleCheck = ctx.sh(roleScript, [requiredRole, ctx.roleConfigRoot, actor], {
+    cwd: ctx.repoRoot,
+  });
+  if (roleCheck.status !== 0) {
+    throw new Error(
+      `${label}: role check failed — actor '${actor}' does not hold role '${requiredRole}': ` +
+        `${(roleCheck.stdout || roleCheck.stderr || '').trim()}`,
+    );
+  }
+}
+
+/**
+ * Build the `approved` event. Attach data only for the fields actually provided,
+ * so a bare approval carries no undefined-valued keys (the public shape is the
+ * key's ABSENCE). `waivers` is frozen only when non-empty.
+ */
+function buildApprovalEvent({ feature, actor, requiredRole, recordedBy, ts, evidence, fingerprint, waivers, highRiskPattern }) {
+  /** @type {import('../events.js').Event} */
+  const event = {
+    feature,
+    type: 'approved',
+    actor,
+    role: requiredRole,
+    ts: ts ?? new Date().toISOString(),
+  };
+  if (recordedBy !== undefined) event.recordedBy = recordedBy;
+  const data = {};
+  if (evidence !== undefined) data.evidence = evidence;
+  if (fingerprint !== undefined) data.fingerprint = fingerprint;
+  if (waivers !== undefined && waivers.length > 0) data.waivers = waivers;
+  if (highRiskPattern !== undefined) data.highRiskPattern = highRiskPattern;
+  if (Object.keys(data).length > 0) event.data = data;
+  return event;
+}
+
+/**
+ * Proxy-aware approval. Constructs and appends an `approved` event carrying
+ * both `actor` (the architect whose judgment it is) and `recordedBy` (whoever
+ * physically ran it). The gate is satisfied by `actor`; `recordedBy` preserves
+ * the audit trail (design "Approval without a bottleneck").
+ *
+ * Write-time authority: check-role.sh is invoked ONCE against the `actor`
+ * identity (in proxy mode this is the --on-behalf-of architect, not the
+ * physical runner). On a non-zero exit the call throws and nothing is written.
+ * The verified role is frozen into the event's `role` field so gate() reads
+ * authority from the immutable log — no repeat shell-outs required at read time.
+ *
+ * The optional `fingerprint` (a hash of the approved plan body, from
+ * harness/plan-fingerprint.js) is attested into the event's `data` when
+ * provided — it records WHICH plan body this approval covers, enabling the
+ * re-attestation transition rule to distinguish a true duplicate from a
+ * legitimate re-approval after a plan edit. It is data-only (the fold ignores it).
+ *
+ * The optional `waivers` (the `{id, justification}` pairs that
+ * scripts/check-approval-blockers.sh reported as applied) are frozen into
+ * `data.waivers` verbatim ONLY when non-empty — omitted or `[]` yields an event
+ * identical to one recorded without the key. A non-array or malformed entry
+ * throws before anything is written (never silently dropped).
+ *
+ * The optional `highRiskPattern` (the NON-DEFAULT effective high-risk pattern
+ * scripts/check-approval-blockers.sh reported via its `high-risk-pattern` tag
+ * line) is frozen into `data.highRiskPattern` verbatim ONLY when present —
+ * omitted yields an event identical to one recorded without the key. A present
+ * value that is not a non-empty string throws before anything is written.
+ *
+ * @param {{ feature: string, actor: string, requiredRole?: string, recordedBy?: string, ts?: string, evidence?: Object, fingerprint?: string, waivers?: Array<{id: string, justification: string}>, highRiskPattern?: string }} a
+ */
+function recordApprovalFor(ctx, { feature, actor, requiredRole = 'architect', recordedBy, ts, evidence, fingerprint, waivers, highRiskPattern } = {}) {
+  if (!feature) throw new Error('recordApproval: feature is required');
+  if (!actor) throw new Error('recordApproval: actor is required');
+  assertValidWaivers(waivers);
+  assertValidHighRiskPattern(highRiskPattern);
+
+  requireRole(ctx, 'recordApproval', requiredRole, actor);
+  appendEvent(
+    ctx,
+    buildApprovalEvent({ feature, actor, requiredRole, recordedBy, ts, evidence, fingerprint, waivers, highRiskPattern }),
+  );
+}
+
+/**
+ * Architecture-review sign-off (audit-only). Records an `architecture-approved`
+ * event into the single reserved `_architecture` project log — it belongs to no
+ * one feature, so its `feature` is the fixed literal `'_architecture'` (admitted
+ * by isSafeFeature's explicit exception). The event establishes no phase and
+ * carries no outcome (audit-only; see events.js) — it has NO rule in gates.yaml
+ * and never gates deliver.
+ *
+ * Write-time authority mirrors recordApproval exactly: check-role.sh is invoked
+ * ONCE against the `onBehalfOf` architect identity (NOT the physical runner / git
+ * machine identity), and the verified role is frozen into the event's `role`
+ * field. On a non-zero exit the call throws and nothing is written. The physical
+ * runner is preserved as `recordedBy` for the audit trail.
+ *
+ * @param {{ slug: string, onBehalfOf: string, requiredRole?: string, recordedBy?: string, evidence?: Object, ts?: string }} a
+ *   - slug:       the feature/work slug the architecture review covers (recorded in data)
+ *   - onBehalfOf: the architect identity whose authority is being frozen (role-checked)
+ *   - recordedBy: who physically ran it (proxy provenance); defaults to onBehalfOf
+ */
+function recordArchitectureApprovedFor(
+  ctx,
+  { slug, onBehalfOf, requiredRole = 'architect', recordedBy, evidence, ts } = {},
+) {
+  if (!slug) throw new Error('recordArchitectureApproved: slug is required');
+  if (!onBehalfOf) {
+    throw new Error('recordArchitectureApproved: onBehalfOf is required');
+  }
+
+  requireRole(ctx, 'recordArchitectureApproved', requiredRole, onBehalfOf);
+
+  const data = { slug };
+  if (evidence !== undefined) data.evidence = evidence;
+
+  /** @type {import('../events.js').Event} */
+  const event = {
+    feature: '_architecture',
+    type: 'architecture-approved',
+    actor: onBehalfOf,
+    role: requiredRole,
+    ts: ts ?? new Date().toISOString(),
+    data,
+  };
+  event.recordedBy = recordedBy !== undefined ? recordedBy : onBehalfOf;
+
+  appendEvent(ctx, event);
+}
+
+/**
+ * Resolve the running git identity (user.email) at write-time. This is the
+ * provenance frozen into an ownership event — the actor who physically holds
+ * (or releases) the single-writer lock. Mirrors how cli.js resolves the runner
+ * for recordApproval (the recorder). Throws (refuse before writing) when no git
+ * identity is configured, since an ownership event with no holder is useless.
+ *
+ * @returns {string} the resolved git user.email
+ */
+function resolveGitIdentity(ctx) {
+  const res = ctx.sh('git', ['config', 'user.email'], { cwd: ctx.repoRoot });
+  const identity = (res.stdout || '').trim();
+  if (!identity) {
+    throw new Error(
+      'cannot determine git user.email — set your git identity before claiming/releasing the lock',
+    );
+  }
+  return identity;
+}
+
+/**
+ * Record a single-writer LOCK CLAIM (`owner-claimed`) or RELEASE
+ * (`owner-released`). The branch IS the lock: the holder provenance is frozen
+ * ONCE at write-time (the explicit actor, else the resolved git identity),
+ * mirroring recordApproval's write-time freeze, and carried in `event.data`
+ * (the data-only ownership-event contract in events.js — these types establish
+ * no phase and carry no outcome).
+ *
+ * This is NOT a gate: it appends an event the existing fold/reduce already
+ * accumulates. No branch is added to evaluateGate; the lock is expressed purely
+ * as appended events. `append` validates the transition before writing, so a
+ * claim on a terminal feature (delivered/done) throws and nothing is written.
+ *
+ * @param {'owner-claimed'|'owner-released'} type
+ * @param {string} label - calling operation name, for error text
+ * @param {{ feature: string, actor?: string, ts?: string }} a
+ *   - actor: optional explicit holder identity; defaults to the resolved git user
+ * @returns {{ holder: string, ts: string }} the frozen holder + timestamp
+ */
+function recordOwnerEvent(ctx, type, label, { feature, actor, ts } = {}) {
+  if (!feature) throw new Error(`${label}: feature is required`);
+  assertSafeFeature(feature);
+
+  const holder = isNonEmptyString(actor) ? actor : resolveGitIdentity(ctx);
+  const stampedTs = ts ?? new Date().toISOString();
+
+  /** @type {import('../events.js').Event} */
+  const event = { feature, type, actor: holder, ts: stampedTs, data: { holder } };
+
+  appendEvent(ctx, event);
+  return { holder, ts: stampedTs };
+}
+
+/**
  * Create a Git StateStore.
  *
  * @param {{ repoRoot: string, sh?: typeof defaultSh, configRoot?: string }} opts
@@ -262,381 +598,19 @@ export function createGitStateStore({
   evaluateGate,
 } = {}) {
   if (!repoRoot) throw new Error('createGitStateStore: repoRoot is required');
-  const roleConfigRoot = configRoot ?? repoRoot;
-
-  // Resolve the gate evaluator lazily so the store loads without js-yaml: the
-  // dynamic import of gates.js (which pulls in js-yaml, the one runtime dep)
-  // only happens the first time gate() is actually called. Injectable (the
-  // `evaluateGate` option) for tests that exercise gate() without the dep.
-  let cachedEvaluateGate = evaluateGate;
-  async function resolveEvaluateGate() {
-    if (!cachedEvaluateGate) {
-      ({ evaluateGate: cachedEvaluateGate } = await import('../gates.js'));
-    }
-    return cachedEvaluateGate;
-  }
-
-  /** Read + parse a feature's event log (crash-tolerant). */
-  function history(feature) {
-    assertSafeFeature(feature);
-    return readEvents(eventsPath(repoRoot, feature));
-  }
-
-  /**
-   * Append one event. Validates the transition against the current state
-   * (derived by reduce over existing history) BEFORE writing — an illegal move
-   * throws TransitionError and nothing is written. Stamps `ts` if absent, but
-   * accepts a caller-injected `ts` (the store never overrides one the caller
-   * passed).
-   */
-  function append(event) {
-    if (!event || typeof event !== 'object') {
-      throw new TypeError('append(event): event must be an object');
-    }
-    const { feature } = event;
-    if (!feature) throw new Error('append(event): event.feature is required');
-    assertSafeFeature(feature);
-    if (!event.type) throw new Error('append(event): event.type is required');
-    if (!event.actor) throw new Error('append(event): event.actor is required');
-
-    const existing = history(feature);
-    // reduce derives the current state; transition validation reads its history.
-    reduce(existing); // pure fold (also asserts the history shape)
-    // The hook lifecycle events (hook-observed / hook-veto / hook-failed) are
-    // in-progress observations recorded alongside wave events. They carry a
-    // provenance payload on `event.data` ({ point, hook, outcome, source:'hook' })
-    // and are permitted exactly like wave-attempt/wave-failed — validateTransition
-    // gates illegal MOVES (post-terminal, duplicate approval, …), not a type
-    // allowlist, so these three pass while no other event is loosened.
-    validateTransition(event, { history: existing });
-
-    // Only reached on a legal transition — now safe to persist.
-    const stamped = { ...event, ts: event.ts ?? new Date().toISOString() };
-
-    const file = eventsPath(repoRoot, feature);
-    mkdirSync(dirname(file), { recursive: true });
-    appendFileSync(file, JSON.stringify(stamped) + '\n', 'utf8');
-  }
-
-  /** Derived current phase (pure fold over the log). */
-  function phase(feature) {
-    return phaseOf(history(feature));
-  }
-
-  /** Parse the feature's plan doc structured sections, or null if none. */
-  function plan(feature) {
-    assertSafeFeature(feature);
-    const file = planPath(repoRoot, feature);
-    if (!existsSync(file)) return null;
-    return parsePlan(readFileSync(file, 'utf8'));
-  }
-
-  /**
-   * Evaluate a named gate. Delegates the predicate to evaluateGate() over the
-   * event history — a pure fold over the frozen event log. No shell-outs are
-   * performed here; all authority (role verification) is established at
-   * WRITE-TIME by recordApproval (which calls check-role.sh and freezes the
-   * verified role into the event). Gate evaluation reads only what is already
-   * frozen in the log.
-   *
-   * TRANSITIONAL NOTE — doc-Status authority (check-plan-approved.sh):
-   *   The branch-tip doc-Status check (scripts/check-plan-approved.sh) is a
-   *   complementary guardrail that was previously performed here at read-time.
-   *   It is now run by the Claude deliver-gate hook
-   *   (scripts/deliver-gate-hook.mjs) before /team:rad-deliver. It must NOT be
-   *   re-introduced into this function; doing so would couple the pure gate
-   *   fold to external filesystem/git state.
-   *
-   * Async: the gate-rule evaluator is loaded lazily (it pulls in the YAML
-   * policy parser), so callers `await state.gate(...)`.
-   */
-  async function gate(feature, name) {
-    const evaluate = await resolveEvaluateGate();
-    return evaluate(name, history(feature));
-  }
-
-  /**
-   * Enumerate features that have an event log and/or a plan doc — no per-branch
-   * fan-out. Returns one descriptor per feature with its derived phase and
-   * whether each backing file is present. Optional filter narrows by phase.
-   *
-   * @param {{ phase?: string }} [filter]
-   */
-  function list(filter = {}) {
-    const features = new Set();
-
-    const stateDir = join(repoRoot, '.agents', 'state');
-    if (existsSync(stateDir)) {
-      for (const entry of readdirSync(stateDir, { withFileTypes: true })) {
-        if (
-          entry.isDirectory() &&
-          isSafeFeature(entry.name) &&
-          existsSync(eventsPath(repoRoot, entry.name))
-        ) {
-          features.add(entry.name);
-        }
-      }
-    }
-
-    const plansDir = join(repoRoot, '.agents', 'plans');
-    if (existsSync(plansDir)) {
-      for (const entry of readdirSync(plansDir)) {
-        if (entry.endsWith('.md') && entry !== 'README.md') {
-          const name = entry.replace(/\.md$/, '');
-          if (isSafeFeature(name)) features.add(name);
-        }
-      }
-    }
-
-    const out = [];
-    for (const feature of features) {
-      const featurePhase = phase(feature);
-      out.push({
-        feature,
-        phase: featurePhase,
-        hasLog: existsSync(eventsPath(repoRoot, feature)),
-        hasPlan: existsSync(planPath(repoRoot, feature)),
-      });
-    }
-
-    return filter.phase
-      ? out.filter((f) => f.phase === filter.phase)
-      : out;
-  }
-
-  /**
-   * Proxy-aware approval. Constructs and appends an `approved` event carrying
-   * both `actor` (the architect whose judgment it is) and `recordedBy` (whoever
-   * physically ran it). The gate is satisfied by `actor`; `recordedBy` preserves
-   * the audit trail (design "Approval without a bottleneck").
-   *
-   * Write-time authority: check-role.sh is invoked ONCE against the `actor`
-   * identity (in proxy mode this is the --on-behalf-of architect, not the
-   * physical runner). On a non-zero exit the call throws and nothing is written.
-   * The verified role is frozen into the event's `role` field so gate() reads
-   * authority from the immutable log — no repeat shell-outs required at read time.
-   *
-   * The optional `fingerprint` (a hash of the approved plan body, from
-   * harness/plan-fingerprint.js) is attested into the event's `data` when
-   * provided — it records WHICH plan body this approval covers, enabling the
-   * re-attestation transition rule to distinguish a true duplicate from a
-   * legitimate re-approval after a plan edit. It is data-only (the fold ignores it).
-   *
-   * The optional `waivers` (the `{id, justification}` pairs that
-   * scripts/check-approval-blockers.sh reported as applied) are frozen into
-   * `data.waivers` verbatim ONLY when non-empty — omitted or `[]` yields an event
-   * identical to one recorded without the key. A non-array or malformed entry
-   * throws before anything is written (never silently dropped).
-   *
-   * The optional `highRiskPattern` (the NON-DEFAULT effective high-risk pattern
-   * scripts/check-approval-blockers.sh reported via its `high-risk-pattern` tag
-   * line) is frozen into `data.highRiskPattern` verbatim ONLY when present —
-   * omitted yields an event identical to one recorded without the key. A present
-   * value that is not a non-empty string throws before anything is written.
-   *
-   * @param {{ feature: string, actor: string, requiredRole?: string, recordedBy?: string, ts?: string, evidence?: Object, fingerprint?: string, waivers?: Array<{id: string, justification: string}>, highRiskPattern?: string }} a
-   */
-  function recordApproval({ feature, actor, requiredRole = 'architect', recordedBy, ts, evidence, fingerprint, waivers, highRiskPattern } = {}) {
-    if (!feature) throw new Error('recordApproval: feature is required');
-    if (!actor) throw new Error('recordApproval: actor is required');
-    assertValidWaivers(waivers);
-    assertValidHighRiskPattern(highRiskPattern);
-
-    // Verify role at write-time. The `actor` is the identity whose authority we
-    // are freezing — in proxy mode the runner (recordedBy) is not the one being
-    // checked. Refuse before writing anything on a failed check.
-    const roleScript = join(repoRoot, 'scripts', 'check-role.sh');
-    const roleCheck = sh(roleScript, [requiredRole, roleConfigRoot, actor], { cwd: repoRoot });
-    if (roleCheck.status !== 0) {
-      throw new Error(
-        `recordApproval: role check failed — actor '${actor}' does not hold role '${requiredRole}': ` +
-        `${(roleCheck.stdout || roleCheck.stderr || '').trim()}`,
-      );
-    }
-
-    /** @type {import('../events.js').Event} */
-    const event = {
-      feature,
-      type: 'approved',
-      actor,
-      role: requiredRole,
-      ts: ts ?? new Date().toISOString(),
-    };
-    if (recordedBy !== undefined) event.recordedBy = recordedBy;
-    // Attach data only for the fields actually provided, so a bare approval
-    // carries no undefined-valued keys (the public shape is the key's ABSENCE).
-    const data = {};
-    if (evidence !== undefined) data.evidence = evidence;
-    if (fingerprint !== undefined) data.fingerprint = fingerprint;
-    if (waivers !== undefined && waivers.length > 0) data.waivers = waivers;
-    if (highRiskPattern !== undefined) data.highRiskPattern = highRiskPattern;
-    if (Object.keys(data).length > 0) event.data = data;
-
-    append(event);
-  }
-
-  /**
-   * Architecture-review sign-off (audit-only). Records an `architecture-approved`
-   * event into the single reserved `_architecture` project log — it belongs to no
-   * one feature, so its `feature` is the fixed literal `'_architecture'` (admitted
-   * by isSafeFeature's explicit exception). The event establishes no phase and
-   * carries no outcome (audit-only; see events.js) — it has NO rule in gates.yaml
-   * and never gates deliver.
-   *
-   * Write-time authority mirrors recordApproval exactly: check-role.sh is invoked
-   * ONCE against the `onBehalfOf` architect identity (NOT the physical runner / git
-   * machine identity), and the verified role is frozen into the event's `role`
-   * field. On a non-zero exit the call throws and nothing is written. The physical
-   * runner is preserved as `recordedBy` for the audit trail.
-   *
-   * @param {{ slug: string, onBehalfOf: string, requiredRole?: string, recordedBy?: string, evidence?: Object, ts?: string }} a
-   *   - slug:       the feature/work slug the architecture review covers (recorded in data)
-   *   - onBehalfOf: the architect identity whose authority is being frozen (role-checked)
-   *   - recordedBy: who physically ran it (proxy provenance); defaults to onBehalfOf
-   */
-  function recordArchitectureApproved({
-    slug,
-    onBehalfOf,
-    requiredRole = 'architect',
-    recordedBy,
-    evidence,
-    ts,
-  } = {}) {
-    if (!slug) throw new Error('recordArchitectureApproved: slug is required');
-    if (!onBehalfOf) {
-      throw new Error('recordArchitectureApproved: onBehalfOf is required');
-    }
-
-    // Verify role at write-time against the architect identity (onBehalfOf) — in
-    // proxy mode the physical runner is not the one being checked. Refuse before
-    // writing anything on a failed check.
-    const roleScript = join(repoRoot, 'scripts', 'check-role.sh');
-    const roleCheck = sh(roleScript, [requiredRole, roleConfigRoot, onBehalfOf], {
-      cwd: repoRoot,
-    });
-    if (roleCheck.status !== 0) {
-      throw new Error(
-        `recordArchitectureApproved: role check failed — actor '${onBehalfOf}' does not hold role '${requiredRole}': ` +
-          `${(roleCheck.stdout || roleCheck.stderr || '').trim()}`,
-      );
-    }
-
-    const data = { slug };
-    if (evidence !== undefined) data.evidence = evidence;
-
-    /** @type {import('../events.js').Event} */
-    const event = {
-      feature: '_architecture',
-      type: 'architecture-approved',
-      actor: onBehalfOf,
-      role: requiredRole,
-      ts: ts ?? new Date().toISOString(),
-      data,
-    };
-    event.recordedBy = recordedBy !== undefined ? recordedBy : onBehalfOf;
-
-    append(event);
-  }
-
-  /**
-   * Resolve the running git identity (user.email) at write-time. This is the
-   * provenance frozen into an ownership event — the actor who physically holds
-   * (or releases) the single-writer lock. Mirrors how cli.js resolves the runner
-   * for recordApproval (the recorder). Throws (refuse before writing) when no git
-   * identity is configured, since an ownership event with no holder is useless.
-   *
-   * @returns {string} the resolved git user.email
-   */
-  function resolveGitIdentity() {
-    const res = sh('git', ['config', 'user.email'], { cwd: repoRoot });
-    const identity = (res.stdout || '').trim();
-    if (!identity) {
-      throw new Error(
-        'cannot determine git user.email — set your git identity before claiming/releasing the lock',
-      );
-    }
-    return identity;
-  }
-
-  /**
-   * Record a single-writer LOCK CLAIM. The branch IS the lock: claiming records
-   * WHO holds it as an `owner-claimed` event whose holder provenance is frozen
-   * ONCE at write-time (the resolved git identity), mirroring recordApproval's
-   * write-time freeze. The holder is carried in `event.data` (the data-only
-   * ownership-event contract in events.js — these types establish no phase and
-   * carry no outcome).
-   *
-   * This is NOT a gate: it appends an event the existing fold/reduce already
-   * accumulates. No branch is added to evaluateGate; the lock is expressed purely
-   * as appended events. `append` validates the transition before writing, so a
-   * claim on a terminal feature (delivered/done) throws and nothing is written.
-   *
-   * @param {{ feature: string, actor?: string, ts?: string }} a
-   *   - actor: optional explicit holder identity; defaults to the resolved git user
-   * @returns {{ holder: string, ts: string }} the frozen holder + timestamp
-   */
-  function recordOwnerClaimed({ feature, actor, ts } = {}) {
-    if (!feature) throw new Error('recordOwnerClaimed: feature is required');
-    assertSafeFeature(feature);
-
-    // Freeze the holder identity ONCE at write-time.
-    const holder = isNonEmptyString(actor) ? actor : resolveGitIdentity();
-    const stampedTs = ts ?? new Date().toISOString();
-
-    /** @type {import('../events.js').Event} */
-    const event = {
-      feature,
-      type: 'owner-claimed',
-      actor: holder,
-      ts: stampedTs,
-      data: { holder },
-    };
-
-    append(event);
-    return { holder, ts: stampedTs };
-  }
-
-  /**
-   * Record a single-writer LOCK RELEASE. Appends an `owner-released` event whose
-   * releaser provenance is frozen ONCE at write-time, clearing the lock the most
-   * recent `owner-claimed` established. Symmetric to recordOwnerClaimed; same
-   * data-only contract, same write-time freeze, same no-new-gate-branch rule.
-   *
-   * @param {{ feature: string, actor?: string, ts?: string }} a
-   *   - actor: optional explicit releaser identity; defaults to the resolved git user
-   * @returns {{ holder: string, ts: string }} the frozen releaser + timestamp
-   */
-  function recordOwnerReleased({ feature, actor, ts } = {}) {
-    if (!feature) throw new Error('recordOwnerReleased: feature is required');
-    assertSafeFeature(feature);
-
-    const holder = isNonEmptyString(actor) ? actor : resolveGitIdentity();
-    const stampedTs = ts ?? new Date().toISOString();
-
-    /** @type {import('../events.js').Event} */
-    const event = {
-      feature,
-      type: 'owner-released',
-      actor: holder,
-      ts: stampedTs,
-      data: { holder },
-    };
-
-    append(event);
-    return { holder, ts: stampedTs };
-  }
+  const ctx = { repoRoot, sh, roleConfigRoot: configRoot ?? repoRoot, evaluateGate };
 
   return {
-    append,
-    history,
-    phase,
-    plan,
-    gate,
-    list,
-    recordApproval,
-    recordArchitectureApproved,
-    recordOwnerClaimed,
-    recordOwnerReleased,
+    append: (event) => appendEvent(ctx, event),
+    history: (feature) => readHistory(ctx, feature),
+    phase: (feature) => phaseFor(ctx, feature),
+    plan: (feature) => readPlan(ctx, feature),
+    gate: (feature, name) => evaluateNamedGate(ctx, feature, name),
+    list: (filter) => listFeatures(ctx, filter),
+    recordApproval: (args) => recordApprovalFor(ctx, args),
+    recordArchitectureApproved: (args) => recordArchitectureApprovedFor(ctx, args),
+    recordOwnerClaimed: (args) => recordOwnerEvent(ctx, 'owner-claimed', 'recordOwnerClaimed', args),
+    recordOwnerReleased: (args) => recordOwnerEvent(ctx, 'owner-released', 'recordOwnerReleased', args),
   };
 }
 

@@ -1,0 +1,1208 @@
+{
+  "append/duplicate-approval": {
+    "error": {
+      "type": "TransitionError",
+      "message": "Cannot append a duplicate approved event — an approval already exists"
+    },
+    "logs": {
+      "demo": "{\"feature\":\"demo\",\"type\":\"approved\",\"actor\":\"arch\",\"role\":\"architect\",\"ts\":\"t0\"}\n"
+    },
+    "sh": []
+  },
+  "append/hook-event-allowed": {
+    "logs": {
+      "demo": "{\"feature\":\"demo\",\"type\":\"approved\",\"actor\":\"arch\",\"role\":\"architect\",\"ts\":\"t0\"}\n{\"feature\":\"demo\",\"type\":\"hook-observed\",\"actor\":\"h\",\"ts\":\"t1\",\"data\":{\"point\":\"p\",\"hook\":\"x\",\"outcome\":\"ok\",\"source\":\"hook\"}}\n"
+    },
+    "sh": []
+  },
+  "append/illegal-transition-no-phase": {
+    "error": {
+      "type": "TransitionError",
+      "message": "Cannot record 'wave-complete' when phase is 'null' (expected 'in-progress')"
+    },
+    "logs": {},
+    "sh": []
+  },
+  "append/key-order-preserved": {
+    "logs": {
+      "demo": "{\"ts\":\"t1\",\"actor\":\"dev\",\"type\":\"plan-created\",\"feature\":\"demo\",\"data\":{\"b\":1,\"a\":2}}\n"
+    },
+    "sh": []
+  },
+  "append/legal-explicit-ts": {
+    "logs": {
+      "demo": "{\"feature\":\"demo\",\"type\":\"approved\",\"actor\":\"arch\",\"role\":\"architect\",\"ts\":\"t0\"}\n"
+    },
+    "sh": []
+  },
+  "append/missing-actor": {
+    "error": {
+      "type": "Error",
+      "message": "append(event): event.actor is required"
+    },
+    "logs": {},
+    "sh": []
+  },
+  "append/missing-event": {
+    "error": {
+      "type": "TypeError",
+      "message": "append(event): event must be an object"
+    },
+    "logs": {},
+    "sh": []
+  },
+  "append/missing-feature": {
+    "error": {
+      "type": "Error",
+      "message": "append(event): event.feature is required"
+    },
+    "logs": {},
+    "sh": []
+  },
+  "append/missing-type": {
+    "error": {
+      "type": "Error",
+      "message": "append(event): event.type is required"
+    },
+    "logs": {},
+    "sh": []
+  },
+  "append/non-object-event": {
+    "error": {
+      "type": "TypeError",
+      "message": "append(event): event must be an object"
+    },
+    "logs": {},
+    "sh": []
+  },
+  "append/post-terminal-event": {
+    "error": {
+      "type": "TransitionError",
+      "message": "Cannot append 'wave-attempt' after terminal phase 'delivered'"
+    },
+    "logs": {
+      "demo": "{\"feature\":\"demo\",\"type\":\"approved\",\"actor\":\"arch\",\"role\":\"architect\",\"ts\":\"t0\"}\n{\"feature\":\"demo\",\"type\":\"deliver-started\",\"actor\":\"h\",\"ts\":\"t1\"}\n{\"feature\":\"demo\",\"type\":\"pr-opened\",\"actor\":\"h\",\"ts\":\"t2\"}\n"
+    },
+    "sh": []
+  },
+  "append/stamps-iso-ts": {
+    "logs": {
+      "demo": "{\"feature\":\"demo\",\"type\":\"plan-created\",\"actor\":\"dev\",\"ts\":\"<TS>\"}\n"
+    },
+    "sh": []
+  },
+  "append/unsafe-feature": {
+    "error": {
+      "type": "Error",
+      "message": "invalid feature slug \"../evil\" (expected /^[a-z0-9][a-z0-9-]*$/ — no path separators or '..')"
+    },
+    "logs": {},
+    "sh": []
+  },
+  "gate/injected-evaluator-args": {
+    "result": {
+      "first": {
+        "injected": true
+      },
+      "second": {
+        "injected": true
+      },
+      "received": [
+        [
+          "approved",
+          [
+            {
+              "feature": "demo",
+              "type": "approved",
+              "actor": "arch",
+              "role": "architect",
+              "ts": "t0"
+            },
+            {
+              "feature": "demo",
+              "type": "deliver-started",
+              "actor": "h",
+              "ts": "t1"
+            }
+          ]
+        ],
+        [
+          "deliverable",
+          [
+            {
+              "feature": "demo",
+              "type": "approved",
+              "actor": "arch",
+              "role": "architect",
+              "ts": "t0"
+            },
+            {
+              "feature": "demo",
+              "type": "deliver-started",
+              "actor": "h",
+              "ts": "t1"
+            }
+          ]
+        ]
+      ]
+    },
+    "logs": {
+      "demo": "{\"feature\":\"demo\",\"type\":\"approved\",\"actor\":\"arch\",\"role\":\"architect\",\"ts\":\"t0\"}\n{\"feature\":\"demo\",\"type\":\"deliver-started\",\"actor\":\"h\",\"ts\":\"t1\"}\n"
+    },
+    "sh": []
+  },
+  "gate/injected-unsafe-feature": {
+    "error": {
+      "type": "Error",
+      "message": "invalid feature slug \"../x\" (expected /^[a-z0-9][a-z0-9-]*$/ — no path separators or '..')"
+    },
+    "logs": {},
+    "sh": []
+  },
+  "gate/real-after-approval": {
+    "result": {
+      "approved": {
+        "passed": true,
+        "reason": "satisfied by approved event from role:architect",
+        "requiredRole": "architect",
+        "satisfiedBy": {
+          "actor": "arch",
+          "role": "architect"
+        }
+      },
+      "again": {
+        "passed": true,
+        "reason": "satisfied by approved event from role:architect",
+        "requiredRole": "architect",
+        "satisfiedBy": {
+          "actor": "arch",
+          "role": "architect"
+        }
+      }
+    },
+    "logs": {
+      "demo": "{\"feature\":\"demo\",\"type\":\"approved\",\"actor\":\"arch\",\"role\":\"architect\",\"ts\":\"t0\"}\n"
+    },
+    "sh": []
+  },
+  "gate/real-before-approval": {
+    "result": {
+      "passed": false,
+      "reason": "needs an approved event with role:architect frozen at write-time",
+      "requiredRole": "architect",
+      "satisfiedBy": null
+    },
+    "logs": {},
+    "sh": []
+  },
+  "history/empty": {
+    "result": [],
+    "logs": {},
+    "sh": []
+  },
+  "history/partial-last-line-and-blank": {
+    "result": [
+      {
+        "feature": "demo",
+        "type": "approved",
+        "actor": "arch",
+        "role": "architect",
+        "ts": "t0"
+      },
+      {
+        "feature": "demo",
+        "type": "deliver-started",
+        "actor": "h",
+        "ts": "t1"
+      }
+    ],
+    "logs": {
+      "demo": "{\"feature\":\"demo\",\"type\":\"approved\",\"actor\":\"arch\",\"role\":\"architect\",\"ts\":\"t0\"}\n{\"feature\":\"demo\",\"type\":\"deliver-started\",\"actor\":\"h\",\"ts\":\"t1\"}\n\n   \n{\"feature\":\"demo\",\"ty"
+    },
+    "sh": []
+  },
+  "history/populated": {
+    "result": [
+      {
+        "feature": "demo",
+        "type": "approved",
+        "actor": "arch",
+        "role": "architect",
+        "ts": "t0"
+      },
+      {
+        "feature": "demo",
+        "type": "deliver-started",
+        "actor": "h",
+        "ts": "t1"
+      }
+    ],
+    "logs": {
+      "demo": "{\"feature\":\"demo\",\"type\":\"approved\",\"actor\":\"arch\",\"role\":\"architect\",\"ts\":\"t0\"}\n{\"feature\":\"demo\",\"type\":\"deliver-started\",\"actor\":\"h\",\"ts\":\"t1\"}\n"
+    },
+    "sh": []
+  },
+  "history/unsafe-feature": {
+    "error": {
+      "type": "Error",
+      "message": "invalid feature slug \"Bad/Name\" (expected /^[a-z0-9][a-z0-9-]*$/ — no path separators or '..')"
+    },
+    "logs": {},
+    "sh": []
+  },
+  "list/empty-repo": {
+    "result": [],
+    "logs": {},
+    "sh": []
+  },
+  "list/mixed": {
+    "result": [
+      {
+        "feature": "_architecture",
+        "phase": null,
+        "hasLog": true,
+        "hasPlan": false
+      },
+      {
+        "feature": "both",
+        "phase": "approved",
+        "hasLog": true,
+        "hasPlan": true
+      },
+      {
+        "feature": "only-plan",
+        "phase": null,
+        "hasLog": false,
+        "hasPlan": true
+      },
+      {
+        "feature": "only-state",
+        "phase": "planned",
+        "hasLog": true,
+        "hasPlan": false
+      }
+    ],
+    "logs": {
+      "Unsafe_Dir": "{\"feature\":\"demo\",\"type\":\"approved\",\"actor\":\"arch\",\"role\":\"architect\",\"ts\":\"t0\"}\n",
+      "_architecture": "{\"feature\":\"_architecture\",\"type\":\"architecture-approved\",\"actor\":\"a\",\"role\":\"architect\",\"ts\":\"t0\",\"data\":{\"slug\":\"x\"}}\n",
+      "both": "{\"feature\":\"both\",\"type\":\"approved\",\"actor\":\"arch\",\"role\":\"architect\",\"ts\":\"t0\"}\n",
+      "only-state": "{\"feature\":\"only-state\",\"type\":\"plan-created\",\"actor\":\"d\",\"ts\":\"t0\"}\n"
+    },
+    "sh": []
+  },
+  "list/phase-filter-approved": {
+    "result": [
+      {
+        "feature": "both",
+        "phase": "approved",
+        "hasLog": true,
+        "hasPlan": true
+      }
+    ],
+    "logs": {
+      "Unsafe_Dir": "{\"feature\":\"demo\",\"type\":\"approved\",\"actor\":\"arch\",\"role\":\"architect\",\"ts\":\"t0\"}\n",
+      "_architecture": "{\"feature\":\"_architecture\",\"type\":\"architecture-approved\",\"actor\":\"a\",\"role\":\"architect\",\"ts\":\"t0\",\"data\":{\"slug\":\"x\"}}\n",
+      "both": "{\"feature\":\"both\",\"type\":\"approved\",\"actor\":\"arch\",\"role\":\"architect\",\"ts\":\"t0\"}\n",
+      "only-state": "{\"feature\":\"only-state\",\"type\":\"plan-created\",\"actor\":\"d\",\"ts\":\"t0\"}\n"
+    },
+    "sh": []
+  },
+  "list/phase-filter-no-match": {
+    "result": [],
+    "logs": {
+      "Unsafe_Dir": "{\"feature\":\"demo\",\"type\":\"approved\",\"actor\":\"arch\",\"role\":\"architect\",\"ts\":\"t0\"}\n",
+      "_architecture": "{\"feature\":\"_architecture\",\"type\":\"architecture-approved\",\"actor\":\"a\",\"role\":\"architect\",\"ts\":\"t0\",\"data\":{\"slug\":\"x\"}}\n",
+      "both": "{\"feature\":\"both\",\"type\":\"approved\",\"actor\":\"arch\",\"role\":\"architect\",\"ts\":\"t0\"}\n",
+      "only-state": "{\"feature\":\"only-state\",\"type\":\"plan-created\",\"actor\":\"d\",\"ts\":\"t0\"}\n"
+    },
+    "sh": []
+  },
+  "list/state-dir-without-log": {
+    "result": [],
+    "logs": {},
+    "sh": []
+  },
+  "phase/empty": {
+    "result": null,
+    "logs": {},
+    "sh": []
+  },
+  "phase/partial-last-line": {
+    "result": "approved",
+    "logs": {
+      "demo": "{\"feature\":\"demo\",\"type\":\"approved\",\"actor\":\"arch\",\"role\":\"architect\",\"ts\":\"t0\"}\n{\"feature\":"
+    },
+    "sh": []
+  },
+  "phase/populated": {
+    "result": "in-progress",
+    "logs": {
+      "demo": "{\"feature\":\"demo\",\"type\":\"approved\",\"actor\":\"arch\",\"role\":\"architect\",\"ts\":\"t0\"}\n{\"feature\":\"demo\",\"type\":\"deliver-started\",\"actor\":\"h\",\"ts\":\"t1\"}\n"
+    },
+    "sh": []
+  },
+  "phase/unsafe-feature": {
+    "error": {
+      "type": "Error",
+      "message": "invalid feature slug \"a..b/c\" (expected /^[a-z0-9][a-z0-9-]*$/ — no path separators or '..')"
+    },
+    "logs": {},
+    "sh": []
+  },
+  "plan/empty-doc": {
+    "result": {
+      "acceptanceCriteria": [],
+      "waves": [],
+      "files": []
+    },
+    "logs": {},
+    "sh": []
+  },
+  "plan/full": {
+    "result": {
+      "acceptanceCriteria": [
+        "1. first criterion",
+        "2. second criterion"
+      ],
+      "waves": [
+        {
+          "n": 1,
+          "heading": "### Wave 1"
+        },
+        {
+          "n": 2,
+          "heading": "### Wave 2"
+        }
+      ],
+      "files": [
+        "a/b.js",
+        "c/d.md"
+      ]
+    },
+    "logs": {},
+    "sh": []
+  },
+  "plan/missing": {
+    "result": null,
+    "logs": {},
+    "sh": []
+  },
+  "plan/unsafe-feature": {
+    "error": {
+      "type": "Error",
+      "message": "invalid feature slug \"../x\" (expected /^[a-z0-9][a-z0-9-]*$/ — no path separators or '..')"
+    },
+    "logs": {},
+    "sh": []
+  },
+  "recordApproval/all-fields": {
+    "logs": {
+      "demo": "{\"feature\":\"demo\",\"type\":\"approved\",\"actor\":\"arch\",\"role\":\"architect\",\"ts\":\"t0\",\"recordedBy\":\"proxy\",\"data\":{\"evidence\":{\"e\":1},\"fingerprint\":\"f\",\"waivers\":[{\"id\":\"W\",\"justification\":\"j\"}],\"highRiskPattern\":\"p\"}}\n"
+    },
+    "sh": [
+      {
+        "file": "<REPO>/scripts/check-role.sh",
+        "args": [
+          "architect",
+          "<REPO>",
+          "arch"
+        ],
+        "cwd": "<REPO>"
+      }
+    ]
+  },
+  "recordApproval/bare": {
+    "logs": {
+      "demo": "{\"feature\":\"demo\",\"type\":\"approved\",\"actor\":\"arch\",\"role\":\"architect\",\"ts\":\"t0\"}\n"
+    },
+    "sh": [
+      {
+        "file": "<REPO>/scripts/check-role.sh",
+        "args": [
+          "architect",
+          "<REPO>",
+          "arch"
+        ],
+        "cwd": "<REPO>"
+      }
+    ]
+  },
+  "recordApproval/custom-required-role": {
+    "logs": {
+      "demo": "{\"feature\":\"demo\",\"type\":\"approved\",\"actor\":\"arch\",\"role\":\"developer\",\"ts\":\"t0\"}\n"
+    },
+    "sh": [
+      {
+        "file": "<REPO>/scripts/check-role.sh",
+        "args": [
+          "developer",
+          "<REPO>",
+          "arch"
+        ],
+        "cwd": "<REPO>"
+      }
+    ]
+  },
+  "recordApproval/default-ts-stamped": {
+    "logs": {
+      "demo": "{\"feature\":\"demo\",\"type\":\"approved\",\"actor\":\"arch\",\"role\":\"architect\",\"ts\":\"<TS>\"}\n"
+    },
+    "sh": [
+      {
+        "file": "<REPO>/scripts/check-role.sh",
+        "args": [
+          "architect",
+          "<REPO>",
+          "arch"
+        ],
+        "cwd": "<REPO>"
+      }
+    ]
+  },
+  "recordApproval/duplicate": {
+    "error": {
+      "type": "TransitionError",
+      "message": "Cannot append a duplicate approved event — an approval already exists"
+    },
+    "logs": {
+      "demo": "{\"feature\":\"demo\",\"type\":\"approved\",\"actor\":\"arch\",\"role\":\"architect\",\"ts\":\"t0\"}\n"
+    },
+    "sh": [
+      {
+        "file": "<REPO>/scripts/check-role.sh",
+        "args": [
+          "architect",
+          "<REPO>",
+          "arch"
+        ],
+        "cwd": "<REPO>"
+      }
+    ]
+  },
+  "recordApproval/evidence": {
+    "logs": {
+      "demo": "{\"feature\":\"demo\",\"type\":\"approved\",\"actor\":\"arch\",\"role\":\"architect\",\"ts\":\"t0\",\"data\":{\"evidence\":{\"pr\":1,\"notes\":[\"a\"]}}}\n"
+    },
+    "sh": [
+      {
+        "file": "<REPO>/scripts/check-role.sh",
+        "args": [
+          "architect",
+          "<REPO>",
+          "arch"
+        ],
+        "cwd": "<REPO>"
+      }
+    ]
+  },
+  "recordApproval/evidence-fingerprint": {
+    "logs": {
+      "demo": "{\"feature\":\"demo\",\"type\":\"approved\",\"actor\":\"arch\",\"role\":\"architect\",\"ts\":\"t0\",\"data\":{\"evidence\":{\"k\":\"v\"},\"fingerprint\":\"f\"}}\n"
+    },
+    "sh": [
+      {
+        "file": "<REPO>/scripts/check-role.sh",
+        "args": [
+          "architect",
+          "<REPO>",
+          "arch"
+        ],
+        "cwd": "<REPO>"
+      }
+    ]
+  },
+  "recordApproval/fingerprint": {
+    "logs": {
+      "demo": "{\"feature\":\"demo\",\"type\":\"approved\",\"actor\":\"arch\",\"role\":\"architect\",\"ts\":\"t0\",\"data\":{\"fingerprint\":\"abc123\"}}\n"
+    },
+    "sh": [
+      {
+        "file": "<REPO>/scripts/check-role.sh",
+        "args": [
+          "architect",
+          "<REPO>",
+          "arch"
+        ],
+        "cwd": "<REPO>"
+      }
+    ]
+  },
+  "recordApproval/high-risk-blank": {
+    "error": {
+      "type": "Error",
+      "message": "recordApproval: highRiskPattern must be a non-empty string, got \"  \""
+    },
+    "logs": {},
+    "sh": []
+  },
+  "recordApproval/high-risk-non-string": {
+    "error": {
+      "type": "Error",
+      "message": "recordApproval: highRiskPattern must be a non-empty string, got 5"
+    },
+    "logs": {},
+    "sh": []
+  },
+  "recordApproval/high-risk-valid": {
+    "logs": {
+      "demo": "{\"feature\":\"demo\",\"type\":\"approved\",\"actor\":\"arch\",\"role\":\"architect\",\"ts\":\"t0\",\"data\":{\"highRiskPattern\":\"src/.*\"}}\n"
+    },
+    "sh": [
+      {
+        "file": "<REPO>/scripts/check-role.sh",
+        "args": [
+          "architect",
+          "<REPO>",
+          "arch"
+        ],
+        "cwd": "<REPO>"
+      }
+    ]
+  },
+  "recordApproval/missing-actor": {
+    "error": {
+      "type": "Error",
+      "message": "recordApproval: actor is required"
+    },
+    "logs": {},
+    "sh": []
+  },
+  "recordApproval/missing-feature": {
+    "error": {
+      "type": "Error",
+      "message": "recordApproval: feature is required"
+    },
+    "logs": {},
+    "sh": []
+  },
+  "recordApproval/no-args": {
+    "error": {
+      "type": "Error",
+      "message": "recordApproval: feature is required"
+    },
+    "logs": {},
+    "sh": []
+  },
+  "recordApproval/reapproval-new-fingerprint": {
+    "logs": {
+      "demo": "{\"feature\":\"demo\",\"type\":\"approved\",\"actor\":\"arch\",\"role\":\"architect\",\"ts\":\"t0\",\"data\":{\"fingerprint\":\"one\"}}\n{\"feature\":\"demo\",\"type\":\"approved\",\"actor\":\"arch\",\"role\":\"architect\",\"ts\":\"t9\",\"data\":{\"fingerprint\":\"two\"}}\n"
+    },
+    "sh": [
+      {
+        "file": "<REPO>/scripts/check-role.sh",
+        "args": [
+          "architect",
+          "<REPO>",
+          "arch"
+        ],
+        "cwd": "<REPO>"
+      }
+    ]
+  },
+  "recordApproval/recordedBy-proxy": {
+    "logs": {
+      "demo": "{\"feature\":\"demo\",\"type\":\"approved\",\"actor\":\"arch\",\"role\":\"architect\",\"ts\":\"t0\",\"recordedBy\":\"runner@example.com\"}\n"
+    },
+    "sh": [
+      {
+        "file": "<REPO>/scripts/check-role.sh",
+        "args": [
+          "architect",
+          "<REPO>",
+          "arch"
+        ],
+        "cwd": "<REPO>"
+      }
+    ]
+  },
+  "recordApproval/role-check-fails-silent": {
+    "error": {
+      "type": "Error",
+      "message": "recordApproval: role check failed — actor 'arch' does not hold role 'architect': "
+    },
+    "logs": {},
+    "sh": [
+      {
+        "file": "<REPO>/scripts/check-role.sh",
+        "args": [
+          "architect",
+          "<REPO>",
+          "arch"
+        ],
+        "cwd": "<REPO>"
+      }
+    ]
+  },
+  "recordApproval/role-check-fails-stderr": {
+    "error": {
+      "type": "Error",
+      "message": "recordApproval: role check failed — actor 'arch' does not hold role 'architect': EACCES: boom"
+    },
+    "logs": {},
+    "sh": [
+      {
+        "file": "<REPO>/scripts/check-role.sh",
+        "args": [
+          "architect",
+          "<REPO>",
+          "arch"
+        ],
+        "cwd": "<REPO>"
+      }
+    ]
+  },
+  "recordApproval/role-check-fails-stdout": {
+    "error": {
+      "type": "Error",
+      "message": "recordApproval: role check failed — actor 'arch' does not hold role 'architect': not an architect"
+    },
+    "logs": {},
+    "sh": [
+      {
+        "file": "<REPO>/scripts/check-role.sh",
+        "args": [
+          "architect",
+          "<REPO>",
+          "arch"
+        ],
+        "cwd": "<REPO>"
+      }
+    ]
+  },
+  "recordApproval/separate-config-root": {
+    "logs": {
+      "demo": "{\"feature\":\"demo\",\"type\":\"approved\",\"actor\":\"arch\",\"role\":\"architect\",\"ts\":\"t0\"}\n"
+    },
+    "sh": [
+      {
+        "file": "<REPO>/scripts/check-role.sh",
+        "args": [
+          "architect",
+          "/elsewhere/cfg",
+          "arch"
+        ],
+        "cwd": "<REPO>"
+      }
+    ]
+  },
+  "recordApproval/unsafe-feature-after-role-check": {
+    "error": {
+      "type": "Error",
+      "message": "invalid feature slug \"../x\" (expected /^[a-z0-9][a-z0-9-]*$/ — no path separators or '..')"
+    },
+    "logs": {},
+    "sh": [
+      {
+        "file": "<REPO>/scripts/check-role.sh",
+        "args": [
+          "architect",
+          "<REPO>",
+          "arch"
+        ],
+        "cwd": "<REPO>"
+      }
+    ]
+  },
+  "recordApproval/validation-before-role-check": {
+    "error": {
+      "type": "Error",
+      "message": "recordApproval: waivers must be an array, got \"bad\""
+    },
+    "logs": {},
+    "sh": []
+  },
+  "recordApproval/waivers-bad-entry": {
+    "error": {
+      "type": "Error",
+      "message": "recordApproval: waivers[1] must be {id, justification} with non-empty strings, got {\"id\":\" \",\"justification\":\"j\"}"
+    },
+    "logs": {},
+    "sh": []
+  },
+  "recordApproval/waivers-empty": {
+    "logs": {
+      "demo": "{\"feature\":\"demo\",\"type\":\"approved\",\"actor\":\"arch\",\"role\":\"architect\",\"ts\":\"t0\"}\n"
+    },
+    "sh": [
+      {
+        "file": "<REPO>/scripts/check-role.sh",
+        "args": [
+          "architect",
+          "<REPO>",
+          "arch"
+        ],
+        "cwd": "<REPO>"
+      }
+    ]
+  },
+  "recordApproval/waivers-not-array": {
+    "error": {
+      "type": "Error",
+      "message": "recordApproval: waivers must be an array, got \"x\""
+    },
+    "logs": {},
+    "sh": []
+  },
+  "recordApproval/waivers-null-entry": {
+    "error": {
+      "type": "Error",
+      "message": "recordApproval: waivers[0] must be {id, justification} with non-empty strings, got null"
+    },
+    "logs": {},
+    "sh": []
+  },
+  "recordApproval/waivers-valid": {
+    "logs": {
+      "demo": "{\"feature\":\"demo\",\"type\":\"approved\",\"actor\":\"arch\",\"role\":\"architect\",\"ts\":\"t0\",\"data\":{\"waivers\":[{\"id\":\"W1\",\"justification\":\"because\"}]}}\n"
+    },
+    "sh": [
+      {
+        "file": "<REPO>/scripts/check-role.sh",
+        "args": [
+          "architect",
+          "<REPO>",
+          "arch"
+        ],
+        "cwd": "<REPO>"
+      }
+    ]
+  },
+  "recordArchitectureApproved/custom-role": {
+    "logs": {
+      "_architecture": "{\"feature\":\"_architecture\",\"type\":\"architecture-approved\",\"actor\":\"arch\",\"role\":\"developer\",\"ts\":\"t0\",\"data\":{\"slug\":\"my-slug\"},\"recordedBy\":\"arch\"}\n"
+    },
+    "sh": [
+      {
+        "file": "<REPO>/scripts/check-role.sh",
+        "args": [
+          "developer",
+          "<REPO>",
+          "arch"
+        ],
+        "cwd": "<REPO>"
+      }
+    ]
+  },
+  "recordArchitectureApproved/default-ts-stamped": {
+    "logs": {
+      "_architecture": "{\"feature\":\"_architecture\",\"type\":\"architecture-approved\",\"actor\":\"arch\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"slug\":\"s\"},\"recordedBy\":\"arch\"}\n"
+    },
+    "sh": [
+      {
+        "file": "<REPO>/scripts/check-role.sh",
+        "args": [
+          "architect",
+          "<REPO>",
+          "arch"
+        ],
+        "cwd": "<REPO>"
+      }
+    ]
+  },
+  "recordArchitectureApproved/evidence": {
+    "logs": {
+      "_architecture": "{\"feature\":\"_architecture\",\"type\":\"architecture-approved\",\"actor\":\"arch\",\"role\":\"architect\",\"ts\":\"t0\",\"data\":{\"slug\":\"my-slug\",\"evidence\":{\"e\":[1,2]}},\"recordedBy\":\"arch\"}\n"
+    },
+    "sh": [
+      {
+        "file": "<REPO>/scripts/check-role.sh",
+        "args": [
+          "architect",
+          "<REPO>",
+          "arch"
+        ],
+        "cwd": "<REPO>"
+      }
+    ]
+  },
+  "recordArchitectureApproved/full": {
+    "logs": {
+      "_architecture": "{\"feature\":\"_architecture\",\"type\":\"architecture-approved\",\"actor\":\"arch\",\"role\":\"architect\",\"ts\":\"t0\",\"data\":{\"slug\":\"my-slug\",\"evidence\":{\"r\":1}},\"recordedBy\":\"runner\"}\n"
+    },
+    "sh": [
+      {
+        "file": "<REPO>/scripts/check-role.sh",
+        "args": [
+          "architect",
+          "<REPO>",
+          "arch"
+        ],
+        "cwd": "<REPO>"
+      }
+    ]
+  },
+  "recordArchitectureApproved/missing-onBehalfOf": {
+    "error": {
+      "type": "Error",
+      "message": "recordArchitectureApproved: onBehalfOf is required"
+    },
+    "logs": {},
+    "sh": []
+  },
+  "recordArchitectureApproved/missing-slug": {
+    "error": {
+      "type": "Error",
+      "message": "recordArchitectureApproved: slug is required"
+    },
+    "logs": {},
+    "sh": []
+  },
+  "recordArchitectureApproved/no-args": {
+    "error": {
+      "type": "Error",
+      "message": "recordArchitectureApproved: slug is required"
+    },
+    "logs": {},
+    "sh": []
+  },
+  "recordArchitectureApproved/recordedBy-default": {
+    "logs": {
+      "_architecture": "{\"feature\":\"_architecture\",\"type\":\"architecture-approved\",\"actor\":\"arch\",\"role\":\"architect\",\"ts\":\"t0\",\"data\":{\"slug\":\"my-slug\"},\"recordedBy\":\"arch\"}\n"
+    },
+    "sh": [
+      {
+        "file": "<REPO>/scripts/check-role.sh",
+        "args": [
+          "architect",
+          "<REPO>",
+          "arch"
+        ],
+        "cwd": "<REPO>"
+      }
+    ]
+  },
+  "recordArchitectureApproved/role-check-fails": {
+    "error": {
+      "type": "Error",
+      "message": "recordArchitectureApproved: role check failed — actor 'arch' does not hold role 'architect': nope"
+    },
+    "logs": {},
+    "sh": [
+      {
+        "file": "<REPO>/scripts/check-role.sh",
+        "args": [
+          "architect",
+          "<REPO>",
+          "arch"
+        ],
+        "cwd": "<REPO>"
+      }
+    ]
+  },
+  "recordArchitectureApproved/second-sign-off-allowed": {
+    "logs": {
+      "_architecture": "{\"feature\":\"_architecture\",\"type\":\"architecture-approved\",\"actor\":\"arch\",\"role\":\"architect\",\"ts\":\"t0\",\"data\":{\"slug\":\"my-slug\"},\"recordedBy\":\"arch\"}\n{\"feature\":\"_architecture\",\"type\":\"architecture-approved\",\"actor\":\"arch\",\"role\":\"architect\",\"ts\":\"t1\",\"data\":{\"slug\":\"other\"},\"recordedBy\":\"arch\"}\n"
+    },
+    "sh": [
+      {
+        "file": "<REPO>/scripts/check-role.sh",
+        "args": [
+          "architect",
+          "<REPO>",
+          "arch"
+        ],
+        "cwd": "<REPO>"
+      },
+      {
+        "file": "<REPO>/scripts/check-role.sh",
+        "args": [
+          "architect",
+          "<REPO>",
+          "arch"
+        ],
+        "cwd": "<REPO>"
+      }
+    ]
+  },
+  "recordOwnerClaimed/after-claim": {
+    "result": {
+      "first": {
+        "holder": "me",
+        "ts": "t0"
+      },
+      "second": {
+        "holder": "you",
+        "ts": "t1"
+      }
+    },
+    "logs": {
+      "demo": "{\"feature\":\"demo\",\"type\":\"owner-claimed\",\"actor\":\"me\",\"ts\":\"t0\",\"data\":{\"holder\":\"me\"}}\n{\"feature\":\"demo\",\"type\":\"owner-claimed\",\"actor\":\"you\",\"ts\":\"t1\",\"data\":{\"holder\":\"you\"}}\n"
+    },
+    "sh": []
+  },
+  "recordOwnerClaimed/blank-actor-uses-git": {
+    "result": {
+      "holder": "dev@example.com",
+      "ts": "t0"
+    },
+    "logs": {
+      "demo": "{\"feature\":\"demo\",\"type\":\"owner-claimed\",\"actor\":\"dev@example.com\",\"ts\":\"t0\",\"data\":{\"holder\":\"dev@example.com\"}}\n"
+    },
+    "sh": [
+      {
+        "file": "git",
+        "args": [
+          "config",
+          "user.email"
+        ],
+        "cwd": "<REPO>"
+      }
+    ]
+  },
+  "recordOwnerClaimed/default-ts-stamped": {
+    "result": {
+      "holder": "me",
+      "ts": "<TS>"
+    },
+    "logs": {
+      "demo": "{\"feature\":\"demo\",\"type\":\"owner-claimed\",\"actor\":\"me\",\"ts\":\"<TS>\",\"data\":{\"holder\":\"me\"}}\n"
+    },
+    "sh": []
+  },
+  "recordOwnerClaimed/explicit-actor": {
+    "result": {
+      "holder": "me@x.io",
+      "ts": "t0"
+    },
+    "logs": {
+      "demo": "{\"feature\":\"demo\",\"type\":\"owner-claimed\",\"actor\":\"me@x.io\",\"ts\":\"t0\",\"data\":{\"holder\":\"me@x.io\"}}\n"
+    },
+    "sh": []
+  },
+  "recordOwnerClaimed/git-identity": {
+    "result": {
+      "holder": "dev@example.com",
+      "ts": "t0"
+    },
+    "logs": {
+      "demo": "{\"feature\":\"demo\",\"type\":\"owner-claimed\",\"actor\":\"dev@example.com\",\"ts\":\"t0\",\"data\":{\"holder\":\"dev@example.com\"}}\n"
+    },
+    "sh": [
+      {
+        "file": "git",
+        "args": [
+          "config",
+          "user.email"
+        ],
+        "cwd": "<REPO>"
+      }
+    ]
+  },
+  "recordOwnerClaimed/missing-feature": {
+    "error": {
+      "type": "Error",
+      "message": "recordOwnerClaimed: feature is required"
+    },
+    "logs": {},
+    "sh": []
+  },
+  "recordOwnerClaimed/missing-identity": {
+    "error": {
+      "type": "Error",
+      "message": "cannot determine git user.email — set your git identity before claiming/releasing the lock"
+    },
+    "logs": {},
+    "sh": [
+      {
+        "file": "git",
+        "args": [
+          "config",
+          "user.email"
+        ],
+        "cwd": "<REPO>"
+      }
+    ]
+  },
+  "recordOwnerClaimed/no-args": {
+    "error": {
+      "type": "Error",
+      "message": "recordOwnerClaimed: feature is required"
+    },
+    "logs": {},
+    "sh": []
+  },
+  "recordOwnerClaimed/on-delivered-feature": {
+    "error": {
+      "type": "TransitionError",
+      "message": "Cannot append 'owner-claimed' after terminal phase 'delivered'"
+    },
+    "logs": {
+      "demo": "{\"feature\":\"demo\",\"type\":\"approved\",\"actor\":\"arch\",\"role\":\"architect\",\"ts\":\"t0\"}\n{\"feature\":\"demo\",\"type\":\"deliver-started\",\"actor\":\"h\",\"ts\":\"t1\"}\n{\"feature\":\"demo\",\"type\":\"pr-opened\",\"actor\":\"h\",\"ts\":\"t2\"}\n"
+    },
+    "sh": []
+  },
+  "recordOwnerClaimed/unsafe-feature": {
+    "error": {
+      "type": "Error",
+      "message": "invalid feature slug \"../x\" (expected /^[a-z0-9][a-z0-9-]*$/ — no path separators or '..')"
+    },
+    "logs": {},
+    "sh": []
+  },
+  "recordOwnerReleased/after-release": {
+    "result": {
+      "first": {
+        "holder": "me",
+        "ts": "t0"
+      },
+      "second": {
+        "holder": "you",
+        "ts": "t1"
+      }
+    },
+    "logs": {
+      "demo": "{\"feature\":\"demo\",\"type\":\"owner-claimed\",\"actor\":\"me\",\"ts\":\"t0\",\"data\":{\"holder\":\"me\"}}\n{\"feature\":\"demo\",\"type\":\"owner-released\",\"actor\":\"you\",\"ts\":\"t1\",\"data\":{\"holder\":\"you\"}}\n"
+    },
+    "sh": []
+  },
+  "recordOwnerReleased/blank-actor-uses-git": {
+    "result": {
+      "holder": "dev@example.com",
+      "ts": "t0"
+    },
+    "logs": {
+      "demo": "{\"feature\":\"demo\",\"type\":\"owner-released\",\"actor\":\"dev@example.com\",\"ts\":\"t0\",\"data\":{\"holder\":\"dev@example.com\"}}\n"
+    },
+    "sh": [
+      {
+        "file": "git",
+        "args": [
+          "config",
+          "user.email"
+        ],
+        "cwd": "<REPO>"
+      }
+    ]
+  },
+  "recordOwnerReleased/default-ts-stamped": {
+    "result": {
+      "holder": "me",
+      "ts": "<TS>"
+    },
+    "logs": {
+      "demo": "{\"feature\":\"demo\",\"type\":\"owner-released\",\"actor\":\"me\",\"ts\":\"<TS>\",\"data\":{\"holder\":\"me\"}}\n"
+    },
+    "sh": []
+  },
+  "recordOwnerReleased/explicit-actor": {
+    "result": {
+      "holder": "me@x.io",
+      "ts": "t0"
+    },
+    "logs": {
+      "demo": "{\"feature\":\"demo\",\"type\":\"owner-released\",\"actor\":\"me@x.io\",\"ts\":\"t0\",\"data\":{\"holder\":\"me@x.io\"}}\n"
+    },
+    "sh": []
+  },
+  "recordOwnerReleased/git-identity": {
+    "result": {
+      "holder": "dev@example.com",
+      "ts": "t0"
+    },
+    "logs": {
+      "demo": "{\"feature\":\"demo\",\"type\":\"owner-released\",\"actor\":\"dev@example.com\",\"ts\":\"t0\",\"data\":{\"holder\":\"dev@example.com\"}}\n"
+    },
+    "sh": [
+      {
+        "file": "git",
+        "args": [
+          "config",
+          "user.email"
+        ],
+        "cwd": "<REPO>"
+      }
+    ]
+  },
+  "recordOwnerReleased/missing-feature": {
+    "error": {
+      "type": "Error",
+      "message": "recordOwnerReleased: feature is required"
+    },
+    "logs": {},
+    "sh": []
+  },
+  "recordOwnerReleased/missing-identity": {
+    "error": {
+      "type": "Error",
+      "message": "cannot determine git user.email — set your git identity before claiming/releasing the lock"
+    },
+    "logs": {},
+    "sh": [
+      {
+        "file": "git",
+        "args": [
+          "config",
+          "user.email"
+        ],
+        "cwd": "<REPO>"
+      }
+    ]
+  },
+  "recordOwnerReleased/no-args": {
+    "error": {
+      "type": "Error",
+      "message": "recordOwnerReleased: feature is required"
+    },
+    "logs": {},
+    "sh": []
+  },
+  "recordOwnerReleased/on-delivered-feature": {
+    "error": {
+      "type": "TransitionError",
+      "message": "Cannot append 'owner-released' after terminal phase 'delivered'"
+    },
+    "logs": {
+      "demo": "{\"feature\":\"demo\",\"type\":\"approved\",\"actor\":\"arch\",\"role\":\"architect\",\"ts\":\"t0\"}\n{\"feature\":\"demo\",\"type\":\"deliver-started\",\"actor\":\"h\",\"ts\":\"t1\"}\n{\"feature\":\"demo\",\"type\":\"pr-opened\",\"actor\":\"h\",\"ts\":\"t2\"}\n"
+    },
+    "sh": []
+  },
+  "recordOwnerReleased/unsafe-feature": {
+    "error": {
+      "type": "Error",
+      "message": "invalid feature slug \"../x\" (expected /^[a-z0-9][a-z0-9-]*$/ — no path separators or '..')"
+    },
+    "logs": {},
+    "sh": []
+  },
+  "surface/exports": {
+    "result": [
+      "createGitStateStore",
+      "defaultSh",
+      "isSafeFeature"
+    ],
+    "logs": {},
+    "sh": []
+  },
+  "surface/keys": {
+    "result": [
+      "append",
+      "history",
+      "phase",
+      "plan",
+      "gate",
+      "list",
+      "recordApproval",
+      "recordArchitectureApproved",
+      "recordOwnerClaimed",
+      "recordOwnerReleased"
+    ],
+    "logs": {},
+    "sh": []
+  },
+  "surface/missing-repoRoot": {
+    "error": {
+      "type": "Error",
+      "message": "createGitStateStore: repoRoot is required"
+    },
+    "logs": {},
+    "sh": []
+  },
+  "surface/no-options": {
+    "error": {
+      "type": "Error",
+      "message": "createGitStateStore: repoRoot is required"
+    },
+    "logs": {},
+    "sh": []
+  }
+}
