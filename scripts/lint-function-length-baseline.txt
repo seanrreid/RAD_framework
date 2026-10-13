@@ -4,15 +4,10 @@
 # shrinks (still over the limit) tighten its number; when it reaches the
 # limit or disappears, remove its line. The baseline can only shrink.
 # Regenerate with: scripts/lint-function-length.mjs --write-baseline
-harness/adapters/worktree.js::makeWorktreeLifecycle	54
 harness/cli.js::architectureApproveCommand	81
 harness/cli.js::deliverCommand	215
 harness/cli.js::gateCommand	48
 harness/cli.js::parsePlanCtx	52
 harness/cli.js::writePlanStatus	46
-harness/gates.js::evaluateGate	46
-harness/hook-runner.js::createHookRunner	121
-harness/hook-runner.js::createHookRunner>runHooks	101
 harness/spine.js::deliverSpine	160
 harness/spine.js::runOneWave	425
-harness/transitions.js::validateTransition	73
