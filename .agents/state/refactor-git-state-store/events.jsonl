@@ -10,3 +10,4 @@
 {"feature":"refactor-git-state-store","type":"wave-started","actor":"harness","ts":"2026-10-13T14:19:58.561Z","data":{"wave":3,"attempt":1}}
 {"feature":"refactor-git-state-store","type":"wave-attempt","actor":"harness","ts":"2026-10-13T14:34:50.632Z","data":{"wave":3,"attempt":1,"outcome":"success","tasks":[{"title":"Refresh the ratchet baseline","status":"complete","commit":"aecd16c","concern":"—","error":"—"},{"title":"Full-suite check","status":"complete","commit":"—","concern":"—","error":"—"}],"verify":{"command":"exec bash scripts/verify-all.sh","status":0,"passed":true}}}
 {"feature":"refactor-git-state-store","type":"wave-complete","actor":"harness","ts":"2026-10-13T14:34:50.636Z","data":{"wave":3}}
+{"feature":"refactor-git-state-store","type":"pr-opened","actor":"harness","ts":"2026-10-13T14:35:00.388Z"}
