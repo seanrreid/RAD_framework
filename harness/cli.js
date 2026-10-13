@@ -16,6 +16,7 @@
  *   plan-status <feature> <rejected|needs-revision> [--trailer "Key: Value"]...
  *   checkout <feature | .agents/plans/<feature>.md>
  *   wrap <feature>
+ *   provenance <feature>
  *
  * Argv parsing is hand-rolled (no runtime dep beyond js-yaml, which this file
  * does not need). Control flow is deterministic and side-effect-free except for
@@ -69,6 +70,7 @@ import {
 } from './plan-commit.js';
 import { publishPlanChange, requirePublishReady } from './branch-publish.js';
 import { planOpenCommand, PLAN_OPEN_USAGE } from './plan-open.js';
+import { provenanceCommand, PROVENANCE_USAGE } from './provenance.js';
 import { planStatusCommand, PLAN_STATUS_USAGE } from './plan-status.js';
 import { checkoutCommand, CHECKOUT_USAGE } from './checkout.js';
 import { wrapCommand, WRAP_USAGE } from './wrap.js';
@@ -174,6 +176,11 @@ const SUBCOMMANDS = {
     summary: "Show each wave's effective capability classes for a plan (read-only).",
     usage: CAPABILITIES_USAGE,
     run: (argv, ctx) => capabilitiesCommand(argv, ctx),
+  },
+  provenance: {
+    summary: "Show who wrote a plan's source issue and whether it is trusted (read-only).",
+    usage: PROVENANCE_USAGE,
+    run: (argv, ctx) => provenanceCommand(argv, ctx),
   },
   'install-core': {
     summary: 'Install or upgrade RAD core files into a target, never overwriting local edits.',

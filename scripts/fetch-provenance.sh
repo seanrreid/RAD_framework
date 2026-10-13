@@ -62,6 +62,7 @@ gh_or_die() {
 # Normalize one object-or-array stream of GitHub records to TSV rows of kind $1.
 to_rows() {
   local kind="$1"
+  [[ "$kind" =~ ^(issue|comment)$ ]] || die "internal error: unknown row kind '${kind}'"
   jq -r --arg kind "$kind" --arg ghost "$GHOST_LOGIN" \
     '(if type == "array" then .[] else . end)
      | [$kind, (.user.login // $ghost), (.user.type // ""), (.author_association // "")] | @tsv'
