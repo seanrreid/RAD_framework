@@ -1,7 +1,10 @@
 # Plan: Switch This Repository's Agent Command to the Usage Wrapper (#270)
 Created: 2026-10-13
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-10-13T19:55:32.323Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/switch-agent-to-usage-wrapper
 Adopted-From: https://github.com/seanrreid/RAD_framework/issues/270 (the config switch; the wrapper and the budget warning shipped in #273)
 Issue-Title: Command adapter with 'claude -p' records no token usage, so the token budget never trips and cost metrics are empty
