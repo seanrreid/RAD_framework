@@ -803,14 +803,34 @@ function parseUnpromisedTests(text, testsByWave) {
  *   executionNotes: { doNotTouch: string[], keyFiles: string[], reminders: string[] } }}
  */
 export function parsePlanCtx(text) {
-  // Branch: extract from `Branch: rad/feature` header line
-  let branch = '';
+  const testsByWave = parseTestsByWave(text);
+  return {
+    branch: parseBranchHeader(text),
+    acceptanceCriteria: parseAcceptanceCriteria(text),
+    waveModels: parseWaveModels(text),
+    waveVerify: parseWaveVerify(text),
+    verifyTimeoutSeconds: resolveVerifyTimeoutSeconds(),
+    testsByWave,
+    unpromisedTests: parseUnpromisedTests(text, testsByWave),
+    // Per-wave `#### Task N.M:` blocks (taskBlocksByWave), handed to runWave
+    // so each wave's prompt carries its tasks.
+    waveTasks: Object.fromEntries(taskBlocksByWave(text)),
+    ...parseCapabilities(text),
+    executionNotes: parseExecutionNotes(text),
+  };
+}
+
+/** The `Branch: rad/feature` header value, or '' when absent. */
+function parseBranchHeader(text) {
   for (const line of text.split('\n')) {
     const m = /^Branch:\s*(.+)$/.exec(line.trim());
-    if (m) { branch = m[1].trim(); break; }
+    if (m) return m[1].trim();
   }
+  return '';
+}
 
-  // Acceptance Criteria: numbered list lines in `## Acceptance Criteria`
+/** Numbered list lines under `## Acceptance Criteria`, up to the next `##`. */
+function parseAcceptanceCriteria(text) {
   const acLines = [];
   let inAc = false;
   for (const line of text.split('\n')) {
@@ -821,37 +841,23 @@ export function parsePlanCtx(text) {
       if (/^[0-9]+\./.test(trimmed)) acLines.push(trimmed);
     }
   }
+  return acLines;
+}
 
-  // Execution Notes sub-sections
-  const doNotTouch = subSectionLines(text, 'Do Not Touch')
+/** The `- ` bullet items of one Execution Notes sub-section. */
+function executionNoteItems(text, heading) {
+  return subSectionLines(text, heading)
     .map((l) => l.trim())
     .filter((l) => l.startsWith('- '))
     .map((l) => l.slice(2));
+}
 
-  const keyFiles = subSectionLines(text, 'Key Files')
-    .map((l) => l.trim())
-    .filter((l) => l.startsWith('- '))
-    .map((l) => l.slice(2));
-
-  const reminders = subSectionLines(text, 'Reminders')
-    .map((l) => l.trim())
-    .filter((l) => l.startsWith('- '))
-    .map((l) => l.slice(2));
-
-  const testsByWave = parseTestsByWave(text);
+/** Execution Notes sub-sections: Do Not Touch, Key Files, Reminders. */
+function parseExecutionNotes(text) {
   return {
-    branch,
-    acceptanceCriteria: acLines,
-    waveModels: parseWaveModels(text),
-    waveVerify: parseWaveVerify(text),
-    verifyTimeoutSeconds: resolveVerifyTimeoutSeconds(),
-    testsByWave,
-    unpromisedTests: parseUnpromisedTests(text, testsByWave),
-    // Per-wave `#### Task N.M:` blocks (taskBlocksByWave), handed to runWave
-    // so each wave's prompt carries its tasks.
-    waveTasks: Object.fromEntries(taskBlocksByWave(text)),
-    ...parseCapabilities(text),
-    executionNotes: { doNotTouch, keyFiles, reminders },
+    doNotTouch: executionNoteItems(text, 'Do Not Touch'),
+    keyFiles: executionNoteItems(text, 'Key Files'),
+    reminders: executionNoteItems(text, 'Reminders'),
   };
 }
 
@@ -2211,50 +2217,49 @@ export async function deliverCommand(argv, ctx) {
  * @returns {string} the header's resulting `Status:` value ('' when absent)
  */
 function writePlanStatus(planFile, fields) {
-  const text = readFileSync(planFile, 'utf8');
-  const lines = text.split('\n');
+  const lines = readFileSync(planFile, 'utf8').split('\n');
+  const header = { lines, anchor: lines.findIndex((l) => /^Status:\s*.*$/.test(l)) };
+  upsertApprovalFields(header, fields);
+  writeFileSync(planFile, lines.join('\n'), 'utf8');
+  return planHeaderStatus(lines.join('\n'));
+}
 
+/**
+ * Set a header field in place if it exists, else insert it just after
+ * `header.anchor` (keeping the header block contiguous, or prepend when there
+ * is no header at all). `anchor` tracks the last header line touched, seeded
+ * to the `Status:` line, so freshly-inserted fields stay grouped.
+ */
+function upsertHeaderField(header, key, value) {
+  const re = new RegExp(`^${key}:\\s*.*$`);
+  const idx = header.lines.findIndex((l) => re.test(l));
+  if (idx !== -1) {
+    header.lines[idx] = `${key}: ${value}`;
+    if (idx > header.anchor) header.anchor = idx;
+    return;
+  }
+  const at = header.anchor === -1 ? 0 : header.anchor + 1;
+  header.lines.splice(at, 0, `${key}: ${value}`);
+  header.anchor = at;
+}
+
+/** Upsert the approval mirror fields in order; proxy and direct modes differ in the recorder lines. */
+function upsertApprovalFields(header, fields) {
   const approvedByValue = fields.proxy
     ? `${fields.approvedBy} (out-of-band)`
     : fields.approvedBy;
-
-  // Track the end of the header block so freshly-inserted fields stay grouped
-  // with the existing headers. Seeded to the `Status:` line; advanced as we add.
-  let anchor = lines.findIndex((l) => /^Status:\s*.*$/.test(l));
-
-  // Set a header field in place if it exists, else insert it just after the
-  // current anchor (keeping the header block contiguous). Returns nothing; keeps
-  // `anchor` pointing at the last header line touched.
-  const upsert = (key, value) => {
-    const re = new RegExp(`^${key}:\\s*.*$`);
-    const idx = lines.findIndex((l) => re.test(l));
-    if (idx !== -1) {
-      lines[idx] = `${key}: ${value}`;
-      if (idx > anchor) anchor = idx;
-      return;
-    }
-    // Missing: insert after the anchor (or prepend if there is no header at all).
-    const at = anchor === -1 ? 0 : anchor + 1;
-    lines.splice(at, 0, `${key}: ${value}`);
-    anchor = at;
-  };
-
   // A delivered feature keeps its Status (e.g. `complete`); only provenance moves (#228).
-  if (!fields.keepStatus) upsert('Status', 'approved');
-  upsert('Approved-By', approvedByValue);
-  upsert('Approved-At', fields.approvedAt);
-
+  if (!fields.keepStatus) upsertHeaderField(header, 'Status', 'approved');
+  upsertHeaderField(header, 'Approved-By', approvedByValue);
+  upsertHeaderField(header, 'Approved-At', fields.approvedAt);
   if (fields.proxy) {
-    upsert('Recorded-By', fields.recordedBy);
-    upsert('Approval-Evidence', fields.evidence);
+    upsertHeaderField(header, 'Recorded-By', fields.recordedBy);
+    upsertHeaderField(header, 'Approval-Evidence', fields.evidence);
   } else if (isNonEmpty(fields.recordedBy)) {
     // Non-proxy mirror of the recorder: direct human approval passes
     // recordedBy = the running architect (recorder == approver), mirrored here.
-    upsert('Recorded-By', fields.recordedBy);
+    upsertHeaderField(header, 'Recorded-By', fields.recordedBy);
   }
-
-  writeFileSync(planFile, lines.join('\n'), 'utf8');
-  return planHeaderStatus(lines.join('\n'));
 }
 
 /** The plan header's `Status:` value ('' when the header is absent). */
