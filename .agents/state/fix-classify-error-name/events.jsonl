@@ -4,3 +4,4 @@
 {"feature":"fix-classify-error-name","type":"wave-started","actor":"harness","ts":"2026-10-13T17:43:15.942Z","data":{"wave":1,"attempt":1}}
 {"feature":"fix-classify-error-name","type":"wave-attempt","actor":"harness","ts":"2026-10-13T17:53:01.991Z","data":{"wave":1,"attempt":1,"outcome":"success","tasks":[{"title":"Compare the lowercased name","status":"complete","commit":"98b2c21","concern":"—","error":"—"},{"title":"Tests for the new behavior","status":"complete","commit":"16ce7c0","concern":"—","error":"—"},{"title":"Update the golden data, narrowly","status":"complete","commit":"4736770","concern":"—","error":"—"}],"verify":{"command":"exec bash scripts/verify-all.sh","status":0,"passed":true}}}
 {"feature":"fix-classify-error-name","type":"wave-complete","actor":"harness","ts":"2026-10-13T17:53:01.992Z","data":{"wave":1}}
+{"feature":"fix-classify-error-name","type":"pr-opened","actor":"harness","ts":"2026-10-13T17:53:12.496Z"}
