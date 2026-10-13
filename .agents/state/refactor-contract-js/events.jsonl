@@ -10,3 +10,4 @@
 {"feature":"refactor-contract-js","type":"wave-started","actor":"harness","ts":"2026-10-13T13:08:54.615Z","data":{"wave":3,"attempt":1}}
 {"feature":"refactor-contract-js","type":"wave-attempt","actor":"harness","ts":"2026-10-13T13:18:44.305Z","data":{"wave":3,"attempt":1,"outcome":"success","tasks":[{"title":"Refresh the ratchet baseline","status":"complete","commit":"5cb3152","concern":"—","error":"—"},{"title":"Full-suite check","status":"complete","commit":"—","concern":"—","error":"—"}],"verify":{"command":"exec bash scripts/verify-all.sh","status":0,"passed":true}}}
 {"feature":"refactor-contract-js","type":"wave-complete","actor":"harness","ts":"2026-10-13T13:18:44.307Z","data":{"wave":3}}
+{"feature":"refactor-contract-js","type":"pr-opened","actor":"harness","ts":"2026-10-13T13:18:51.831Z"}
