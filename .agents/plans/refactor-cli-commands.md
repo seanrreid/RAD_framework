@@ -1,9 +1,9 @@
 # Plan: Refactor the Long cli.js Commands Under the Function-Length Ratchet (#252, part 5 of 6)
 Created: 2026-10-13
 Author: architect
-Status: in-progress
+Status: approved
 Approved-By: sean@torchcodelab.com
-Approved-At: 2026-10-13T15:16:36.822Z
+Approved-At: 2026-10-13T15:41:21.866Z
 Recorded-By: sean@torchcodelab.com
 Branch: rad/refactor-cli-commands
 Adopted-From: #252 part 5 of 6 (refactor five offenders in harness/cli.js; the issue stays open until plan 6 lands)
@@ -43,11 +43,12 @@ The work is **behavior-preserving**. The safety net matches plans 1-4, adapted t
 4. **`rad gate` identical.** For `gateCommand` (argument errors, missing feature or gate name, an unknown gate, a missing or empty log, an approved log, a log with several events, and the `--stdin` form with valid, empty and malformed JSONL), the exit code and the exact stdout and stderr equal the golden record, and no file is written.
 5. **`rad architecture-approve` identical.** For `architectureApproveCommand` (argument errors, a missing slug, `--evidence` without `--on-behalf-of`, an undetermined git identity, direct and proxy mode, a failed role check), the exit code, the exact stdout and stderr, and the `_architecture` event log text equal the golden record.
 6. **`rad deliver` identical in order and content.** For `deliverCommand` scenarios covering: `--help`; bad arguments; no feature; each agent-selection refusal; an invalid failed-attempts cap; an invalid configuration; an invalid hooks directory; a delivered rerun; a refused `--resume`; a setup failure; the unarmed-budget warning; a prepare or finish port failure; a spine that throws; an ok run with evidence; an ok run the log does not evidence; and each stop class, the exit code, the exact stdout and stderr *in the order written*, and the resulting event log equal the golden record, with no worktree or event created for the refusals that precede setup.
-7. **Public surface unchanged.** `cli.js` exports the same names with the same signatures (`parsePlanCtx`, `deliverCommand`, `gateCommand`, `architectureApproveCommand` among them); no file outside `cli.js`, the new test files and the baseline is modified.
+7. **Public surface unchanged.** `cli.js` exports the same names with the same signatures (`parsePlanCtx`, `deliverCommand`, `gateCommand`, `architectureApproveCommand` among them); no file outside `cli.js`, the new test files, the baseline and the one eval anchor in `harness/evals/delivery.eval.js` is modified.
 8. **Ratchet shrinks.** After `--write-baseline`, the five `cli.js` entries are gone, no new entry for `cli.js` appears (every helper is 40 lines or fewer), and `node scripts/lint-function-length.mjs` exits 0.
 9. **Invariants intact.** `bash scripts/lint-invariants.sh` passes.
-10. **Existing tests untouched.** `git diff` shows no change to any existing test file, and the whole existing suite passes.
-11. **Full suite passes.** `scripts/verify-all.sh` passes on the delivered branch.
+10. **Evals still prove their gates.** `node --test harness/evals/*.eval.js` passes in full, including every `[mutated]` case; the re-anchored `crashing-pre-wave-hook` mutation still removes the `runHooks` key from the spine arguments and the eval still fails against it.
+11. **Existing tests untouched.** `git diff` shows no change to any existing test file, and the whole existing suite passes.
+12. **Full suite passes.** `scripts/verify-all.sh` passes on the delivered branch.
 
 ## Agent Scope
 No sub-agents were called. Research was inline (8 tool calls): the baseline entries for `cli.js`, and a full read of `deliverCommand`, `parsePlanCtx`, `writePlanStatus`, `architectureApproveCommand` and `gateCommand`.
@@ -60,6 +61,7 @@ No sub-agents were called. Research was inline (8 tool calls): the baseline entr
 | harness/cli.js | 2200-2262 | `writePlanStatus` split into header-field helpers |
 | harness/cli.js | 2640-2745 | `architectureApproveCommand` split into argument, identity and write helpers |
 | harness/cli.js | 2880-2960 | `gateCommand` split into parse, evaluate and report helpers |
+| harness/evals/delivery.eval.js | 95-98 | One text anchor in the `crashing-pre-wave-hook` mutation updated to where `runHooks` now lives |
 | harness/test/cli-commands-characterization.test.js | 1-300 | New. The scenario sets and the comparison to the golden file |
 | harness/test/fixtures/cli-commands-golden.json | 1-1 | New. Golden results generated from the unmodified `cli.js` |
 | scripts/lint-function-length-baseline.txt | 1-45 | Regenerated with `--write-baseline` |
@@ -69,13 +71,13 @@ No sub-agents were called. Research was inline (8 tool calls): the baseline entr
 ### Do Not Touch
 - Every existing test file, including cli.test.js and the cli-*.test.js files
 - harness/spine.js, harness/plan-open.js, harness/provenance.js and every other module (cli.js's imports and the calls it makes must stay as they are)
-- harness/evals/, scripts/lint-function-length.mjs, docs/invariants.yaml
+- harness/evals/ everywhere except the single anchor named in Files in Scope (`delivery.eval.js`, the `crashing-pre-wave-hook` mutation), scripts/lint-function-length.mjs, docs/invariants.yaml
 
 ### Key Files
 - harness/cli.js — the five functions; `parseDeliverArgs`, `selectDeliverAgent`, `loadDeliverConfig`, `resolveResume`, `setupWorktreeRun`, `setupMainRun`, `reportStop`, `completionEvidence` and the other existing helpers `deliverCommand` already uses
 - harness/test/cli.test.js — the existing command tests and their ctx and stub patterns (read, do not edit)
 - harness/evals/lib/fixture.js — `createFixture` builds a real temporary git repository with an origin, copied scripts and an approved plan; a good basis for the `deliverCommand` scenarios
-- harness/evals/delivery.eval.js — shows how a scripted agent drives a delivery
+- harness/evals/delivery.eval.js — shows how a scripted agent drives a delivery; its `crashing-pre-wave-hook` mutation (~line 97) is the one anchor Task 3.3 updates
 
 ### Reminders
 - harness/ is self-protected: architect approval and the last-wave full-suite Verify. Deliver with `RAD_WAVE_TIMEOUT_SECONDS=1800` AND `RAD_VERIFY_TIMEOUT_SECONDS=1800`.
@@ -85,6 +87,7 @@ No sub-agents were called. Research was inline (8 tool calls): the baseline entr
 - Keep the **order of side effects** in `deliverCommand` exactly: help, argument parse, feature check, config load, agent selection, failed-attempts cap, invalid-config refusal, hooks-directory check, delivered short-circuit, resume eligibility, setup (worktree or main), matrix load, token-budget parse and warning, work branch, script context, prepare port, finish port (with worktree preservation on failure), hook runner, the spine call inside its `try`, evidence, cleanup, the final reports.
 - Keep the spine call's argument object identical key for key, including the conditional `...(resume ? { resume } : {})`.
 - `parsePlanCtx` is exported and used by `rad approve`, `rad deliver`, `rad capabilities` and others: keep it a pure function of its text and the environment, with the same key set in the same order.
+- Several evals patch literal `cli.js` text to prove gates are load-bearing (`harness/evals/delivery.eval.js` and `approval.eval.js`). These strings must stay verbatim in `cli.js`: `pushGuard: true`, the `scripts/check-scope.sh` entry of `SCRIPT_ARGS`, `return env.RAD_WORKTREE !== WORKTREE_OFF_VALUE;`, `if (stop.class === STOP_CLASSES.FAILED) {` and the anchors `approval.eval.js` uses. Only the `runHooks`/`pushGuard` anchor moves (Task 3.3). After each refactor wave run `node --test harness/evals/*.eval.js`, not only `npm test`.
 - Run `node scripts/lint-function-length.mjs` before finishing each refactor wave; the baseline is regenerated only in Wave 4.
 
 ## Program Design
@@ -172,8 +175,8 @@ What: Extract the argument checks, identity resolution and result formatting hel
 Validate: AC#4, AC#5, AC#7, AC#10 — the characterization test and the existing tests pass unchanged; no behavior change, so no new tests.
 
 ### Wave 3 — sequential
-Tasks in this wave must run in sequence.
-Verify: npm test --prefix harness
+Tasks in this wave must run in sequence (3.3 needs the code moved by 3.1 and 3.2).
+Verify: npm test --prefix harness && node --test harness/evals/*.eval.js
 
 #### Task 3.1: Split deliverCommand into phases
 File: harness/cli.js:1960-2200
@@ -184,6 +187,11 @@ Validate: AC#6, AC#7, AC#9, AC#10 — the characterization test (including the o
 File: harness/cli.js:1960-2200
 What: Move the `deliverSpine` argument object into `buildSpineArgs(run)` and the `try`/`catch` around the call into `runSpine(run)`, keeping every key, every comment that states a constraint, the conditional `resume` key, and the catch behavior (preserve the worktree, sanitize the message, print `unexpected error`, return 1).
 Validate: AC#6, AC#7, AC#10 — the characterization test, the delivery evals and the existing tests pass unchanged; no behavior change, so no new tests.
+
+#### Task 3.3: Re-anchor the hook eval
+File: harness/evals/delivery.eval.js:95-98
+What: The `crashing-pre-wave-hook` case patches the literal text `      runHooks,\n      pushGuard` in `harness/cli.js` to remove the hook runner and prove the gate is load-bearing. After Task 3.2 that text lives in `buildSpineArgs` as `    runHooks: run.runHooks,\n    pushGuard`. Change only the two string arguments of that one `patchFile` call: the anchor becomes `    runHooks: run.runHooks,\n    pushGuard` and the replacement `    pushGuard` (same mutation: the `runHooks` key is removed). Touch nothing else in the file; the other `cli.js` anchors (`pushGuard: true`, the `check-scope.sh` entry, `return env.RAD_WORKTREE !== WORKTREE_OFF_VALUE;`, `if (stop.class === STOP_CLASSES.FAILED) {`) still match and must keep matching.
+Validate: AC#10, AC#11 — `node --test harness/evals/*.eval.js` passes in full, including `crashing-pre-wave-hook [mutated]`; the diff of the file is exactly those two string arguments; no test is deleted, renamed or skipped.
 
 ### Wave 4 — sequential
 Tasks in this wave must run in sequence.
@@ -216,9 +224,11 @@ None.
 - The `deliverCommand` scenarios need real git repositories and are slower than the earlier characterizations; the test must stay deterministic and complete well within the suite's time. Two consecutive passing runs are required before the golden file is committed.
 - The matrices can only catch inputs they contain; the full existing suite is the second net.
 - A golden file generated after any `cli.js` edit would certify the refactor against itself; Wave 1 must not touch `cli.js`.
+- Evals mutate literal `cli.js` text. The first delivery attempt stopped in Wave 4 because one such anchor moved with the code; Task 3.3 fixes it and Wave 3's Verify now runs the evals so any other break is caught a wave earlier.
 - `cli.js` is large and shared; any other open work touching it would conflict. None is planned (plan 6 touches `spine.js`).
 
 ## Issue Gaps
+- AMENDED 2026-10-13 after the first delivery attempt stopped on `fail-scope` in Wave 4: the `crashing-pre-wave-hook` eval patches literal `cli.js` text that Wave 3 moved. The plan now allows exactly that one anchor change (Task 3.3), runs the evals in Wave 3's Verify, and lists the anchors that must stay verbatim. The refactor itself was already correct and is unchanged.
 - ASSUMPTION: no `Issue:` header, so the deliver PR does not close #252; the issue is closed by hand after plan 6.
 - ASSUMPTION: `writePlanStatus` is private, so it is characterized only through `rad approve`; its helpers stay private to `cli.js`.
 - ASSUMPTION: scenarios that reach the spine use an injected scripted `runWave`; the real adapters are covered by the earlier plans' characterizations.
