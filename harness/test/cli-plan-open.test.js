@@ -17,6 +17,7 @@ import { defaultSh } from '../adapters/git-state-store.js';
 import { planOpenCommand } from '../plan-open.js';
 import { planCommitMessage } from '../plan-commit.js';
 import { main } from '../cli.js';
+import { planFingerprint } from '../plan-fingerprint.js';
 
 const SLUG = 'demo';
 const BRANCH = `rad/${SLUG}`;
@@ -71,8 +72,13 @@ function writePlan(root, text) {
   writeFileSync(join(root, PLAN_REL), text);
 }
 
-/** `sh` that stubs the three scripts and records every call; git runs for real. */
-function makeSh(root, { lintStatus = 0, lintOut = '', defaultStatus = 0 } = {}) {
+const OWNER_TSV = 'issue\talice\tUser\tOWNER\n';
+const provenanceCalls = (calls) => calls.filter((c) => c.file.endsWith('scripts/fetch-provenance.sh'));
+
+/** `sh` that stubs the four scripts and records every call; git runs for real. */
+function makeSh(root, {
+  lintStatus = 0, lintOut = '', defaultStatus = 0, provenance = { status: 0, stdout: OWNER_TSV, stderr: '' },
+} = {}) {
   const calls = [];
   const sh = (file, args, opts) => {
     calls.push({ file, args });
@@ -81,6 +87,7 @@ function makeSh(root, { lintStatus = 0, lintOut = '', defaultStatus = 0 } = {}) 
       return { status: defaultStatus, stdout: defaultStatus === 0 ? 'main\n' : '', stderr: '' };
     }
     if (file === join(root, 'scripts/rad-label.sh')) return { status: 0, stdout: '', stderr: '' };
+    if (file === join(root, 'scripts/fetch-provenance.sh')) return provenance;
     return defaultSh(file, args, opts);
   };
   return { sh, calls };
@@ -130,7 +137,7 @@ test('fresh run: branch on origin, one plan commit with the derived message, lab
     assert.match(git(root, ['log', '-1', '--format=%s', BRANCH]).stdout, /^plan: Demo feature$/);
     assert.equal(git(root, ['diff-tree', '--no-commit-id', '--name-only', '-r', BRANCH]).stdout, PLAN_REL);
     const sha = git(root, ['rev-parse', BRANCH]).stdout;
-    assert.equal(r.stdout.trim(), `rad plan-open: ok feature=demo branch=${BRANCH} commit=${sha} issue=42`);
+    assert.equal(r.stdout.trim().split('\n').pop(), `rad plan-open: ok feature=demo branch=${BRANCH} commit=${sha} issue=42`);
     const labels = labelCalls(r.calls);
     assert.deepEqual(labels.map((c) => c.args), [['42', 'pending-review']]);
     const pushIdx = r.calls.findIndex((c) => c.file === 'git' && c.args[0] === 'push');
@@ -258,6 +265,107 @@ test('push failure exits 1 with a local commit; rerun pushes, exactly one plan c
     assert.equal(git(root, ['rev-list', '--count', `origin/main..origin/${BRANCH}`]).stdout, '1');
     assert.equal(second.calls.some((c) => c.file === 'git' && c.args[0] === 'commit'), false, 'rerun only pushes');
     assert.equal(labelCalls(second.calls).length, 1);
+  });
+});
+
+const committedPlan = (root) => git(root, ['show', `${BRANCH}:${PLAN_REL}`]).stdout;
+
+test('provenance: stamped header is in the committed plan; commit message and ok line unchanged', async () => {
+  await withRepo(async ({ root }) => {
+    writePlan(root, ISSUE_PLAN);
+    const stdout = 'issue\talice\tUser\tOWNER\ncomment\tbob\tUser\tNONE\ncomment\tcarol\tUser\tMEMBER\n';
+    const r = await runPlanOpen(root, [PLAN_REL], { provenance: { status: 0, stdout, stderr: '' } });
+    assert.equal(r.code, 0, r.stderr);
+    assert.deepEqual(provenanceCalls(r.calls).map((c) => c.args), [['42']]);
+    const plan = committedPlan(root);
+    assert.match(plan, /^Source-Author: alice \(OWNER\)$/m);
+    assert.match(plan, /^Source-Comments: 2 total, 1 non-collaborator$/m);
+    assert.ok(plan.indexOf('Source-Author:') < plan.indexOf('## Context'), 'stamp is in the header block');
+    assert.equal(git(root, ['log', '-1', '--format=%B', BRANCH]).stdout, planCommitMessage(ISSUE_PLAN, []));
+    const sha = git(root, ['rev-parse', BRANCH]).stdout;
+    assert.equal(r.stdout.trim().split('\n').pop(), `rad plan-open: ok feature=demo branch=${BRANCH} commit=${sha} issue=42`);
+    assert.match(r.stdout, /^provenance: alice \(OWNER\)\n/m);
+    assert.ok(r.stdout.indexOf('provenance:') < r.stdout.indexOf('rad plan-open: ok'));
+  });
+});
+
+test('provenance: a model-written Source-Author is overwritten, once', async () => {
+  await withRepo(async ({ root }) => {
+    const forged = ISSUE_PLAN.replace('Issue: 42\n', 'Issue: 42\nSource-Author: forged (OWNER)\nSource-Comments: 0 total, 0 non-collaborator\n');
+    writePlan(root, forged);
+    const stdout = 'issue\tmallory\tUser\tNONE\n';
+    const r = await runPlanOpen(root, [PLAN_REL], { provenance: { status: 0, stdout, stderr: '' } });
+    assert.equal(r.code, 0, r.stderr);
+    const plan = committedPlan(root);
+    assert.doesNotMatch(plan, /forged/);
+    assert.equal(plan.match(/^Source-Author:/gm).length, 1);
+    assert.equal(plan.match(/^Source-Comments:/gm).length, 1);
+    assert.match(plan, /^Source-Author: mallory \(NONE\)$/m);
+  });
+});
+
+test('provenance: fetch failure, unsupported platform and bad output still succeed with an unknown stamp', async () => {
+  const cases = [
+    [{ status: 1, stdout: '', stderr: 'gh api issue 42 failed: HTTP 404' }, /^Source-Author: unknown \(gh api issue 42 failed: HTTP 404\)$/m],
+    [{ status: 3, stdout: 'unsupported\tgitlab\n', stderr: '' }, /^Source-Author: unknown \(unsupported platform: gitlab\)$/m],
+    [{ status: 0, stdout: 'garbage\n', stderr: '' }, /^Source-Author: unknown \(unparseable provenance output: /m],
+    [{ status: 0, stdout: '', stderr: '' }, /^Source-Author: unknown \(unparseable provenance output: /m],
+  ];
+  for (const [provenance, expected] of cases) {
+    await withRepo(async ({ root }) => {
+      writePlan(root, ISSUE_PLAN);
+      const r = await runPlanOpen(root, [PLAN_REL], { provenance });
+      assert.equal(r.code, 0, r.stderr);
+      assert.match(committedPlan(root), expected);
+      assert.match(committedPlan(root), /^Source-Comments: unknown$/m);
+      assert.match(r.stdout, /^provenance: unknown \(/m);
+      assert.ok(onOrigin(root));
+    });
+  }
+});
+
+test('provenance: no source issue stamps none without calling the script; adopted issue is fetched', async () => {
+  await withRepo(async ({ root }) => {
+    writePlan(root, NO_ISSUE_PLAN);
+    const r = await runPlanOpen(root, [PLAN_REL]);
+    assert.equal(r.code, 0, r.stderr);
+    assert.equal(provenanceCalls(r.calls).length, 0);
+    assert.match(committedPlan(root), /^Source-Author: none \(no source issue\)$/m);
+    assert.match(committedPlan(root), /^Source-Comments: none$/m);
+    assert.match(r.stdout, /^provenance: none \(no source issue\)$/m);
+  });
+  await withRepo(async ({ root }) => {
+    writePlan(root, ADOPT_PLAN);
+    const r = await runPlanOpen(root, [PLAN_REL]);
+    assert.equal(r.code, 0, r.stderr);
+    assert.deepEqual(provenanceCalls(r.calls).map((c) => c.args), [['7']]);
+  });
+});
+
+test('provenance: a resumed push step does not re-stamp', async () => {
+  await withRepo(async ({ root, base }) => {
+    writePlan(root, ISSUE_PLAN);
+    git(root, ['config', 'remote.origin.pushurl', join(base, 'no-such-origin.git')]);
+    const first = await runPlanOpen(root, [PLAN_REL]);
+    assert.equal(first.code, 1, first.stderr);
+    assert.equal(provenanceCalls(first.calls).length, 1);
+    const stamped = committedPlan(root);
+    git(root, ['config', '--unset', 'remote.origin.pushurl']);
+    const second = await runPlanOpen(root, [PLAN_REL], { provenance: { status: 1, stdout: '', stderr: 'would differ' } });
+    assert.equal(second.code, 0, second.stderr);
+    assert.equal(provenanceCalls(second.calls).length, 0);
+    assert.doesNotMatch(second.stdout, /provenance:/);
+    assert.equal(git(root, ['show', `origin/${BRANCH}:${PLAN_REL}`]).stdout, stamped);
+  });
+});
+
+test('provenance: stamping does not change the plan fingerprint', async () => {
+  await withRepo(async ({ root }) => {
+    writePlan(root, ISSUE_PLAN);
+    const r = await runPlanOpen(root, [PLAN_REL]);
+    assert.equal(r.code, 0, r.stderr);
+    assert.notEqual(committedPlan(root), ISSUE_PLAN.trimEnd());
+    assert.deepEqual(planFingerprint(committedPlan(root) + '\n'), planFingerprint(ISSUE_PLAN));
   });
 });
 
