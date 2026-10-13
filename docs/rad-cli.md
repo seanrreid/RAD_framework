@@ -150,6 +150,17 @@ rerun is safe; there is no rollback.
 the command prints `label skipped: no issue`. A labelling failure exits 1 (the
 branch is already pushed; a rerun is safe).
 
+**Provenance stamp:** before committing a fresh plan, plan-open runs
+`scripts/fetch-provenance.sh <issue>` and writes two display-only header lines,
+replacing any already present: `Source-Author: <login> (<association>)` and
+`Source-Comments: <N> total, <M> non-collaborator`. `OWNER`, `MEMBER` and
+`COLLABORATOR` are trusted; everything else, and any bot, is untrusted. A plan with
+no source issue gets `Source-Author: none (no source issue)`; a failed fetch, a
+non-GitHub platform or unparseable output gets `Source-Author: unknown (<reason>)`.
+The stamp never blocks plan-open and does not change the plan fingerprint. A rerun
+that resumes at the push step does not re-stamp. The planner must not write these
+lines.
+
 **Sync:** it always pushes and ignores `RAD_SYNC`.
 
 **Success line:**
@@ -303,6 +314,24 @@ pushes the existing commit without making a new one. There is no rollback.
 
 **Exit codes:** 0 published (or nothing to publish); 1 a publish step failed
 (rerun resumes); 2 refused, nothing changed.
+
+---
+
+### rad provenance
+
+```
+rad provenance <feature>
+```
+
+Reads the `Source-Author:` and `Source-Comments:` header lines that `plan-open`
+stamped and prints one `provenance:` line: `trusted`, `UNTRUSTED` (with the
+association, and `bot` for a bot), `unknown`, `none`, or `not recorded` (a plan with
+no stamp). A second line reports how many issue comments came from
+non-collaborators. It is advisory and read-only: it writes nothing and appends no
+event. `rad-approve` runs it and shows the result before the architect approves.
+
+**Exit codes:** 0 for every advisory outcome; 2 for a bad feature name or a missing
+plan.
 
 ---
 

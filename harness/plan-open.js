@@ -9,12 +9,15 @@
  * failed after the branch exists — a rerun is safe and resumes (no rollback).
  * Always pushes; never reads RAD_SYNC. Every git call is an args array via `sh`.
  */
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import process from 'node:process';
 
 import { defaultSh, isSafeFeature } from './adapters/git-state-store.js';
 import { conventionWorkBranch, planCommitMessage, planIssueNumber, validateTrailer } from './plan-commit.js';
+import {
+  noneHeaderLines, parseProvenanceTsv, provenanceHeaderLines, stampProvenance, unknownHeaderLines,
+} from './provenance.js';
 
 const VERB = 'rad plan-open';
 export const PLAN_OPEN_USAGE = 'rad plan-open <plan-file> [--trailer "Key: Value"]...';
@@ -23,6 +26,9 @@ const FAILED_EXIT = 1;
 const OK_EXIT = 0;
 const LINT_SCRIPT = 'scripts/lint-plan.sh';
 const LABEL_SCRIPT = 'scripts/rad-label.sh';
+const PROVENANCE_SCRIPT = 'scripts/fetch-provenance.sh';
+const UNSUPPORTED_PLATFORM_EXIT = 3;
+const SOURCE_AUTHOR_PREFIX = 'Source-Author: ';
 const DEFAULT_BRANCH_SCRIPT = 'scripts/get-default-branch.sh';
 const LABEL_STATUS = 'pending-review';
 /** The plan path relative to the repo root; group 1 is the slug. */
@@ -197,6 +203,31 @@ function cutBranch(sh, root, req) {
   gitOrStop(sh, root, ['checkout', '-q', '-b', req.branch, `origin/${base}`], failure);
 }
 
+/** The header lines for a plan's source issue; any fetch or parse failure becomes `unknown`, never a stop. */
+function provenanceLines(sh, root, issue) {
+  if (issue === null) return noneHeaderLines();
+  const res = sh(join(root, PROVENANCE_SCRIPT), [String(issue)], { cwd: root });
+  if (res.status === UNSUPPORTED_PLATFORM_EXIT) {
+    const platform = String(res.stdout ?? '').trim().split('\t')[1] ?? 'unknown';
+    return unknownHeaderLines(`unsupported platform: ${platform}`);
+  }
+  if (res.status !== 0) {
+    return unknownHeaderLines(String(res.stderr || res.stdout || '').trim() || `${PROVENANCE_SCRIPT} exited ${res.status}`);
+  }
+  try {
+    return provenanceHeaderLines(parseProvenanceTsv(res.stdout));
+  } catch (err) {
+    return unknownHeaderLines(`unparseable provenance output: ${err.message}`);
+  }
+}
+
+/** Stamp Source-Author / Source-Comments into the plan header (display-only; the fingerprint ignores the header). */
+function stampPlan(sh, root, req) {
+  const lines = provenanceLines(sh, root, planIssueNumber(req.text));
+  writeFileSync(join(root, req.planRel), stampProvenance(req.text, lines));
+  process.stdout.write(`provenance: ${lines[0].slice(SOURCE_AUTHOR_PREFIX.length)}\n`);
+}
+
 /** Stage only the plan file and commit it on the work branch. */
 function commitPlan(sh, root, req) {
   const current = gitOrStop(sh, root, ['rev-parse', '--abbrev-ref', 'HEAD'], failure);
@@ -239,7 +270,10 @@ function startingStep(sh, root, req) {
 function openPlan(sh, root, req, step) {
   if (step === 'fresh') cutBranch(sh, root, req);
   if (step === 'commit') requireCommitReady(sh, root, req);
-  if (step !== 'push') commitPlan(sh, root, req);
+  if (step !== 'push') {
+    stampPlan(sh, root, req);
+    commitPlan(sh, root, req);
+  }
   pushBranch(sh, root, req);
   const issue = labelIssue(sh, root, req);
   const sha = gitOrStop(sh, root, ['rev-parse', req.branch], failure);

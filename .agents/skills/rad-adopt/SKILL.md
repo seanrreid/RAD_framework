@@ -318,6 +318,10 @@ only the plan file, commits it with a message it derives from the plan (an
 labels the issue `pending-review` itself (from `Issue:`, or from an
 `Adopted-From:` issue URL). Do not run those steps by hand.
 
+The harness also stamps `Source-Author:` and `Source-Comments:` on the plan header
+at `plan-open`, recording who wrote the issue and its comments for the approving
+architect. The planner must not write those two lines.
+
 - **Exit 0** → the branch is pushed; continue to Step 8.
 - **Exit 1** → the plan is committed locally but not pushed (or labelling failed).
   Report the message to the author and rerun the same command once the push can

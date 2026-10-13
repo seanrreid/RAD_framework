@@ -14,6 +14,7 @@ the source of truth. If a bullet and its source disagree, the source wins.
 - There are two human gates: `/rad-approve` on the plan, then review of the deliver PR. See `docs/daily-workflow.md`.
 - The wave contract is provider-neutral plain text, honored by the `command`, `sdk` and `acp` adapters. See `docs/rad-wave-contract.md` and #86.
 - Deliver PRs reference the issue as `Issue: #N`, never `Closes #N`; closing the issue is the architect's call at merge. See `docs/rad-cli.md`.
+- `plan-open` stamps the source issue's author and comment mix on the plan header (`Source-Author:`, `Source-Comments:`) so the approving architect sees when a plan was built from untrusted text; it is display-only, outside the fingerprint and the gate, and never blocks. See `docs/rad-cli.md`.
 - Deleting, renaming away, or skipping an existing test needs a `test-removal:<path>` waiver in the approved plan; `check-scope.sh` blocks it otherwise. See the `test-weakening-blocked` entry in `docs/invariants.yaml`.
 
 ## Testing standards
