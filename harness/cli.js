@@ -1973,25 +1973,17 @@ function makeRunHooks({ hookShell, root, hooksDir, now }) {
 }
 
 /**
- * `deliver <feature> [--model <model-id>]`.
+ * Pre-setup phase 1: help, argument parse, feature check.
  *
- * Reads the approved plan, constructs an SDK-backed runWave, and drives
- * deliverSpine to completion. Returns an integer exit code — never calls
- * process.exit() directly.
- *
- * @param {string[]} argv - args after `deliver`
- * @param {{ repoRoot: string, sh?: typeof defaultSh, runWave?: Function }} ctx
- * @returns {Promise<number>}
+ * @param {string[]} argv
+ * @returns {{ code: number } | { parsed: object }}
  */
-export async function deliverCommand(argv, ctx) {
-  const { repoRoot } = ctx;
-  const sh = ctx.sh ?? defaultSh;
-
+function validateDeliverRequest(argv) {
   // Subcommand-level help: print usage and exit 0.
   if (argv.includes('--help') || argv.includes('-h')) {
     process.stdout.write(`Usage: ${DELIVER_USAGE}\n`);
     process.stdout.write('\nRun approved plan wave execution via Claude Agent SDK.\n');
-    return 0;
+    return { code: 0 };
   }
 
   let parsed;
@@ -2000,17 +1992,24 @@ export async function deliverCommand(argv, ctx) {
   } catch (err) {
     process.stderr.write(`rad deliver: ${err.message}\n`);
     process.stderr.write(`Usage: ${DELIVER_USAGE}\n`);
-    return err.exitCode ?? 1;
+    return { code: err.exitCode ?? 1 };
   }
 
-  const { feature, modelExplicit } = parsed;
-
-  if (!isNonEmpty(feature)) {
+  if (!isNonEmpty(parsed.feature)) {
     process.stderr.write('rad deliver: a feature name is required\n');
     process.stderr.write(`Usage: ${DELIVER_USAGE}\n`);
-    return 1;
+    return { code: 1 };
   }
+  return { parsed };
+}
 
+/**
+ * Pre-setup phase 2: config load, agent selection, failed-attempts cap, config
+ * and hooks-directory validation. Nothing here creates a worktree or an event.
+ *
+ * @returns {Promise<{ code: number } | { selection: object, model: string|undefined, failedCap: object, settings: object }>}
+ */
+async function resolveDeliverSettings(ctx, repoRoot, parsed) {
   // Adapter selection. The environment (RAD_AGENT / RAD_AGENT_CMD) wins outright
   // when either is set; otherwise `agent:` in .rad/config.yml applies. The kind
   // picks the runner: 'command' (vendor-neutral CLI), 'sdk' (Anthropic SDK) or
@@ -2019,11 +2018,11 @@ export async function deliverCommand(argv, ctx) {
   // skips construction and the credential check. Config is read once, here.
   const configLoad = await loadDeliverConfig(repoRoot);
   const selected = selectDeliverAgent(ctx, configLoad);
-  if (selected.code !== undefined) return selected.code;
+  if (selected.code !== undefined) return { code: selected.code };
   const { selection } = selected;
   // acp honours no model (ACP v1 has no stable selector), so only an explicit
   // --model reaches it, where createAcpAdapter turns it into its one warning.
-  const model = selection.kind === 'acp' && !modelExplicit ? undefined : parsed.model;
+  const model = selection.kind === 'acp' && !parsed.modelExplicit ? undefined : parsed.model;
 
   // Failed-attempt cap: parsed BEFORE setup so a malformed value exits 2 with
   // no worktree created and no event appended.
@@ -2032,27 +2031,37 @@ export async function deliverCommand(argv, ctx) {
     process.stderr.write(
       `rad deliver: ${MAX_FAILED_ATTEMPTS_ENV} must be a positive integer (got '${failedCap.raw}')\n`,
     );
-    return USAGE_EXIT_CODE;
+    return { code: USAGE_EXIT_CODE };
   }
 
   // Settings + hooks dir: validated BEFORE setup so an invalid config or a
   // malformed hooks dir exits 2 with no worktree created and no event appended.
   // Uses the config loaded once above, from repoRoot.
-  if (!configLoad.ok) return refuseInvalidDeliverConfig(configLoad.errors);
+  if (!configLoad.ok) return { code: refuseInvalidDeliverConfig(configLoad.errors) };
   const settings = configLoad.doc?.settings ?? {};
   const hooksCheck = resolveHooksDir(process.env, repoRoot, settings);
   if (!hooksCheck.ok) {
     process.stderr.write(
       `rad deliver: ${hooksCheck.source} must be a directory path (got ${JSON.stringify(hooksCheck.raw)})\n`,
     );
-    return USAGE_EXIT_CODE;
+    return { code: USAGE_EXIT_CODE };
   }
+  return { selection, model, failedCap, settings };
+}
 
+/**
+ * Pre-spine phase 3: delivered short-circuit, --resume eligibility, then setup
+ * (worktree or main checkout).
+ *
+ * @returns {Promise<{ code: number } | { setup: object, resume: object|null }>}
+ */
+async function resolveDeliverMode({ ctx, sh, repoRoot, parsed, cfg }) {
+  const { feature } = parsed;
   // Delivered rerun: BEFORE --resume eligibility (a delivered feature has no
   // stopped run to resume) and before setup — it never calls the spine, so
   // nothing is appended after pr-opened.
   const delivered = await deliveredShortCircuit({ ctx, sh, repoRoot, feature });
-  if (delivered !== null) return delivered;
+  if (delivered !== null) return { code: delivered };
 
   // --resume eligibility: BEFORE setup, so a refusal exits 2 with no worktree
   // created and no event appended. Without --resume this yields resume: null
@@ -2060,7 +2069,7 @@ export async function deliverCommand(argv, ctx) {
   const eligibility = resolveResume({ ...parsed, feature, repoRoot, sh });
   if (eligibility.refusal !== undefined) {
     process.stderr.write(`rad deliver: ${eligibility.refusal}\n`);
-    return USAGE_EXIT_CODE;
+    return { code: USAGE_EXIT_CODE };
   }
   const { resume } = eligibility;
 
@@ -2071,11 +2080,23 @@ export async function deliverCommand(argv, ctx) {
   // check-*.sh / open-pr.sh run are rooted at an isolated git worktree on the
   // work branch. RAD_WORKTREE_DIR (optional base dir) is read by the lifecycle
   // script itself, so we just let it flow through the environment.
-  const setupOpts = { ctx, feature, model, selection, repoRoot, sh };
+  const setupOpts = { ctx, feature, model: cfg.model, selection: cfg.selection, repoRoot, sh };
   const setup = worktreeEnabled()
     ? await setupWorktreeRun({ ...setupOpts, resume })
     : await setupMainRun(setupOpts);
-  if (setup.code !== undefined) return setup.code;
+  if (setup.code !== undefined) return { code: setup.code };
+  return { setup, resume };
+}
+
+/**
+ * Assemble everything the spine call needs once setup has succeeded: matrix,
+ * token budget (with its unarmed warning), work branch, script context, the
+ * prepare/finish ports and the hook runner.
+ *
+ * @returns {{ code: number } | object} the run, or the exit code of a port failure
+ */
+function buildDeliverRun({ ctx, sh, repoRoot, feature, cfg, mode }) {
+  const { setup, resume } = mode;
   const { root, planCtx, state, runWave, worktree } = setup;
 
   const matrix = loadMatrix();
@@ -2095,84 +2116,107 @@ export async function deliverCommand(argv, ctx) {
   if (finishPort.code !== undefined) {
     // Before the spine, like a setup failure: keep the worktree for inspection.
     if (worktree) preserveAfterSetupFailure(worktree, feature, root);
-    return finishPort.code;
+    return { code: finishPort.code };
   }
   const runHooks = makeRunHooks({
-    hookShell: ctx.sh ?? spawnHook, root, hooksDir: resolveHooksDir(process.env, root, settings).dir, now,
+    hookShell: ctx.sh ?? spawnHook, root, hooksDir: resolveHooksDir(process.env, root, cfg.settings).dir, now,
   });
+  return {
+    feature, state, matrix, runWave, port, finishPort, sh, repoRoot, root, scriptCtx, now, runHooks,
+    tokenBudget, planCtx, failedCap: cfg.failedCap, resume, worktree, workBranch,
+  };
+}
 
-  let result;
+/**
+ * The plan-derived keys of the spine call, in call order.
+ */
+function planSpineArgs(planCtx, root) {
+  return {
+    // Per-wave `Verify:` commands, passed through exactly as tokenBudget is.
+    // Empty for a plan that declares none, which leaves the spine's behavior
+    // and its event sequence unchanged.
+    waveVerify: planCtx.waveVerify,
+    // Per-wave { type, tasks } from the plan's task blocks; the spine folds
+    // them onto each wave it hands runWave, so every prompt lists its tasks.
+    waveTasks: planCtx.waveTasks,
+    // Per-wave promised test files (parseTestsByWave): the presence gate after
+    // wave k checks only waves <= k's promises; {} skips the gate entirely.
+    testsByWave: planCtx.testsByWave,
+    // Unpromised Tests-to-Write files: when any is missing after the plan
+    // waves, the spine runs one synthetic test wave N+1 (default model and
+    // plan-level capabilities — it has no per-wave entry) and then stops
+    // tests-missing on any file still absent. None → null: today's run.
+    testWave: endOfRunTestWave(planCtx.unpromisedTests, root),
+    // Per-wave `Model:` ids (parseWaveModels — the sole Model: parser), recorded
+    // on each wave-started. Empty for a plan that declares none.
+    waveModels: planCtx.waveModels,
+    // Effective capability classes of constrained waves only, recorded on each
+    // wave-started. Empty for an undeclared plan with no deny list.
+    waveCapabilities: planCtx.waveEffective,
+  };
+}
+
+/**
+ * The deliverSpine argument object, key for key.
+ *
+ * @param {object} run - the object buildDeliverRun returns
+ */
+function buildSpineArgs(run) {
+  const { feature, state, matrix, runWave, port, finishPort, planCtx, root, resume } = run;
+  return {
+    feature,
+    state,
+    docs: null,
+    matrix,
+    gates: null,
+    runWave,
+    // Sync/merge/in-progress before any wave; a stop exits via reportStop.
+    prepare: port.prepare,
+    // Mark the plan complete before open-pr.sh; publish pr-opened after it.
+    finish: finishPort.finish,
+    // Scripts run with cwd = root: repoRoot today, the worktree when isolated.
+    // Each gets its real argv from SCRIPT_ARGS; an unknown script throws.
+    sh: makeSpineScriptPort({ sh: run.sh, repoRoot: run.repoRoot, root, scriptCtx: run.scriptCtx }),
+    now: run.now,
+    runHooks: run.runHooks,
+    pushGuard: true,
+    tokenBudget: run.tokenBudget,
+    ...planSpineArgs(planCtx, root),
+    approvalIntact: makeApprovalIntact({ root, state, feature }),
+    maxFailedAttempts: run.failedCap.cap,
+    // Only a --resume run passes the key; otherwise the call is today's.
+    ...(resume ? { resume } : {}),
+  };
+}
+
+/**
+ * Drive the spine. An unexpected throw preserves the worktree and becomes exit 1.
+ *
+ * @returns {Promise<{ result: object } | { code: number }>}
+ */
+async function runSpine(run) {
   try {
-    result = await deliverSpine({
-      feature,
-      state,
-      docs: null,
-      matrix,
-      gates: null,
-      runWave,
-      // Sync/merge/in-progress before any wave; a stop exits via reportStop.
-      prepare: port.prepare,
-      // Mark the plan complete before open-pr.sh; publish pr-opened after it.
-      finish: finishPort.finish,
-      // Scripts run with cwd = root: repoRoot today, the worktree when isolated.
-      // Each gets its real argv from SCRIPT_ARGS; an unknown script throws.
-      sh: makeSpineScriptPort({ sh, repoRoot, root, scriptCtx }),
-      now,
-      runHooks,
-      pushGuard: true,
-      tokenBudget,
-      // Per-wave `Verify:` commands, passed through exactly as tokenBudget is.
-      // Empty for a plan that declares none, which leaves the spine's behavior
-      // and its event sequence unchanged.
-      waveVerify: planCtx.waveVerify,
-      // Per-wave { type, tasks } from the plan's task blocks; the spine folds
-      // them onto each wave it hands runWave, so every prompt lists its tasks.
-      waveTasks: planCtx.waveTasks,
-      // Per-wave promised test files (parseTestsByWave): the presence gate after
-      // wave k checks only waves <= k's promises; {} skips the gate entirely.
-      testsByWave: planCtx.testsByWave,
-      // Unpromised Tests-to-Write files: when any is missing after the plan
-      // waves, the spine runs one synthetic test wave N+1 (default model and
-      // plan-level capabilities — it has no per-wave entry) and then stops
-      // tests-missing on any file still absent. None → null: today's run.
-      testWave: endOfRunTestWave(planCtx.unpromisedTests, root),
-      // Per-wave `Model:` ids (parseWaveModels — the sole Model: parser), recorded
-      // on each wave-started. Empty for a plan that declares none.
-      waveModels: planCtx.waveModels,
-      // Effective capability classes of constrained waves only, recorded on each
-      // wave-started. Empty for an undeclared plan with no deny list.
-      waveCapabilities: planCtx.waveEffective,
-      approvalIntact: makeApprovalIntact({ root, state, feature }),
-      maxFailedAttempts: failedCap.cap,
-      // Only a --resume run passes the key; otherwise the call is today's.
-      ...(resume ? { resume } : {}),
-    });
+    return { result: await deliverSpine(buildSpineArgs(run)) };
   } catch (err) {
     // Unexpected spine throw: still preserve the worktree (so the operator can
     // inspect it) before rethrowing-as-exit. Cleanup is keyed off the returned
     // terminal object below for the normal path; this guards the abnormal one.
-    if (worktree) preserveAfterSetupFailure(worktree, feature, root);
+    if (run.worktree) preserveAfterSetupFailure(run.worktree, run.feature, run.root);
     // Sanitize: a deep spine/SDK error could otherwise surface a credential.
     const safe = sanitizeErrorMessage(err?.message ?? String(err));
     process.stderr.write(`rad deliver: unexpected error — ${safe}\n`);
-    return 1;
+    return { code: 1 };
   }
+}
 
-  const evidence = completionEvidence(result, state, feature);
-  // An afterPr failure comes after pr-opened: the run is delivered, so its
-  // worktree is torn down like a completed one; the exit still reports the stop.
-  const deliveredButUnpublished = result.afterPr === true;
-
-  // Worktree cleanup: complete (tear down) only on EVIDENCED success or a
-  // delivered run, preserve (keep for inspection) on any other stop or an ok
-  // the log does not confirm.
-  if (worktree) {
-    const completed = evidence.completed || deliveredButUnpublished;
-    const cleanupCode = finishWorktree({ worktree, completed, sh, root, feature });
-    if (cleanupCode !== null) return cleanupCode;
-  }
-  if (deliveredButUnpublished) return reportStop({ result, feature, worktree: null, root });
-
+/**
+ * Final report once the worktree is dealt with: ok line, unevidenced-ok refusal,
+ * or the stop-class report.
+ *
+ * @returns {number} exit code
+ */
+function reportDeliverOutcome(result, evidence, run) {
+  const { feature, worktree, root, sh, repoRoot, workBranch } = run;
   if (evidence.completed) {
     // Best-effort publish (RAD_SYNC-gated): deliver recorded wave events on the
     // work-branch tip; push it so the process memory is portable across machines.
@@ -2197,6 +2241,64 @@ export async function deliverCommand(argv, ctx) {
 
   // Structured failure line (machine-greppable); exit code by stop class.
   return reportStop({ result, feature, worktree, root });
+}
+
+/**
+ * Post-spine phase: evidence, worktree cleanup and the final report.
+ *
+ * @returns {number} exit code
+ */
+function concludeDeliver(result, run) {
+  const { feature, state, worktree, root, sh, repoRoot, workBranch } = run;
+  const evidence = completionEvidence(result, state, feature);
+  // An afterPr failure comes after pr-opened: the run is delivered, so its
+  // worktree is torn down like a completed one; the exit still reports the stop.
+  const deliveredButUnpublished = result.afterPr === true;
+
+  // Worktree cleanup: complete (tear down) only on EVIDENCED success or a
+  // delivered run, preserve (keep for inspection) on any other stop or an ok
+  // the log does not confirm.
+  if (worktree) {
+    const completed = evidence.completed || deliveredButUnpublished;
+    const cleanupCode = finishWorktree({ worktree, completed, sh, root, feature });
+    if (cleanupCode !== null) return cleanupCode;
+  }
+  if (deliveredButUnpublished) return reportStop({ result, feature, worktree: null, root });
+
+  return reportDeliverOutcome(result, evidence, run);
+}
+
+/**
+ * `deliver <feature> [--model <model-id>]`.
+ *
+ * Reads the approved plan, constructs an SDK-backed runWave, and drives
+ * deliverSpine to completion. Returns an integer exit code — never calls
+ * process.exit() directly.
+ *
+ * @param {string[]} argv - args after `deliver`
+ * @param {{ repoRoot: string, sh?: typeof defaultSh, runWave?: Function }} ctx
+ * @returns {Promise<number>}
+ */
+export async function deliverCommand(argv, ctx) {
+  const { repoRoot } = ctx;
+  const sh = ctx.sh ?? defaultSh;
+
+  const request = validateDeliverRequest(argv);
+  if (request.code !== undefined) return request.code;
+  const { parsed } = request;
+
+  const cfg = await resolveDeliverSettings(ctx, repoRoot, parsed);
+  if (cfg.code !== undefined) return cfg.code;
+
+  const mode = await resolveDeliverMode({ ctx, sh, repoRoot, parsed, cfg });
+  if (mode.code !== undefined) return mode.code;
+
+  const run = buildDeliverRun({ ctx, sh, repoRoot, feature: parsed.feature, cfg, mode });
+  if (run.code !== undefined) return run.code;
+
+  const spine = await runSpine(run);
+  if (spine.code !== undefined) return spine.code;
+  return concludeDeliver(spine.result, run);
 }
 
 /**
