@@ -977,6 +977,120 @@ function recordAttempt(wave, loop, attempt, { result, tipBefore, tipAfter }, gat
   return { outcome, action, print, gateOutput, vetoSource };
 }
 
+/** ── Hook: wave-complete (observe-only), fired in the advance block as the wave
+ * is recorded complete; then the `wave-complete` event. Returns null (advanced). */
+function advanceWave(wave, loop, outcome) {
+  const { state, feature, now, runHooks } = loop;
+  fireHooks(
+    runHooks,
+    'wave-complete',
+    { feature, wave: wave.n, outcome },
+    { state, feature, now },
+  );
+  state.append({
+    feature,
+    type: 'wave-complete',
+    actor: 'harness',
+    ts: now(),
+    data: { wave: wave.n },
+  });
+  return null;
+}
+
+/** ── Hook: on-error (observe-only), fired at the doom-loop wave-failed terminal;
+ * then the `wave-failed` event (tagged with the veto provenance, if any). */
+function doomLoopStop(wave, loop, { outcome, vetoSource }) {
+  const { state, feature, now, runHooks, stopCtx } = loop;
+  fireHooks(
+    runHooks,
+    'on-error',
+    { feature, wave: wave.n, outcome },
+    { state, feature, now },
+  );
+  state.append({
+    feature,
+    type: 'wave-failed',
+    actor: 'harness',
+    ts: now(),
+    data: vetoSource
+      ? { wave: wave.n, reason: 'doom-loop', source: 'hook', point: vetoSource.point, hook: vetoSource.hook }
+      : { wave: wave.n, reason: 'doom-loop' },
+  });
+  return stopRun({ stopped: 'doom-loop', ok: false, wave: wave.n, outcome }, stopCtx);
+}
+
+/** 'abort' | 'surface' (and any other declared terminal action). ── Hook: on-error
+ * (observe-only), fired at this wave-failed terminal (matrix abort/surface). */
+function terminalStop(wave, loop, { outcome, action, vetoSource }) {
+  const { state, feature, now, runHooks, stopCtx } = loop;
+  fireHooks(
+    runHooks,
+    'on-error',
+    { feature, wave: wave.n, outcome },
+    { state, feature, now },
+  );
+  state.append({
+    feature,
+    type: 'wave-failed',
+    actor: 'harness',
+    ts: now(),
+    data: vetoSource
+      ? { wave: wave.n, action, outcome, source: 'hook', point: vetoSource.point, hook: vetoSource.hook }
+      : { wave: wave.n, action },
+  });
+  return stopRun({ stopped: 'matrix', ok: false, wave: wave.n, action, outcome }, stopCtx);
+}
+
+/**
+ * Dispatch a non-advancing attempt. A terminal action stops the run. A
+ * retry/revision fires the observe-only on-retry hook, then the doom-loop
+ * breaker: an identical *failure* fingerprint twice in a row means the retry is
+ * provably stuck — abort rather than burn the budget. Only failing outcomes are
+ * fingerprinted, so a genuine success can never trip it. Otherwise the attempt's
+ * failure is captured for the NEXT attempt (back-pressure, issue #90) —
+ * deliberately AFTER the doom-loop verdict: the capture is prompt input only and
+ * never participates in that verdict or in MAX_ATTEMPTS. `run` carries the
+ * per-wave `lastPrint`/`priorFailure`. Returns a stop result, or null to retry
+ * within the bounded budget (the cap is the hard ceiling).
+ */
+function retryOrStop(wave, loop, attempt, rec, run, result) {
+  const { state, feature, now, runHooks } = loop;
+  const { outcome, action, print, gateOutput } = rec;
+  if (action !== 'retry' && action !== 'revision') return terminalStop(wave, loop, rec);
+  fireHooks(
+    runHooks,
+    'on-retry',
+    { feature, wave: wave.n, outcome },
+    { state, feature, now },
+  );
+  if (print === run.lastPrint) return doomLoopStop(wave, loop, rec);
+  run.lastPrint = print;
+  run.priorFailure = capturePriorFailure({
+    attempt, outcome, output: gateOutput, result, wave, state, feature, now,
+  });
+  return null;
+}
+
+/** Budget exhausted without an advance (and without a doom-loop trip).
+ * ── Hook: on-error (observe-only), fired at this wave-failed terminal. */
+function exhaustedStop(wave, loop) {
+  const { state, feature, now, runHooks, stopCtx } = loop;
+  fireHooks(
+    runHooks,
+    'on-error',
+    { feature, wave: wave.n, outcome: null },
+    { state, feature, now },
+  );
+  state.append({
+    feature,
+    type: 'wave-failed',
+    actor: 'harness',
+    ts: now(),
+    data: { wave: wave.n, reason: 'budget-exhausted' },
+  });
+  return stopRun({ stopped: 'budget', ok: false, wave: wave.n }, stopCtx);
+}
+
 /**
  * Run ONE wave (a plan wave, or the synthetic end-of-run test wave) through the
  * per-wave body: approval re-check, token budget, resume verify, orphan
@@ -987,11 +1101,7 @@ function recordAttempt(wave, loop, attempt, { result, tipBefore, tipAfter }, gat
  * Returns the stopRun result of a terminal stop, or null when the wave advanced.
  */
 async function runOneWave(wave, loop) {
-  const {
-    state, feature, now, matrix, sh, maxAttempts, waveVerify, runHooks, pushGuard, testsByWave,
-    waves, history, stopCtx,
-  } = loop;
-
+  const { state, feature, now, runHooks, maxAttempts, history } = loop;
   const preStop = await preWaveStop(wave, loop);
   if (preStop) return preStop;
 
@@ -1000,145 +1110,30 @@ async function runOneWave(wave, loop) {
   // wave-failed. After a terminal stop the wave re-runs with a full budget; a
   // legacy log (no fingerprint) seeds null and cannot trip the breaker. ──
   const prior = priorAttemptState(history, wave.n);
-  let lastPrint = prior.lastPrint;
-  let advanced = false;
-  // Back-pressure (issue #90): the previous attempt's captured failure, fed to
-  // the NEXT attempt so a retry differs by more than model nondeterminism.
-  // Scoped per wave and null on the first attempt — a retry that carries no
-  // capture is exactly today's behavior.
-  let priorFailure = null;
+  // `priorFailure` (back-pressure, issue #90): the previous attempt's captured
+  // failure, fed to the NEXT attempt so a retry differs by more than model
+  // nondeterminism. Scoped per wave and null on the first attempt.
+  const run = { lastPrint: prior.lastPrint, priorFailure: null };
 
   for (let attempt = prior.attempts + 1; attempt <= maxAttempts; attempt += 1) {
     const attemptStop = attemptCapStop(wave, loop) ?? preWaveVetoStop(wave, loop);
     if (attemptStop) return attemptStop;
-    const ran = await invokeWave(wave, loop, attempt, priorFailure);
-
+    const ran = await invokeWave(wave, loop, attempt, run.priorFailure);
     const gates = applyPostWaveGates(wave, loop, ran.result);
-    const { result } = ran;
-    const { outcome, action, print, gateOutput, vetoSource } = recordAttempt(wave, loop, attempt, ran, gates);
-
+    const rec = recordAttempt(wave, loop, attempt, ran, gates);
     // ── Hook: on-outcome (observe-only). Fired after the matrix resolves the
     // outcome, before the action is dispatched. Observe + emit only. ──
     fireHooks(
       runHooks,
       'on-outcome',
-      { feature, wave: wave.n, outcome },
+      { feature, wave: wave.n, outcome: rec.outcome },
       { state, feature, now },
     );
-
-    if (action === 'advance') {
-      // ── Hook: wave-complete (observe-only). Fired in the advance block as the
-      // wave is recorded complete. Observe + emit only. ──
-      fireHooks(
-        runHooks,
-        'wave-complete',
-        { feature, wave: wave.n, outcome },
-        { state, feature, now },
-      );
-      state.append({
-        feature,
-        type: 'wave-complete',
-        actor: 'harness',
-        ts: now(),
-        data: { wave: wave.n },
-      });
-      advanced = true;
-      break;
-    }
-
-    if (action === 'retry' || action === 'revision') {
-      // ── Hook: on-retry (observe-only). Fired in the retry/revision branch.
-      // Observe + emit only. ──
-      fireHooks(
-        runHooks,
-        'on-retry',
-        { feature, wave: wave.n, outcome },
-        { state, feature, now },
-      );
-      // Doom-loop breaker: an identical *failure* fingerprint twice in a row
-      // means the retry is provably stuck — abort rather than burn the budget.
-      // Only failing (retry/revision) outcomes are fingerprinted here, so a
-      // genuine success can never trip the breaker (it advances above first).
-      // `print` was computed above, before the attempt was recorded.
-      if (print === lastPrint) {
-        // ── Hook: on-error (observe-only). Fired at this wave-failed terminal
-        // (doom-loop). Observe + emit only. ──
-        fireHooks(
-          runHooks,
-          'on-error',
-          { feature, wave: wave.n, outcome },
-          { state, feature, now },
-        );
-        state.append({
-          feature,
-          type: 'wave-failed',
-          actor: 'harness',
-          ts: now(),
-          data: vetoSource
-            ? { wave: wave.n, reason: 'doom-loop', source: 'hook', point: vetoSource.point, hook: vetoSource.hook }
-            : { wave: wave.n, reason: 'doom-loop' },
-        });
-        return stopRun({ stopped: 'doom-loop', ok: false, wave: wave.n, outcome }, stopCtx);
-      }
-      lastPrint = print;
-      // Back-pressure (issue #90): carry THIS attempt's failure into the next
-      // one so the retry prompt differs. Deliberately placed AFTER the
-      // fingerprint/doom-loop decision above — the capture is prompt input
-      // only and never participates in that verdict or in MAX_ATTEMPTS.
-      priorFailure = capturePriorFailure({
-        attempt,
-        outcome,
-        output: gateOutput,
-        result,
-        wave,
-        state,
-        feature,
-        now,
-      });
-      continue; // within the bounded budget; the cap is the hard ceiling.
-    }
-
-    // 'abort' | 'surface' (and any other declared terminal action).
-    // ── Hook: on-error (observe-only). Fired at this wave-failed terminal
-    // (matrix abort/surface). Observe + emit only. ──
-    fireHooks(
-      runHooks,
-      'on-error',
-      { feature, wave: wave.n, outcome },
-      { state, feature, now },
-    );
-    state.append({
-      feature,
-      type: 'wave-failed',
-      actor: 'harness',
-      ts: now(),
-      data: vetoSource
-        ? { wave: wave.n, action, outcome, source: 'hook', point: vetoSource.point, hook: vetoSource.hook }
-        : { wave: wave.n, action },
-    });
-    return stopRun({ stopped: 'matrix', ok: false, wave: wave.n, action, outcome }, stopCtx);
+    if (rec.action === 'advance') return advanceWave(wave, loop, rec.outcome);
+    const stopped = retryOrStop(wave, loop, attempt, rec, run, ran.result);
+    if (stopped) return stopped;
   }
-
-  if (!advanced) {
-    // Budget exhausted without an advance (and without a doom-loop trip).
-    // ── Hook: on-error (observe-only). Fired at this wave-failed terminal
-    // (budget-exhausted). Observe + emit only. ──
-    fireHooks(
-      runHooks,
-      'on-error',
-      { feature, wave: wave.n, outcome: null },
-      { state, feature, now },
-    );
-    state.append({
-      feature,
-      type: 'wave-failed',
-      actor: 'harness',
-      ts: now(),
-      data: { wave: wave.n, reason: 'budget-exhausted' },
-    });
-    return stopRun({ stopped: 'budget', ok: false, wave: wave.n }, stopCtx);
-  }
-  return null;
+  return exhaustedStop(wave, loop);
 }
 
 /**
