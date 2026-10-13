@@ -76,6 +76,7 @@ import { checkoutCommand, CHECKOUT_USAGE } from './checkout.js';
 import { wrapCommand, WRAP_USAGE } from './wrap.js';
 import { labelCommand, LABEL_USAGE } from './label.js';
 import { playbookCommand, PLAYBOOK_USAGE } from './playbook-command.js';
+import { warnOnUnmeteredBudget } from './usage-watch.js';
 import { makePreparePort } from './deliver-prepare.js';
 import { makeFinishPort, executionLogPaths } from './deliver-finish.js';
 
@@ -2156,6 +2157,14 @@ function planSpineArgs(planCtx, root) {
   };
 }
 
+/** `runWave` that warns once on stderr when an armed budget meets a usage-less wave. */
+function watchBudgetUsage(runWave) {
+  return warnOnUnmeteredBudget(runWave, {
+    armed: parseTokenBudget(process.env) !== null,
+    write: (line) => process.stderr.write(line),
+  });
+}
+
 /**
  * The deliverSpine argument object, key for key.
  *
@@ -2169,7 +2178,7 @@ function buildSpineArgs(run) {
     docs: null,
     matrix,
     gates: null,
-    runWave,
+    runWave: watchBudgetUsage(runWave),
     // Sync/merge/in-progress before any wave; a stop exits via reportStop.
     prepare: port.prepare,
     // Mark the plan complete before open-pr.sh; publish pr-opened after it.
