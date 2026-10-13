@@ -34,6 +34,39 @@ function fixtureOpts(c) {
   return { ...opts, agentCmd: live, instruction: c.adversarialPrompt };
 }
 
+/** Crash text a mutant must never produce: a mutation that breaks the code instead of the guard. */
+export const CRASH_PATTERN = /ReferenceError|TypeError|SyntaxError|RangeError|command not found|unbound variable|Cannot find module|is not a function|is not defined/;
+/** Result keys the crash scan skips: events carry logged text, not process stderr. */
+const CRASH_SCAN_SKIP = new Set(['events']);
+
+/** First `stderr` string matching CRASH_PATTERN anywhere in a nested result, else null. */
+export function findMutantCrash(result) {
+  if (result === null || typeof result !== 'object') return null;
+  for (const [key, value] of Object.entries(result)) {
+    if (CRASH_SCAN_SKIP.has(key)) continue;
+    const hit = key === 'stderr' && typeof value === 'string' ? value.match(CRASH_PATTERN)?.[0] : findMutantCrash(value);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+/**
+ * Judge a `[mutated]` twin: a crash is rejected before the assertion runs, a
+ * passing assertion is rejected, and only a failing assertion returns normally.
+ */
+export async function judgeMutatedRun(c, fx, result) {
+  const crash = findMutantCrash(result);
+  if (crash) throw new Error(`${c.id} [mutated]: the mutant crashed (${crash}) instead of failing its assertion — fix the mutation anchor`);
+  let passed = false;
+  try {
+    await c.assert(fx, result);
+    passed = true;
+  } catch {
+    // Expected: the weakened guard must make the assertion fail.
+  }
+  if (passed) throw new Error(`${c.id} [mutated]: assertion still passed with the guard removed — it does not test the guard`);
+}
+
 async function runCase(c, { mutated }) {
   const fx = createFixture(fixtureOpts(c));
   try {
@@ -43,14 +76,7 @@ async function runCase(c, { mutated }) {
       await c.assert(fx, result);
       return;
     }
-    let passed = false;
-    try {
-      await c.assert(fx, result);
-      passed = true;
-    } catch {
-      // Expected: the weakened guard must make the assertion fail.
-    }
-    if (passed) throw new Error(`${c.id} [mutated]: assertion still passed with the guard removed — it does not test the guard`);
+    await judgeMutatedRun(c, fx, result);
   } finally {
     fx.cleanup();
   }
