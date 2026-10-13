@@ -1,7 +1,7 @@
 # Plan: Refactor the Git State Store Under the Function-Length Ratchet (#252, part 3 of 6)
 Created: 2026-10-13
 Author: architect
-Status: approved
+Status: in-progress
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-10-13T14:15:55.503Z
 Recorded-By: sean@torchcodelab.com
