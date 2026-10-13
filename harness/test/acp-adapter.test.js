@@ -17,7 +17,8 @@ const FAKE_AGENT = fileURLToPath(new URL('./fixtures/acp/fake-agent.mjs', import
 const FAST = { timeoutMs: 5_000, killGraceMs: 200 };
 // The complete-check test spawns a real process and needs a roomier grace on loaded machines (#230).
 const COMPLETE_CHECK_KILL_GRACE_MS = 2_000;
-const SHORT_DEADLINE_MS = 400;
+// 1500, not 400: the ACP handshake must finish before the deadline on a loaded machine (measured); see #275.
+const SHORT_DEADLINE_MS = 1500;
 
 const WAVE = { n: 1, type: 'sequential', tasks: [{ title: 'Fake task', what: 'do it' }] };
 const PLAN_CTX = { feature: 'acp-test', branch: 'rad/acp-test', executionLog: 'log.md' };
@@ -180,7 +181,7 @@ test('stopReason cancelled without a client cancel: fail-protocol', async () => 
 test('a hung turn: session/cancel sent, fail-timeout, process dead', async () => {
   const { result, trace } = await runScenario('hang', { timeoutMs: SHORT_DEADLINE_MS });
   assert.equal(result.outcome, 'fail-timeout');
-  assert.match(result.tasks[0].error, /wave timed out after 400ms/);
+  assert.match(result.tasks[0].error, new RegExp(`wave timed out after ${SHORT_DEADLINE_MS}ms`));
   assert.deepEqual(paramsOf(received(trace, 'session/cancel')[0]), { sessionId: 'sess-fake' });
   assert.equal(isAlive(pidOf(trace)), false);
 });
@@ -381,8 +382,12 @@ test('checkAcpAgent: ignore-cancel times out at prompt and the process is still 
   const { trace, cmd } = fake('ignore-cancel');
   const report = await checkAcpAgent({ cmd, repoRoot: workDir, timeoutMs: SHORT_DEADLINE_MS, killGraceMs: FAST.killGraceMs });
   assert.equal(report.ok, false);
-  assert.equal(lastCheck(report).name, 'prompt');
-  assert.match(lastCheck(report).detail, /acp-check timed out after 400ms/);
+  assert.equal(
+    lastCheck(report).name,
+    'prompt',
+    `the ${SHORT_DEADLINE_MS}ms deadline expired during the '${lastCheck(report).name}' step, not 'prompt'; a slow machine may need a larger SHORT_DEADLINE_MS`,
+  );
+  assert.match(lastCheck(report).detail, new RegExp(`acp-check timed out after ${SHORT_DEADLINE_MS}ms`));
   assert.equal(isAlive(pidOf(trace)), false);
 });
 
