@@ -1,7 +1,8 @@
 # Plan: Refactor the Command and SDK Adapters Under the Function-Length Ratchet (#252, part 2 of 6)
 Created: 2026-10-13
 Author: architect
-Status: in-progress
+Status: complete
+Completed-At: 2026-10-13T14:06:08.870Z
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-10-13T13:54:51.060Z
 Recorded-By: sean@torchcodelab.com
