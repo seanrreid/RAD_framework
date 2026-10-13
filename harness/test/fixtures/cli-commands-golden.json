@@ -2188,6 +2188,42 @@
     "code": 0,
     "output": [
       {
+        "stream": "stderr",
+        "text": "rad deliver: wave 1 reported no token usage, so RAD_TOKEN_BUDGET cannot trip; use an agent command that emits a RAD_USAGE line (see docs/rad-wave-contract.md)\n"
+      },
+      {
+        "stream": "stdout",
+        "text": "rad deliver: ok feature=stop-feature waves=2 status=complete\n"
+      }
+    ],
+    "events": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n{\"feature\":\"stop-feature\",\"type\":\"deliver-started\",\"actor\":\"harness\",\"ts\":\"<TS>\"}\n{\"feature\":\"stop-feature\",\"type\":\"run-prepared\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-started\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1,\"attempt\":1}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-attempt\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1,\"attempt\":1,\"outcome\":\"success\"}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-complete\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-started\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":2,\"attempt\":1}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-attempt\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":2,\"attempt\":1,\"outcome\":\"success\"}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-complete\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":2}}\n{\"feature\":\"stop-feature\",\"type\":\"pr-opened\",\"actor\":\"harness\",\"ts\":\"<TS>\"}\n",
+    "filesChanged": [
+      ".agents/state/stop-feature/events.jsonl:1317"
+    ],
+    "eventsBefore": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n"
+  },
+  "deliver — armed budget with a usage-reporting wave does not warn": {
+    "code": 0,
+    "output": [
+      {
+        "stream": "stdout",
+        "text": "rad deliver: ok feature=stop-feature waves=2 status=complete\n"
+      }
+    ],
+    "events": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n{\"feature\":\"stop-feature\",\"type\":\"deliver-started\",\"actor\":\"harness\",\"ts\":\"<TS>\"}\n{\"feature\":\"stop-feature\",\"type\":\"run-prepared\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-started\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1,\"attempt\":1}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-attempt\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1,\"attempt\":1,\"outcome\":\"success\",\"usage\":{\"total\":100}}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-complete\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":1}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-started\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":2,\"attempt\":1}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-attempt\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":2,\"attempt\":1,\"outcome\":\"success\",\"usage\":{\"total\":100}}}\n{\"feature\":\"stop-feature\",\"type\":\"wave-complete\",\"actor\":\"harness\",\"ts\":\"<TS>\",\"data\":{\"wave\":2}}\n{\"feature\":\"stop-feature\",\"type\":\"pr-opened\",\"actor\":\"harness\",\"ts\":\"<TS>\"}\n",
+    "filesChanged": [
+      ".agents/state/stop-feature/events.jsonl:1361"
+    ],
+    "eventsBefore": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n"
+  },
+  "deliver — armed budget with several usage-less waves warns once": {
+    "code": 0,
+    "output": [
+      {
+        "stream": "stderr",
+        "text": "rad deliver: wave 1 reported no token usage, so RAD_TOKEN_BUDGET cannot trip; use an agent command that emits a RAD_USAGE line (see docs/rad-wave-contract.md)\n"
+      },
+      {
         "stream": "stdout",
         "text": "rad deliver: ok feature=stop-feature waves=2 status=complete\n"
       }
