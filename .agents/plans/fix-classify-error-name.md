@@ -1,7 +1,8 @@
 # Plan: Classify Errors by Their Lowercased Name, So a Real SyntaxError Is a Model Error (#260)
 Created: 2026-10-13
 Author: architect
-Status: in-progress
+Status: complete
+Completed-At: 2026-10-13T17:53:02.127Z
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-10-13T17:42:53.339Z
 Recorded-By: sean@torchcodelab.com
