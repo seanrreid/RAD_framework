@@ -1136,6 +1136,162 @@ async function runOneWave(wave, loop) {
   return exhaustedStop(wave, loop);
 }
 
+/** The four run-wide counters, seeded from the event log and the resume flag. */
+function seedCounters(history, resume) {
+  // ── Resume verify (cheap, once): if a prior run already advanced one or more
+  // waves, the per-wave gate that guarded THIS run never ran for them. Before
+  // touching the first non-skipped wave, run ONE cumulative test-PRESENCE check
+  // to confirm every test file the plan promised so far exists on disk. If one
+  // is absent, escalate — don't build on a base with unwritten tests. Nothing
+  // here executes a test, so this says nothing about whether the prior work
+  // behaves correctly; execution-based verification does not exist yet (see
+  // issue #89). A fresh run (nothing skipped) does not run this. ──
+  const resumeVerified = false;
+
+  // ── Token-budget circuit breaker. OPTIONAL: a non-positive `tokenBudget`
+  // (unset/0/negative) fully disables it. Otherwise we accumulate each wave's
+  // recorded usage (`result.usage.total`, missing → 0) and, BEFORE starting the
+  // next wave, graceful-abort if cumulative spend has reached/exceeded the
+  // budget — a terminal return in the style of the other `stopped:` paths.
+  //
+  // Seeded from prior runs' recorded usage so a RESUMED deliver INHERITS earlier
+  // spend: the budget is a lifetime ceiling for the feature, not a fresh
+  // per-invocation allowance (a crash-looping deliver can't blow past it by
+  // resuming). On a fresh run the log carries no wave-attempt usage, so this is 0. ──
+  const spent = totalUsage(history).total;
+
+  // Cumulative failed-attempt count for the cap, seeded from the log so it
+  // spans resumed runs until a deliver-stopped resets it.
+  const failedAttempts = failedAttemptsSinceStop(history);
+
+  // Operator resume context rides on the FIRST runWave call of this run only —
+  // not attempt===1: skipped waves and resumed attempt counts make that wrong.
+  const operatorContextPending = Boolean(resume);
+  return { resumeVerified, spent, failedAttempts, operatorContextPending };
+}
+
+/**
+ * Seed the run-wide state onto `loop` from the plan and the event log, and
+ * return the wave list with the set of waves a prior run already advanced.
+ */
+function seedRun(loop) {
+  const { state, feature, resume } = loop;
+  const plan = state.plan(feature);
+  const waves = (plan && plan.waves) || [];
+
+  // ── Resume: waves that already advanced on a prior run carry a `wave-complete`
+  // event. Skip them — never re-run runWave or append duplicate attempt/complete
+  // events. Keyed strictly off `wave-complete`, so a wave that crashed mid-run
+  // (attempt logged, never advanced) is NOT skipped and resumes here. ──
+  const history = state.history(feature);
+  const completed = resumeFrom(history);
+
+  // The per-wave body (runOneWave) reads the run's ports from `loop` and
+  // MUTATES its four run-wide counters in place, so they carry across waves.
+  Object.assign(loop, { waves, completed, history }, seedCounters(history, resume));
+  return { waves, completed };
+}
+
+/**
+ * Record the run start, validate the hooks dir and run the prepare port, then
+ * seed `loop`. Returns `{ stop }` (a stopRun result) or `{ waves, completed }`.
+ */
+async function startRun(loop) {
+  const { state, feature, now, resume, hookPreflight, prepare } = loop;
+  state.append({ feature, type: 'deliver-started', actor: 'harness', ts: now() });
+  if (resume) appendRunResumed({ state, feature, now, resume });
+  // Every return after this line is a stop (except success) and MUST go
+  // through stopRun so the run's last event is exactly one `deliver-stopped`.
+  loop.stopCtx = { state, feature, now };
+
+  // ── Hook pre-flight (Task 2.2). Validate the hooks dir ONCE up front so an
+  // unreadable/malformed dir surfaces deterministically here rather than mid-wave.
+  // Reuses the runner's discovery (injected) — no duplicated FS logic. An ABSENT
+  // dir is a silent no-op (default NOOP_PREFLIGHT): nothing to validate, nothing
+  // changes. A malformed dir is allowed to throw to the caller. ──
+  hookPreflight();
+
+  // ── Prepare (sync/merge/in-progress). OPTIONAL injected port: absent changes
+  // nothing. Runs before orphan convergence and every wave, so a conflict stops
+  // the run before any agent touches the branch. ──
+  if (prepare) {
+    const prepStop = await runPrepare({ prepare, state, feature, now });
+    if (prepStop) return { stop: stopRun(prepStop, loop.stopCtx) };
+  }
+  return seedRun(loop);
+}
+
+/**
+ * An approval recorded during the LAST wave has no next pre-wave re-check to
+ * catch it: refuse to post-check or open the PR on it (#158). History-only —
+ * the approvalIntact port is deliberately NOT called here (one call per wave).
+ */
+function approvalDuringRunStop(loop) {
+  const { state, feature, waves, stopCtx } = loop;
+  if (approvedDuringRun(state.history(feature)).length === 0) return null;
+  const lastWave = waves.length > 0 ? waves[waves.length - 1].n : undefined;
+  return stopRun(
+    { stopped: 'approval-changed', ok: false, wave: lastWave, reason: APPROVED_DURING_RUN_REASON },
+    stopCtx,
+  );
+}
+
+/**
+ * DET post-checks: existing bash guardrails, called by path via the injected
+ * `sh`. A non-zero exit halts the spine before the PR is recorded. Returns the
+ * stopRun result of a failed check (or beforePr finish step), else null.
+ */
+async function runPostChecks(loop, finish) {
+  const { sh, feature, stopCtx } = loop;
+  for (const script of POST_CHECKS) {
+    if (finish && script === FINISH_BEFORE_SCRIPT) {
+      const failure = await runFinishStep(finish.beforePr);
+      if (failure) {
+        const { detail } = failure;
+        return stopRun({ stopped: FINISH_FAILED, ok: false, detail, reason: detail }, stopCtx);
+      }
+    }
+    const check = sh(`scripts/${script}`, feature);
+    if (check.status !== 0) {
+      return stopRun({ stopped: 'post-check', ok: false, check: script, status: check.status }, stopCtx);
+    }
+  }
+  return null;
+}
+
+/**
+ * Everything after the wave loop: the end-of-run test wave and final guard
+ * (only when `testWave` is supplied; also runs on resume, so a run whose plan
+ * waves all completed earlier still cannot reach the PR with listed tests
+ * missing), the approval-during-run check, the post-checks, `pr-opened`, and
+ * the afterPr finish step.
+ */
+async function finishRun(loop) {
+  const { state, feature, now, waves, testWave, finish } = loop;
+  if (testWave) {
+    const stop = await runTestWaveAndGuard(testWave, loop);
+    if (stop) return stop;
+  }
+  const approvalStop = approvalDuringRunStop(loop);
+  if (approvalStop) return approvalStop;
+  const checkStop = await runPostChecks(loop, finish);
+  if (checkStop) return checkStop;
+
+  state.append({ feature, type: 'pr-opened', actor: 'harness', ts: now() });
+
+  // `pr-opened` moves the run to the terminal `delivered` phase: an afterPr
+  // failure is reported in the result only — appending here would throw.
+  if (finish) {
+    const failure = await runFinishStep(finish.afterPr);
+    if (failure) {
+      const { detail } = failure;
+      return { ok: false, stopped: FINISH_FAILED, detail, reason: detail, afterPr: true };
+    }
+  }
+
+  return { ok: true, waves: waves.length };
+}
+
 /**
  * Run the deliver spine for one feature.
  *
@@ -1278,137 +1434,17 @@ export async function deliverSpine({
   testWave = null,
   waveTasks = {},
 }) {
-  // ── DET gate: approval. The human (or proxy) decided earlier; here we ENFORCE
-  // it. A blocked gate is a normal outcome — return structured, append nothing
-  // destructive, and never call runWave. ──
   const g = await state.gate(feature, 'approved');
   if (!g.passed) {
     return { stopped: 'gate', gate: 'approved', reason: g.reason };
   }
-
-  state.append({ feature, type: 'deliver-started', actor: 'harness', ts: now() });
-  if (resume) appendRunResumed({ state, feature, now, resume });
-  // Every return below this line is a stop (except success) and MUST go
-  // through stopRun so the run's last event is exactly one `deliver-stopped`.
-  const stopCtx = { state, feature, now };
-
-  // ── Hook pre-flight (Task 2.2). Validate the hooks dir ONCE up front so an
-  // unreadable/malformed dir surfaces deterministically here rather than mid-wave.
-  // Reuses the runner's discovery (injected) — no duplicated FS logic. An ABSENT
-  // dir is a silent no-op (default NOOP_PREFLIGHT): nothing to validate, nothing
-  // changes. A malformed dir is allowed to throw to the caller. ──
-  hookPreflight();
-
-  // ── Prepare (sync/merge/in-progress). OPTIONAL injected port: absent changes
-  // nothing. Runs before orphan convergence and every wave, so a conflict stops
-  // the run before any agent touches the branch. ──
-  if (prepare) {
-    const prepStop = await runPrepare({ prepare, state, feature, now });
-    if (prepStop) return stopRun(prepStop, stopCtx);
-  }
-
-  const plan = state.plan(feature);
-  const waves = (plan && plan.waves) || [];
-
-  // ── Resume: waves that already advanced on a prior run carry a `wave-complete`
-  // event. Skip them — never re-run runWave or append duplicate attempt/complete
-  // events. Keyed strictly off `wave-complete`, so a wave that crashed mid-run
-  // (attempt logged, never advanced) is NOT skipped and resumes here. ──
-  const history = state.history(feature);
-  const completed = resumeFrom(history);
-
-  // ── Resume verify (cheap, once): if a prior run already advanced one or more
-  // waves, the per-wave gate that guarded THIS run never ran for them. Before
-  // touching the first non-skipped wave, run ONE cumulative test-PRESENCE check
-  // to confirm every test file the plan promised so far exists on disk. If one
-  // is absent, escalate — don't build on a base with unwritten tests. Nothing
-  // here executes a test, so this says nothing about whether the prior work
-  // behaves correctly; execution-based verification does not exist yet (see
-  // issue #89). A fresh run (nothing skipped) does not run this. ──
-  const resumeVerified = false;
-
-  // ── Token-budget circuit breaker. OPTIONAL: a non-positive `tokenBudget`
-  // (unset/0/negative) fully disables it. Otherwise we accumulate each wave's
-  // recorded usage (`result.usage.total`, missing → 0) and, BEFORE starting the
-  // next wave, graceful-abort if cumulative spend has reached/exceeded the
-  // budget — a terminal return in the style of the other `stopped:` paths.
-  //
-  // Seeded from prior runs' recorded usage so a RESUMED deliver INHERITS earlier
-  // spend: the budget is a lifetime ceiling for the feature, not a fresh
-  // per-invocation allowance (a crash-looping deliver can't blow past it by
-  // resuming). On a fresh run the log carries no wave-attempt usage, so this is 0. ──
-  const spent = totalUsage(history).total;
-
-  // Cumulative failed-attempt count for the cap, seeded from the log so it
-  // spans resumed runs until a deliver-stopped resets it.
-  const failedAttempts = failedAttemptsSinceStop(history);
-
-  // Operator resume context rides on the FIRST runWave call of this run only —
-  // not attempt===1: skipped waves and resumed attempt counts make that wrong.
-  const operatorContextPending = Boolean(resume);
-
-  // ── DET wave loop — the MATRIX decides what happens next, not a counter. ──
-  // The per-wave body (runOneWave) reads the run's ports from `loop` and
-  // MUTATES its four run-wide counters in place, so they carry across waves.
-  const loop = {
-    state, feature, now, matrix, runWave, sh, maxAttempts, tokenBudget, waveVerify, waveModels,
-    waveCapabilities, runHooks, approvalIntact, maxFailedAttempts, resume, pushGuard, testsByWave,
-    waveTasks, waves, completed, history, stopCtx,
-    resumeVerified, spent, failedAttempts, operatorContextPending,
-  };
-
+  const loop = { state, feature, now, matrix, runWave, sh, maxAttempts, tokenBudget, waveVerify, waveModels, waveCapabilities,
+    runHooks, approvalIntact, maxFailedAttempts, resume, pushGuard, testsByWave, waveTasks, hookPreflight, prepare, finish, testWave };
+  const { stop, waves, completed } = await startRun(loop);
+  if (stop) return stop;
   for (const wave of waves) {
-    if (completed.has(wave.n)) continue;
-    const stop = await runOneWave(wave, loop);
-    if (stop) return stop;
+    const halt = completed.has(wave.n) ? null : await runOneWave(wave, loop);
+    if (halt) return halt;
   }
-
-  // ── End-of-run test wave N+1 + final guard (only when `testWave` is supplied;
-  // absent, nothing here runs). Also runs on resume, so a run whose plan waves
-  // all completed earlier still cannot reach the PR with listed tests missing. ──
-  if (testWave) {
-    const stop = await runTestWaveAndGuard(testWave, loop);
-    if (stop) return stop;
-  }
-
-  // An approval recorded during the LAST wave has no next pre-wave re-check to
-  // catch it: refuse to post-check or open the PR on it (#158). History-only —
-  // the approvalIntact port is deliberately NOT called here (one call per wave).
-  if (approvedDuringRun(state.history(feature)).length > 0) {
-    const lastWave = waves.length > 0 ? waves[waves.length - 1].n : undefined;
-    return stopRun(
-      { stopped: 'approval-changed', ok: false, wave: lastWave, reason: APPROVED_DURING_RUN_REASON },
-      stopCtx,
-    );
-  }
-
-  // ── DET post-checks: existing bash guardrails, called by path via the injected
-  // `sh`. A non-zero exit halts the spine before the PR is recorded. ──
-  for (const script of POST_CHECKS) {
-    if (finish && script === FINISH_BEFORE_SCRIPT) {
-      const failure = await runFinishStep(finish.beforePr);
-      if (failure) {
-        const { detail } = failure;
-        return stopRun({ stopped: FINISH_FAILED, ok: false, detail, reason: detail }, stopCtx);
-      }
-    }
-    const check = sh(`scripts/${script}`, feature);
-    if (check.status !== 0) {
-      return stopRun({ stopped: 'post-check', ok: false, check: script, status: check.status }, stopCtx);
-    }
-  }
-
-  state.append({ feature, type: 'pr-opened', actor: 'harness', ts: now() });
-
-  // `pr-opened` moves the run to the terminal `delivered` phase: an afterPr
-  // failure is reported in the result only — appending here would throw.
-  if (finish) {
-    const failure = await runFinishStep(finish.afterPr);
-    if (failure) {
-      const { detail } = failure;
-      return { ok: false, stopped: FINISH_FAILED, detail, reason: detail, afterPr: true };
-    }
-  }
-
-  return { ok: true, waves: waves.length };
+  return finishRun(loop);
 }
