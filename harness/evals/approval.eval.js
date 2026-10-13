@@ -133,12 +133,11 @@ defineCases([
       assert.equal(stop?.data?.reason, 'approval-changed', `deliver-stopped: ${JSON.stringify(stop)}`);
       assert.equal(fx.adversaryRan(), false, 'the agent ran');
     },
-    // Restore #151's first-wave exemption in the spine copy; only the CLI assertion can catch it.
+    // Restore #151's first-wave exemption in preWaveStop, where `loop` is in scope.
     mutate: (root) => {
       const spine = join('harness', 'spine.js');
-      patch(root, spine, 'for (const wave of waves) {', 'let firstWaveOfRun = true;\n  for (const wave of waves) {');
       patch(root, spine, 'const reason = await approvalChangeReason({ state, feature, approvalIntact });',
-        'const reason = firstWaveOfRun ? null : await approvalChangeReason({ state, feature, approvalIntact });\n    firstWaveOfRun = false;');
+        'const reason = loop.firstWaveSeen ? await approvalChangeReason({ state, feature, approvalIntact }) : (loop.firstWaveSeen = true, null);');
       assumeUnchanged(root, spine);
     },
   },
