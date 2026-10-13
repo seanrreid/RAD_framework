@@ -7,9 +7,6 @@
 harness/adapters/agent/command.js::createCommandAdapter	120
 harness/adapters/agent/command.js::spawnOnce	64
 harness/adapters/agent/command.js::spawnOnce><anon>#1	62
-harness/adapters/agent/contract.js::buildWavePrompt	132
-harness/adapters/agent/contract.js::classifyError	78
-harness/adapters/agent/contract.js::parseWaveResult	55
 harness/adapters/agent/sdk.js::createRunWave	176
 harness/adapters/agent/sdk.js::createRunWave>runQueryOnce	62
 harness/adapters/agent/sdk.js::createRunWave>runQueryOnce><anon>	45
