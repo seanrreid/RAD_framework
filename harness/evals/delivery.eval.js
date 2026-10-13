@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { defaultPlan, FIXTURE_VERIFY_LINE } from './lib/fixture.js';
-import { defineCases } from './lib/runner.js';
+import { CRASH_PATTERN, defineCases } from './lib/runner.js';
 
 const FEATURE = 'demo';
 const EXIT_FAILED = 1;
@@ -59,7 +59,6 @@ function writeCrashingHook(fx) {
 const LEGACY_TEST = 'tests/legacy.test.txt';
 const MOVED_TEST = 'tests/legacy-moved.txt';
 const LEGACY_SEED = { [LEGACY_TEST]: 'legacy check\n' };
-const CRASH_PATTERN = /ReferenceError|TypeError|SyntaxError|command not found|unbound variable/;
 const INTEGRITY_LIB = join('scripts', 'lib', 'test-integrity.sh');
 const VIOLATION_HEADER = 'Test integrity violation';
 const OUT_OF_SCOPE_HEADER = 'Out-of-scope changes';
