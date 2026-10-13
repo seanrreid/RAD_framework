@@ -1,7 +1,10 @@
 # Plan: Report Token Usage from claude -p, and Warn When a Budget Cannot Trip (#270)
 Created: 2026-10-13
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-10-13T19:23:30.405Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/claude-usage-wrapper-and-budget-warning
 Adopted-From: https://github.com/seanrreid/RAD_framework/issues/270 (options 1 and 4; the issue stays open until the config switch is verified)
 Issue-Title: Command adapter with 'claude -p' records no token usage, so the token budget never trips and cost metrics are empty
