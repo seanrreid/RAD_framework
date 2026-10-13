@@ -13,3 +13,4 @@
 {"feature":"refactor-gate-authority-modules","type":"wave-started","actor":"harness","ts":"2026-10-13T14:55:43.374Z","data":{"wave":4,"attempt":1}}
 {"feature":"refactor-gate-authority-modules","type":"wave-attempt","actor":"harness","ts":"2026-10-13T15:06:41.531Z","data":{"wave":4,"attempt":1,"outcome":"success","tasks":[{"title":"Refresh the ratchet baseline","status":"complete","commit":"293077a","concern":"—","error":"—"},{"title":"Full-suite check","status":"complete","commit":"—","concern":"—","error":"—"}],"verify":{"command":"exec bash scripts/verify-all.sh","status":0,"passed":true}}}
 {"feature":"refactor-gate-authority-modules","type":"wave-complete","actor":"harness","ts":"2026-10-13T15:06:41.533Z","data":{"wave":4}}
+{"feature":"refactor-gate-authority-modules","type":"pr-opened","actor":"harness","ts":"2026-10-13T15:06:49.620Z"}
