@@ -1,7 +1,7 @@
 # Plan: Purge Stale Docs and Move Reference Material to docs/research
 Created: 2026-10-14
 Author: architect
-Status: approved
+Status: in-progress
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-10-14T13:51:02.926Z
 Recorded-By: sean@torchcodelab.com
