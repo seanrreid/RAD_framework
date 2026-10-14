@@ -1,7 +1,10 @@
 # Plan: First-Run Docs: Namespaced Commands, Agent Step, Approval Wording
 Created: 2026-10-14
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-10-14T15:39:49.077Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/first-run-docs-namespaced-commands
 Tier: light
 Source-Author: none (no source issue)
