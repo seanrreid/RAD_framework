@@ -26,8 +26,10 @@ originally set up with the installer.
 | `.rad/upgrade-backup/` | Written only on the first upgrade of a pre-manifest install — backups of overwritten files |
 | `CLAUDE.md` | Never touched — your project conventions |
 | `.rad/config.yml` | Never touched — your config data (platform, default branch, roles, scope map). Created by `rad config migrate` only when missing |
-| `.claude/agents/` | Never touched — your generated agent boundaries |
-| `.agents/` | Never touched — your research, architecture, plans, logs, findings |
+| `.rad/skills/`, `.rad/agents/` | **Refreshed** — the source trees `rad generate` reads; locally edited files kept |
+| `.claude/agents/` | **Refreshed** — the generated reviewers the installer shipped, with the same keep-local-edits rule. Agent files you created with `/architect:rad-design` are never touched |
+| `.agents/skills/`, `.codex/agents/` | **Refreshed** — only the generated files the installer shipped; same keep-local-edits rule |
+| `.agents/` | Never touched — your research, architecture, plans, logs, findings — apart from the generated skill files under `.agents/skills/` |
 
 The upgrade also recreates any missing directories in the RAD structure, so a
 project that predates newer directories (e.g. `.agents/findings/`) is healed
@@ -82,12 +84,12 @@ the refreshed files together with the manifest:
 
 ```bash
 cd /path/to/your-project
-git add .claude/commands/ .claude/skills/ ai/ scripts/ harness/ .rad/installed.json
+git add .claude/ .codex/ .agents/skills/ .rad/ ai/ scripts/ harness/
 git commit -m "chore: upgrade RAD framework to latest"
 ```
 
-Run `/rad-status` in Claude Code afterward to confirm the new command set
-loaded.
+Run `/shared:rad-status` afterward (in Claude Code, or the equivalent skill in
+your agent) to confirm the new command set loaded.
 
 ---
 
@@ -112,7 +114,7 @@ staging, and backup behavior:
 cd /path/to/your-project
 node /tmp/rad/harness/cli.js install-core --source /tmp/rad --target .
 
-git add .claude/commands/ .claude/skills/ ai/ scripts/ harness/ .rad/installed.json
+git add .claude/ .codex/ .agents/skills/ .rad/ ai/ scripts/ harness/
 git commit -m "chore: upgrade RAD framework to latest"
 ```
 
@@ -122,8 +124,8 @@ or found a deleted file, and 2 (writing nothing) on bad arguments or a malformed
 overwrites local edits without a backup and leaves no manifest, so the next
 upgrade cannot tell your edits apart from old framework versions.
 
-Do **not** copy `CLAUDE.md`, `.rad/config.yml`, `.claude/agents/`, or `.agents/`
-content — those belong to your project. If the project has no `.rad/config.yml`
+Do **not** copy `CLAUDE.md`, `AGENTS.md`, `.rad/config.yml`, agent files you
+created, or `.agents/` content — those belong to your project. If the project has no `.rad/config.yml`
 yet, create it as described in
 [Upgrading to .rad/config.yml (#87)](#upgrading-to-radconfigyml-87).
 
@@ -146,10 +148,12 @@ framework core files and the SHA-256 of the version RAD installed:
 ```
 
 Commit it with the rest of the install. The core set is `.claude/commands/**`,
-`.claude/skills/**`, `ai/**`, `scripts/*.sh`, `scripts/lib/**`,
-`scripts/hooks/**`, and `harness/**` except `harness/node_modules/**`
-(`.DS_Store` files are skipped). `CLAUDE.md`, `.claude/agents/`,
-`.claude/settings*.json`, `.agents/`, and `.rad/config.yml` are never in it.
+`.claude/skills/**`, `ai/**`, `scripts/*.sh`, `scripts/*.mjs`, `scripts/lib/**`,
+`scripts/hooks/**`, `harness/**` except `harness/node_modules/**`,
+`.rad/skills/**`, `.rad/agents/**`, and the generated-marker files under
+`.claude/agents/`, `.agents/skills/` and `.codex/agents/` (`.DS_Store` files are
+skipped). `CLAUDE.md`, `AGENTS.md`, your own agent files, `.claude/settings*.json`,
+`.agents/` content, and `.rad/config.yml` are never in it.
 
 On upgrade, each core file is compared with the manifest:
 
@@ -215,20 +219,20 @@ afterward changes. Read this before upgrading a project with active work.
 
 **One work branch per feature.** The old two-branch model (`plan/[feature]`
 for the plan, `deliver/[feature]` for the code) is retired. Each feature now
-lives on a single `rad/[feature]` branch, cradle to grave: `/rad-plan` cuts it
-from the default branch and commits the plan doc, `/rad-approve` records
-approval on it, and `/rad-deliver` runs on it and opens the PR. The branch name
+lives on a single `rad/[feature]` branch, cradle to grave: `/team:rad-plan` cuts it
+from the default branch and commits the plan doc, `/architect:rad-approve` records
+approval on it, and `/team:rad-deliver` runs on it and opens the PR. The branch name
 is recorded in the plan doc's `Branch:` header.
 
 **No plan PR.** There is no longer a Gate 1 plan PR, no `rad:plan` /
-`rad:pending-review` labels, and nothing to merge for approval. `/rad-approve`
+`rad:pending-review` labels, and nothing to merge for approval. `/architect:rad-approve`
 writes `Status: approved` to the plan doc at the `rad/[feature]` branch **tip**
 and pushes that branch — it never commits to the default branch. The plan doc
 reaches the default branch later, together with the code, through the single
 deliver PR (`rad:deliver`). This keeps contributors off the protected default
 branch.
 
-**Gates.** Gate 1 is `/rad-approve` on the branch tip (no PR). Gate 2 is the
+**Gates.** Gate 1 is `/architect:rad-approve` on the branch tip (no PR). Gate 2 is the
 deliver PR being reviewed and merged.
 
 **Default branch is configurable.** Nothing hardcodes `main` anymore. Set
@@ -237,7 +241,7 @@ deliver PR being reviewed and merged.
 
 **Proxy approval.** A non-architect can record an approval the architect gave
 out-of-band:
-`/rad-approve <feature> --on-behalf-of "<architect>" --evidence "<cite>"`.
+`/architect:rad-approve <feature> --on-behalf-of "<architect>" --evidence "<cite>"`.
 
 **Plan docs gained sections.** New plans include `## Scope` and
 `## Acceptance Criteria`.
@@ -265,9 +269,9 @@ branches should either:
 
 - **Finish under the old flow** before upgrading the way you work on it (merge
   its plan PR and complete its deliver PR as before), or
-- **Recreate it under Lane B** — re-run `/rad-plan` (or `/rad-adopt`) for the
+- **Recreate it under Lane B** — re-run `/team:rad-plan` (or `/team:rad-adopt`) for the
   feature to cut a fresh `rad/[feature]` branch, then proceed through
-  `/rad-approve` and `/rad-deliver`.
+  `/architect:rad-approve` and `/team:rad-deliver`.
 
 Don't try to convert a live `plan/`/`deliver/` pair into a single `rad/` branch
 by hand.
@@ -405,7 +409,7 @@ node harness/cli.js generate
 scripts/lint-agent-files.sh
 ```
 
-New agents from `/rad-design` carry the tag already. See
+New agents from `/architect:rad-design` carry the tag already. See
 [docs/agent-hierarchy-audit.md](docs/agent-hierarchy-audit.md) for worked
 examples across RAD's own 27 agents.
 
@@ -486,6 +490,13 @@ before, and `agent:` is ignored. With neither the environment nor `agent:`,
 or appending an event. `rad review` also falls back to `agent.command` (adapter
 `command` only) after `RAD_REVIEW_AGENT_CMD` and `RAD_AGENT_CMD`. Run
 `node harness/cli.js config validate` after editing. See
+[docs/configuration.md](docs/configuration.md#agent-adapter).
+
+`agent.adapter` may also be `acp` or `sdk`. Any other CLI is set with
+`rad config init --agent-cmd "<cmd>"` (optionally `--agent-adapter acp`) or by
+editing `.rad/config.yml`. Using `node scripts/claude-usage.mjs` as the command
+adds token and cost reporting to a Claude agent. See
+[INSTALL.md](INSTALL.md#choose-your-agent) and
 [docs/configuration.md](docs/configuration.md#agent-adapter).
 
 ---
