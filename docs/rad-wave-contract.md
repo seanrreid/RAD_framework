@@ -7,7 +7,7 @@ prompt and emit a `WAVE_RESULT` block can drive a RAD delivery.
 
 Three adapters ship today and all honor this contract:
 
-- **`command`** (default, vendor-neutral) — shells out to an operator-configured
+- **`command`** (vendor-neutral) — shells out to an operator-configured
   CLI agent (`claude -p`, `codex exec`, `aider`, or a wrapper script).
 - **`sdk`** (Anthropic) — drives the Claude Agent SDK `query` loop.
 - **`acp`** (vendor-neutral) — speaks Agent Client Protocol v1 to an agent
@@ -58,7 +58,9 @@ This section explains the design. It does not change any execution behaviour.
 
 ## The adapter interface
 
-RAD ships three adapters, selected by `RAD_AGENT`: `command` (spawns any CLI
+RAD ships three adapters, selected by `agent.adapter` in `.rad/config.yml`, or by
+`RAD_AGENT`/`RAD_AGENT_CMD` when either is set (the environment then decides
+everything; see [Agent Adapter](./configuration.md#agent-adapter)): `command` (spawns any CLI
 agent), `sdk` (the Claude Agent SDK) and `acp` (an Agent Client Protocol v1
 agent; see [The `acp` adapter](#the-acp-adapter)). Each is a factory that
 returns a `runWave` function:
@@ -217,8 +219,9 @@ block. The `agent_message_chunk` text is collected and parsed with
 | `cancelled` RAD did not ask for, or any unknown value | `fail-protocol` |
 
 **Timeout and failures.** At the wave deadline RAD sends `session/cancel`,
-waits a grace period for the turn to settle, then SIGTERM and SIGKILL; the
-attempt is `fail-timeout`. An agent crash, a line that is not JSON-RPC 2.0, a
+waits a grace period for the turn to settle, then SIGTERM and SIGKILL, signalled to
+the agent's whole process group (see
+[`rad-cli.md`](./rad-cli.md#agent-process-groups)); the attempt is `fail-timeout`. An agent crash, a line that is not JSON-RPC 2.0, a
 response to an unknown id, or an error response is `fail-protocol`.
 
 **Permission policy.** Each `session/request_permission` is answered from the
@@ -267,7 +270,7 @@ To check an agent before using it, run `rad acp-check --cmd "<agent>"` (see
 ## The wave prompt
 
 `buildWavePrompt(wave, planCtx)` produces the prompt every adapter feeds its
-agent. It is the same template the `/rad-deliver` prose command uses, containing:
+agent. It is the same template the `/team:rad-deliver` prose command uses, containing:
 
 - the wave number, feature, branch, execution-log path, and wave type;
 - the Execution Notes (Do Not Touch / Key Files / Reminders);
@@ -355,8 +358,12 @@ Run-level failures the adapter detects before/around parsing map directly:
 | wall-clock timeout (deadline exceeded) | `fail-timeout` |
 | missing `WAVE_RESULT` after one reprompt | `fail-protocol` |
 | `command`: non-zero exit or spawn error with **no** `WAVE_RESULT` block | `fail-protocol` (matrix `abort` — no retry; a retry re-runs the same broken startup) |
+| `command`: captured output exceeds the 10 MB cap (process killed) | `fail-protocol` |
 | `command`: non-zero exit **with** a `WAVE_RESULT` block | `fail-tests` (via synthetic failure, as before) |
 | `sdk`: SDK error result (unchanged) | `fail-tests` (via synthetic failure) |
+
+On a `command` or `acp` timeout the whole agent process group is signalled, not just
+the child pid; see [`rad-cli.md`](./rad-cli.md#agent-process-groups) for detail.
 
 ---
 
@@ -417,7 +424,7 @@ plan — re-running unchanged cannot succeed).
 | `token-budget` | `needs-decision` | `token-budget` | `token budget {budget} reached (spent {spent}); raise RAD_TOKEN_BUDGET or stop` |
 | `failed-attempt-cap` | `needs-decision` | `failed-attempt-cap` | `{failed} failed attempts reached RAD_MAX_FAILED_ATTEMPTS={cap}; raise the cap, re-plan, or stop` |
 | `approval-changed` | `needs-decision` | `approval-changed` | `the plan changed since approval (or approval no longer holds); re-approve before re-running` |
-| `gate` (pre-start) | `needs-decision` | `gate` | `plan not approved; run /rad-approve` |
+| `gate` (pre-start) | `needs-decision` | `gate` | `plan not approved; run /architect:rad-approve` |
 | `merge-conflict` | `needs-decision` | `merge-conflict` | `merging origin/{base} into {branch} conflicts ({detail}); resolve the conflict on the branch, commit, and re-run with --resume` |
 | `prepare-failed` | `failed` | `prepare-failed` | `prepare failed: {detail}` |
 | `finish-failed` | `failed` | `finish-failed` | `finishing the run failed: {detail}; re-run rad deliver to finish` |
@@ -575,7 +582,7 @@ The stderr failure line carries `class=` and `decision=`.
 
 `surface` is a **terminal return, not a pause** — the harness never waits for a
 human mid-run. Attended vs unattended is the **caller's** concern: an unattended
-caller (CI, a script) branches on the exit code; a `/rad-deliver` session is the
+caller (CI, a script) branches on the exit code; a `/team:rad-deliver` session is the
 attended wrapper that relays the decision line to the operator. No attendedness
 input exists in the harness.
 
@@ -627,8 +634,10 @@ shared helpers in `contract.js` rather than reimplementing the protocol.
 | Capabilities | constrained waves refused | mapped to `allowedTools`; `mcp` refused | constrained waves refused; permission requests answered and recorded |
 | Model | `{model}` token in the command | `--model` / wave `Model:` | ignored with one warning |
 | Usage | `RAD_USAGE` line, if printed | SDK token counts | none from a conformant v1 agent |
-| Selection | `RAD_AGENT=command` (default) + `RAD_AGENT_CMD=<cmd>` | `RAD_AGENT=sdk` | `RAD_AGENT=acp` + `RAD_AGENT_CMD=<agent>` |
+| Selection | `agent.adapter: command` + `agent.command`, or `RAD_AGENT=command` + `RAD_AGENT_CMD=<cmd>` | `agent.adapter: sdk`, or `RAD_AGENT=sdk` | `agent.adapter: acp` + `agent.command`, or `RAD_AGENT=acp` + `RAD_AGENT_CMD=<agent>` |
 
-Selection is purely environment-driven (no config-file loader). See
+The adapter comes from `agent.adapter` in `.rad/config.yml`, or from
+`RAD_AGENT`/`RAD_AGENT_CMD` when either is set (the environment then decides
+everything); see [Agent Adapter](./configuration.md#agent-adapter). See
 [`rad-cli.md`](./rad-cli.md) for the `rad deliver` selection details and the
 per-path credential requirements.
