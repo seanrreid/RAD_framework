@@ -1,13 +1,14 @@
 # Platform Support
 
 RAD works with any git platform. GitHub is the default with full CLI automation.
-Other platforms degrade gracefully to manual mode.
+Other platforms degrade gracefully to manual mode. Command names are namespaced by role; see the
+[note in daily-workflow.md](daily-workflow.md).
 
 RAD opens exactly one PR per feature: the **deliver PR**, created by
 `open-pr.sh` from the feature's `rad/[feature]` work branch to the default
-branch. There is no plan PR — `/rad-approve` records `Status: approved` on the
-`rad/` branch tip, and `check-plan-approved.sh` reads that approval directly
-with `git show`, so the approval check is platform-agnostic and needs no
+branch. There is no plan PR — `/architect:rad-approve` records an `approved` event in `.agents/state/<feature>/events.jsonl` on the
+`rad/` branch tip (the `Status:` header is a display mirror), and
+`check-plan-approved.sh` reads that event log directly with `git show`, so the approval check is platform-agnostic and needs no
 `gh`/`glab` PR-merge lookup.
 
 ---
@@ -16,7 +17,7 @@ with `git show`, so the approval check is platform-agnostic and needs no
 
 "PR automation" below refers to the deliver PR — the only PR in the flow.
 The approval check is platform-agnostic everywhere: `check-plan-approved.sh`
-reads `Status: approved` from the `rad/` branch tip with `git show`.
+reads the `approved` event from the `rad/` branch tip's event log with `git show`.
 
 | Platform | Deliver PR automation | Approval check | Status |
 |----------|----------------------|----------------|--------|
@@ -130,7 +131,7 @@ glab auth login --hostname git.yourcompany.com
 
 Bitbucket's CLI (`bb`) has limited functionality. RAD uses manual mode for Bitbucket.
 
-When `/rad-deliver` completes, it will output:
+When `/team:rad-deliver` completes, it will output:
 ```
 ┌─────────────────────────────────────────────────────┐
 │  Manual PR Creation Required                        │
@@ -149,7 +150,7 @@ recorded in the plan file.
 
 The approval check (Gate 1) needs no PR on any platform:
 `check-plan-approved.sh` runs `git show` against the `rad/` branch tip to read
-the plan doc's `Status: approved`. Only the deliver PR (Gate 2) requires the
+the `approved` event in the feature's event log. Only the deliver PR (Gate 2) requires the
 manual creation step above.
 
 ---
@@ -174,11 +175,11 @@ Set `platform: manual` in `.rad/config.yml` to always use manual mode, regardles
 of what platform is detected.
 
 Manual mode:
-- `/rad-deliver` prints deliver-PR creation instructions instead of opening
+- `/team:rad-deliver` prints deliver-PR creation instructions instead of opening
   the PR (this is the only PR in the flow)
 - After you manually create the deliver PR, paste the URL and it's recorded
   in the plan
-- `check-plan-approved.sh` reads `Status: approved` from the `rad/` branch tip
+- `check-plan-approved.sh` reads the `approved` event log from the `rad/` branch tip
   with `git show` — the same platform-agnostic check used everywhere
 - All other RAD functionality works identically
 

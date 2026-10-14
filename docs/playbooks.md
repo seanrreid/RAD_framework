@@ -5,10 +5,13 @@ example "add an env knob" or "add a hook point"). A plan pins one by ref in its
 header, so the shape the plan was written against is part of what the architect
 approves. The mechanism is mechanical only: `rad playbook` validates files and
 refs, `plan_playbook` and `lint-plan.sh` check the plan header, and the plan
-fingerprint covers the pin. The `--playbook` flag in `/rad-plan` and
-`/rad-adopt` loads a playbook before research and writes the `Playbook:` header
+fingerprint covers the pin. The `--playbook` flag in `/team:rad-plan` and
+`/team:rad-adopt` loads a playbook before research and writes the `Playbook:` header
 for you (see [Using a playbook](#using-a-playbook)). Two seed playbooks ship:
-`env-knob--timeout-style` and `event-type--audit-only`. CI runs
+`env-knob--timeout-style` and `event-type--audit-only`. They live in the RAD
+repository's `.agents/playbooks/` and are not installed into projects; to use
+one, copy it into your project's `.agents/playbooks/`. Command names are
+namespaced by role; see the [note in daily-workflow.md](daily-workflow.md). CI runs
 `rad playbook lint` in the `playbook-lint` job.
 
 ## Using a playbook
@@ -20,7 +23,7 @@ for you (see [Using a playbook](#using-a-playbook)). Two seed playbooks ship:
 
 `--playbook <kind>/<slug>[@<version>]` sits beside `--override-disposition`. A
 bare ref pins the current version. The skill checks the ref with
-`rad playbook check-ref` before research (`/rad-plan` Step 1b, `/rad-adopt`
+`rad playbook check-ref` before research (`/team:rad-plan` Step 1b, `/team:rad-adopt`
 Step 3b), uses the playbook's files and wave skeleton as the starting point,
 writes the `Playbook:` header line and records departures in a
 `## Playbook Deviations` section. A playbook is guidance the plan cites;
@@ -118,7 +121,7 @@ hashed; the pin (including its version) is.
 ## Guardrail
 
 A playbook never bypasses approval or severity routing. Pinning one does not
-approve a plan, skip `/rad-approve`, lower a risk tier, or change how review
+approve a plan, skip `/architect:rad-approve`, lower a risk tier, or change how review
 findings are routed. A playbook is guidance the plan cites, not authority.
 
 ## Commands
