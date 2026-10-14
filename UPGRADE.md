@@ -26,8 +26,10 @@ originally set up with the installer.
 | `.rad/upgrade-backup/` | Written only on the first upgrade of a pre-manifest install — backups of overwritten files |
 | `CLAUDE.md` | Never touched — your project conventions |
 | `.rad/config.yml` | Never touched — your config data (platform, default branch, roles, scope map). Created by `rad config migrate` only when missing |
-| `.claude/agents/` | Never touched — your generated agent boundaries |
-| `.agents/` | Never touched — your research, architecture, plans, logs, findings |
+| `.rad/skills/`, `.rad/agents/` | **Refreshed** — the source trees `rad generate` reads; locally edited files kept |
+| `.claude/agents/` | **Refreshed** — the generated reviewers the installer shipped, with the same keep-local-edits rule. Agent files you created with `/architect:rad-design` are never touched |
+| `.agents/skills/`, `.codex/agents/` | **Refreshed** — only the generated files the installer shipped; same keep-local-edits rule |
+| `.agents/` | Never touched — your research, architecture, plans, logs, findings — apart from the generated skill files under `.agents/skills/` |
 
 The upgrade also recreates any missing directories in the RAD structure, so a
 project that predates newer directories (e.g. `.agents/findings/`) is healed
@@ -146,10 +148,12 @@ framework core files and the SHA-256 of the version RAD installed:
 ```
 
 Commit it with the rest of the install. The core set is `.claude/commands/**`,
-`.claude/skills/**`, `ai/**`, `scripts/*.sh`, `scripts/lib/**`,
-`scripts/hooks/**`, and `harness/**` except `harness/node_modules/**`
-(`.DS_Store` files are skipped). `CLAUDE.md`, `.claude/agents/`,
-`.claude/settings*.json`, `.agents/`, and `.rad/config.yml` are never in it.
+`.claude/skills/**`, `ai/**`, `scripts/*.sh`, `scripts/*.mjs`, `scripts/lib/**`,
+`scripts/hooks/**`, `harness/**` except `harness/node_modules/**`,
+`.rad/skills/**`, `.rad/agents/**`, and the generated-marker files under
+`.claude/agents/`, `.agents/skills/` and `.codex/agents/` (`.DS_Store` files are
+skipped). `CLAUDE.md`, `AGENTS.md`, your own agent files, `.claude/settings*.json`,
+`.agents/` content, and `.rad/config.yml` are never in it.
 
 On upgrade, each core file is compared with the manifest:
 
