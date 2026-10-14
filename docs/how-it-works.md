@@ -260,6 +260,6 @@ branch only changes when that final PR merges.
 - [harness-and-framework.md](harness-and-framework.md) — what RAD *is*: the deterministic harness core vs. the process-framework shell
 - [daily-workflow.md](daily-workflow.md) — the day-to-day command reference
 - [architect-guide.md](architect-guide.md) — setup, scope maps, and approval
-- [plan-pr-guide.md](plan-pr-guide.md) — the plan approval guide
+- [plan-approval-guide.md](plan-approval-guide.md) — the plan approval guide
 - [wave-execution.md](wave-execution.md) — how `/rad-deliver` runs tasks in waves
 - [onboarding.md](onboarding.md) — your first feature, start to finish
