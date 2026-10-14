@@ -8,7 +8,7 @@ the source of truth. If a bullet and its source disagree, the source wins.
 
 ## Architecture decisions
 
-- Deterministic harness code owns control flow and calls the model only at judgment points, pausing at human points. See `docs/harness-audit.md`.
+- Deterministic harness code owns control flow and calls the model only at judgment points, pausing at human points. See `docs/harness-and-framework.md`.
 - Approval is the `approved` event in `.agents/state/<feature>/events.jsonl`, folded by `harness/gates.js`; the plan's `Status: approved` header is a display-only mirror. See `docs/invariants.yaml`.
 - There is no auto-approval: severity-routed approval (Green Lane v1) was removed, and a human approves every plan. See #137.
 - There are two human gates: `/rad-approve` on the plan, then review of the deliver PR. See `docs/daily-workflow.md`.

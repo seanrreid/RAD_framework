@@ -1,8 +1,6 @@
 # RAD Harness — The StateStore Design
 
 > Status: draft for discussion
-> Branch: `rad/harness-audit`
-> Companion to: `harness-audit.md` (which recommends *migrate, not rebuild*)
 > Question being answered: *How do we migrate RAD's orchestration into code without
 > marrying the design to git — and in a way that serves speed, quality,
 > determinism, and portability at once?*

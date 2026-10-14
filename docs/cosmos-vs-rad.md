@@ -108,8 +108,7 @@ One idea worth chewing on from their side: Cosmos frames deep code review as
 **optimized for recall, not precision** — agents read everything, humans are
 shown "places where key assumptions are shifting" rather than the full diff.
 That is a different Gate-2 philosophy than RAD's (where the architect reads the
-deliver PR), and a candidate input for the interactive-evaluation discussion in
-[`discovery-interactive-evaluation.md`](discovery-interactive-evaluation.md).
+deliver PR), and a candidate input for an interactive-evaluation review step.
 
 ### Model routing: dynamic vs declared
 
