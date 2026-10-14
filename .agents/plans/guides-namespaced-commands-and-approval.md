@@ -1,7 +1,10 @@
 # Plan: Remaining Guides: Namespaced Commands, Approval Wording, Stale Facts
 Created: 2026-10-14
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-10-14T16:37:21.386Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/guides-namespaced-commands-and-approval
 Tier: light
 Source-Author: none (no source issue)
