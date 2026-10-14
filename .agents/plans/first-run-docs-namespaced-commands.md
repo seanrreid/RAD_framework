@@ -1,7 +1,7 @@
 # Plan: First-Run Docs: Namespaced Commands, Agent Step, Approval Wording
 Created: 2026-10-14
 Author: architect
-Status: approved
+Status: in-progress
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-10-14T15:39:49.077Z
 Recorded-By: sean@torchcodelab.com
