@@ -3,17 +3,24 @@
 How the team uses RAD day-to-day. The full loop for any feature:
 
 ```
-Anyone:     /rad-research [prd or issue]  ← once per project setup
-Architect:  /rad-design [slug]            ← once per project setup
+Anyone:     /team:rad-research [prd or issue]  ← once per project setup
+Architect:  /architect:rad-design [slug]            ← once per project setup
 
-Developer:  /rad-plan [feature]    ← cuts rad/[feature] branch, commits plan (no PR)
-Architect:  /rad-approve [feature] ← Gate 1: records approval on the branch tip (no PR)
+Developer:  /team:rad-plan [feature]    ← cuts rad/[feature] branch, commits plan (no PR)
+Architect:  /architect:rad-approve [feature] ← Gate 1: records approval on the branch tip (no PR)
 
-Developer:  /rad-deliver [feature] ← runs `rad deliver`: waves on rad/[feature], opens the deliver PR
-Developer:  /rad-review            ← self-review before requesting architect review
+Developer:  /team:rad-deliver [feature] ← runs `rad deliver`: waves on rad/[feature], opens the deliver PR
+Developer:  /team:rad-review            ← self-review before requesting architect review
 Architect:  [reviews deliver PR]   ← Gate 2: implementation approval
 Architect:  [merges deliver PR]    ← plan doc + code reach the default branch; feature ships
 ```
+
+> **Command names.** Claude Code namespaces RAD's commands by role:
+> `/team:…` (`rad-plan`, `rad-research`, `rad-adopt`, `rad-deliver`,
+> `rad-review`, `quality-review`, `accessibility-review`), `/architect:…`
+> (`rad-approve`, `rad-design`, `rad-epic-decompose`) and `/shared:…`
+> (`rad-status`, `rad-insights`). Only `/kickoff` and `/wrap` are bare. In
+> Codex the same steps are the `rad-*` skills in `.agents/skills/`.
 
 There is one work branch per feature, `rad/[feature]`, cut from the default
 branch and carried cradle-to-grave: it holds the plan doc, the recorded
@@ -40,14 +47,16 @@ platform setup and label creation.
 Commit the installed files before proceeding:
 
 ```bash
-git add .claude/ .agents/ scripts/ AGENTS.md CLAUDE.md
+git add .claude/ .codex/ .agents/ .rad/ ai/ scripts/ harness/ AGENTS.md CLAUDE.md
 git commit -m "chore: install RAD framework"
 ```
+
+**Set your agent.** `install.sh --yes` writes no agent, so `rad deliver` exits 2 until one is set. Set it with `install.sh --agent claude|codex`, or afterwards with `node harness/cli.js config init --agent-cmd "<cmd>" --force`. See [Choose your agent](../INSTALL.md#choose-your-agent).
 
 ### Step 2: Research
 
 ```
-/rad-research [path-to-prd or issue-url]
+/team:rad-research [path-to-prd or issue-url]
 ```
 
 Point it at your PRD, a GitHub/GitLab issue, or paste a spec inline.
@@ -64,7 +73,7 @@ treated as `actionable`.
 ### Step 3: Design
 
 ```
-/rad-design [slug]
+/architect:rad-design [slug]
 ```
 
 Reads the research artifact and drafts the agent hierarchy to
@@ -76,7 +85,7 @@ asks to **approve / edit / cancel** — all in one invocation:
   `.codex/agents/`, in the same run. No manual edit, no re-run.
 - **edit** — adjust role assignments or scope boundaries; the draft is revised and
   shown again.
-- **cancel** — leave it as a draft and stop; re-run `/rad-design [slug]` later to
+- **cancel** — leave it as a draft and stop; re-run `/architect:rad-design [slug]` later to
   resume.
 
 (Editing `Status: approved` by hand still works — a pre-existing approved artifact
@@ -95,7 +104,7 @@ git push
 ## Planning a feature (developer or designer)
 
 ```
-/rad-plan Add skeleton loading to the habit list
+/team:rad-plan Add skeleton loading to the habit list
 ```
 
 This will:
@@ -108,29 +117,29 @@ This will:
 4. Commit the plan to the `rad/[feature]` branch
 5. Lint the plan — checks structure, wave limits, and context budget
 
-No PR is opened. Then wait. Do not run `/rad-deliver` until the architect runs
-`/rad-approve`, which records approval on the branch tip.
+No PR is opened. Then wait. Do not run `/team:rad-deliver` until the architect runs
+`/architect:rad-approve`, which records approval on the branch tip.
 
 **Disposition check.** When a research artifact exists for the feature,
-`/rad-plan` first runs `scripts/check-disposition.sh` on it. The check is
+`/team:rad-plan` first runs `scripts/check-disposition.sh` on it. The check is
 fail-open — a missing, unknown, or uncited `Disposition:` counts as `actionable` —
 but a cited non-actionable disposition (`not-actionable`, `insufficient-context`,
-`superseded`) makes `/rad-plan` refuse. To plan anyway, re-run with
+`superseded`) makes `/team:rad-plan` refuse. To plan anyway, re-run with
 `--override-disposition "<reason>"`; the reason is recorded as a
 `Disposition-Override:` line in the plan header, so the architect sees it at
 Gate 1. This adds no new gate.
 
 **Choosing a planning tier.** For small, single-wave, low-risk work outside RAD's
 own paths (`harness/`, `scripts/`, `.claude/`, `.agents/state/`), use
-`/rad-plan --light`: a quick scope check replaces the full research and the plan is
+`/team:rad-plan --light`: a quick scope check replaces the full research and the plan is
 condensed (`Tier: light` — at most 1 wave and 3 tasks, no high-risk path). Use
-standard `/rad-plan` for everything else. Both tiers go through `/rad-approve`.
-`/rad-research` and `/rad-design` run once per project, not per change — the
-per-change cost is `/rad-plan` only.
+standard `/team:rad-plan` for everything else. Both tiers go through `/architect:rad-approve`.
+`/team:rad-research` and `/architect:rad-design` run once per project, not per change — the
+per-change cost is `/team:rad-plan` only.
 
 **Starting from a playbook.** For a recurring change shape (an env knob, an
 audit-only event), add `--playbook <kind>/<slug>[@<version>]`, e.g.
-`/rad-plan --playbook env-knob/timeout-style "..."`. The plan starts from the
+`/team:rad-plan --playbook env-knob/timeout-style "..."`. The plan starts from the
 playbook's files and wave skeleton and pins it in a `Playbook:` header line, so
 the architect approves the shape too. See [playbooks.md](playbooks.md).
 
@@ -141,17 +150,17 @@ the architect approves the shape too. See [playbooks.md](playbooks.md).
 For work that existed before RAD was introduced:
 
 ```
-/rad-adopt #42
-/rad-adopt https://github.com/org/repo/issues/42
-/rad-adopt "Fix login timeout not resetting on user activity"
+/team:rad-adopt #42
+/team:rad-adopt https://github.com/org/repo/issues/42
+/team:rad-adopt "Fix login timeout not resetting on user activity"
 ```
 
 This fetches the issue context (or uses your description), researches the
-codebase, and generates a wave-structured plan — same format as `/rad-plan`.
+codebase, and generates a wave-structured plan — same format as `/team:rad-plan`.
 An `## Issue Gaps` section captures assumptions made where the issue was vague.
 
-The plan goes through `/rad-approve` before execution, same as any other plan.
-`/rad-adopt` runs the same disposition check as `/rad-plan` when a research
+The plan goes through `/architect:rad-approve` before execution, same as any other plan.
+`/team:rad-adopt` runs the same disposition check as `/team:rad-plan` when a research
 artifact exists, with the same `--override-disposition "<reason>"` escape hatch.
 It also accepts `--playbook <kind>/<slug>[@<version>]` (see
 [playbooks.md](playbooks.md)).
@@ -169,8 +178,8 @@ land a testable end-to-end increment — one workflow's schema, service, API, an
 together — over stack-ordered waves that defer all integration to the last wave;
 `scripts/lint-plan.sh` warns (never blocks) when waves look stack-ordered, and pure
 refactors or harness-internal work may stay horizontal. For features with a
-user-visible surface, `/rad-research` can offer an HTML mockup saved under
-`.agents/mockups/`; `/rad-design` and `/rad-plan` then reference it, and the plan
+user-visible surface, `/team:rad-research` can offer an HTML mockup saved under
+`.agents/mockups/`; `/architect:rad-design` and `/team:rad-plan` then reference it, and the plan
 lint warns if a referenced mockup is missing on disk.
 
 **Consistency advisories (warnings only).** The plan lint also cross-checks tasks
@@ -188,7 +197,7 @@ This is Gate 1. You're approving the *approach*, not the code. There is no
 plan PR — the plan lives on its `rad/[feature]` branch.
 
 ```
-/rad-approve [feature]
+/architect:rad-approve [feature]
 ```
 
 Check:
@@ -201,10 +210,11 @@ Check:
 - [ ] Out-of-scope dependencies are acknowledged
 
 If something is wrong: ask the contributor to update the plan file on the
-`rad/[feature]` branch and push, then re-review. When satisfied, `/rad-approve`
-writes `Status: approved` to the plan doc and commits/pushes it to the
-`rad/[feature]` branch tip — never to the default branch. That recorded
-approval is the gate that unblocks `/rad-deliver`.
+`rad/[feature]` branch and push, then re-review. When satisfied, `/architect:rad-approve`
+records an `approved` event in `.agents/state/<feature>/events.jsonl` and
+commits/pushes it to the `rad/[feature]` branch tip — never to the default
+branch. The plan header's `Status:` is a display mirror. That recorded
+approval is the gate that unblocks `/team:rad-deliver`.
 
 A plan edited after delivery can be re-approved with the same verb: the plan
 header's `Status:` (e.g. `complete`) is kept, and only the approval provenance
@@ -218,7 +228,7 @@ If the architect approved out-of-band (in chat, a meeting, etc.), a
 non-architect can record it for them:
 
 ```
-/rad-approve [feature] --on-behalf-of "Sean Reid" --evidence "approved in #standup 2026-05-29"
+/architect:rad-approve [feature] --on-behalf-of "Sean Reid" --evidence "approved in #standup 2026-05-29"
 ```
 
 This records `Approved-By` and `Recorded-By` separately so the proxy is auditable.
@@ -228,7 +238,7 @@ This records `Approved-By` and `Recorded-By` separately so the proxy is auditabl
 ## Executing the plan (developer or designer)
 
 ```
-/rad-deliver add-skeleton-loading
+/team:rad-deliver add-skeleton-loading
 ```
 
 The skill (`/team:rad-deliver` in Claude Code, `$rad-deliver` in Codex) runs
@@ -266,10 +276,10 @@ for the full lifecycle.
 ## Self-review before requesting architect review (developer)
 
 ```
-/rad-review
+/team:rad-review
 ```
 
-Run this after `/rad-deliver` completes. It checks:
+Run this after `/team:rad-deliver` completes. It checks:
 - All changed files were in the plan's scope
 - Implementation matches the plan
 - Every Acceptance Criterion has coverage
@@ -287,7 +297,7 @@ Fix any HIGH priority issues before requesting architect review.
 
 **Behavioral exercise (Step 4c).** A standard plan may carry an optional
 `## Exercise` section (`Launch:`, `Teardown:`, `Drive:`, and
-`Observe (AC#N):` lines; a light plan omits it). When present, `/rad-review`
+`Observe (AC#N):` lines; a light plan omits it). When present, `/team:rad-review`
 Step 4c runs `rad exercise <feature>` against the delivered branch and adds a
 `### Behavioral Exercise` section to the report. Pass `--no-exercise` to skip it;
 with no recipe it is skipped automatically. Findings are persisted as
@@ -317,7 +327,7 @@ violations, approval integrity, high-risk paths, self-protected paths, …), and
 
 Standard code review, plus RAD-specific checks:
 - [ ] Review digest read (job summary) — every **Look here** item accounted for
-- [ ] Self-review was run (check for `/rad-review` output in PR comments)
+- [ ] Self-review was run (check for `/team:rad-review` output in PR comments)
 - [ ] All changes are within the plan's declared scope
 - [ ] Digest run items look clean — no surprise retries or stops
 - [ ] Tests are present and test behavior, not implementation
@@ -337,16 +347,16 @@ failure.
 
 **A plan needs changes before approval:**
 The contributor updates `.agents/plans/[feature].md` directly and pushes to
-the `rad/[feature]` branch. The architect re-reviews and runs `/rad-approve`
+the `rad/[feature]` branch. The architect re-reviews and runs `/architect:rad-approve`
 when satisfied.
 
-**A /rad-deliver run fails (exit 1):**
+**A /team:rad-deliver run fails (exit 1):**
 The harness has already retried per its rules, so don't retry by hand. Tell the
 architect (the deliver PR may not exist yet), with the `rad deliver: failed …`
 line. The architect decides whether to update the plan on the `rad/[feature]`
-branch or take over the blocked task; then re-run `/rad-deliver`.
+branch or take over the blocked task; then re-run `/team:rad-deliver`.
 
-**A /rad-deliver run needs a decision (exit 3):**
+**A /team:rad-deliver run needs a decision (exit 3):**
 The skill stops and shows you the decision. Answer it, and the run resumes with
 `--resume --context "<your answer>"`. See
 [Resuming a stopped run](rad-cli.md#resuming-a-stopped-run).
@@ -359,14 +369,14 @@ handles the dependency separately.
 **A run stops partway:**
 Each wave runs in its own agent call, so the calling session's context stays
 small. The run's state lives in the event log, not in the session: after a fix,
-re-run `/rad-deliver [feature]` from any session.
+re-run `/team:rad-deliver [feature]` from any session.
 
 ---
 
-## /rad-status — the team dashboard
+## /shared:rad-status — the team dashboard
 
 ```
-/rad-status
+/shared:rad-status
 ```
 
 Run this at the start of any session to see:
@@ -387,13 +397,13 @@ uncommitted work. `/wrap` never changes plan status; that comes from
 
 ---
 
-## /rad-insights — review pattern analysis
+## /shared:rad-insights — review pattern analysis
 
 ```
-/rad-insights
+/shared:rad-insights
 ```
 
-Reads the accumulated findings from every `/rad-review` run and surfaces
+Reads the accumulated findings from every `/team:rad-review` run and surfaces
 patterns across cycles:
 - Which finding categories keep recurring (security, error-handling, accessibility)
 - Which files attract the most findings
@@ -403,14 +413,14 @@ patterns across cycles:
 Optionally filter to a recent window:
 
 ```
-/rad-insights --since 2026-04-01
+/shared:rad-insights --since 2026-04-01
 ```
 
 Run this periodically — monthly is a reasonable cadence, or after a stretch of
 fast-paced delivery. Useful for both the architect (spotting architectural debt)
 and developers (seeing where to invest in skill improvement).
 
-Findings accumulate automatically as long as `/rad-review` is run on each
+Findings accumulate automatically as long as `/team:rad-review` is run on each
 `rad/[feature]` branch before the deliver PR. No separate setup required.
 
 ### Reviewer Calibration
@@ -418,7 +428,7 @@ Findings accumulate automatically as long as `/rad-review` is run on each
 The report includes a **Reviewer Calibration** section: per reviewer, how many of
 its findings were later confirmed, how many were false alarms, and how many are
 unlabeled. A finding's verdict comes from an explicit `verdict` field that
-`/rad-review` writes when a cycle verified or refuted it; older findings fall back
+`/team:rad-review` writes when a cycle verified or refuted it; older findings fall back
 to keywords (a `false-alarm` category or "verified false" / "false alarm" → false
 alarm; "verified real" or an uppercase `FIXED` → confirmed; anything else stays
 unlabeled). Precision and false-alarm rate are shown only once a reviewer has at
@@ -439,7 +449,7 @@ as code to avoid. The proxy definitions are in
 
 ### `rad forecast` in the planning flow
 
-The same signals appear at plan time. `/rad-plan` (Step 4b) and `/rad-adopt`
+The same signals appear at plan time. `/team:rad-plan` (Step 4b) and `/team:rad-adopt`
 (Step 6b) run `rad forecast <plan>` after the plan lint and print a line for each
 declared path with history:
 
@@ -454,7 +464,7 @@ remedy as a task in the plan before you request approval. See
 ### `--draft-plans`: turning recurring findings into a plan
 
 ```
-/rad-insights --draft-plans
+/shared:rad-insights --draft-plans
 ```
 
 Runs `scripts/draft-insights-plan.sh`, which collects every finding category at

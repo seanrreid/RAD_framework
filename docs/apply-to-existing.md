@@ -5,6 +5,8 @@ of gradual rollout rather than a big-bang migration. The extra time is spent
 on archaeology, accurate AGENTS.md authoring, and agent validation against
 the real codebase.
 
+Command names are namespaced by role; see the [note in daily-workflow.md](daily-workflow.md).
+
 ---
 
 ## Why this takes longer
@@ -13,7 +15,7 @@ On an existing project, you're working backward: generating an architecture
 from a codebase that already exists, rather than building a codebase from an
 architecture you designed. The risks are:
 
-- **Wrong boundaries** — `/rad-research` generates scopes from what you
+- **Wrong boundaries** — `/team:rad-research` generates scopes from what you
   describe. If your description doesn't match the real directory structure,
   the agent scopes will be wrong and the team will hit them immediately.
 - **Stale AGENTS.md** — writing AGENTS.md from memory produces a document
@@ -43,15 +45,17 @@ bash /tmp/rad/install.sh --dir /path/to/your-project
 Complete the post-install steps in [INSTALL.md](../INSTALL.md), then commit:
 
 ```bash
-git add .claude/ .agents/ scripts/ AGENTS.md CLAUDE.md
+git add .claude/ .codex/ .agents/ .rad/ ai/ scripts/ harness/ AGENTS.md CLAUDE.md
 git commit -m "chore: install RAD framework"
 ```
+
+**Set your agent.** `install.sh --yes` writes no agent, so `rad deliver` exits 2 until one is set. Set it with `install.sh --agent claude|codex`, or afterwards with `node harness/cli.js config init --agent-cmd "<cmd>" --force`. See [Choose your agent](../INSTALL.md#choose-your-agent).
 
 Do not push to the team yet — you'll validate the architecture solo first.
 
 ### Step 2: Audit the real codebase
 
-Before running `/rad-research`, understand what you actually have.
+Before running `/team:rad-research`, understand what you actually have.
 
 ```bash
 # Real directory structure
@@ -73,10 +77,10 @@ Pay attention to:
 - Files nobody has touched → low risk, broader scope is fine
 - Directories that span multiple domains → boundary decisions to make explicit
 
-### Step 3: Run /rad-research, then /rad-design
+### Step 3: Run /team:rad-research, then /architect:rad-design
 
 ```
-/rad-research [path-to-readme-or-spec]
+/team:rad-research [path-to-readme-or-spec]
 ```
 
 If you don't have a formal PRD, point it at your README or paste a description
@@ -91,7 +95,7 @@ revealed, not what you remember or wish were true. The most important inputs:
 Then run:
 
 ```
-/rad-design [slug]
+/architect:rad-design [slug]
 ```
 
 Review the architecture draft carefully. Validate each proposed scope against
@@ -111,9 +115,10 @@ Request changes to the draft until the scopes match reality.
 Use the generated agents yourself on real tasks for a week
 before the team sees them.
 
-Run `/rad-plan` on something real. It cuts a `rad/[feature]` branch from your
-default branch and commits the plan doc to it. Run `/rad-approve` to record
-`Status: approved` on that branch tip, then `/rad-deliver` to open the single
+Run `/team:rad-plan` on something real. It cuts a `rad/[feature]` branch from your
+default branch and commits the plan doc to it. Run `/architect:rad-approve` to record
+an `approved` event in `.agents/state/<feature>/events.jsonl` on that
+branch tip (the `Status:` header is a display mirror), then `/team:rad-deliver` to open the single
 deliver PR back to the default branch. Go through the full loop. Look for:
 
 **Scope mismatches**: agent says it reads `src/components` but the relevant
@@ -175,9 +180,10 @@ full team yet.
 30 minutes, one-on-one. Show them:
 - What RAD is and why you're introducing it
 - Their agent boundaries (what they can and can't access)
-- The full loop: `/rad-plan` (cuts `rad/[feature]`, commits the plan doc) →
-  you review the plan on the branch → `/rad-approve` (Gate 1, records
-  `Status: approved` on the branch tip, no PR) → `/rad-deliver` (opens the
+- The full loop: `/team:rad-plan` (cuts `rad/[feature]`, commits the plan doc) →
+  you review the plan on the branch → `/architect:rad-approve` (Gate 1, records
+  an `approved` event in `.agents/state/<feature>/events.jsonl` on the branch tip; the `Status:` header is a
+  display mirror; no PR) → `/team:rad-deliver` (opens the
   single deliver PR) → you review and merge the deliver PR (Gate 2)
 - What you look for when reviewing a plan (be specific — show the review checklist)
 - How fast you'll turn around plan reviews (commit to a number: "within 4 hours during work hours")
@@ -185,24 +191,24 @@ full team yet.
 ### Step 2: First plan together
 
 Pick a real feature they were going to work on anyway. Walk through
-`/rad-plan` together. Let them drive, you observe. The plan doc lands on a
+`/team:rad-plan` together. Let them drive, you observe. The plan doc lands on a
 `rad/[feature]` branch — review it synchronously on that branch, talk through
-what you're checking and why, then run `/rad-approve` together to record the
+what you're checking and why, then run `/architect:rad-approve` together to record the
 approval on the branch tip.
 
-Then let them run `/rad-deliver` solo. Check in when the deliver PR opens.
+Then let them run `/team:rad-deliver` solo. Check in when the deliver PR opens.
 
 ### Step 3: Solo feature
 
 Let them run the next feature entirely solo. Review the plan on its `rad/`
-branch asynchronously before running `/rad-approve`. Give feedback on the plan
+branch asynchronously before running `/architect:rad-approve`. Give feedback on the plan
 (not just approve/reject — explain what could be more precise).
 
 ### Step 4: Assess and adjust
 
 After two features with the pilot developer:
 - Are the agent scopes correct? Did they hit any boundaries that shouldn't exist?
-- Is the plan review turnaround working? Are they blocked waiting on `/rad-approve`?
+- Is the plan review turnaround working? Are they blocked waiting on `/architect:rad-approve`?
 - Is the wave structure producing good execution? Any task failures?
 - What confused them?
 
@@ -226,7 +232,7 @@ Cover:
   approval recorded on the branch tip, a single deliver PR to the default branch)
 - What doesn't change (the mental model, the phase discipline, the plan format)
 - Their specific boundaries (show the Agent Scope Map from `.rad/config.yml`,
-  via `node harness/cli.js config get agent_scope_map` or `/rad-status`)
+  via `node harness/cli.js config get agent_scope_map` or `/shared:rad-status`)
 - The onboarding doc location (`docs/onboarding.md`)
 
 ### Step 2: Onboard one at a time
@@ -234,8 +240,8 @@ Cover:
 Don't onboard everyone at once. Stagger by one person per day if possible.
 Each person should:
 1. Read `docs/onboarding.md`
-2. Run `/rad-status` to verify their setup
-3. Do their first `/rad-plan` with you available to answer questions
+2. Run `/shared:rad-status` to verify their setup
+3. Do their first `/team:rad-plan` with you available to answer questions
 
 ### Step 3: Tighten based on early feedback
 
@@ -243,7 +249,7 @@ The first week of full-team operation will surface remaining issues:
 - Scope boundaries that need adjustment
 - `AGENTS.md` facts that are wrong or missing
 - Wave structure confusion (most teams default to everything sequential at first)
-- Plan approval (`/rad-approve`) turnaround bottlenecks
+- Plan approval (`/architect:rad-approve`) turnaround bottlenecks
 
 Treat this week as calibration, not failure. Fix issues in the agent files
 and `AGENTS.md` as they surface. Commit each fix immediately.
@@ -254,9 +260,9 @@ and `AGENTS.md` as they surface. Commit each fix immediately.
 
 ### "The agents reference paths that don't exist"
 
-The `/rad-research` interview described an idealized structure. Run the audit
+The `/team:rad-research` interview described an idealized structure. Run the audit
 commands from Week 1, update `.agents/research/[slug].md` to match reality,
-and re-run `/rad-design` to regenerate the agent files.
+and re-run `/architect:rad-design` to regenerate the agent files.
 
 ### "Claude keeps doing things it shouldn't"
 
@@ -270,10 +276,10 @@ it's one markdown file on the `rad/[feature]` branch. If reviews take longer,
 the plans are too large (ask for splits) or too vague (request changes via
 `Status: needs-revision` rather than approving).
 
-If you genuinely can't review and run `/rad-approve` within 4 hours during
+If you genuinely can't review and run `/architect:rad-approve` within 4 hours during
 work hours, the gate model is wrong for your situation. Consider delegating
 Gate 1 to a senior developer, or recording an out-of-band approval with
-`/rad-approve --on-behalf-of`.
+`/architect:rad-approve --on-behalf-of`.
 
 ### "Nobody is using the wave structure correctly"
 
@@ -294,10 +300,10 @@ they need, or expand scope narrowly with documented justification.
 
 - Plans are committed to a `rad/[feature]` branch within a few hours of a
   feature being started
-- Plan reviews take under 10 minutes and `/rad-approve` is run same day
-- `/rad-deliver` runs cleanly on approved plans without scope violations
+- Plan reviews take under 10 minutes and `/architect:rad-approve` is run same day
+- `/team:rad-deliver` runs cleanly on approved plans without scope violations
 - `AGENTS.md` is being updated when new facts are discovered
-- The team is catching their own scope issues in `/rad-review` before
+- The team is catching their own scope issues in `/team:rad-review` before
   you see them in the deliver PR
 - Context rot complaints have dropped (sessions stay focused)
 
