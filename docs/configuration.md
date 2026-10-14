@@ -511,18 +511,26 @@ as before (no push, no fetch, no new events — byte-for-byte today's behavior).
 RAD_SYNC: <any non-empty value>   # opt-in plain-git sync folded into the rad verbs
 ```
 
-When `RAD_SYNC` is set, the code gates a best-effort `git push` of the work-branch tip in
-two places (`harness/cli.js`): after a record-only `rad approve --no-commit`, and after a
-completed `rad deliver`. Transport is **plain git only** (`git push`) — never
-the host API (`gh`/`glab`), which keeps it platform-agnostic; the host-API mirror/display
-layer is untouched. Auth is **inherited** from the user's existing git credentials — RAD
-never prompts for or stores them. Sync is **offline-fail-safe**: the local commit always
-lands, the push is best-effort (a failed push never blocks or fails the verb), and a
-**fail-closed divergence tripwire** refuses a write on a diverged tip and surfaces the
-conflicting holder (recorded via `owner-claimed`/`owner-released` events) rather than
-auto-merging. The gate fold (`harness/gates.js`) stays pure — all transport attaches at the
-CLI/script boundary, never inside the fold. Unset/empty = OFF. See
-`.agents/plans/portable-process-memory.md` for the full design.
+`RAD_SYNC` is read in three places, and only there:
+
+- `harness/cli.js` — after a record-only `rad approve --no-commit` and after a
+  completed `rad deliver`, it runs `scripts/git-sync.sh push <work-branch>`. A
+  failed push, a missing helper or a spawn error never fails the verb.
+- `scripts/check-plan-approved.sh` — before the gate reads the event log, it runs
+  `scripts/git-sync.sh fetch-tip <work-branch>`, so an approval recorded on another
+  machine is seen without a manual pull. The result is discarded: a failed fetch
+  never blocks the gate read, which still fails closed on a missing log.
+- `harness/plan-open.js` and `harness/deliver-finish.js` mention the variable only
+  to say they ignore it: `rad plan-open` and the deliver finish phase always push,
+  with or without `RAD_SYNC`.
+
+`git-sync.sh fetch-tip` compares the local tip with `origin/<branch>` and signals
+`diverged` (exit 3, or exit 4 when the fetch fails). That is a signal only: no
+caller acts on it, so there is no refusal of a write on a diverged tip; the
+`owner-claimed` and `owner-released` events are data-only and do not gate anything.
+Transport is plain `git push` and `git fetch`, never the host API (`gh`/`glab`),
+with the user's existing git credentials; RAD never prompts for or stores them.
+The gate fold (`harness/gates.js`) stays pure. Unset or empty = OFF.
 
 ### Plan Lint — High-Risk Paths
 
