@@ -656,3 +656,20 @@ The same `## Waivers` section also carries `- test-removal:<path>: <reason>` bul
 consumed by the test-integrity guard in `scripts/check-scope.sh`: a test file that is
 deleted, renamed away, or given a skip marker needs one.
 
+
+### Other environment variables
+
+Further `RAD_*` variables, each read where the table says. All are optional.
+
+| Variable | Default | Effect | Where read |
+|----------|---------|--------|------------|
+| `RAD_REVIEW_AGENT_CMD` | unset | Command `rad review` runs the reviewer through; checked before `RAD_AGENT_CMD`, then `agent.command` in `.rad/config.yml`. | `harness/cli.js` (`REVIEW_AGENT_ENV_VARS`) |
+| `RAD_REVIEW_TIMEOUT_SECONDS` | `600` | Wall-clock ceiling for one `rad review` run. A value that is not a positive integer is an error. | `harness/cli.js` (`reviewTimeoutMs`) |
+| `RAD_EXERCISE_TIMEOUT_SECONDS` | `600` | Wall-clock ceiling for the exercise step. A value that is not a positive integer is an error. | `harness/exercise.js` (`readKnobs`) |
+| `RAD_EXERCISE_BLOCKING` | unset (observe-only) | `1` or `true` makes the exercise step blocking; `0`, `false` or empty keeps it observe-only. Any other value is an error. | `harness/exercise.js` (`readKnobs`) |
+| `RAD_FINDINGS_THRESHOLD` | `5` | Findings count at which a category is drafted into an insights plan. Parsed like `parseInt`; unset, `0`, negative or non-numeric falls back to the default. | `scripts/draft-insights-plan.sh` (`parse_threshold`) |
+| `RAD_FINDINGS_FILE` | `.agents/findings.jsonl` | Findings log the insights drafter reads. A value starting with `-` or containing a newline exits 2. | `scripts/draft-insights-plan.sh` |
+| `RAD_ARCHITECT_OVERRIDE` | unset | Architect identity (or identities) the approval-authenticity check uses instead of `roles.architect`. With neither set, the check fails closed. | `scripts/check-approval-integrity.sh` |
+| `RAD_PLATFORM` | unset (detected) | Overrides `detect-platform.sh`. Anything other than `github` makes `fetch-provenance.sh` print `unsupported` and exit 3. | `scripts/fetch-provenance.sh`, `scripts/fetch-epic.sh` |
+| `RAD_INVARIANTS_ROOT` | repo root | Directory the invariant registry's anchor paths resolve against. A value with control characters exits 2. | `scripts/lint-invariants.sh` |
+| `RAD_HOOK_*` | set per hook run | The `RAD_HOOK_*` variables a wave-lifecycle hook receives; see [`scripts/hooks/README.md`](../scripts/hooks/README.md). | `scripts/hooks/README.md` |
