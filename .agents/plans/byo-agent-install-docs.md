@@ -1,7 +1,7 @@
 # Plan: Install Docs for a Bring-Your-Own Agent
 Created: 2026-10-14
 Author: architect
-Status: approved
+Status: in-progress
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-10-14T13:34:03.953Z
 Recorded-By: sean@torchcodelab.com
