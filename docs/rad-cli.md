@@ -1434,6 +1434,195 @@ repeated flag, or a `--timeout` that is not a positive integer.
 
 ---
 
+### rad status
+
+```
+rad status [--phase <phase>]
+```
+
+Lists every feature the working tree knows about, with its current phase.
+**Read-only:** no git writes, no events, no plan-doc changes, no network.
+`/shared:rad-status` is the prose command that builds on it.
+
+A feature is listed when it has `.agents/state/<feature>/events.jsonl` or
+`.agents/plans/<feature>.md` in the checked-out tree; branch tips are not read.
+The phase is folded from the event log, and is blank for a plan that has no log.
+The reserved `_architecture` project log (see
+[`rad architecture-approve`](#rad-architecture-approve)) is listed as a row of its
+own, with a blank phase. `--phase <phase>` keeps only rows whose phase equals the
+value; an unknown phase is not an error and prints no features.
+
+**Output:** a three-column table (`Feature`, `Status`, `Branch` as
+`rad/<feature>`), or `rad status: no features found` when nothing matches.
+
+**Exit codes:** `0` listed, including no features found; `1` an unknown flag, a
+stray argument or a `--phase` without a value.
+
+---
+
+### rad capabilities
+
+```
+rad capabilities <feature> [--plan <path>]
+```
+
+Prints each wave's effective capability classes for a plan, resolved the way
+`rad deliver` resolves them. **Read-only:** writes nothing and appends no event.
+It reads `.agents/plans/<feature>.md` (or `--plan <path>`, relative to the repo
+root) and the `capabilities.deny` list in `.rad/config.yml`; a missing config
+means no deny list. The adapter-specific refusals (the command adapter, the sdk
+tool mapping) are deliver-time checks and are not applied here. The grammar, the
+deny list and the output format are in
+[`docs/configuration.md`](configuration.md#rad-capabilities).
+
+**Output:** one line per wave, `wave N: <classes> (<source>)`, with
+`; denied: <classes>` appended when the deny list removed any.
+
+**Exit codes:** `0` printed; `1` no plan doc, or `.rad/config.yml` is invalid;
+`2` bad arguments, a malformed `Capabilities:` line, or an explicit request the
+deny list denies.
+
+---
+
+### rad plan-fingerprint
+
+```
+rad plan-fingerprint <planFile>
+```
+
+Prints the SHA-256 fingerprint of a plan doc's body to stdout, one 64-character
+hex line. **Read-only:** no events, no git, no model call. The mutable header
+(`Status:`, `Approved-By:` and the rest) is not hashed, so only the body from the
+first `## ` heading on counts, plus the header `Capabilities:` and `Playbook:`
+lines. `rad approve` stores this hash in the `approved` event, and
+`scripts/check-plan-approved.sh` shells out to this command to compare, so there
+is one implementation of the digest. A file with no `## ` heading hashes its
+(empty) body without error.
+
+**Exit codes:** `0` printed; `1` no argument, more than one argument, or a file
+that cannot be read.
+
+---
+
+### rad config
+
+```
+rad config get <key> | rad config validate | rad config settings
+  | rad config migrate [--from <path>] [--force]
+  | rad config init [--architect <id>] [--platform <p>] [--default-branch <b>]
+    [--agent <claude|codex> | --agent-cmd <cmd> [--agent-adapter <command|acp>] | --agent-adapter sdk] [--force]
+```
+
+Reads and writes `.rad/config.yml`. The schema, the `--agent` presets and the
+settings are in [`docs/configuration.md`](configuration.md#rad-config-command);
+this section is only the action list. `get`, `validate` and `settings` are
+read-only; `migrate` and `init` write the config file and nothing else, with no
+git, event or network effect.
+
+| Action | What it does | Exit codes |
+|--------|--------------|------------|
+| `get <key>` | Prints the value; a list prints one item per line, a scope-map row as compact JSON. | `0` printed; `1` config missing or invalid; `2` bad arguments; `3` key not set |
+| `validate` | Checks the file against the schema and prints `✓ .rad/config.yml valid`. | `0` valid; `1` missing or invalid; `2` bad arguments |
+| `settings` | Prints `<key><TAB><source><TAB><value>` for `high_risk_patterns` and `hooks_dir`; source is `env`, `config` or `default`. A missing config file is fine. | `0` printed; `2` invalid config, a malformed `RAD_HOOKS_DIR`, or bad arguments |
+| `migrate` | Writes `.rad/config.yml` from the config blocks in `CLAUDE.md` (or `--from <path>`), never editing the source; refuses to overwrite without `--force`. | `0` written; `1` target exists, source missing or lacking required keys, or the result invalid; `2` bad arguments |
+| `init` | Writes a fresh, validated config: architect from `--architect`, else `git config user.email`; platform defaults to `manual`, branch to `main`; an `agent:` block only when an agent flag is given. Refuses to overwrite without `--force`. | `0` written; `1` target exists, no architect identity, or an invalid value; `2` bad arguments |
+
+Nothing is written on any failure. A bare `rad config`, or an unknown action,
+exits `2` with the usage line.
+
+---
+
+### rad generate
+
+```
+rad generate [--check] [--root <dir>]
+```
+
+Renders the Claude Code and Codex files from the sources under `.rad/` (skills,
+`agents/` and `agents-internal/`), which is the step `/architect:rad-design` runs
+after it writes the agent sources. `--root <dir>` renders for another tree and
+defaults to the repo root.
+
+**Without `--check` it writes:** every output file under `.claude/commands`,
+`.claude/skills`, `.claude/agents`, `.agents/skills` and `.codex/agents`, each
+carrying a generated marker. It prints `wrote <path>` for each file it changed and
+`unchanged <path>` for the rest. It never deletes: a marked file whose source is
+gone is printed as `orphan <path>` for you to remove. A file at an output path
+that lacks the marker is a conflict and is never overwritten; any conflict stops
+the run with nothing written.
+
+**With `--check` it is read-only:** it prints `drift <path>` for an output that
+is missing or differs and `orphan <path>` for an orphan, and writes nothing. It
+prints nothing when the tree is in sync. There is no git, event or network effect
+in either mode.
+
+**Exit codes:** `0` written, or in sync under `--check`; `1` drift or orphans
+under `--check`; `2` bad arguments (an unknown or repeated flag, a stray argument,
+a `--root` without a value), no `.rad/` sources, a source error, or any conflict.
+
+---
+
+### rad owner-claim / rad owner-release
+
+```
+rad owner-claim <feature>
+rad owner-release <feature>
+```
+
+Record who holds the single-writer lock on a feature. The branch is the lock;
+these commands only record the holder. **Both write:** each appends one event
+(`owner-claimed` or `owner-released`) to `.agents/state/<feature>/events.jsonl` in
+the working tree, with the holder taken from `git config user.email`. Nothing is
+committed or pushed, there is no model call or PR, and no gate reads these events;
+the CI ownership check is advisory (see [CI checks](#ci-checks)). The command does
+not check that the plan or the branch exists, so a first claim on a new feature
+name creates its log directory. `owner-release` does not check that a claim
+exists or who made it.
+
+**Output:** `rad owner-claim: ok feature=<f> action=claim holder=<who> at=<ts>`,
+and the same with `owner-release` and `action=release`.
+
+**Exit codes:** `0` recorded; `1` a missing or extra argument, an unknown flag, an
+unsafe feature name, no `git user.email`, or a feature that has already reached
+`delivered` or `done` (the log accepts no event after a terminal phase).
+
+---
+
+### rad architecture-approve
+
+```
+rad architecture-approve <slug> [--on-behalf-of <name>] [--evidence <text>]
+```
+
+Records that an architect signed off the agent architecture that
+`/architect:rad-design` produced. **Writes:** it appends one
+`architecture-approved` event to the reserved `.agents/state/_architecture/events.jsonl`,
+the project-level log that belongs to no feature; `<slug>` is kept in the event's
+data. The event is audit-only: no gate reads it and it never affects `rad deliver`.
+Nothing is committed, pushed or labelled, and there is no model call; commit the
+log yourself. Unlike `rad approve`, the command does not check the git branch or
+the plan.
+
+**Authority:** `scripts/check-role.sh` must confirm the architect role at write
+time, and the verified role is frozen into the event. Direct mode checks the
+running `git config user.email`. Proxy mode (`--on-behalf-of <name>`) checks
+`<name>` and records the runner as `recorded-by`; it requires `--evidence`, and
+`--evidence` without `--on-behalf-of` is refused.
+
+**Flags the usage line omits:** the argument parser is shared with `rad approve`,
+so `--no-commit` and `--trailer "Key: Value"` are accepted and silently ignored
+here.
+
+**Output:** `rad architecture-approve: ok slug=<s> approved-by=<who> [recorded-by=<who>] approved-at=<ts> proxy=<bool>`;
+`recorded-by` appears in proxy mode only.
+
+**Exit codes:** `0` recorded; `1` a missing slug, a bad argument, no
+`git user.email`, `--on-behalf-of` without `--evidence`, `--evidence` without
+`--on-behalf-of`, or a failed role check or write (nothing is written on a
+failure).
+
+---
+
 ## Install commands
 
 The installer (`install.sh`) drives these verbs; they can also be run by hand.
