@@ -3,7 +3,7 @@
 A point-by-point comparison of Walking Skeleton Development (WSD) against RAD —
 where the two converge, where they genuinely differ, and which WSD ideas are worth
 adopting, deferring, or declining. Like the Cosmos and CUGA reviews in
-[`references.md`](references.md), the headline finding is again **convergent design
+[`references.md`](../references.md), the headline finding is again **convergent design
 validation**: a third independent framework landed on RAD's substrate bets.
 
 The load-bearing difference this time is not ownership (Cosmos) or autonomy (CUGA).
@@ -73,7 +73,7 @@ thing in different words.
 
 WSD's central move is to carve work into **actor-visible capabilities** and forbid
 frontend/backend/test phasing. RAD's wave rule is **dependency profile**, and
-[`wave-execution.md`](wave-execution.md) presents a layer sequence as the
+[`wave-execution.md`](../wave-execution.md) presents a layer sequence as the
 canonical *correct* decomposition:
 
 ```
@@ -193,7 +193,7 @@ fold. A vault layer over `.agents/` is a *read* surface.
 
 WSD ships "runtime-specific execution bindings" — a Codex plugin and a Claude
 plugin. RAD inverts this: one **frozen, provider-neutral contract**
-([`rad-wave-contract.md`](rad-wave-contract.md)) with two adapters behind a single
+([`rad-wave-contract.md`](../rad-wave-contract.md)) with two adapters behind a single
 injected seam.
 
 `spine.js:249` is the only place the model is ever called, `runWave` arrives by
@@ -223,7 +223,7 @@ uncited. This is a documentation gap in RAD, not a design gap.
 | **Clean / Hexagonal architecture** | `spine.js:133-146` takes every dependency by injection — model, shell, clock, StateStore. Textbook ports and adapters |
 | **Shape Up — the forcing function** | Gates 0/1/2. RAD's are *enforced*: the `approved` event is sole authority via a pure fold, plus a deterministic PreToolUse hook that blocks an unapproved `/rad-deliver` |
 | **BDD/ATDD without ceremony** | `lint-plan.sh` requires numbered, testable Acceptance Criteria and warns when a task's `Validate:` line does not cite an `AC#`. Same refusal of Gherkin |
-| **Docs-as-code / ADRs** | [`framing-decisions.md`](framing-decisions.md) is an ADR set in all but name — idea → decision → where it lives → why, written so "future work doesn't relitigate a settled fork." Missing only numbering and supersession |
+| **Docs-as-code / ADRs** | [`framing-decisions.md`](../framing-decisions.md) is an ADR set in all but name — idea → decision → where it lives → why, written so "future work doesn't relitigate a settled fork." Missing only numbering and supersession |
 | **Information radiators** | `/rad-status`, `/rad-insights`, `/kickoff`, and the `rad:*` label mirror |
 | **Security by design** | `check-verify.sh` runs declared commands under `env -i` with an allow-listed subset (`PATH HOME LANG LC_ALL TMPDIR TERM`), so no exported credential reaches the command; bounded output; hard timeout |
 | **Structured-concurrency ownership** | `owner-claimed` / `owner-released` events and the fail-closed divergence tripwire; every wave sub-agent is owned through to a collected `WAVE_RESULT` |
@@ -343,8 +343,8 @@ description argues RAD should relax it.
 
 ## See also
 
-- [references.md](references.md) — the running log of external sources reviewed against RAD
+- [references.md](../references.md) — the running log of external sources reviewed against RAD
 - [cosmos-vs-rad.md](cosmos-vs-rad.md) — the prior full comparison, same format
-- [framing-decisions.md](framing-decisions.md) — RAD's settled stances
-- [harness-and-framework.md](harness-and-framework.md) — the harness/framework identity
-- [wave-execution.md](wave-execution.md) — the decomposition model this comparison challenges
+- [framing-decisions.md](../framing-decisions.md) — RAD's settled stances
+- [harness-and-framework.md](../harness-and-framework.md) — the harness/framework identity
+- [wave-execution.md](../wave-execution.md) — the decomposition model this comparison challenges

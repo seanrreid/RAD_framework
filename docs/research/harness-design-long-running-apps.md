@@ -110,7 +110,7 @@ Codex, OpenCode, and others, that produces a sharp design rule:
   convention checks). A provider-neutral "run the artifact and observe behavior
   before judging" evaluation step — driven through whatever agent CLI is
   configured — would catch what static review misses, and stays agnostic because
-  it is behavioral, not model-internal. Candidate discovery note: an interactive
+  it is behavioral, not model-internal. A candidate interactive
   evaluation review step.
 
 ---

@@ -40,7 +40,7 @@ Each entry follows the same shape:
   guide). Default-deny-by-hook capabilities and their two-token LLM/deterministic
   split corroborate #85; an approver allowlist changed only via PR corroborates
   #87. Note: their own `AGENTS.md` says "No tests exist in the repo." Full
-  breakdown: [flue-vs-rad.md](flue-vs-rad.md).
+  breakdown: [flue-vs-rad.md](research/flue-vs-rad.md).
 - **Issues:** [#119](https://github.com/seanrreid/RAD_framework/issues/119)
   (record `wave-started` before `runWave`; converge orphans on resume),
   [#121](https://github.com/seanrreid/RAD_framework/issues/121) (cache-read /
@@ -75,7 +75,7 @@ Each entry follows the same shape:
   vault-shaped *read* layer over `.agents/` — a better answer to the soft-knowledge
   gap than Cosmos's hosted KB, because a vault stays in plain git the operator owns.
   Declined: capability slicing wholesale (it fights the context budget waves exist
-  to satisfy). Full breakdown: [wsd-vs-rad.md](wsd-vs-rad.md).
+  to satisfy). Full breakdown: [wsd-vs-rad.md](research/wsd-vs-rad.md).
 - **Issues:** none filed. Candidates overlap existing
   [#46](https://github.com/seanrreid/RAD_framework/issues/46),
   [#47](https://github.com/seanrreid/RAD_framework/issues/47),
@@ -97,7 +97,7 @@ Each entry follows the same shape:
   (declined — RAD keeps model choice declared in the approved plan, auditable at
   Gate 1), and a recall-not-precision deep-review framing (open Gate-2 candidate).
   Steal-with-modification: default-on worktree isolation for `/rad-deliver`, not
-  VMs. Full breakdown: [cosmos-vs-rad.md](cosmos-vs-rad.md).
+  VMs. Full breakdown: [cosmos-vs-rad.md](research/cosmos-vs-rad.md).
 - **Issues:** [#59](https://github.com/seanrreid/RAD_framework/issues/59)
   (deliver-PR review digest — recall-oriented Gate-2 surface),
   [#60](https://github.com/seanrreid/RAD_framework/issues/60) (plan-time
@@ -173,7 +173,7 @@ Each entry follows the same shape:
   which executes a real command and reads its exit code. RAD keeps its human
   pawl, so its proposals are suggestion-only where CASE's retrospective writes
   autonomously. The refresh also found RAD's "bash 3.2+" portability claim
-  currently false (#102). Full breakdown: [case-vs-rad.md](case-vs-rad.md).
+  currently false (#102). Full breakdown: [case-vs-rad.md](research/case-vs-rad.md).
 - **Issues:** none filed. Findings map onto existing
   [#52](https://github.com/seanrreid/RAD_framework/issues/52) (fresh-context
   verifier ≈ interactive evaluation),
@@ -199,7 +199,7 @@ Each entry follows the same shape:
   (deterministic detection, suggestion-only proposals), the autonomous-mode gap
   is tracked, and context engineering has its first measurable-cache issues but
   remains the largest gap. Full breakdown:
-  [harness-engineering-vs-rad.md](harness-engineering-vs-rad.md).
+  [harness-engineering-vs-rad.md](research/harness-engineering-vs-rad.md).
 - **Issues:** none filed at review. Gaps now map onto
   [#112](https://github.com/seanrreid/RAD_framework/issues/112) and
   [#121](https://github.com/seanrreid/RAD_framework/issues/121) (cache-aware

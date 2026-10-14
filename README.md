@@ -211,13 +211,22 @@ your-project/
 | `docs/daily-workflow.md` | Getting started with the team workflow |
 | `docs/architect-guide.md` | Setting up and maintaining the architecture |
 | `docs/epic-decomposition.md` | When, why, and how to run the Gate-0 `/rad-epic-decompose` step |
-| `docs/plan-pr-guide.md` | How plan approval works and what to review |
+| `docs/plan-approval-guide.md` | How plan approval works and what to review |
 | `docs/wave-execution.md` | How /rad-deliver runs tasks in waves |
 | `docs/platform-support.md` | Git platform configuration and fallbacks |
 | `docs/onboarding.md` | Guide for new team members |
 | `docs/apply-to-existing.md` | Applying RAD to an existing project (2–3 weeks) |
-| `docs/12-factor-agents.md` | How RAD maps to 12-Factor Agent principles |
 | `docs/maintaining-claude-md.md` | Maintaining AGENTS.md and CLAUDE.md: keeping conventions accurate over time |
+| `docs/acp-evaluation.md` | Why RAD speaks the Agent Client Protocol at the provider seam, and what it costs |
+| `docs/agent-hierarchy-audit.md` | Why each of the internal agents exists, tagged by the boundary it enforces |
+| `docs/agentic-factory-checks/` | The agentic-factory-checks audit: the checks, indexes and sources RAD was compared against |
+| `docs/configuration.md` | The `.rad/config.yml` schema, `rad config`, every `RAD_*` variable, and approval and branch rules |
+| `docs/evals.md` | How the scripted and live evals check that RAD's guards hold when an agent misbehaves |
+| `docs/invariants.md` | The invariant registry: every safety guarantee RAD claims and where it is enforced |
+| `docs/playbooks.md` | Pinned playbooks for recurring change shapes and the `--playbook` flag |
+| `docs/rad-decisions.md` | RAD's own rationale, testing standards and constraints, with pointers to the source of truth |
+| `docs/rad-tool-portability.md` | How RAD's Claude Code surface maps to Codex CLI via `rad generate` |
+| `docs/research/` | Outside comparisons and reading notes (WSD, Flue, Cosmos, CASE, harness engineering, 12-Factor Agents); background, not guidance |
 | `.agents/findings/README.md` | Findings log schema, record types, and jq query reference |
 
 ---

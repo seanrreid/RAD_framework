@@ -179,7 +179,7 @@ is the head of the single deliver PR. There are no separate `plan/` or
 
 ### Gate 1: Plan approval on the branch tip
 
-See `docs/plan-pr-guide.md` (the Plan Approval Guide) for the full review checklist.
+See `docs/plan-approval-guide.md` (the Plan Approval Guide) for the full review checklist.
 
 You review the plan doc directly on its `rad/[feature]` branch tip — no PR is
 involved. When the plan is correct, run:
