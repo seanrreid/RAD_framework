@@ -127,7 +127,8 @@ The plan linter enforces a **context budget** on the Files in Scope table:
 
 All commands are committed to the project repo. The `architect/` subdirectory
 signals which commands carry architect-level responsibility — enforcement is via
-branch protection and PR workflow, not command access control.
+the PR workflow, not command access control. Branch protection on your default
+branch is recommended; see [INSTALL.md](INSTALL.md#3-set-up-branch-protection-recommended).
 
 ---
 
@@ -142,6 +143,19 @@ The installer handles directory structure, commands, scripts, and the
 `AGENTS.md` and `CLAUDE.md` scaffolding in one step. See [INSTALL.md](INSTALL.md) for the full guide
 including upgrade and uninstall instructions.
 
+**Prerequisites:** `git`, `node`, and an agent CLI of your choice (or an
+`ANTHROPIC_API_KEY` for the `sdk` adapter) to run `/rad-deliver`. `claude` and
+`codex` are built-in presets. `gh` or `glab` is recommended for PR automation.
+
+### Choose your agent
+
+`rad deliver` runs each wave through the agent you configure, and it need not be
+Claude. Use `install.sh --agent claude|codex`, or
+`rad config init --agent-cmd "<cmd>"` for any other CLI. See
+[Choose your agent](INSTALL.md#choose-your-agent) in INSTALL.md and
+[Agent Adapter](docs/configuration.md#agent-adapter) for the adapters,
+authentication and precedence rules.
+
 ---
 
 ## File Structure After Installation
@@ -150,55 +164,33 @@ including upgrade and uninstall instructions.
 your-project/
 ├── AGENTS.md                         ← project conventions (the conventions source)
 ├── CLAUDE.md                         ← imports AGENTS.md + Claude Code specifics
+├── .rad/
+│   ├── config.yml                    ← platform, roles, agent, scope map
+│   ├── installed.json                ← install manifest: framework files + hashes
+│   ├── agents/                       ← agent sources (built-in reviewers; /rad-design adds yours)
+│   └── skills/                       ← skill sources; `rad generate` writes the per-agent copies
 ├── .claude/
-│   ├── agents/                       ← auto-discovered by Claude Code
-│   │   ├── orchestrator.md
-│   │   ├── [domain]-orchestrator.md
-│   │   ├── [tool-name].md
-│   │   ├── accessibility-reviewer.md ← built-in reviewer (invoked by /rad-review)
-│   │   └── quality-reviewer.md       ← built-in reviewer (invoked by /rad-review)
-│   └── commands/
-│       ├── architect/
-│       │   ├── rad-approve.md        → /rad-approve         (architect)
-│       │   ├── rad-design.md         → /rad-design          (architect)
-│       │   └── rad-epic-decompose.md → /rad-epic-decompose  (architect, Gate 0)
-│       ├── team/
-│       │   ├── rad-research.md       → /rad-research  (team)
-│       │   ├── rad-plan.md           → /rad-plan      (team)
-│       │   ├── rad-adopt.md          → /rad-adopt     (team)
-│       │   ├── rad-deliver.md        → /rad-deliver   (team; generated from .rad/skills/)
-│       │   ├── rad-review.md         → /rad-review    (team)
-│       │   ├── accessibility-review.md → /accessibility-review (team)
-│       │   └── quality-review.md     → /quality-review (team)
-│       └── shared/
-│           ├── rad-status.md         → /rad-status    (shared)
-│           └── rad-insights.md       → /rad-insights  (shared)
-│   └── skills/
-│       ├── kickoff/SKILL.md          → /kickoff       (session start ritual)
-│       └── wrap/SKILL.md             → /wrap          (session end ritual)
+│   ├── commands/                     ← architect/, team/, shared/ slash commands
+│   ├── skills/                       ← kickoff, wrap
+│   ├── agents/                       ← generated agent files, incl. the built-in reviewers
+│   └── settings.json                 ← registers the deliver-gate hook
+├── .codex/
+│   └── agents/                       ← generated Codex agent files
 ├── .agents/
 │   ├── research/                     ← research artifacts (/rad-research output)
 │   ├── architecture/                 ← architecture drafts (/rad-design draft → approved)
-│   ├── epics/                        ← epic shaping stories (/rad-epic-decompose, runtime)
 │   ├── plans/                        ← plan artifacts (Gate 1)
-│   ├── state/<feature>/events.jsonl  ← append-only event log — the gate authority (runtime)
 │   ├── logs/                         ← optional execution logs (nothing gates on them)
 │   ├── findings.jsonl                ← append-only review findings log (written by /rad-review)
-│   └── findings/README.md            ← findings log schema and query reference
-└── scripts/
-    ├── detect-platform.sh            ← detects git platform from remote
-    ├── get-default-branch.sh         ← resolves default_branch from .rad/config.yml (via rad config get)
-    ├── checkout-plan.sh              ← checks out a plan's rad/[feature] branch
-    ├── fetch-epic.sh                 ← fetches an epic + children for /rad-epic-decompose
-    ├── rad-label.sh                  ← applies RAD labels to a PR
-    ├── open-pr.sh                    ← platform-agnostic PR creation
-    ├── check-plan-approved.sh        ← gates on the approved event at the branch tip
-    ├── check-role.sh                 ← validates contributor role vs. command
-    ├── check-scope.sh                ← validates file changes against agent scope
-    ├── check-tests-present.sh        ← checks promised test files exist on disk (does not run them)
-    ├── lint-plan.sh                  ← validates plan structure + context budget
-    ├── worktree-lifecycle.sh         ← optional git-worktree isolation for a deliver run
-    └── rad-status.sh                 ← powers /rad-status dashboard
+│   ├── findings/README.md            ← findings log schema and query reference
+│   ├── skills/                       ← generated skill copies for Codex
+│   ├── state/<feature>/events.jsonl  ← append-only event log, the gate authority (created at runtime)
+│   ├── epics/                        ← epic shaping stories (created at runtime)
+│   └── playbooks/                    ← pinned playbooks (created at runtime)
+├── ai/                               ← guardrail pack
+├── harness/                          ← `rad` CLI (harness/cli.js)
+└── scripts/                          ← helper scripts (platform detection, check-*, lint-*, PR
+                                         creation, …), plus lib/ and hooks/
 ```
 
 ---
