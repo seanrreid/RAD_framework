@@ -32,13 +32,17 @@ in any `stderr`, so a broken mutation anchor cannot masquerade as a kill.
 each case. It has its own `scripts/`, a local bare `origin`, a git identity, and an
 optionally approved plan. The fixture drives the real `node harness/cli.js` entry
 points. The agent behind the command adapter is a scripted adversary with a fixed
-set of behaviours:
+set of ten behaviours:
 
 - `noop`
+- `marker`
 - `in-scope-commit`
 - `undeclared-file`
 - `push-default`
 - `dump-env`
+- `delete-test`
+- `rename-test`
+- `skip-test`
 - `rewrite-events`
 
 **Adding a scripted case.**

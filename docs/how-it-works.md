@@ -5,6 +5,9 @@ lifecycle, the artifacts, and the guardrails. If the README is the "what" and th
 [daily-workflow](daily-workflow.md) guide is the "what do I type today," this is
 the "how and why it fits together."
 
+> Command names are role-namespaced (`/team:…`, `/architect:…`, `/shared:…`); see the
+> [command names note](daily-workflow.md) in the daily workflow.
+
 ---
 
 ## The one-paragraph version
@@ -37,9 +40,10 @@ multiple people work in parallel without colliding, and what keeps work-in-fligh
 off a protected default branch.
 
 **4. Two gates, one PR.**
-   - **Gate 1 — Plan approval.** The architect runs `/rad-approve`, which writes
-     `Status: approved` to the plan on its branch tip. *There is no plan PR.*
-   - **Gate 2 — Code review.** `/rad-deliver` opens the single deliver PR
+   - **Gate 1 — Plan approval.** The architect runs `/architect:rad-approve`, which records
+     an `approved` event in `.agents/state/<feature>/events.jsonl` on its branch tip
+     (the `Status:` header is a display mirror). *There is no plan PR.*
+   - **Gate 2 — Code review.** `/team:rad-deliver` opens the single deliver PR
      (`rad:deliver` label) from `rad/[feature]` → default branch. The architect
      reviews and merges. The plan doc and the code reach the default branch
      together, through one reviewed merge.
@@ -55,9 +59,9 @@ the same way locally and in any automation, on any platform, on bash 3.2+.
 ```
    Anyone        Architect        Team            Architect        Team           Team          Architect
  ┌──────────┐  ┌────────────┐  ┌──────────┐    ┌────────────┐  ┌────────────┐  ┌───────────┐  ┌───────────┐
- │/rad-     │→ │/rad-design │→ │/rad-plan │ →  │/rad-approve│→ │/rad-deliver│→ │/rad-review│→ │ PR review │
- │ research │  │            │  │(or       │    │  (Gate 1)  │  │            │  │           │  │ + merge   │
- │          │  │            │  │ /rad-    │    │            │  │            │  │           │  │ (Gate 2)  │
+ │ research │→ │   design   │→ │  plan    │ →  │  approve   │→ │  deliver   │→ │  review   │→ │ PR review │
+ │          │  │            │  │(or       │    │  (Gate 1)  │  │            │  │           │  │ + merge   │
+ │          │  │            │  │          │    │            │  │            │  │           │  │ (Gate 2)  │
  │          │  │            │  │  adopt)  │    │            │  │            │  │           │  │           │
  └──────────┘  └────────────┘  └──────────┘    └────────────┘  └────────────┘  └───────────┘  └───────────┘
   .agents/      .agents/         cuts            Status:          waves on        self-review    merge to
@@ -67,11 +71,11 @@ the same way locally and in any automation, on any platform, on bash 3.2+.
 ```
 
 ### Phase 1 — Research (anyone)
-`/rad-research` consumes a PRD, issue, or inline spec and writes a research
+`/team:rad-research` consumes a PRD, issue, or inline spec and writes a research
 artifact to `.agents/research/`. No code, no branch — just understanding.
 
 ### Phase 2 — Architecture (architect, once per project)
-`/rad-design` consumes the research and produces the agent architecture:
+`/architect:rad-design` consumes the research and produces the agent architecture:
 `.agents/architecture/[slug].md`, the agent boundary files — sources in
 `.rad/agents` (shipped) or `.rad/agents-internal` (repo-internal, never
 shipped); `rad generate` writes `.claude/agents` and `.codex/agents` — and the
@@ -79,7 +83,7 @@ shipped); `rad generate` writes `.claude/agents` and `.codex/agents` — and the
 generate. This defines which agents exist and what each is allowed to touch.
 
 ### Phase 3 — Plan (any team member)
-`/rad-plan "<feature>"` (or `/rad-adopt <issue>` to start from a tracked issue):
+`/team:rad-plan "<feature>"` (or `/team:rad-adopt <issue>` to start from a tracked issue):
 - delegates codebase research to an Explore sub-agent (bounded summaries, not raw
   file dumps — keeps the main context lean),
 - writes a wave-structured plan to `.agents/plans/[feature].md` with a `Branch:`
@@ -88,24 +92,26 @@ generate. This defines which agents exist and what each is allowed to touch.
 - **cuts `rad/[feature]` from the default branch, commits the plan there, and
   pushes — no PR.**
 
-A plan is **waves** of **tasks**. Tasks in a wave with no dependency on each other
-run in parallel; dependent work goes in a later wave. Every task's `Validate:`
+A plan is **waves** of **tasks**. Independent tasks are grouped in a wave and run
+in one agent call; dependent work goes in a later wave. Every task's `Validate:`
 field cites an acceptance criterion (`AC#N`) so nothing is unmoored from a goal.
 
 ### Gate 1 — Approve (architect)
-`/rad-approve [feature]` checks out the branch tip, shows the plan for review, and
-on approval writes `Status: approved` + `Approved-By` + `Approved-At` to the plan
-and pushes to the **branch** — never the default branch.
+`/architect:rad-approve [feature]` checks out the branch tip, shows the plan for review, and
+on approval records an `approved` event (with `Approved-By` and `Approved-At`) in
+`.agents/state/<feature>/events.jsonl` on the branch tip and pushes to the
+**branch** — never the default branch. `rad deliver` and `check-plan-approved.sh`
+read that event; the plan's `Status:` header is a display mirror.
 
 > **Out-of-band approvals.** If the architect approved in Slack / a comment / a
 > standup but didn't run the command, a teammate can record it with
-> `/rad-approve [feature] --on-behalf-of "<architect>" --evidence "<quote/link>"`.
+> `/architect:rad-approve [feature] --on-behalf-of "<architect>" --evidence "<quote/link>"`.
 > The named approver is validated as a configured architect, evidence is
 > mandatory, and the record stores both `Approved-By` (the architect) and
 > `Recorded-By` (whoever ran it) — the split is the integrity of the gate.
 
 ### Phase 4 — Deliver (team)
-`/rad-deliver [feature]` (`$rad-deliver` in Codex) runs
+`/team:rad-deliver [feature]` (`$rad-deliver` in Codex) runs
 `node harness/cli.js deliver <feature>`, which:
 - refuses unless an `approved` event is in the plan's event log at the
   `rad/[feature]` branch tip — it will **not** run an unapproved plan,
@@ -120,7 +126,7 @@ and pushes to the **branch** — never the default branch.
 See [`rad deliver`](rad-cli.md#rad-deliver) for the full lifecycle.
 
 ### Phase 5 — Self-review (team, before asking the architect)
-`/rad-review` runs on the branch before you request architect review:
+`/team:rad-review` runs on the branch before you request architect review:
 - scope check (out-of-scope files are HIGH),
 - plan fidelity + **acceptance-criteria coverage** (an AC no task delivers is HIGH),
 - the `quality-reviewer` and (for frontend) `accessibility-reviewer` agents,
@@ -130,7 +136,7 @@ See [`rad deliver`](rad-cli.md#rad-deliver) for the full lifecycle.
   are `reviewer: "exercise"`. Skip it with `--no-exercise`; it is self-review only
   and never touches the approval gate (see [`rad exercise`](rad-cli.md#rad-exercise)),
 - and appends structured findings to `.agents/findings.jsonl` for trend analysis
-  via `/rad-insights`.
+  via `/shared:rad-insights`.
 
 ### Gate 2 — Code review (architect)
 The architect reviews the deliver PR and merges it to the default branch. That
@@ -142,11 +148,11 @@ merge is the only thing that writes to the protected branch.
 
 | Artifact | Path | Written by |
 |---|---|---|
-| Research notes | `.agents/research/` | `/rad-research` |
-| Architecture + scope map | `.agents/architecture/`, `CLAUDE.md`, agent sources in `.rad/agents/` (shipped) or `.rad/agents-internal/` (repo-internal, never shipped); `rad generate` writes `.claude/agents/` and `.codex/agents/` | `/rad-design` |
-| Plan (the contract) | `.agents/plans/[feature].md` (on its `rad/` branch) | `/rad-plan`, `/rad-adopt` |
-| Event log (record of a run) | `.agents/state/[feature]/events.jsonl` | `/rad-approve`, `rad deliver` |
-| Review findings | `.agents/findings.jsonl` | `/rad-review` |
+| Research notes | `.agents/research/` | `/team:rad-research` |
+| Architecture + scope map | `.agents/architecture/`, `CLAUDE.md`, agent sources in `.rad/agents/` (shipped) or `.rad/agents-internal/` (repo-internal, never shipped); `rad generate` writes `.claude/agents/` and `.codex/agents/` | `/architect:rad-design` |
+| Plan (the contract) | `.agents/plans/[feature].md` (on its `rad/` branch) | `/team:rad-plan`, `/team:rad-adopt` |
+| Event log (record of a run) | `.agents/state/[feature]/events.jsonl` | `/architect:rad-approve`, `rad deliver` |
+| Review findings | `.agents/findings.jsonl` | `/team:rad-review` |
 
 While a feature is in flight, its plan and log live **only on the `rad/[feature]`
 branch** — that's why the board reads branch tips.
@@ -177,9 +183,9 @@ rules. You can run any of them by hand.
 
 | Role | Can | Configured in |
 |---|---|---|
-| Anyone | `/rad-research` | — |
-| Developer / Designer | `/rad-plan`, `/rad-adopt`, `/rad-deliver`, `/rad-review` within their agent scope | `.rad/config.yml` → `roles` |
-| Architect | `/rad-design`, `/rad-approve`, and merging deliver PRs | `.rad/config.yml` → `roles.architect` |
+| Anyone | `/team:rad-research` | — |
+| Developer / Designer | `/team:rad-plan`, `/team:rad-adopt`, `/team:rad-deliver`, `/team:rad-review` within their agent scope | `.rad/config.yml` → `roles` |
+| Architect | `/architect:rad-design`, `/architect:rad-approve`, and merging deliver PRs | `.rad/config.yml` → `roles.architect` |
 
 Role gating is enforced by `check-role.sh` against `.rad/config.yml` (see
 `docs/configuration.md`). If the `roles` entries are still placeholders, role-gated commands won't have a configured
@@ -191,7 +197,7 @@ identity to match — fill them in before relying on the gate.
 
 A plan's `Status:` moves through: `pending-review` → `approved` →
 `in-progress` → `complete` (with `rejected` / `needs-revision` as off-ramps from
-approval). `rad-status.sh` (and `/rad-status`) renders the board by reading every
+approval). `rad-status.sh` (and `/shared:rad-status`) renders the board by reading every
 `rad/` branch tip, so you see in-flight work across the team without checking out
 branches. When a platform CLI is available, `rad-label.sh` mirrors the status onto
 the issue/PR as a single `rad:<status>` label — a convenient, fetch-free view.
@@ -210,7 +216,8 @@ associative arrays, `${var,,}`, GNU-only `grep`/`find` extensions, and unguarded
 empty-array expansion under `set -u`. A plan's `## Tests to Write` names the test
 file(s); `check-tests-present.sh` confirms those files exist on disk before the
 deliver PR opens — presence only. It never runs them, so it cannot tell you the
-tests pass; execution-based verification is tracked as issue #89.
+tests pass; execution-based verification is `scripts/check-verify.sh`, which runs
+the per-wave `Verify:` line.
 
 ---
 
@@ -218,18 +225,18 @@ tests pass; execution-based verification is tracked as issue #89.
 
 ```bash
 # 1. Plan a fix (cuts rad/fix-login-timeout, writes the plan, pushes — no PR)
-/rad-plan "Fix the login timeout not resetting on activity"
+/team:rad-plan "Fix the login timeout not resetting on activity"
 
 # 2. Architect approves on the branch tip (Gate 1)
-/rad-approve fix-login-timeout
+/architect:rad-approve fix-login-timeout
 #    …or record an out-of-band yes:
-/rad-approve fix-login-timeout --on-behalf-of "Sam Lee" --evidence "Slack #eng 2026-05-29: 'approved'"
+/architect:rad-approve fix-login-timeout --on-behalf-of "Sam Lee" --evidence "Slack #eng 2026-05-29: 'approved'"
 
 # 3. Execute the plan wave by wave; opens the single deliver PR
-/rad-deliver fix-login-timeout
+/team:rad-deliver fix-login-timeout
 
 # 4. Self-review before asking the architect
-/rad-review
+/team:rad-review
 
 # 5. Architect reviews the deliver PR and merges to the default branch (Gate 2)
 ```
@@ -241,8 +248,8 @@ branch only changes when that final PR merges.
 
 ## Common situations
 
-- **Starting from a tracked issue?** Use `/rad-adopt <issue>` instead of
-  `/rad-plan`. It fetches the issue, confirms its interpretation with you, and adds
+- **Starting from a tracked issue?** Use `/team:rad-adopt <issue>` instead of
+  `/team:rad-plan`. It fetches the issue, confirms its interpretation with you, and adds
   a mandatory `## Issue Gaps` section recording any assumptions.
 - **The architect is a bottleneck?** Use `--on-behalf-of` to record a real
   out-of-band approval (never to self-approve).
@@ -261,5 +268,5 @@ branch only changes when that final PR merges.
 - [daily-workflow.md](daily-workflow.md) — the day-to-day command reference
 - [architect-guide.md](architect-guide.md) — setup, scope maps, and approval
 - [plan-approval-guide.md](plan-approval-guide.md) — the plan approval guide
-- [wave-execution.md](wave-execution.md) — how `/rad-deliver` runs tasks in waves
+- [wave-execution.md](wave-execution.md) — how `/team:rad-deliver` runs tasks in waves
 - [onboarding.md](onboarding.md) — your first feature, start to finish
