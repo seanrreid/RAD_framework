@@ -1,7 +1,10 @@
 # Plan: Document the Eight rad Commands That Have No Section
 Created: 2026-10-14
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-10-14T20:39:11.484Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/rad-cli-undocumented-commands
 Tier: light
 Source-Author: none (no source issue)
