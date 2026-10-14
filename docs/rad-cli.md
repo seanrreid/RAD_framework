@@ -1207,13 +1207,19 @@ Both are *opt-in*: absent, the spine behaves exactly as before.
 - **`RAD_TOKEN_BUDGET`** — a per-deliver cumulative token ceiling. When set to a
   positive integer, the spine sums each wave's recorded `usage.total` and, **before
   starting the next wave**, gracefully stops if the running total has reached or
-  exceeded the budget. The stop is a normal structured terminal — not a throw:
-  `rad deliver` exits 1 and prints `stopped=token-budget spent=<n> budget=<n>`, and a
-  `wave-failed` event with `reason: token-budget` is recorded. Unset, `0`, or
-  non-numeric values leave the breaker disabled (no behavior change), and `rad deliver`
-  writes one line to stderr at start saying no token cap applies and naming
-  `RAD_TOKEN_BUDGET` (informational; it never blocks). Waves whose
-  adapter emits no usage contribute `0`, so the breaker never trips spuriously.
+  exceeded the budget. The stop is a normal structured terminal — not a throw: it is
+  a `needs-decision` stop, so `rad deliver` exits **3** and prints
+  `stopped=token-budget spent=<n> budget=<n>`, and a `wave-failed` event with
+  `reason: token-budget` is recorded. Raise the budget and resume with
+  `--resume --context` (see [Resuming a stopped run](#resuming-a-stopped-run)).
+  Unset, `0`, or non-numeric values leave the breaker disabled (no behavior
+  change). Two warnings go to stderr, neither of which blocks: at start-up, one
+  line saying no token cap applies and naming `RAD_TOKEN_BUDGET`; and, when a
+  budget is armed, once per run on the first wave that reports no usage, saying
+  `RAD_TOKEN_BUDGET` cannot trip and pointing at `RAD_USAGE` (see the
+  usage-reporting paragraph under [Adapter selection](#adapter-selection)). Waves with no usage add nothing to the
+  total, so they never trip the budget — which also means an agent that never
+  reports usage leaves the budget unable to trip at all.
 
   ```bash
   RAD_TOKEN_BUDGET=200000 RAD_AGENT=sdk node harness/cli.js deliver my-feature
@@ -1534,7 +1540,7 @@ settings file, or a missing hook script.
 node --test harness/test/deliver.test.js
 ```
 
-Three cases: dispatch smoke, ANTHROPIC_API_KEY guard, gate refusal. All run
+Covers dispatch smoke, the ANTHROPIC_API_KEY guard and gate refusal. All run
 without hitting the API.
 
 ### Step 2 — verify SDK shape (no API call)
@@ -1572,7 +1578,7 @@ Watch for:
 
 ## SDK interface notes
 
-`runwave.js` uses `query` from `@anthropic-ai/claude-agent-sdk`. The confirmed
+The `sdk` adapter (`harness/adapters/agent/sdk.js`) uses `query` from `@anthropic-ai/claude-agent-sdk`. The confirmed
 options shape as of SDK install (2026-06-05):
 
 | Option | Value used | Notes |
@@ -1582,7 +1588,7 @@ options shape as of SDK install (2026-06-05):
 | `options.env` | `{ ...process.env, ANTHROPIC_API_KEY }` | **replaces** subprocess env; spread process.env explicitly |
 | `options.model` | `claude-opus-4-8` (default) | passed if provided |
 | `options.tools` | `{ type: 'preset', preset: 'claude_code' }` | enables full Claude Code tool set |
-| `options.allowedTools` | `['Read','Write','Edit','Bash','Glob','Grep']` | auto-allowed without permission prompts |
+| `options.allowedTools` | per wave: the default tool set, narrowed by the wave's capabilities | auto-allowed without permission prompts |
 | `options.permissionMode` | `'acceptEdits'` | suppresses interactive permission prompts |
 | `options.persistSession` | `false` | each wave is a fresh session |
 
