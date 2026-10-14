@@ -1,7 +1,8 @@
 # Plan: UPGRADE.md Accuracy: Core Set, Commit Steps, Agent Adapters, Command Names
 Created: 2026-10-14
 Author: architect
-Status: in-progress
+Status: complete
+Completed-At: 2026-10-14T16:49:10.218Z
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-10-14T16:47:45.708Z
 Recorded-By: sean@torchcodelab.com
