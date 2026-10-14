@@ -3,6 +3,9 @@
 Your responsibilities in the RAD framework: setting up the architecture,
 maintaining agent boundaries, and operating the two approval gates.
 
+> Command names are role-namespaced (`/team:…`, `/architect:…`, `/shared:…`); see the
+> [command names note](daily-workflow.md) in the daily workflow.
+
 ---
 
 ## Your commands
@@ -11,10 +14,10 @@ You have everything the team has, plus:
 
 | Command | Purpose |
 |---------|---------|
-| `/rad-design` | Draft and generate agent architecture |
-| `/rad-approve` | Review a plan and record approval on its work-branch tip |
+| `/architect:rad-design` | Draft and generate agent architecture |
+| `/architect:rad-approve` | Review a plan and record approval on its work-branch tip |
 | All team commands | Research, plan, deliver, review, status |
-| `/rad-insights` | Review pattern analysis across cycles |
+| `/shared:rad-insights` | Review pattern analysis across cycles |
 
 All commands are committed to the project repo alongside team commands — no
 global install needed. The `architect/` subdirectory signals responsibility;
@@ -35,10 +38,10 @@ Follow the post-install steps in [INSTALL.md](../INSTALL.md): fill in
 `AGENTS.md` (the conventions source; `CLAUDE.md` holds only Claude Code
 specifics), create platform labels, and commit the installed files.
 
-### 1. Run /rad-research
+### 1. Run /team:rad-research
 
 ```
-/rad-research [path-to-prd or issue-url]
+/team:rad-research [path-to-prd or issue-url]
 ```
 
 Point it at your PRD, a GitHub/GitLab issue, or paste the spec inline.
@@ -46,12 +49,12 @@ It extracts what's being built, asks RAD-specific clarifying questions (team
 roles, platform, domain sensitivity), and writes `.agents/research/[slug].md`.
 
 A developer can do this step and hand the artifact to you for review before
-you run `/rad-design`.
+you run `/architect:rad-design`.
 
-### 2. Run /rad-design
+### 2. Run /architect:rad-design
 
 ```
-/rad-design [slug]
+/architect:rad-design [slug]
 ```
 
 Reads the research artifact and writes an architecture draft to
@@ -61,7 +64,7 @@ Reads the research artifact and writes an architecture draft to
 - Scope and output contracts for every agent
 - The `agent_scope_map:` block ready for `.rad/config.yml`
 
-Review the draft inline. `/rad-design` presents the hierarchy and asks to
+Review the draft inline. `/architect:rad-design` presents the hierarchy and asks to
 **approve / edit / cancel** — one invocation, no separate re-run:
 - **approve** — flips `Status: draft → approved` and, in the same run, writes
   the `.rad/agents/*.md` sources, runs `rad generate` (`node harness/cli.js
@@ -69,7 +72,7 @@ Review the draft inline. `/rad-design` presents the hierarchy and asks to
   prints the `agent_scope_map:` block to paste into `.rad/config.yml`.
 - **edit** — adjust role assignments, tighten scope boundaries, add constraints;
   the draft is revised and re-presented.
-- **cancel** — leave it as a draft and stop; re-run `/rad-design [slug]` later to
+- **cancel** — leave it as a draft and stop; re-run `/architect:rad-design [slug]` later to
   resume.
 
 No manual `Status` edit is required. (Editing `Status: approved` by hand still
@@ -121,20 +124,20 @@ Project → Settings → Repository → Protected Branches → Allowed to merge:
 
 ## Maintaining the architecture
 
-### When to re-run /rad-research and /rad-design
+### When to re-run /team:rad-research and /architect:rad-design
 
-Re-run `/rad-research` when the project scope changes significantly — new
+Re-run `/team:rad-research` when the project scope changes significantly — new
 domains added, team composition changes, or a new PRD supersedes the original.
-Update the research artifact, then re-run `/rad-design` to regenerate the
+Update the research artifact, then re-run `/architect:rad-design` to regenerate the
 architecture draft.
 
-Re-run `/rad-design` alone (without `/rad-research`) when the architecture
+Re-run `/architect:rad-design` alone (without `/team:rad-research`) when the architecture
 needs adjustment but the research is still accurate:
 - Major codebase restructuring (new top-level directories, new services)
 - Adding a new domain that doesn't fit existing agents
 - Onboarding a new role type with different access needs
 
-Re-running `/rad-design` on an approved architecture artifact rewrites the
+Re-running `/architect:rad-design` on an approved architecture artifact rewrites the
 `.rad/agents` sources and runs `rad generate`. Review the diff carefully before committing — existing plans
 reference current agent scopes.
 
@@ -172,8 +175,8 @@ unblocking the contributor.
 ## Operating the two gates
 
 RAD v2 (Lane B) uses one work branch per feature, cradle-to-grave:
-`rad/[feature]`. That branch is cut from the default branch by `/rad-plan`
-(or `/rad-adopt`), carries the plan doc, then the approval, then the code, and
+`rad/[feature]`. That branch is cut from the default branch by `/team:rad-plan`
+(or `/team:rad-adopt`), carries the plan doc, then the approval, then the code, and
 is the head of the single deliver PR. There are no separate `plan/` or
 `deliver/` branches, and **there is no plan PR.**
 
@@ -185,15 +188,17 @@ You review the plan doc directly on its `rad/[feature]` branch tip — no PR is
 involved. When the plan is correct, run:
 
 ```
-/rad-approve [feature]
+/architect:rad-approve [feature]
 ```
 
-This writes `Status: approved` to the plan doc on the `rad/` branch tip and
-pushes that commit to the same branch. It never writes to the default branch.
-Recording approval is what unblocks the contributor's `/rad-deliver`.
+This records an `approved` event in `.agents/state/<feature>/events.jsonl` on the
+`rad/` branch tip and pushes that commit to the same branch. `rad deliver` and
+`check-plan-approved.sh` read that event; the `Status:` header is a display
+mirror. It never writes to the default branch.
+Recording approval is what unblocks the contributor's `/team:rad-deliver`.
 
 While reviewing, confirm the plan's `## Scope` and `## Acceptance Criteria` are
-present and sound — `/rad-approve` surfaces them in its review summary so you
+present and sound — `/architect:rad-approve` surfaces them in its review summary so you
 can sanity-check that every acceptance criterion is covered by a task. Tasks
 should cite the criteria they satisfy as `AC#N`.
 
@@ -204,20 +209,20 @@ approving anyway.
 
 ### Gate 2: The deliver PR
 
-`/rad-deliver` runs on the same `rad/[feature]` branch and opens the single
+`/team:rad-deliver` runs on the same `rad/[feature]` branch and opens the single
 code review PR (label `rad:deliver`) from `rad/[feature]` → the default branch.
 The plan doc and the code reach the default branch together through this one
 reviewed PR — which is why contributors never push to the protected default
 branch directly.
 
 Standard code review, plus check:
-- `/rad-review` was run (look for it in PR comments or CI)
+- `/team:rad-review` was run (look for it in PR comments or CI)
 - Execution log looks clean
 - All changes within declared scope
-- Acceptance criteria are met (`/rad-review` flags uncovered ACs as HIGH)
+- Acceptance criteria are met (`/team:rad-review` flags uncovered ACs as HIGH)
 - Tests present and meaningful
 
-If something is wrong that `/rad-review` should have caught, it means the
+If something is wrong that `/team:rad-review` should have caught, it means the
 self-review step was skipped — note this in your review and remind the contributor.
 
 Merging the deliver PR is the final step. Gate 2 = deliver PR reviewed and
@@ -228,11 +233,11 @@ merged by the architect.
 ## Proxy approval: `--on-behalf-of`
 
 Sometimes you approve a plan out-of-band — in a meeting, over chat, in a
-verbal review — but you're not at a terminal to run `/rad-approve` yourself.
+verbal review — but you're not at a terminal to run `/architect:rad-approve` yourself.
 Lane B lets a non-architect record that approval on your behalf:
 
 ```
-/rad-approve <feature> --on-behalf-of "<architect>" --evidence "<cite>"
+/architect:rad-approve <feature> --on-behalf-of "<architect>" --evidence "<cite>"
 ```
 
 This records the approval on the `rad/<feature>` branch tip exactly like a
@@ -254,7 +259,7 @@ decision you already made — never to manufacture one.
 - **The decision must be genuine.** Only use `--on-behalf-of` for an approval
   the named architect actually gave out-of-band. Do not use it to self-approve
   or to push a plan forward on the assumption the architect would say yes.
-- **The named approver must be a configured architect.** `/rad-approve`
+- **The named approver must be a configured architect.** `/architect:rad-approve`
   validates `--on-behalf-of` against the architect role (via `check-role.sh`)
   and refuses if the name isn't a real architect.
 - **`--evidence` is mandatory.** You must cite where the out-of-band approval
@@ -273,11 +278,11 @@ recognize, treat it as a process violation.
 ## Monitoring review quality over time
 
 ```
-/rad-insights
+/shared:rad-insights
 ```
 
-Every `/rad-review` run appends structured findings to `.agents/findings.jsonl`.
-`/rad-insights` reads that log and surfaces patterns across all cycles:
+Every `/team:rad-review` run appends structured findings to `.agents/findings.jsonl`.
+`/shared:rad-insights` reads that log and surfaces patterns across all cycles:
 
 - **Recurring categories** — security, error-handling, accessibility issues that
   keep appearing suggest systemic gaps (missing team knowledge, missing linting rules,
@@ -312,11 +317,12 @@ The contributor should have stopped and flagged it. Review the situation:
   update the plan to account for the dependency
 
 ### Context getting noisy
-Wave sub-agents keep the delivery orchestrator's context lean — each wave runs
-in isolation and only returns a `WAVE_RESULT` summary to main context. Genuine
-context rot is now uncommon but can still happen during repeated correction
-loops on a failing task. Ask the contributor to start a new Claude Code session
-and re-run `/rad-deliver` — it resumes from the execution log.
+`rad deliver` runs each wave as one agent call in isolation, and records the run in
+the event log (`.agents/state/<feature>/events.jsonl`). Context rot can still
+happen during repeated correction loops on a failing task. Ask the contributor to
+start a fresh agent session and resume the run with
+`node harness/cli.js deliver <feature> --resume --context "..."` — it picks up
+from the event log.
 
 ---
 

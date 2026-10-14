@@ -1,36 +1,39 @@
 # Epic Decomposition (Gate 0)
 
-`/rad-epic-decompose` is the **Gate-0 shaping step**, upstream of
-`/rad-research` in the RAD workflow. It takes a GitHub epic — a parent issue
+`/architect:rad-epic-decompose` is the **Gate-0 shaping step**, upstream of
+`/team:rad-research` in the RAD workflow. It takes a GitHub epic — a parent issue
 with linked children — and produces a discovery artifact the architect uses to
 shape the epic into deliverable work, one child story at a time.
+
+> Command names are role-namespaced (`/team:…`, `/architect:…`, `/shared:…`); see the
+> [command names note](daily-workflow.md) in the daily workflow.
 
 It sits *before* the rest of the loop:
 
 ```
-Architect:  /rad-epic-decompose → Gate 0: shapes a GitHub epic into per-child stories
-Anyone:     /rad-research        → consumes a PRD/issue, writes .agents/research/
-Architect:  /rad-design          → drafts agent sources (.rad/agents shipped, .rad/agents-internal repo-internal); rad generate writes .claude/agents + .codex/agents
-Team:       /rad-plan            → cuts rad/[feature] branch, commits plan
-Architect:  /rad-approve         → Gate 1: records approval on the branch tip
-Team:       /rad-deliver         → wave execution, opens the deliver PR (Gate 2)
+Architect:  /architect:rad-epic-decompose → Gate 0: shapes a GitHub epic into per-child stories
+Anyone:     /team:rad-research        → consumes a PRD/issue, writes .agents/research/
+Architect:  /architect:rad-design          → drafts agent sources (.rad/agents shipped, .rad/agents-internal repo-internal); rad generate writes .claude/agents + .codex/agents
+Team:       /team:rad-plan            → cuts rad/[feature] branch, commits plan
+Architect:  /architect:rad-approve         → Gate 1: records approval on the branch tip
+Team:       /team:rad-deliver         → wave execution, opens the deliver PR (Gate 2)
 Architect:  PR review            → merge to the default branch
 ```
 
-This is a *shaping* step. It does **not** generate plans, call `/rad-research`
-or `/rad-plan`, commit, open a PR, or flip any approval status. The architect
+This is a *shaping* step. It does **not** generate plans, call `/team:rad-research`
+or `/team:rad-plan`, commit, open a PR, or flip any approval status. The architect
 reviews, edits, signs off, and commits the artifact manually.
 
 ---
 
 ## When to run it
 
-Run `/rad-epic-decompose` when you have a GitHub **epic** — a large parent
+Run `/architect:rad-epic-decompose` when you have a GitHub **epic** — a large parent
 issue whose work spans several child issues — and you need to understand and
 sequence the children before any one of them is planned.
 
 You do **not** need it for a single, self-contained issue. For that, go
-straight to `/rad-research` (or `/rad-adopt` for a pre-existing issue). Epic
+straight to `/team:rad-research` (or `/team:rad-adopt` for a pre-existing issue). Epic
 decomposition earns its keep only when there are multiple children to scope and
 order relative to one another.
 
@@ -61,9 +64,9 @@ number and `slug` is the kebab-case epic title), written with `Status: draft`.
 ## How to run it
 
 ```
-/rad-epic-decompose 42
-/rad-epic-decompose #42
-/rad-epic-decompose https://github.com/org/repo/issues/42
+/architect:rad-epic-decompose 42
+/architect:rad-epic-decompose #42
+/architect:rad-epic-decompose https://github.com/org/repo/issues/42
 ```
 
 The argument is the epic issue number or URL. With no argument, the command
@@ -97,7 +100,7 @@ The artifact is discovery, not a decision. After it is written:
 3. **Commit it yourself** when satisfied — the command never auto-commits, never
    pushes, never opens a PR, and never sets any approval status. The architect
    owns the commit and the sign-off.
-4. **Plan the first child** with `/rad-plan` once shaping is complete.
+4. **Plan the first child** with `/team:rad-plan` once shaping is complete.
 
 Because the command does no committing and flips no status, re-running it on
 the same epic simply rewrites the draft artifact — your committed edits live in

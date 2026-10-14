@@ -3,6 +3,9 @@
 > (Formerly the Plan PR guide — RAD v2 removed the plan PR; approval is now
 > recorded directly on the work branch.)
 
+> Command names are role-namespaced (`/team:…`, `/architect:…`, `/shared:…`); see the
+> [command names note](daily-workflow.md) in the daily workflow.
+
 How to read, review, and approve a plan as the architect.
 Plan approval is Gate 1 — you're approving the approach before any code is written.
 
@@ -11,7 +14,7 @@ Plan approval is Gate 1 — you're approving the approach before any code is wri
 ## Where the plan lives
 
 Under Lane B there is one work branch per feature, cradle-to-grave:
-`rad/[feature]`. `/rad-plan` (or `/rad-adopt`) cuts this branch from the
+`rad/[feature]`. `/team:rad-plan` (or `/team:rad-adopt`) cuts this branch from the
 default branch, writes the plan doc to `.agents/plans/[feature-name].md`, and
 commits it to the branch. The branch name is recorded in the plan doc's
 `Branch:` header.
@@ -35,13 +38,15 @@ The plan doc carries a `Status:` header that tracks it through Gate 1:
 | Status | Meaning |
 |--------|---------|
 | `pending-review` | Plan committed to the `rad/` branch, awaiting your review |
-| `approved` | You approved it via `/rad-approve`; `/rad-deliver` is unblocked |
+| `approved` | You approved it via `/architect:rad-approve`; `/team:rad-deliver` is unblocked |
 | `needs-revision` | You want changes before approval; contributor updates the plan and pushes |
 | `rejected` | The feature/approach is wrong; the plan does not proceed |
 
-`/rad-approve` is what moves a plan to `approved`. It writes `Status: approved`
-to the plan doc on the `rad/` branch tip and pushes to that same branch — never
-to the default branch. The plan reaches the default branch later, together with
+`/architect:rad-approve` is what approves a plan. It records an `approved` event in
+`.agents/state/<feature>/events.jsonl` on the `rad/` branch tip and pushes to that
+same branch — never to the default branch. `rad deliver` and
+`check-plan-approved.sh` read that event; the `Status:` header is a display mirror
+the command also updates. The plan reaches the default branch later, together with
 the code, through the single deliver PR.
 
 ---
@@ -67,7 +72,7 @@ contributor's role in the Agent Scope Map.
 ```
 
 Also check that the plan passed the linter's context budget check. The linter
-runs during `/rad-plan` and warns at >800 lines in scope, errors at >1500.
+runs during `/team:rad-plan` and warns at >800 lines in scope, errors at >1500.
 If a plan with a budget error reaches you, ask the contributor to split it —
 it cannot be approved in this state.
 
@@ -80,8 +85,8 @@ Confirm both are present and sound:
 - Every acceptance criterion is covered by at least one task. Tasks cite the
   criteria they satisfy as `AC#N`.
 
-`/rad-approve` surfaces the scope and acceptance criteria in its review summary
-so you can sanity-check coverage before approving. Later, `/rad-review` flags
+`/architect:rad-approve` surfaces the scope and acceptance criteria in its review summary
+so you can sanity-check coverage before approving. Later, `/team:rad-review` flags
 any uncovered acceptance criterion as a HIGH finding on the deliver PR — catch
 gaps here at Gate 1 instead.
 
@@ -124,6 +129,19 @@ If the plan says "None" but you can see the feature obviously requires
 something outside the contributor's scope, flag it. Hidden dependencies
 cause execution failures or unauthorized file reads.
 
+### 7. Waivers, verification, provenance and capabilities
+Approving accepts what the plan declares. Check:
+
+- **Waivers.** Judge each `## Waivers` entry (`high-risk:<path>` and
+  `test-removal:<path>`) on its reason; approval freezes them into the `approved`
+  event.
+- **Last-wave `Verify:`.** A standard plan needs a `Verify:` line on its last wave
+  (or `Verify: none (<reason>)`). Light plans are exempt.
+- **Source provenance.** Read the `Source-Author:` line. If the source is
+  untrusted, read every Task and `Verify:` command before approving.
+- **Capabilities.** Check the declared `Capabilities:` lines grant no more than
+  the work needs.
+
 ---
 
 ## Recording your decision
@@ -133,13 +151,15 @@ cause execution failures or unauthorized file reads.
 Plan is correct. Run:
 
 ```
-/rad-approve [feature]
+/architect:rad-approve [feature]
 ```
 
-This writes `Status: approved` to the plan doc on the `rad/[feature]` branch
-tip and pushes to that branch. That recorded approval is what unblocks the
-contributor's `/rad-deliver`. There is no merge and no separate approval
-comment — the status on the branch tip is the signal.
+This records an `approved` event in `.agents/state/<feature>/events.jsonl` on the
+`rad/[feature]` branch tip and pushes to that branch. `rad deliver` and
+`check-plan-approved.sh` read that event; the `Status:` header is a display
+mirror. That recorded approval is what unblocks the contributor's
+`/team:rad-deliver`. There is no merge and no separate approval comment — the
+event on the branch tip is the signal.
 
 ### Proxy approval (`--on-behalf-of`)
 
@@ -147,7 +167,7 @@ When you approved the plan out-of-band (in a meeting, over chat) but aren't at
 a terminal, someone else can record your decision for you:
 
 ```
-/rad-approve <feature> --on-behalf-of "<architect>" --evidence "<cite>"
+/architect:rad-approve <feature> --on-behalf-of "<architect>" --evidence "<cite>"
 ```
 
 - The named approver must be a configured architect (validated via
@@ -203,19 +223,20 @@ is not code review — treat it accordingly.
 
 Check out the `rad/[feature]` branch, edit the plan file directly, and push.
 Note what you changed and why (in your approval or a message to the contributor),
-then run `/rad-approve`.
+then run `/architect:rad-approve`.
 
 This is appropriate when the plan is mostly right but needs a specific fix
 that would be faster to do yourself than to explain in feedback.
 
 ---
 
-## What unblocks `/rad-deliver`
+## What unblocks `/team:rad-deliver`
 
-`/rad-deliver` gates on `Status: approved` at the `rad/[feature]` branch tip. It
+`/team:rad-deliver` gates on the `approved` event in
+`.agents/state/<feature>/events.jsonl` at the `rad/[feature]` branch tip. It
 runs on that same branch (no new branch) and opens the single deliver PR
 (`rad:deliver`) from `rad/[feature]` → the default branch — the only PR in the
 flow, and the one place the plan doc and code reach the default branch together.
 
-Until `/rad-approve` has recorded approval on the branch tip, `/rad-deliver`
+Until `/architect:rad-approve` has recorded approval on the branch tip, `/team:rad-deliver`
 stays blocked.
