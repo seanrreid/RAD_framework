@@ -3,6 +3,8 @@
 Welcome to a project using the RAD framework. This guide gets you from zero
 to your first planned, approved, and delivered feature.
 
+Command names are namespaced by role; see the [note in daily-workflow.md](daily-workflow.md).
+
 ---
 
 ## What RAD is (the short version)
@@ -26,14 +28,16 @@ before you spend time implementing it.
 
 ## Setup
 
-### 1. Install Claude Code
+### 1. Install your agent CLI
 
-If you don't have it:
+If your project's agent is Claude Code, install it and authenticate with your
+Anthropic account:
 ```bash
 npm install -g @anthropic-ai/claude-code
 ```
 
-Authenticate with your Anthropic account.
+If the project uses Codex or another CLI, install and authenticate that
+instead. See [Choose your agent](../INSTALL.md#choose-your-agent).
 
 ### 2. Install the git platform CLI
 
@@ -57,18 +61,18 @@ git clone [repo-url]
 cd [repo]
 
 # Check RAD status
-claude-code
-> /rad-status
+claude
+> /shared:rad-status
 ```
 
 You should see the platform, agent inventory, and your role in the output.
-If you see "No agents defined", the architect needs to run `/rad-research`
-then `/rad-design` to set up the agent architecture first.
+If you see "No agents defined", the architect needs to run `/team:rad-research`
+then `/architect:rad-design` to set up the agent architecture first.
 
 ### 4. Understand your boundaries
 
 Read the Agent Scope Map — `agent_scope_map` in `.rad/config.yml`, printed by
-`node harness/cli.js config get agent_scope_map` (or rendered by `/rad-status`).
+`node harness/cli.js config get agent_scope_map` (or rendered by `/shared:rad-status`).
 It shows:
 - Which agents are available to your role
 - Which directories each agent can read
@@ -85,7 +89,7 @@ dependency — don't try to work around it.
 ### Step 1: Check current status
 
 ```
-/rad-status
+/shared:rad-status
 ```
 
 See what's in progress, what's waiting for architect approval, and whether any
@@ -96,7 +100,7 @@ plans by status. Run `/wrap` at the end of your session.
 ### Step 2: Plan your feature
 
 ```
-/rad-plan [describe what you want to build]
+/team:rad-plan [describe what you want to build]
 ```
 
 This will:
@@ -112,19 +116,19 @@ architect know it's ready to approve.
 ### Step 3: Wait for plan approval
 
 The architect reviews the plan on your `rad/[feature]` branch. They may:
-- **Run `/rad-approve [feature]`** — this records `Status: approved` on the
-  branch tip and you're cleared to execute
+- **Run `/architect:rad-approve [feature]`** — this records an `approved` event in `.agents/state/<feature>/events.jsonl`
+  on the branch tip (the `Status:` header is a display mirror) and you're cleared to execute
 - **Request changes** — update the plan file and push to the branch; they
   re-review
 - **Reject the approach** — they'll explain what needs rethinking
 
-There is no plan PR. Don't start executing until `/rad-approve` has recorded
+There is no plan PR. Don't start executing until `/architect:rad-approve` has recorded
 approval on the branch tip.
 
 ### Step 4: Execute the plan
 
 ```
-/rad-deliver [your-feature]
+/team:rad-deliver [your-feature]
 ```
 
 The skill runs `node harness/cli.js deliver [your-feature]`. It gates on the
@@ -142,7 +146,7 @@ this is the one PR in the workflow. See [`rad deliver`](rad-cli.md#rad-deliver).
 ### Step 5: Self-review
 
 ```
-/rad-review
+/team:rad-review
 ```
 
 Run this before asking the architect to look at your code PR. Fix any HIGH
@@ -150,7 +154,7 @@ priority issues it finds. Leave MEDIUM/LOW issues as notes in the PR.
 
 ### Step 6: Request architect review
 
-The deliver PR is already open (created by `/rad-deliver`). Comment on it to
+The deliver PR is already open (created by `/team:rad-deliver`). Comment on it to
 let the architect know it's ready for review.
 
 ---
@@ -170,24 +174,24 @@ dependency, and ask the architect how to proceed. Do not read files outside
 your scope.
 
 **You're not sure if something is in your scope:**
-Run `/rad-status` and check the Agent Scope Map. When in doubt, ask — it's
+Run `/shared:rad-status` and check the Agent Scope Map. When in doubt, ask — it's
 faster than fixing a scope violation in review.
 
 ---
 
 ## Common mistakes
 
-**Running /rad-deliver before the plan is approved.**
-`/rad-deliver` gates on the `approved` event at the `rad/[feature]` branch tip
-and will stop you with an error. Wait for `/rad-approve`.
+**Running /team:rad-deliver before the plan is approved.**
+`/team:rad-deliver` gates on the `approved` event at the `rad/[feature]` branch tip
+and will stop you with an error. Wait for `/architect:rad-approve`.
 
 **Reading files directly during planning.**
-`/rad-plan` delegates research to an Explore sub-agent — you don't read files
+`/team:rad-plan` delegates research to an Explore sub-agent — you don't read files
 yourself during the planning phase. The sub-agent returns a bounded summary
 that stays within your role's scope boundaries. If something needed isn't
 covered, it's likely out of scope — flag it as a dependency, don't work around it.
 
-**Skipping /rad-review before requesting architect review.**
+**Skipping /team:rad-review before requesting architect review.**
 The architect will find the same issues and send you back to fix them. Save
 the round-trip.
 
