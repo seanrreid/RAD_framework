@@ -1,7 +1,10 @@
 # Plan: Install Docs for a Bring-Your-Own Agent
 Created: 2026-10-14
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-10-14T13:34:03.953Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/byo-agent-install-docs
 Tier: light
 Source-Author: none (no source issue)
