@@ -1,15 +1,17 @@
 # rad CLI
 
 The `rad` CLI is a thin, deterministic composition layer over the harness ports.
-It owns the pure mechanics that the `/rad-*` prose commands used to inline; the
-prose commands retain the human-in-the-loop steps and shell out here for recording
+It owns the pure mechanics that the `/team:rad-*` and `/architect:rad-*` prose
+commands used to inline; the prose commands retain the human-in-the-loop steps and shell out here for recording
 and execution.
 
-The CLI never calls a model on its own and never opens a PR — `rad approve` is
-pure git/state work; `rad deliver` delegates model calls to a selectable agent
-adapter (a spawned CLI agent or the Claude Agent SDK) but does not call any API
-itself. It pushes a branch only in `approve`, `plan-open` and `plan-status`.
-`checkout` switches the checked-out branch but never pushes.
+The CLI never calls a model itself. `rad approve` is pure git/state work; `rad
+deliver` delegates every model call to the configured agent adapter (`command`,
+`acp` or `sdk`) and opens the single deliver PR through `scripts/open-pr.sh`.
+The verbs that push a branch are `approve`, `plan-open`, `plan-status`, `wrap` and
+`deliver` (its prepare phase, finish phase and a rerun of an already delivered
+feature, plus `open-pr.sh` for the PR head). `checkout` switches the checked-out
+branch but never pushes.
 
 ---
 
@@ -63,7 +65,7 @@ Records an architect approval and, by default, publishes it on the work branch:
 6. labels the issue `approved`.
 
 No PR is opened and nothing is committed to the default branch. The
-`/rad-approve` prose command calls this after the architect confirms.
+`/architect:rad-approve` prose command calls this after the architect confirms.
 
 **Authority:**
 - Direct: the running `git user.email` must be a configured architect in `.rad/config.yml` (`roles.architect`)
@@ -113,8 +115,8 @@ under `RAD_SYNC`; its failure never fails the command.
 rad plan-open <plan-file> [--trailer "Key: Value"]...
 ```
 
-Opens a plan's work branch: the one deterministic step behind `/rad-plan` Step 5
-and `/rad-adopt` Step 7, callable from any coding tool. On a fresh run it:
+Opens a plan's work branch: the one deterministic step behind `/team:rad-plan` Step 5
+and `/team:rad-adopt` Step 7, callable from any coding tool. On a fresh run it:
 1. fetches the default branch and runs `git checkout -b <branch> origin/<default>`;
 2. stages **only** the plan file and commits it with a message derived from the plan;
 3. pushes with `push -u origin <branch>`;
@@ -178,7 +180,7 @@ rad plan-status <feature> <rejected|needs-revision> [--trailer "Key: Value"]...
 ```
 
 Records an architect's non-approval review of a plan: the one deterministic step
-behind the **no** and **feedback** answers in `/rad-approve`, callable from any
+behind the **no** and **feedback** answers in `/architect:rad-approve`, callable from any
 coding tool. It:
 1. sets the plan doc's `Status:` header to the given status;
 2. commits **only** the plan file on its work branch with a message derived from
@@ -229,7 +231,7 @@ message that a rerun is safe; the rerun resumes. There is no rollback.
 rad checkout <feature | .agents/plans/<feature>.md>
 ```
 
-Checks out a plan's work branch at its remote tip. This is how `/rad-approve`
+Checks out a plan's work branch at its remote tip. This is how `/architect:rad-approve`
 gets onto the work branch before it reviews the plan, and any coding tool can
 call it. It wraps `scripts/checkout-plan.sh` and adds no git logic of its own.
 It:
@@ -346,7 +348,7 @@ It wraps `scripts/rad-label.sh` and adds no gh logic of its own: it runs
 `scripts/rad-label.sh <N> <status>` from the repo root, prints the script's
 output and exits with its status. Like the script, which plan-open, approve and
 deliver already call, it runs no role check. Skills use it for their optional
-issue-label step (for example `/rad-epic-decompose` Step 6).
+issue-label step (for example `/architect:rad-epic-decompose` Step 6).
 
 **Arguments:** `<issue>` is a positive integer; `#N` is accepted. `<status>` is
 one of `draft`, `ready`, `pending-review`, `needs-revision`, `rejected`,
@@ -405,7 +407,7 @@ nothing — it only reads the event log. For the `approved` gate this is the sin
 source of truth: the `approved` **event** is the sole approval authority, and the
 plan doc's `Status:` header is a display-only mirror that the gate ignores.
 
-`/rad-deliver` uses `rad gate <feature> approved` to decide whether wave execution
+`/team:rad-deliver` uses `rad gate <feature> approved` to decide whether wave execution
 may start; `check-plan-approved.sh` shells out to it as well.
 
 - `--stdin` reads the event log from standard input instead of the on-disk file,
@@ -475,8 +477,8 @@ forecast: no reliability signals for <n> path(s) (history: <m> feature(s))
 ```
 
 The remedy is described, never applied — a boundary/decomposition note, a comment
-explaining the governing constraint, or a characterization test. `/rad-plan`
-(Step 4b) and `/rad-adopt` (Step 6b) run it after the plan lint so the author can
+explaining the governing constraint, or a characterization test. `/team:rad-plan`
+(Step 4b) and `/team:rad-adopt` (Step 6b) run it after the plan lint so the author can
 fold a remedy task into the plan before approval. v1 is path-level only: no
 wave-size or token-spend forecasting.
 
@@ -529,11 +531,11 @@ paths > deficit forecast > finding recurrence > run evidence.
 - unavailable: <input> — <reason>
 ```
 
-**Readers:** `/rad-review` Step 1b (the `### Digest` section, ahead of Scope) and
+**Readers:** `/team:rad-review` Step 1b (the `### Digest` section, ahead of Scope) and
 the CI `deliver-integrity` job, which appends it to the job summary (a digest
 failure there is a `::warning::`, never a failed job).
 
-**Note:** a feature delivered through the `/rad-deliver` skill (not `rad
+**Note:** a feature delivered through the `/team:rad-deliver` skill (not `rad
 deliver`) has no spine wave events, so the digest shows `completion not
 evidenced for <n> wave(s)` for it. This is deliberate — the digest is
 recall-oriented and does not suppress it; confirm completion from the execution
@@ -674,14 +676,14 @@ no configured command, or a malformed timeout.
 ceiling. A malformed value (non-numeric, zero, negative) exits **2** rather than
 falling back to the default.
 
-**How `/rad-review` uses it.** When `RAD_REVIEW_AGENT_CMD` is set, `/rad-review`
+**How `/team:rad-review` uses it.** When `RAD_REVIEW_AGENT_CMD` is set, `/team:rad-review`
 Steps 4 and 4b run `rad review quality-reviewer` / `rad review
 accessibility-reviewer` instead of the in-session sub-agents, take stdout as the
 reviewer's output (its `rad-findings` block is persisted to
 `.agents/findings.jsonl` as usual), and note a non-zero exit in the report
 without stopping. The cycle record gains `review_agent: {source, executable}`
 (the basename only). Unset → the sub-agents run as before. `RAD_AGENT_CMD`
-alone does **not** switch `/rad-review` over; only `RAD_REVIEW_AGENT_CMD` does.
+alone does **not** switch `/team:rad-review` over; only `RAD_REVIEW_AGENT_CMD` does.
 
 **Caveat.** A reviewer from a different vendor than the implementer reduces
 *correlated* blind spots (the same model rarely catches its own habitual
@@ -772,7 +774,7 @@ never depends on the mode.
 unset/empty/`0`/`false` (mode `observe-only`); any other value exits **2**. The
 mode only labels the summary line.
 
-**In `/rad-review`.** Step 4c of the Claude command runs `rad exercise <feature>`
+**In `/team:rad-review`.** Step 4c of the Claude command runs `rad exercise <feature>`
 unless `--no-exercise` is passed (the token is removed from the file list), and
 the Codex `rad-review` skill runs it read-only. Both print
 `Exercise: skipped (--no-exercise)` when skipped by the flag, and keep the
@@ -913,7 +915,12 @@ Full contract: [Between-wave checks](./rad-wave-contract.md#between-wave-checks)
 #### Finish phase
 
 After the last wave, `rad deliver` runs the approval-during-run guard and
-`check-scope.sh`, then finishes in the run root:
+`check-scope.sh`, then finishes in the run root. `check-scope.sh` also runs the
+test-weakening guard: a test file that is deleted, renamed away or given a skip
+marker fails the check unless the plan's `## Waivers` section carries a
+`- test-removal:<path>: <reason>` bullet (see
+[Approval Rules](configuration.md#approval-rules)).
+
 
 1. **beforePr** — sets the plan to `Status: complete` with `Completed-At:` (kept
    on a rerun), commits the plan, the event log and the run's execution logs
@@ -957,19 +964,29 @@ validation.)
 
 | Env var | Values | Default | Meaning |
 |---------|--------|---------|---------|
-| `RAD_AGENT` | `command` \| `sdk` \| `acp` | `command` | which adapter drives the wave |
+| `RAD_AGENT` | `command` \| `sdk` \| `acp` | — | which adapter drives the wave. Comes from `agent.adapter` in `.rad/config.yml`; when the environment is set (`RAD_AGENT` or `RAD_AGENT_CMD`), from `RAD_AGENT`, assumed `command` only if `RAD_AGENT_CMD` is set alone |
 | `RAD_AGENT_CMD` | any command string | — | the CLI to spawn (command and acp paths) |
 | `RAD_AGENT_PREFLIGHT` | `off` | — (probe runs) | exactly `off` skips the command- and acp-path startup preflight |
 | `RAD_AGENT_PREFLIGHT_TIMEOUT_SECONDS` | positive integer | `60` | preflight probe deadline; malformed exits 2 |
 | `RAD_WAVE_TIMEOUT_SECONDS` | positive integer | `600` | per-wave wall-clock deadline for the command and acp adapters (the SDK path ignores it); malformed exits 2 before any wave or event |
-| `RAD_TOKEN_BUDGET` | positive integer | — | per-deliver cumulative token ceiling (cost breaker) |
-| `RAD_REVIEW_AGENT_CMD` | any command string | — (falls back to `RAD_AGENT_CMD`, then `agent.command`) | review-lane CLI for [`rad review`](#rad-review) and `/rad-review`; not used by `rad deliver` |
+| `RAD_TOKEN_BUDGET` | positive integer | — | per-deliver cumulative token ceiling (cost breaker); see [Cost & frugality](#cost--frugality-optional) |
+| `RAD_MAX_FAILED_ATTEMPTS` | positive integer | — (off) | cap on failed attempts across the run; reaching it stops with `failed-attempt-cap`, a needs-decision stop (exit 3); malformed exits 2 |
+| `RAD_REVIEW_AGENT_CMD` | any command string | — (falls back to `RAD_AGENT_CMD`, then `agent.command`) | review-lane CLI for [`rad review`](#rad-review) and `/team:rad-review`; not used by `rad deliver` |
 | `RAD_EXERCISE_TIMEOUT_SECONDS` | positive integer | `600` | wall-clock bound on the whole [`rad exercise`](#rad-exercise) run (Launch + agent); malformed, zero or negative exits 2 |
 | `RAD_EXERCISE_BLOCKING` | `1` \| `true` \| `0` \| `false` \| unset | unset (`observe-only`) | labels the `rad exercise` summary `mode=blocking` or `observe-only`; never changes the exit code; any other value exits 2 |
 
+**Usage reporting.** The command adapter records token usage only from a
+`RAD_USAGE {json}` line (first match wins) in the agent's stdout. Plain `claude -p`
+prints no such line, so it reports no usage. `node scripts/claude-usage.mjs` runs
+`claude -p --output-format json` and prints the `RAD_USAGE` line ahead of the
+answer. The line format is in
+[`rad-wave-contract.md`](./rad-wave-contract.md#the-rad_usage-line-command-adapter).
+Without usage, `RAD_TOKEN_BUDGET` cannot trip (see
+[Cost & frugality](#cost--frugality-optional)).
+
 **Per-path credential requirements:**
 
-- **`command` (default)** — requires **no** `ANTHROPIC_API_KEY`. Credentials are
+- **`command`** — requires **no** `ANTHROPIC_API_KEY`. Credentials are
   the configured command's concern. `RAD_AGENT_CMD` **is required**; if unset,
   `rad deliver` exits 1 with `RAD_AGENT_CMD is required when RAD_AGENT=command`.
 - **`sdk`** — requires `ANTHROPIC_API_KEY`. If unset, `rad deliver` exits 1 with
@@ -1026,9 +1043,10 @@ validated when `RAD_AGENT_PREFLIGHT=off`, since no probe runs. A probe that
 exceeds the deadline is killed and reported as an `agent preflight` timeout.
 
 ```bash
-# Default (command) path — bring your own agent CLI, no API key needed here:
-export RAD_AGENT=command            # (or leave unset)
+# Command path — bring your own agent CLI, no API key needed here:
+export RAD_AGENT=command            # (assumed when only RAD_AGENT_CMD is set)
 export RAD_AGENT_CMD="claude -p"    # or "codex exec", "aider", a wrapper script
+                                    # reports no usage; use "node scripts/claude-usage.mjs" to meter it
 node harness/cli.js deliver my-feature
 
 # SDK path — Anthropic SDK, API key required:
@@ -1194,13 +1212,19 @@ Both are *opt-in*: absent, the spine behaves exactly as before.
 - **`RAD_TOKEN_BUDGET`** — a per-deliver cumulative token ceiling. When set to a
   positive integer, the spine sums each wave's recorded `usage.total` and, **before
   starting the next wave**, gracefully stops if the running total has reached or
-  exceeded the budget. The stop is a normal structured terminal — not a throw:
-  `rad deliver` exits 1 and prints `stopped=token-budget spent=<n> budget=<n>`, and a
-  `wave-failed` event with `reason: token-budget` is recorded. Unset, `0`, or
-  non-numeric values leave the breaker disabled (no behavior change), and `rad deliver`
-  writes one line to stderr at start saying no token cap applies and naming
-  `RAD_TOKEN_BUDGET` (informational; it never blocks). Waves whose
-  adapter emits no usage contribute `0`, so the breaker never trips spuriously.
+  exceeded the budget. The stop is a normal structured terminal — not a throw: it is
+  a `needs-decision` stop, so `rad deliver` exits **3** and prints
+  `stopped=token-budget spent=<n> budget=<n>`, and a `wave-failed` event with
+  `reason: token-budget` is recorded. Raise the budget and resume with
+  `--resume --context` (see [Resuming a stopped run](#resuming-a-stopped-run)).
+  Unset, `0`, or non-numeric values leave the breaker disabled (no behavior
+  change). Two warnings go to stderr, neither of which blocks: at start-up, one
+  line saying no token cap applies and naming `RAD_TOKEN_BUDGET`; and, when a
+  budget is armed, once per run on the first wave that reports no usage, saying
+  `RAD_TOKEN_BUDGET` cannot trip and pointing at `RAD_USAGE` (see the
+  usage-reporting paragraph under [Adapter selection](#adapter-selection)). Waves with no usage add nothing to the
+  total, so they never trip the budget — which also means an agent that never
+  reports usage leaves the budget unable to trip at all.
 
   ```bash
   RAD_TOKEN_BUDGET=200000 RAD_AGENT=sdk node harness/cli.js deliver my-feature
@@ -1263,7 +1287,7 @@ main checkout, constructs no worktree port, and binds every `check-*.sh` /
 | `RAD_WORKTREE` | `0` to opt out | — (ON) | isolate the deliver run into a git worktree |
 | `RAD_WORKTREE_DIR` | a directory path | sibling `../<repo>-rad-worktrees/<feature>` | base dir for the isolated tree |
 
-The `/rad-deliver` skill runs `rad deliver`, so the same isolation applies to the
+The `/team:rad-deliver` skill runs `rad deliver`, so the same isolation applies to the
 skill path. Only the `RAD_WORKTREE=0` opt-out remains, recorded as an unguarded
 bypass of the `deliver-runs-isolated` registry invariant.
 
@@ -1521,7 +1545,7 @@ settings file, or a missing hook script.
 node --test harness/test/deliver.test.js
 ```
 
-Three cases: dispatch smoke, ANTHROPIC_API_KEY guard, gate refusal. All run
+Covers dispatch smoke, the ANTHROPIC_API_KEY guard and gate refusal. All run
 without hitting the API.
 
 ### Step 2 — verify SDK shape (no API call)
@@ -1559,7 +1583,7 @@ Watch for:
 
 ## SDK interface notes
 
-`runwave.js` uses `query` from `@anthropic-ai/claude-agent-sdk`. The confirmed
+The `sdk` adapter (`harness/adapters/agent/sdk.js`) uses `query` from `@anthropic-ai/claude-agent-sdk`. The confirmed
 options shape as of SDK install (2026-06-05):
 
 | Option | Value used | Notes |
@@ -1569,7 +1593,7 @@ options shape as of SDK install (2026-06-05):
 | `options.env` | `{ ...process.env, ANTHROPIC_API_KEY }` | **replaces** subprocess env; spread process.env explicitly |
 | `options.model` | `claude-opus-4-8` (default) | passed if provided |
 | `options.tools` | `{ type: 'preset', preset: 'claude_code' }` | enables full Claude Code tool set |
-| `options.allowedTools` | `['Read','Write','Edit','Bash','Glob','Grep']` | auto-allowed without permission prompts |
+| `options.allowedTools` | per wave: the default tool set, narrowed by the wave's capabilities | auto-allowed without permission prompts |
 | `options.permissionMode` | `'acceptEdits'` | suppresses interactive permission prompts |
 | `options.persistSession` | `false` | each wave is a fresh session |
 
@@ -1591,6 +1615,30 @@ and any other CI platform wraps the same scripts the same way.
 presenting a forged history. Protect `rad/*` branches on your host (no
 force-push, required reviews) — that protection is the substrate beneath the
 authenticity check, not something these scripts replace.
+
+### Job index
+
+The 15 jobs in `.github/workflows/ci.yml`, each a thin wrapper over the command
+shown. `bash scripts/verify-all.sh --list` prints the subset that runs locally
+(`deliver-integrity` and `matrix-replay` need PR context and are excluded).
+
+| Job | Runs |
+|-----|------|
+| `harness-tests` | `npm test --prefix harness` (the harness `node --test` suite) |
+| `script-tests` | every `scripts/test-*.sh` fixture |
+| `bash32-parse` | `scripts/test-bash32-parse.sh` (scripts parse under bash 3.2) |
+| `events-append-only` | `scripts/check-events-append-only.sh` against the PR base |
+| `agent-file-lint` | `scripts/lint-agent-files.sh` |
+| `claude-md-budget` | `scripts/lint-claude-md.sh` (150-line advisory budget) |
+| `shell-safety-lint` | `scripts/lint-shell-safety.sh` (new scripts must be `100755`) |
+| `invariant-lint` | `scripts/lint-invariants.sh` |
+| `function-length-lint` | `node scripts/lint-function-length.mjs`; the ~40-line rule is in `AGENTS.md` (Coding Conventions) |
+| `generated-drift` | `node harness/cli.js generate --check` |
+| `playbook-lint` | `node harness/cli.js playbook lint` |
+| `evals-scripted` | `node --test harness/evals/*.eval.js` |
+| `deliver-integrity` | on a deliver PR only: `check-approval-integrity.sh`, `check-scope.sh` and the [`rad digest`](#rad-digest) job summary |
+| `plan-lint` | `scripts/lint-plan.sh` on each changed plan file |
+| `matrix-replay` | `scripts/check-matrix-replay.sh` when `harness/matrix.yaml` or `harness/gates.yaml` changes |
 
 ### check-approval-integrity.sh
 
@@ -1712,6 +1760,6 @@ or more violations, each printed as `<path>: <error>`.
   `check-plan-approved.sh` gates on that event, and the plan doc's `Status:`
   header is a display-only mirror. `rad approve` still writes the header for human
   display, but nothing gates on it.
-- **CLI cutovers**: `rad status`, `rad plan`, `rad design` as follow-up increments.
+- **CLI cutovers**: `rad plan` and `rad design` as follow-up increments.
 - **Redundant role check**: `approveCommand` calls `check-role.sh` upfront for UX
   and `recordApproval` calls it again internally. Harmless; clean up post-Decision 2.
