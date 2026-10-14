@@ -5,11 +5,13 @@ It owns the pure mechanics that the `/rad-*` prose commands used to inline; the
 prose commands retain the human-in-the-loop steps and shell out here for recording
 and execution.
 
-The CLI never calls a model on its own and never opens a PR — `rad approve` is
-pure git/state work; `rad deliver` delegates model calls to a selectable agent
-adapter (a spawned CLI agent or the Claude Agent SDK) but does not call any API
-itself. It pushes a branch only in `approve`, `plan-open` and `plan-status`.
-`checkout` switches the checked-out branch but never pushes.
+The CLI never calls a model itself. `rad approve` is pure git/state work; `rad
+deliver` delegates every model call to the configured agent adapter (`command`,
+`acp` or `sdk`) and opens the single deliver PR through `scripts/open-pr.sh`.
+The verbs that push a branch are `approve`, `plan-open`, `plan-status`, `wrap` and
+`deliver` (its prepare phase, finish phase and a rerun of an already delivered
+feature, plus `open-pr.sh` for the PR head). `checkout` switches the checked-out
+branch but never pushes.
 
 ---
 
@@ -957,19 +959,29 @@ validation.)
 
 | Env var | Values | Default | Meaning |
 |---------|--------|---------|---------|
-| `RAD_AGENT` | `command` \| `sdk` \| `acp` | `command` | which adapter drives the wave |
+| `RAD_AGENT` | `command` \| `sdk` \| `acp` | — | which adapter drives the wave. Comes from `agent.adapter` in `.rad/config.yml`; when the environment is set (`RAD_AGENT` or `RAD_AGENT_CMD`), from `RAD_AGENT`, assumed `command` only if `RAD_AGENT_CMD` is set alone |
 | `RAD_AGENT_CMD` | any command string | — | the CLI to spawn (command and acp paths) |
 | `RAD_AGENT_PREFLIGHT` | `off` | — (probe runs) | exactly `off` skips the command- and acp-path startup preflight |
 | `RAD_AGENT_PREFLIGHT_TIMEOUT_SECONDS` | positive integer | `60` | preflight probe deadline; malformed exits 2 |
 | `RAD_WAVE_TIMEOUT_SECONDS` | positive integer | `600` | per-wave wall-clock deadline for the command and acp adapters (the SDK path ignores it); malformed exits 2 before any wave or event |
-| `RAD_TOKEN_BUDGET` | positive integer | — | per-deliver cumulative token ceiling (cost breaker) |
+| `RAD_TOKEN_BUDGET` | positive integer | — | per-deliver cumulative token ceiling (cost breaker); see [Cost & frugality](#cost--frugality-optional) |
+| `RAD_MAX_FAILED_ATTEMPTS` | positive integer | — (off) | cap on failed attempts across the run; reaching it stops with `failed-attempt-cap`, a needs-decision stop (exit 3); malformed exits 2 |
 | `RAD_REVIEW_AGENT_CMD` | any command string | — (falls back to `RAD_AGENT_CMD`, then `agent.command`) | review-lane CLI for [`rad review`](#rad-review) and `/rad-review`; not used by `rad deliver` |
 | `RAD_EXERCISE_TIMEOUT_SECONDS` | positive integer | `600` | wall-clock bound on the whole [`rad exercise`](#rad-exercise) run (Launch + agent); malformed, zero or negative exits 2 |
 | `RAD_EXERCISE_BLOCKING` | `1` \| `true` \| `0` \| `false` \| unset | unset (`observe-only`) | labels the `rad exercise` summary `mode=blocking` or `observe-only`; never changes the exit code; any other value exits 2 |
 
+**Usage reporting.** The command adapter records token usage only from a
+`RAD_USAGE {json}` line (first match wins) in the agent's stdout. Plain `claude -p`
+prints no such line, so it reports no usage. `node scripts/claude-usage.mjs` runs
+`claude -p --output-format json` and prints the `RAD_USAGE` line ahead of the
+answer. The line format is in
+[`rad-wave-contract.md`](./rad-wave-contract.md#the-rad_usage-line-command-adapter).
+Without usage, `RAD_TOKEN_BUDGET` cannot trip (see
+[Cost & frugality](#cost--frugality-optional)).
+
 **Per-path credential requirements:**
 
-- **`command` (default)** — requires **no** `ANTHROPIC_API_KEY`. Credentials are
+- **`command`** — requires **no** `ANTHROPIC_API_KEY`. Credentials are
   the configured command's concern. `RAD_AGENT_CMD` **is required**; if unset,
   `rad deliver` exits 1 with `RAD_AGENT_CMD is required when RAD_AGENT=command`.
 - **`sdk`** — requires `ANTHROPIC_API_KEY`. If unset, `rad deliver` exits 1 with
@@ -1026,9 +1038,10 @@ validated when `RAD_AGENT_PREFLIGHT=off`, since no probe runs. A probe that
 exceeds the deadline is killed and reported as an `agent preflight` timeout.
 
 ```bash
-# Default (command) path — bring your own agent CLI, no API key needed here:
-export RAD_AGENT=command            # (or leave unset)
+# Command path — bring your own agent CLI, no API key needed here:
+export RAD_AGENT=command            # (assumed when only RAD_AGENT_CMD is set)
 export RAD_AGENT_CMD="claude -p"    # or "codex exec", "aider", a wrapper script
+                                    # reports no usage; use "node scripts/claude-usage.mjs" to meter it
 node harness/cli.js deliver my-feature
 
 # SDK path — Anthropic SDK, API key required:
