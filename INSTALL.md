@@ -10,7 +10,7 @@ structure, commands, scripts, and CLAUDE.md scaffolding — in one step.
 | Tool | Required | Purpose |
 |------|----------|---------|
 | `git` | Yes | RAD requires a git repository |
-| `claude` CLI | Yes | Claude Code — [install here](https://claude.ai/code) |
+| An agent CLI of your choice (or an `ANTHROPIC_API_KEY` for the `sdk` adapter) | Yes, to run `/rad-deliver` | The agent `rad deliver` runs each wave through. `claude` ([Claude Code](https://claude.ai/code)) and `codex` are built-in presets; see [Choose your agent](#choose-your-agent) |
 | `node` | Yes | Runs `harness/cli.js`, which lays down the framework files. The installer stops with a named error if it is missing |
 | `gh` or `glab` | Recommended | PR automation. RAD falls back to manual mode without one |
 
@@ -62,50 +62,38 @@ your-project/
 ├── AGENTS.md                         ← scaffolded from template (project conventions)
 ├── CLAUDE.md                         ← scaffolded stub: `@AGENTS.md` + Claude Code specifics
 ├── .rad/
-│   ├── config.yml                    ← .rad/config.yml, written by `rad config init` (platform, roles, scope map)
-│   └── installed.json                ← install manifest: framework files + hashes (commit it)
+│   ├── config.yml                    ← written by `rad config init` (platform, roles, agent, scope map)
+│   ├── installed.json                ← install manifest: framework files + hashes (commit it)
+│   ├── agents/                       ← agent sources (the built-in reviewers)
+│   └── skills/                       ← skill sources; `rad generate` writes the per-agent copies
 ├── .claude/
-│   └── commands/
-│       ├── architect/
-│       │   ├── rad-design.md         → /rad-design
-│       │   └── rad-approve.md        → /rad-approve
-│       ├── team/
-│       │   ├── rad-research.md       → /rad-research
-│       │   ├── rad-plan.md           → /rad-plan
-│       │   ├── rad-adopt.md          → /rad-adopt
-│       │   ├── rad-deliver.md        → /rad-deliver (generated from .rad/skills/)
-│       │   └── rad-review.md         → /rad-review
-│       └── shared/
-│           ├── rad-status.md         → /rad-status
-│           └── rad-insights.md       → /rad-insights
-│   └── skills/
-│       ├── kickoff/SKILL.md          → /kickoff
-│       └── wrap/SKILL.md             → /wrap
+│   ├── commands/                     ← architect/, team/ and shared/ slash commands
+│   ├── skills/                       ← kickoff, wrap
+│   ├── agents/                       ← generated agent files (built-in reviewers)
+│   └── settings.json                 ← registers the deliver-gate hook
+├── .codex/
+│   └── agents/                       ← generated Codex agent files
 ├── .agents/
 │   ├── research/                     ← /rad-research output
 │   ├── architecture/                 ← /rad-design drafts
 │   ├── plans/                        ← /rad-plan output
 │   ├── logs/                         ← optional wave execution logs (nothing gates on them)
-│   └── findings/                     ← /rad-review findings log
+│   ├── findings/                     ← findings log schema and query reference
+│   ├── findings.jsonl                ← /rad-review findings log
+│   ├── skills/                       ← generated skill copies for Codex
+│   ├── state/                        ← event logs, created at runtime
+│   ├── epics/                        ← epic shaping stories, created at runtime
+│   └── playbooks/                    ← pinned playbooks, created at runtime
 ├── ai/                               ← guardrail pack (see below)
 ├── harness/                          ← `rad` CLI (harness/cli.js)
-└── scripts/
-    ├── detect-platform.sh
-    ├── get-default-branch.sh
-    ├── checkout-plan.sh
-    ├── rad-label.sh
-    ├── open-pr.sh
-    ├── check-plan-approved.sh
-    ├── check-scope.sh
-    ├── lint-plan.sh
-    ├── rad-status.sh
-    ├── lib/
-    │   └── plan-paths.sh             ← shared plan-path helpers (lint-plan, check-scope, …)
-    └── hooks/                        ← wave lifecycle hooks
+└── scripts/                          ← helper scripts (detect-platform, check-*, lint-*, open-pr, …),
+                                         plus lib/ and hooks/
 ```
 
 The installer also copies the RAD skills into `.claude/skills/` (`kickoff/` and
-`wrap/`, providing `/kickoff` and `/wrap`) alongside all `scripts/*.sh` helpers.
+`wrap/`, providing `/kickoff` and `/wrap`) alongside the `scripts/` helpers.
+`.agents/state/`, `.agents/epics/` and `.agents/playbooks/` are not created by
+the installer; RAD creates them the first time it needs them.
 
 Every framework file the installer lays down (`.claude/commands/`,
 `.claude/skills/`, `ai/`, `scripts/`, and `harness/` except
@@ -115,8 +103,9 @@ unedited framework file (safe to update) from one you changed (kept). Check for
 drift at any time with `node harness/cli.js install-status`. See
 [UPGRADE.md](UPGRADE.md#how-upgrades-handle-local-edits).
 
-`.claude/agents/` is not populated at install time — the architecture process
-(`/rad-research` → `/rad-design`) generates those files for your specific project.
+`.claude/agents/` and `.codex/agents/` ship with the two built-in reviewers
+(`accessibility-reviewer`, `quality-reviewer`). The architecture process
+(`/rad-research` → `/rad-design`) adds the agent files for your specific project.
 
 ### Presets
 
@@ -244,6 +233,45 @@ and ask it to re-read before proceeding.
 
 ---
 
+## Choose your agent
+
+`rad deliver` (and so `/rad-deliver`) runs each wave through one agent. It does
+not have to be Claude. Three adapters are available:
+
+| Adapter | What it runs | Needs |
+|---------|--------------|-------|
+| `command` | An agent CLI you name, for example `claude -p`, `codex exec` or `aider` | The CLI, already authenticated |
+| `acp` | The command as an Agent Client Protocol v1 agent | The CLI, already authenticated |
+| `sdk` | The Claude Agent SDK | `ANTHROPIC_API_KEY` |
+
+Pick one at install time or afterwards:
+
+```bash
+bash /tmp/rad/install.sh --dir /path/to/your-project --agent claude   # or: --agent codex
+node harness/cli.js config init --agent-cmd "<cmd>"                    # any other CLI
+node harness/cli.js config init --agent-cmd "<cmd>" --agent-adapter acp
+node harness/cli.js config init --agent-adapter sdk
+```
+
+Add `--force` to `config init` to overwrite an existing `.rad/config.yml`. The
+`claude` preset writes `adapter: command` with `command: claude -p`; `codex`
+writes `command: codex exec`.
+
+- **Authentication.** The agent command runs under an allow-listed environment:
+  only `PATH HOME LANG LC_ALL TMPDIR TERM USER` are forwarded. It must
+  authenticate from on-disk credentials or the OS keychain. An exported
+  `ANTHROPIC_API_KEY` or `GH_TOKEN` never reaches it.
+- **Environment wins.** If `RAD_AGENT` or `RAD_AGENT_CMD` is set, the
+  environment decides everything and `agent:` in `.rad/config.yml` is ignored
+  entirely. The two are never mixed field by field.
+- **Token and cost reporting.** `claude -p` does not report usage on its own.
+  To get token and cost reporting, set the command to the wrapper:
+  `node scripts/claude-usage.mjs`.
+
+Full reference: [Agent Adapter](docs/configuration.md#agent-adapter).
+
+---
+
 ## Post-Install Setup
 
 ### 1. Review `.rad/config.yml`, then fill in AGENTS.md
@@ -324,28 +352,46 @@ only designated architects can merge. This is what enforces the Gate 2 deliver
 PR review — not command access. Keeping the default branch protected is also why
 RAD routes the plan doc through the deliver PR rather than committing it directly.
 
-**GitHub** (replace `main` with your default branch):
+The installer does not apply branch protection; this step is recommended, not
+automatic.
+
+**GitHub** (replace `main` with your default branch, and `ci` with the name of
+your required status check, or use `[]` for none):
 ```bash
 gh api repos/:owner/:repo/branches/main/protection \
-  --method PUT \
-  --field required_pull_request_reviews='{"required_approving_review_count":1}'
+  --method PUT --input - <<'JSON'
+{
+  "required_status_checks": { "strict": true, "contexts": ["ci"] },
+  "enforce_admins": true,
+  "required_pull_request_reviews": { "required_approving_review_count": 1 },
+  "restrictions": null
+}
+JSON
 ```
+
+`restrictions` is `null` here (anyone with write access may push through a
+reviewed PR); on an organization repository, set it to
+`{"users": [], "teams": ["architects"], "apps": []}` to limit who can merge.
 
 ### 4. Commit the installed files
 
 ```bash
-git add .claude/ .agents/ .rad/ ai/ scripts/ harness/ CLAUDE.md   # .rad/ holds config.yml and installed.json
+git add .claude/ .codex/ .agents/ .rad/ ai/ scripts/ harness/ AGENTS.md CLAUDE.md   # .rad/ holds config.yml and installed.json
 git commit -m "chore: install RAD framework"
 git push
 ```
 
 ### 5. Start the architecture process
 
-In Claude Code, open your project and run:
+In your agent, open your project and run:
 
 ```
-/rad-research path/to/your-prd.md
+/team:rad-research path/to/your-prd.md
 ```
+
+Claude Code namespaces RAD's commands by role directory (`architect/`, `team/`,
+`shared/`), so a bare `/rad-research` does not resolve. Other docs use the bare
+name as shorthand.
 
 See `docs/daily-workflow.md` for the full workflow from here.
 
@@ -388,20 +434,21 @@ edits are handled.
 RAD has no daemon or global state. To remove it from a project:
 
 ```bash
-rm -rf .claude/commands/ .claude/skills/ scripts/
-rm -rf .agents/research/ .agents/architecture/ .agents/plans/ .agents/logs/ .agents/findings/
-rm -rf .rad/                          # removes .rad/config.yml
-rm CLAUDE.md
+rm -rf .claude/ .codex/ .agents/ .rad/ ai/ harness/ scripts/
+rm -f AGENTS.md CLAUDE.md
 git add -A
 git commit -m "chore: remove RAD framework"
 ```
 
-If you want to keep your plan history but remove the commands:
+`.claude/` and `.agents/` may hold files that are not RAD's (your own commands,
+skills or settings). Remove only RAD's subdirectories if so. If you want to keep
+your plan history, leave `.agents/` and remove the rest:
 
 ```bash
-rm -rf .claude/commands/ scripts/
-git add .claude/commands/ scripts/
-git commit -m "chore: remove RAD commands"
+rm -rf .claude/ .codex/ .rad/ ai/ harness/ scripts/
+rm -f AGENTS.md CLAUDE.md
+git add -A
+git commit -m "chore: remove RAD framework, keep plans"
 ```
 
 ---
