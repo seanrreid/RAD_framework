@@ -3,7 +3,7 @@
 A point-by-point comparison of Augment Code's Cosmos (public preview) against
 RAD — where the two converge, where they genuinely differ, and which Cosmos
 ideas are worth adopting, deferring, or declining. Like the CUGA review in
-[`references.md`](references.md), the headline finding is **convergent design
+[`references.md`](../references.md), the headline finding is **convergent design
 validation**: an independent, funded team landed on the same shape RAD did.
 
 Source: [Augment Code — Cosmos, now in public preview](https://www.augmentcode.com/blog/cosmos-now-in-public-preview)
@@ -75,7 +75,7 @@ lint rules) **is** a learning flywheel — it just distills lessons into
 deterministic checks instead of into agent context.
 
 That difference is a position, not a deficiency. It is the Bitter Lesson
-stance (see [`harness-and-framework.md`](harness-and-framework.md)) applied to
+stance (see [`harness-and-framework.md`](../harness-and-framework.md)) applied to
 learning: knowledge baked into a lint survives model swaps and stays
 inspectable; knowledge baked into an agent's context store is a capability bet
 on the vendor's retrieval. Cosmos's flywheel will feel more magical; RAD's is

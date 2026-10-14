@@ -3,7 +3,7 @@
 A point-by-point comparison of Flue — the Astro team's open agent framework —
 against RAD: where the two converge, where they genuinely differ, and which
 Flue ideas are worth adopting, deferring, or declining. Like the Cosmos and
-CUGA reviews in [`references.md`](references.md), the headline is convergent
+CUGA reviews in [`references.md`](../references.md), the headline is convergent
 design validation. Unlike those reviews, this one also produced a **defect
 finding** in RAD's own spine (issue #119, since resolved — see
 [Resolution](#resolution-119)).

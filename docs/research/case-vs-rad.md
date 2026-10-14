@@ -4,7 +4,7 @@ A comparison of [WorkOS CASE](https://github.com/workos/case) against RAD. The
 harness-engineering articles reviewed in
 [`harness-engineering-vs-rad.md`](harness-engineering-vs-rad.md) describe harness
 *thinking*. CASE is a harness *system*, and by far RAD's closest sibling. Like the
-Cosmos, CUGA and WSD reviews in [`references.md`](references.md), the headline
+Cosmos, CUGA and WSD reviews in [`references.md`](../references.md), the headline
 finding is **convergent design validation**: CASE independently arrived at nearly
 all of RAD's core primitives.
 
@@ -46,7 +46,7 @@ core bets are right:
   `spine.js`).
 - **Append-only event logs** (`.case/events/` ≈ `harness/events.js`). CASE's
   transition-validated `append()` was adopted directly into RAD's state store; see
-  [`harness-state-store.md`](harness-state-store.md), Decision 4.
+  [`harness-state-store.md`](../harness-state-store.md), Decision 4.
 - **Context isolation per phase** (CASE's per-role contexts ≈ RAD's fresh
   sub-agent per wave).
 - **Identical-failure-fingerprint early abort.** *Both* abort on a repeated

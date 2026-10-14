@@ -6,7 +6,7 @@
 > Sources:
 > - [LangChain — The Anatomy of an Agent Harness](https://www.langchain.com/blog/the-anatomy-of-an-agent-harness)
 > - [Addy Osmani — Agent Harness Engineering](https://addyosmani.com/blog/agent-harness-engineering/)
-> - RAD docs: [`harness-and-framework.md`](harness-and-framework.md), [`how-it-works.md`](how-it-works.md)
+> - RAD docs: [`harness-and-framework.md`](../harness-and-framework.md), [`how-it-works.md`](../how-it-works.md)
 >
 > Companion: [`case-vs-rad.md`](case-vs-rad.md) — the same lens applied to WorkOS
 > CASE, RAD's closest sibling *system* (originally a section of this doc).
