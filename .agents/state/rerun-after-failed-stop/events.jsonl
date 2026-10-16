@@ -7,3 +7,4 @@
 {"feature":"rerun-after-failed-stop","type":"wave-started","actor":"harness","ts":"2026-10-16T20:41:49.673Z","data":{"wave":2,"attempt":1}}
 {"feature":"rerun-after-failed-stop","type":"wave-attempt","actor":"harness","ts":"2026-10-16T20:52:20.414Z","data":{"wave":2,"attempt":1,"outcome":"success","usage":{"input":10,"output":1479,"total":207505,"cacheRead":175537,"cacheWrite":30479,"cost":0.1542797},"tasks":[{"title":"Document the recovery path","status":"complete","commit":"fa23642","concern":"—","error":"—"}],"verify":{"command":"exec bash scripts/verify-all.sh","status":0,"passed":true}}}
 {"feature":"rerun-after-failed-stop","type":"wave-complete","actor":"harness","ts":"2026-10-16T20:52:20.416Z","data":{"wave":2}}
+{"feature":"rerun-after-failed-stop","type":"pr-opened","actor":"harness","ts":"2026-10-16T20:52:29.670Z"}
