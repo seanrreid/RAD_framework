@@ -13,6 +13,9 @@ import { pathToFileURL } from 'node:url';
 
 const CLAUDE_BIN = 'claude';
 const BASE_ARGS = ['-p', '--output-format', 'json'];
+const PERMISSION_MODE_FLAG = '--permission-mode';
+/** Matches the SDK adapter: edits are auto-approved, shell commands are not. */
+const DEFAULT_PERMISSION_MODE = 'acceptEdits';
 const RESULT_TYPE = 'result';
 const USAGE_PREFIX = 'RAD_USAGE ';
 /** Largest CLI output the wrapper will buffer (the prompt may be large; answers rarely are). */
@@ -78,9 +81,17 @@ export function renderOutput(parsed) {
   return head + text + (text.endsWith('\n') ? '' : '\n');
 }
 
+/** The default permission-mode args, or none when the caller already chose a mode. */
+export function defaultPermissionArgs(argv) {
+  const callerSet = argv.some(
+    (a) => a === PERMISSION_MODE_FLAG || a.startsWith(`${PERMISSION_MODE_FLAG}=`),
+  );
+  return callerSet ? [] : [PERMISSION_MODE_FLAG, DEFAULT_PERMISSION_MODE];
+}
+
 /** Run the CLI with the prompt on stdin; no shell, argument array only. */
 function runCli(args, prompt) {
-  return spawnSync(CLAUDE_BIN, [...BASE_ARGS, ...args], {
+  return spawnSync(CLAUDE_BIN, [...BASE_ARGS, ...defaultPermissionArgs(args), ...args], {
     input: prompt,
     maxBuffer: MAX_BUFFER_BYTES,
     stdio: ['pipe', 'pipe', 'pipe'],
