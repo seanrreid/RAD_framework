@@ -1204,6 +1204,30 @@ in worktree mode (the default). `rad stop-status <feature>` shows whether a run 
 resumable. See [`rad-wave-contract.md`](./rad-wave-contract.md#resuming-a-stopped-run)
 for the prompt block and cap interaction.
 
+#### Rerunning after a failed stop
+
+A `failed` stop is not resumable, and worktree mode keeps its worktree, so a plain
+`rad deliver <feature>` rerun is refused (exit **2**) while that preserved
+worktree still holds the work branch. When exactly one worktree holds the branch
+and its marker names this feature with status `preserved`, the refusal names the
+directory and the way out:
+
+```bash
+scripts/worktree-lifecycle.sh remove <feature> <dir>
+node harness/cli.js deliver <feature>
+```
+
+If the removal is refused because the worktree has uncommitted changes,
+`git worktree remove --force <dir>` discards them — the partial work is lost, so
+check it first. Then rerun.
+
+A holder with no marker, another feature's marker, an `active` or malformed marker,
+or more than one holder keeps the generic `already checked out in another
+worktree` refusal with no removal advice: RAD does not own that worktree.
+`--resume` is for `needs-decision` stops only; on a `failed` stop it is refused as
+`cannot resume a failed stop` and points here: fix the cause, remove any preserved
+worktree, and rerun `rad deliver` without `--resume`.
+
 #### Cost & frugality (optional)
 
 Two optional, fully backward-compatible knobs keep a deliver from over-spending.

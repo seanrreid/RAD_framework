@@ -1194,6 +1194,7 @@ test('deliver --resume AC#4 — worktree mode: a failed stop on the branch tip i
     });
     assert.equal(code, 2, `expected exit 2; stderr:\n${stderr}`);
     assert.match(stderr, /cannot resume a failed stop \(abort-scope\): fix the scope/);
+    assert.match(stderr, /a failed stop is not resumed; fix the cause, remove any preserved worktree, and rerun `rad deliver` without `--resume`/);
   });
 });
 

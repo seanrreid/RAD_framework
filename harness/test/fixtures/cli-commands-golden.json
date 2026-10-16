@@ -2051,7 +2051,7 @@
     "output": [
       {
         "stream": "stderr",
-        "text": "rad deliver: cannot resume a failed stop (fail-scope): wave 1: fail-scope — the work is wrong for the plan; fix the plan or the code and re-run\n"
+        "text": "rad deliver: cannot resume a failed stop (fail-scope): wave 1: fail-scope — the work is wrong for the plan; fix the plan or the code and re-run — a failed stop is not resumed; fix the cause, remove any preserved worktree, and rerun `rad deliver` without `--resume`\n"
       }
     ],
     "events": "{\"feature\":\"stop-feature\",\"type\":\"approved\",\"actor\":\"architect@example.com\",\"role\":\"architect\",\"ts\":\"<TS>\",\"data\":{\"fingerprint\":\"<SHA>\"}}\n{\"feature\":\"stop-feature\",\"type\":\"deliver-stopped\",\"actor\":\"dev@example.com\",\"ts\":\"<TS>\",\"data\":{\"class\":\"failed\",\"reason\":\"fail-scope\",\"decision\":\"wave 1: fail-scope — the work is wrong for the plan; fix the plan or the code and re-run\"}}\n",
@@ -2619,7 +2619,7 @@
       "output": [
         {
           "stream": "stderr",
-          "text": "rad deliver: cannot resume a failed stop (fail-scope): wave 1: fail-scope — the work is wrong for the plan; fix the plan or the code and re-run\n"
+          "text": "rad deliver: cannot resume a failed stop (fail-scope): wave 1: fail-scope — the work is wrong for the plan; fix the plan or the code and re-run — a failed stop is not resumed; fix the cause, remove any preserved worktree, and rerun `rad deliver` without `--resume`\n"
         }
       ]
     },
