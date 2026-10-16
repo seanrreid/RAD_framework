@@ -1,7 +1,10 @@
 # Plan: Permission Refusal as Its Own Stop
 Created: 2026-10-16
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-10-16T19:10:41.141Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/permission-refusal-stop
 Issue: 287
 Adopted-From: https://github.com/seanrreid/RAD_framework/issues/287
