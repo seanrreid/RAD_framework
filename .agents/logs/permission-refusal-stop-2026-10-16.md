@@ -5,3 +5,4 @@ Branch: rad/permission-refusal-stop
 ## Steps
 | 1 | Wave 1 | Wrapper emits RAD_DENIALS | ✓ complete | 3e38782 | 19:31:08Z |
 | 2 | Wave 1 | Adapter extracts denials | ✓ complete | 05e68e3 | 19:32:08Z |
+| 3 | Wave 2 | The permission-denied stop | ✓ complete | 9fcce5a | 19:32:53Z |
