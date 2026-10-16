@@ -65,6 +65,14 @@ export const STOP_TABLE = Object.freeze({
     class: FAILED,
     decision: 'test files still missing after the test wave: {detail}; write them on the branch and re-run rad deliver',
   }),
+  // Agent CLI refused a tool/path the attempt needed and the outcome did not
+  // advance (raised by the spine, not the matrix). Deterministic until the
+  // permission configuration changes, so FAILED. `{detail}` names each denial.
+  'permission-denied': Object.freeze({
+    class: FAILED,
+    decision:
+      "permission refused: {detail}; grant it in the agent's permission configuration (e.g. --permission-mode / --allowedTools in the command) and re-run",
+  }),
   'token-budget': Object.freeze({
     class: NEEDS_DECISION,
     decision: 'token budget {budget} reached (spent {spent}); raise RAD_TOKEN_BUDGET or stop',

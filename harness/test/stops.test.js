@@ -205,3 +205,17 @@ test('null / non-object input throws', () => {
     assert.throws(() => classifyStop(bad), /classifyStop: unknown result/);
   }
 });
+
+test('permission-denied is FAILED, names the denial and points at the permission config', () => {
+  const r = classifyStop({
+    stopped: 'permission-denied', ok: false, wave: 2, detail: 'Bash /tmp/x', reason: 'permission-denied',
+  });
+  assert.equal(r.class, 'failed');
+  assert.equal(r.reason, 'permission-denied');
+  assert.match(r.decision, /permission refused: Bash \/tmp\/x;/);
+  assert.match(r.decision, /--allowedTools/);
+});
+
+test('permission-denied with no detail renders unknown, never undefined', () => {
+  assert.match(classifyStop({ stopped: 'permission-denied' }).decision, /permission refused: unknown;/);
+});

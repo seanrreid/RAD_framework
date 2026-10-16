@@ -615,11 +615,34 @@ function appendWaveStarted({ state, feature, now, wave, attempt, waveModels, wav
   });
 }
 
+/** True when the agent result carries at least one permission denial. */
+function hasDenials(result) {
+  return Array.isArray(result.denials) && result.denials.length > 0;
+}
+
+/** Cap on one denial field in the stop detail (adapter data is agent-influenced). */
+const MAX_DENIAL_FIELD = 200;
+// eslint-disable-next-line no-control-regex
+const CONTROL_CHARS = /[\u0000-\u001f\u007f]/g;
+
+function denialField(value) {
+  return typeof value === 'string' ? value.replace(CONTROL_CHARS, ' ').slice(0, MAX_DENIAL_FIELD) : '';
+}
+
+/** `tool path; tool path` — each denied tool and path, sanitized and capped. */
+function denialDetail(denials) {
+  return denials
+    .map((d) => [denialField(d?.tool), denialField(d?.path)].filter(Boolean).join(' '))
+    .filter(Boolean)
+    .join('; ') || 'unknown';
+}
+
 /**
  * Build a `wave-attempt` event's data. `attempt` is always recorded;
  * `fingerprint` (the digest the doom-loop compares) only when `print` is set,
  * i.e. the resolved action was retry/revision; `permissions` (the acp adapter's
- * permission decisions) only when `result.permissions` is a non-empty array.
+ * permission decisions) only when `result.permissions` is a non-empty array;
+ * `denials` (the command adapter's refused tool/paths) likewise.
  * Optional keys are spread, never present-and-undefined. Post-wave veto
  * provenance keeps its prior shape.
  */
@@ -627,8 +650,9 @@ function attemptData({ wave, attempt, outcome, result, evidence, vetoSource, pri
   const printEvidence = print ? { fingerprint: print } : {};
   const hasPermissions = Array.isArray(result.permissions) && result.permissions.length > 0;
   const permissions = hasPermissions ? { permissions: result.permissions } : {};
+  const denials = hasDenials(result) ? { denials: result.denials } : {};
   const base = {
-    wave: wave.n, attempt, outcome, usage: result.usage, ...evidence, ...printEvidence, ...permissions,
+    wave: wave.n, attempt, outcome, usage: result.usage, ...evidence, ...printEvidence, ...permissions, ...denials,
   };
   return vetoSource
     ? { ...base, source: 'hook', point: vetoSource.point, hook: vetoSource.hook }
@@ -1071,6 +1095,15 @@ function retryOrStop(wave, loop, attempt, rec, run, result) {
   return null;
 }
 
+/** Stop at once on permission denials; the attempt is already on the log. */
+function permissionDeniedStop(wave, loop, denials) {
+  const detail = denialDetail(denials);
+  return stopRun(
+    { stopped: 'permission-denied', ok: false, wave: wave.n, detail, reason: 'permission-denied' },
+    loop.stopCtx,
+  );
+}
+
 /** Budget exhausted without an advance (and without a doom-loop trip).
  * ── Hook: on-error (observe-only), fired at this wave-failed terminal. */
 function exhaustedStop(wave, loop) {
@@ -1130,6 +1163,9 @@ async function runOneWave(wave, loop) {
       { state, feature, now },
     );
     if (rec.action === 'advance') return advanceWave(wave, loop, rec.outcome);
+    // A non-advancing attempt that the agent CLI says was refused permission:
+    // retrying cannot succeed, so stop before the retry/doom-loop paths.
+    if (hasDenials(ran.result)) return permissionDeniedStop(wave, loop, ran.result.denials);
     const stopped = retryOrStop(wave, loop, attempt, rec, run, ran.result);
     if (stopped) return stopped;
   }
