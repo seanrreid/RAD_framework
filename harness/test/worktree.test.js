@@ -1078,8 +1078,39 @@ test('deliver: no --resume while this feature\'s preserved worktree holds the br
     });
 
     assert.equal(code, 2);
-    assert.ok(stderr.includes(HELD_REFUSAL), stderr);
+    assert.ok(stderr.includes(`scripts/worktree-lifecycle.sh remove ${FEATURE} '${worktreeDir}'`), stderr);
+    assert.ok(stderr.includes(worktreeDir), stderr);
+    assert.match(stderr, /rerun rad deliver/);
+    assert.ok(stderr.includes(`git worktree remove --force '${worktreeDir}'`), stderr);
+    assert.match(stderr, /uncommitted changes/);
     assert.equal(sh.lifecycle.length, 0);
     assert.equal(readMarkerFile(worktreeDir), before, 'never reactivated without --resume');
   });
 });
+
+for (const { name, marker, holders } of [
+  { name: 'an active marker', marker: { feature: FEATURE, status: 'active' }, holders: 1 },
+  { name: 'another feature\'s marker', marker: { feature: 'other-feature', status: 'preserved' }, holders: 1 },
+  { name: 'no marker', marker: null, holders: 1 },
+  { name: 'a malformed marker', marker: '{ not json', holders: 1 },
+  { name: 'two holders', marker: { feature: FEATURE, status: 'preserved' }, holders: 2 },
+]) {
+  test(`deliver: ${name} without --resume → exit 2 with the generic refusal, no removal advice`, async () => {
+    await withTempDirs(async (repoRoot, worktreeDir) => {
+      writeApprovedPlan(worktreeDir, FEATURE);
+      if (typeof marker === 'string') writeFileSync(join(worktreeDir, '.rad-worktree.json'), marker);
+      else if (marker) writeMarker(worktreeDir, marker);
+      const dirs = holders === 2 ? [worktreeDir, '/elsewhere/wt'] : [worktreeDir];
+      const sh = makeDeliverSh({ worktreeList: porcelainHolding(repoRoot, dirs) });
+
+      const { code, stderr } = await runCaptured({
+        worktree: undefined, repoRoot, sh, runWave: async () => ({ outcome: 'success' }),
+      });
+
+      assert.equal(code, 2, stderr);
+      assert.ok(stderr.includes(`${HELD_REFUSAL} (${dirs.join(', ')}) — see \`git worktree list\`; remove that worktree or check out another branch there, then re-run\n`), stderr);
+      assert.doesNotMatch(stderr, /worktree-lifecycle\.sh|--force/);
+      assert.equal(sh.lifecycle.length, 0);
+    });
+  });
+}

@@ -290,6 +290,9 @@ const WAVE_TIMEOUT_ENV = 'RAD_WAVE_TIMEOUT_SECONDS';
 const POSITIVE_INTEGER_PATTERN = /^[1-9][0-9]*$/;
 /** Exit code for a malformed deliver configuration value. */
 const USAGE_EXIT_CODE = 2;
+/** Appended to the failed-stop --resume refusal: the way out is a fresh run. */
+const FAILED_STOP_RESUME_HINT =
+  ' — a failed stop is not resumed; fix the cause, remove any preserved worktree, and rerun `rad deliver` without `--resume`';
 /** Exit code for a deliver stop a human can lift (#77 `needs-decision`). */
 const NEEDS_DECISION_EXIT_CODE = 3;
 /** Exit code for a deliver stop showing the work is wrong (#77 `failed`). */
@@ -1287,18 +1290,54 @@ function releaseMainCheckout({ workBranch, repoRoot, sh }) {
  *
  * @returns {{ code: number } | null}
  */
-function ensureBranchFree({ workBranch, repoRoot, sh }) {
+function ensureBranchFree({ feature, workBranch, repoRoot, sh, worktree }) {
   const head = mainGit(sh, repoRoot, ['rev-parse', '--abbrev-ref', 'HEAD']).trim();
   if (head === workBranch) return releaseMainCheckout({ workBranch, repoRoot, sh });
   const holders = worktreesOnBranch(mainGit(sh, repoRoot, ['worktree', 'list', '--porcelain']), workBranch);
   if (holders.length > 0) {
-    process.stderr.write(
-      `rad deliver: ${workBranch} is already checked out in another worktree (${holders.join(', ')}) — ` +
-      'see `git worktree list`; remove that worktree or check out another branch there, then re-run\n',
-    );
+    const owned = holders.length === 1 && ownedPreservedWorktree(feature, holders[0], worktree).owned;
+    process.stderr.write(owned ? preservedHolderRefusal(feature, workBranch, holders[0]) : genericHolderRefusal(workBranch, holders));
     return { code: USAGE_EXIT_CODE };
   }
   return null;
+}
+
+function genericHolderRefusal(workBranch, holders) {
+  return `rad deliver: ${workBranch} is already checked out in another worktree (${holders.join(', ')}) — ` +
+    'see `git worktree list`; remove that worktree or check out another branch there, then re-run\n';
+}
+
+/** Removal guidance for a worktree RAD owns: its marker names this feature, status preserved. */
+function preservedHolderRefusal(feature, workBranch, dir) {
+  const quoted = shellQuote(dir);
+  return `rad deliver: ${workBranch} is already checked out in the preserved worktree of a stopped run (${dir}) — ` +
+    `remove it from the main checkout, then rerun rad deliver:\n` +
+    `  scripts/worktree-lifecycle.sh remove ${feature} ${quoted}\n` +
+    'if the removal is refused because the worktree has uncommitted changes, ' +
+    `\`git worktree remove --force ${quoted}\` discards them\n`;
+}
+
+/** Single-quote a path for safe pasting into a shell command. */
+function shellQuote(value) {
+  return `'${String(value).replace(/'/g, `'\\''`)}'`;
+}
+
+/**
+ * Whether `holder`'s marker names this feature with status preserved. Fail
+ * closed: a read error is "not owned", returned as `error` for the caller to
+ * report or ignore.
+ *
+ * @returns {{ owned: boolean, error: string|null }}
+ */
+function ownedPreservedWorktree(feature, holder, worktree) {
+  let marker;
+  try {
+    marker = worktree.readMarker(holder);
+  } catch (err) {
+    return { owned: false, error: sanitizeErrorMessage(err?.message ?? String(err)) };
+  }
+  const owned = marker !== null && marker.feature === feature && marker.status === STATUS_PRESERVED;
+  return { owned, error: null };
 }
 
 /**
@@ -1314,16 +1353,12 @@ function findReusableWorktree({ feature, workBranch, repoRoot, sh, worktree }) {
   const holders = worktreesOnBranch(mainGit(sh, repoRoot, ['worktree', 'list', '--porcelain']), workBranch);
   if (holders.length !== 1) return null;
   const [holder] = holders;
-  let marker;
-  try {
-    marker = worktree.readMarker(holder);
-  } catch (err) {
-    const safe = sanitizeErrorMessage(err?.message ?? String(err));
-    process.stderr.write(`rad deliver: cannot reuse the worktree at ${holder} — ${safe}\n`);
+  const { owned, error } = ownedPreservedWorktree(feature, holder, worktree);
+  if (error !== null) {
+    process.stderr.write(`rad deliver: cannot reuse the worktree at ${holder} — ${error}\n`);
     return null;
   }
-  const reusable = marker !== null && marker.feature === feature && marker.status === STATUS_PRESERVED;
-  return reusable ? holder : null;
+  return owned ? holder : null;
 }
 
 /**
@@ -1372,7 +1407,7 @@ function prepareWorktreeRoot({ feature, repoRoot, sh, resume = null }) {
       ? findReusableWorktree({ feature, workBranch, repoRoot, sh, worktree })
       : null;
     if (reusable) return reuseWorktree({ dir: reusable, worktree, workBranch });
-    const blocked = ensureBranchFree({ workBranch, repoRoot, sh });
+    const blocked = ensureBranchFree({ feature, workBranch, repoRoot, sh, worktree });
     if (blocked) return blocked;
     return { root: worktree.create(feature, workBranch), worktree, workBranch };
   } catch (err) {
@@ -1555,7 +1590,7 @@ function resolveResume({ resume, context, feature, repoRoot, sh }) {
   const stop = latestStop(read.history);
   if (stop == null) return { refusal: `nothing to resume: ${feature} has no deliver-stopped event` };
   if (stop.class === STOP_CLASSES.FAILED) {
-    return { refusal: `cannot resume a failed stop (${stop.reason}): ${stop.decision}` };
+    return { refusal: `cannot resume a failed stop (${stop.reason}): ${stop.decision}${FAILED_STOP_RESUME_HINT}` };
   }
   const recordedBy = gitUserEmail(repoRoot, sh);
   if (!isNonEmpty(recordedBy)) return { refusal: 'cannot resolve git user.email for run-resumed.recordedBy' };
