@@ -944,7 +944,8 @@ Reading the output:
 - **`load[*]`** — one row per deliver merge, oldest first: `pr`, `files`,
   `linesChanged` (binary files count 0) and `openedToMergeMs` (last `pr-opened` event
   → the merge commit's committer date). `null` means an endpoint is missing or the
-  span runs backwards — render it as "n/a", never as 0. Rows with `merged: false`
+  span runs backwards — render it as "n/a", never as 0. `pr` is also `null` on a
+  merged row whose commit subject carries no `(#N)`. Rows with `merged: false`
   opened a PR that has no merge on the default branch yet.
 - **`rework[*]`** — `rate` (`reworkedFiles / files`; `null` when the merge changed no
   product files), `reworkCommits`, `weightedRework` (each rework touch weighted
@@ -1246,10 +1247,12 @@ Reporting only — no target or threshold applies to these values.
 [From Step 4i. Omit this section entirely if noMerges is true or Step 4i exited
  non-zero (then say why in one line).]
 Rework window: [windowDays] days (RAD_REWORK_WINDOW_DAYS, default 14)
-[Table of the most recent 10 deliver merges, newest first; render null as "n/a":]
+[Table of the most recent 10 deliver merges, newest first; render null as "n/a".
+ Join `load` and `rework` rows on `feature`; Rework rate and Reworked / files come
+ from `rework` (product files only), Files / lines from `load` (every file in the merge).]
 | Feature | PR | Rework rate | Reworked / files | Weighted | Window complete | Files / lines | Opened→merged |
 |---------|----|-------------|------------------|----------|-----------------|---------------|---------------|
-| [feature] | #[pr] | [rate as %] | [reworkedFiles]/[files] | [weightedRework, 2 dp] | [yes/no] | [files] / [linesChanged] | [duration] |
+| [feature] | [#load.pr, or "n/a" when null] | [rework.rate as %] | [rework.reworkedFiles]/[rework.files] | [rework.weightedRework, 2 dp] | [rework.windowComplete: yes/no] | [load.files] / [load.linesChanged] | [load.openedToMergeMs as duration] |
 Trends (older half vs newer half):
 - Rework rate: [arrow] (n=[n], complete windows only)
 - PR size (lines): [arrow] (n=[n])
