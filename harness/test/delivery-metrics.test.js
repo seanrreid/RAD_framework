@@ -138,6 +138,17 @@ test('reworkRate: a later deliver merge is excluded only for its own scoped file
   assert.equal(row.reworkCommits, 1);
 });
 
+test('reworkRate: a planned rename is not rework, but a later edit of the renamed file is', () => {
+  const later = merge({ feature: 'g', sha: 'm2', mergedAt: at(2), files: [file('a2.js')], scopedFiles: ['a.js', 'a2.js'] });
+  const commits = [
+    commit('m2', 2, [touch('a2.js', 'R100', 'a.js')], { isDeliver: true, feature: 'g' }),
+    commit('c1', 4, [touch('a2.js')]),
+  ];
+  const row = reworkRate([merge({ files: [file('a.js')] }), later], commits, OPTS)[0];
+  assert.equal(row.reworkedFiles, 1);
+  assert.equal(row.reworkCommits, 1);
+});
+
 test('reworkRate: .agents/ paths are excluded from the file set', () => {
   const files = [file('a.js'), file('.agents/plans/f.md'), file('.agents/state/f/events.jsonl')];
   const row = only(reworkRate([merge({ files })], [commit('c1', 1, [touch('.agents/plans/f.md')])], OPTS));

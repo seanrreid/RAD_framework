@@ -73,6 +73,18 @@ test('readDeliveryHistory: a missing default branch in a non-empty repo throws w
   });
 });
 
+test('readDeliveryHistory: a log record with no header terminator throws instead of parsing garbage', () => {
+  // rev-parse succeeds; `git log` returns a record missing the \x03 header terminator.
+  const truncated = '\x01abc123\x02\x022026-10-16T00:00:00Z\x02Deliver: x (#1)\x02body with no terminator';
+  const sh = (_cmd, args) => (args[0] === 'rev-parse'
+    ? { status: 0, stdout: 'abc123\n', stderr: '' }
+    : { status: 0, stdout: truncated, stderr: '' });
+  assert.throws(
+    () => readDeliveryHistory({ root: tmpdir(), sh, defaultBranch: BASE }),
+    /malformed git log record \(no header terminator\): "abc123/,
+  );
+});
+
 test('readDeliveryHistory: squash deliver merge yields a merge record with numstat and scope', () => {
   withRepo((root) => {
     const sha = squashDeliver(root, 'alpha', 12, { 'a.js': 'x\ny\n', 'shared.js': 'one\ntwo\n' }, ['a.js', 'shared.js']);

@@ -27,7 +27,8 @@ const RECORD = '\x01';
 const FIELD = '\x02';
 const HEADER_END = '\x03';
 const LOG_FORMAT = `--format=${RECORD}%H${FIELD}%P${FIELD}%cI${FIELD}%s${FIELD}%b${HEADER_END}`;
-const LOG_BASE = ['log', '--first-parent', '--diff-merges=first-parent', '-M', '-z', LOG_FORMAT];
+const MALFORMED_PREVIEW_CHARS = 40;
+const LOG_BASE =['log', '--first-parent', '--diff-merges=first-parent', '-M', '-z', LOG_FORMAT];
 
 const SLUG = '[a-z0-9][a-z0-9-]*';
 const DELIVER_SUBJECT = /^Deliver:/;
@@ -55,6 +56,9 @@ function branchExists(sh, root, branch) {
 function parseLog(out) {
   return out.split(RECORD).filter((r) => r !== '').map((record) => {
     const end = record.indexOf(HEADER_END);
+    if (end === -1) {
+      throw new Error(`delivery-history: malformed git log record (no header terminator): ${JSON.stringify(record.slice(0, MALFORMED_PREVIEW_CHARS))}`);
+    }
     const [sha, parents, date, subject, body] = record.slice(0, end).split(FIELD);
     // -z puts a NUL and a newline between the header and the first diff entry.
     const tokens = record.slice(end + 1).replace(/^[\0\n]+/, '').split('\0').filter((t) => t !== '');
