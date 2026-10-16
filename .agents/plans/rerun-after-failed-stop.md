@@ -1,7 +1,7 @@
 # Plan: Rerun After a Failed Stop Names the Way Out
 Created: 2026-10-16
 Author: architect
-Status: approved
+Status: in-progress
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-10-16T20:39:26.731Z
 Recorded-By: sean@torchcodelab.com
