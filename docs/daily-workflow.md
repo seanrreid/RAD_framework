@@ -409,6 +409,10 @@ patterns across cycles:
 - Which files attract the most findings
 - Whether HIGH findings per cycle are trending up or down over time
 - What to address systematically vs. what was a one-off
+- Post-merge rework rate per delivered feature (how many of its files needed a
+  fix within `RAD_REWORK_WINDOW_DAYS`, default 14) and Gate-2 load (deliver-PR
+  size and time from PR opened to merged), as trends — information only, with
+  no thresholds
 
 Optionally filter to a recent window:
 

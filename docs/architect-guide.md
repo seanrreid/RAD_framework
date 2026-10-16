@@ -292,6 +292,10 @@ Every `/team:rad-review` run appends structured findings to `.agents/findings.js
 - **Trajectory** — HIGH findings per cycle trending down means the team is
   improving; trending up means something changed (new contributor, new domain,
   new framework)
+- **Rework and Gate-2 load** — your own verification load: deliver-PR size and
+  the time each PR waited for your merge, alongside how often a delivered
+  feature's files needed a fix soon after merge. These are read from plain git
+  and are information only — no threshold applies, and nothing gates on them
 
 Run this monthly or after any stretch of rapid delivery. The output gives you
 a concrete agenda for retros and 1:1s — rooted in actual review data, not anecdote.
