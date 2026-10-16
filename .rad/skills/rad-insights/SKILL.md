@@ -895,9 +895,81 @@ Reading the output:
 These values are reporting only. They set no target or threshold, and nothing
 reads them to block, warn or gate a command.
 
+### Step 4i: Post-merge rework and Gate-2 verification load
+
+Post-merge rework rate and Gate-2 verification load per delivered feature come from
+plain git history on the default branch (`readDeliveryHistory` in
+`harness/delivery-history.js`) and the pure folds in `harness/delivery-metrics.js`
+(`verificationLoad`, `reworkRate`, `trend`, `resolveWindowDays`). Import them; never
+re-implement them in jq or shell. What counts as rework is a policy decision
+documented in that module's header. The reader uses the **local** default branch,
+so update it first (`git fetch` and fast-forward it) for current numbers. Run from
+the repo root:
+
+```bash
+DEFAULT_BRANCH=$(node harness/cli.js config get default_branch) || { echo "rework/load: cannot resolve default_branch" >&2; exit 1; }
+DEFAULT_BRANCH="$DEFAULT_BRANCH" node --input-type=module -e '
+import { readFileSync, readdirSync, existsSync } from "node:fs";
+import { join } from "node:path";
+const { readDeliveryHistory } = await import("./harness/delivery-history.js");
+const { verificationLoad, reworkRate, trend, resolveWindowDays } =
+  await import("./harness/delivery-metrics.js");
+
+const stateDir = process.env.RAD_STATE_DIR || ".agents/state";
+const histories = {};
+if (existsSync(stateDir)) {
+  for (const d of readdirSync(stateDir, { withFileTypes: true })) {
+    const log = join(stateDir, d.name, "events.jsonl");
+    if (!d.isDirectory() || !existsSync(log)) continue;
+    histories[d.name] = readFileSync(log, "utf8")
+      .split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  }
+}
+
+const { merges, commits, unresolved } =
+  readDeliveryHistory({ root: process.cwd(), defaultBranch: process.env.DEFAULT_BRANCH });
+const windowDays = resolveWindowDays(process.env);
+const load = verificationLoad(merges, histories);
+const rework = reworkRate(merges, commits, { windowDays, now: Date.now() });
+const merged = load.filter((r) => r.merged);
+const trends = {
+  reworkRate: trend(rework.filter((r) => r.windowComplete).map((r) => r.rate)),
+  prSize: trend(merged.map((r) => r.linesChanged)),
+  reviewLatency: trend(merged.map((r) => r.openedToMergeMs)),
+};
+console.log(JSON.stringify({ noMerges: merges.length === 0, windowDays, unresolved,
+  load, rework, trends }, null, 2));
+'
+```
+
+A non-zero exit (git or `plan_scope_paths` failed) is reported with its stderr and
+the section is omitted. It never stops the rest of the report.
+
+Reading the output:
+
+- **`load[*]`** — one row per deliver merge, oldest first: `pr`, `files`,
+  `linesChanged` (binary files count 0) and `openedToMergeMs` (last `pr-opened` event
+  → the merge commit's committer date). `null` means an endpoint is missing or the
+  span runs backwards — render it as "n/a", never as 0. Rows with `merged: false`
+  opened a PR that has no merge on the default branch yet.
+- **`rework[*]`** — `rate` (`reworkedFiles / files`; `null` when the merge changed no
+  product files), `reworkCommits`, `weightedRework` (each rework touch weighted
+  `1 − age/window`, so an early fix counts more) and `windowComplete` (`false` while
+  the merge is younger than the window — its rate can still rise).
+- **`trends`** — `reworkRate` uses only complete windows; `prSize` uses
+  `linesChanged`; `reviewLatency` uses `openedToMergeMs`. Each is `{arrow, n}`:
+  older-half mean vs newer-half mean, no floor and no tolerance. Always show `n`.
+- **`windowDays`** — from `RAD_REWORK_WINDOW_DAYS`, default 14.
+- **`unresolved`** — deliver merges whose feature slug could not be read from the
+  commit; they are counted, never guessed.
+- **`noMerges: true`** — no deliver merge on the default branch; omit the section.
+
+These values are reporting only. They set no target or threshold, and nothing
+reads them to block, warn or gate a command.
+
 ### Step 5: Synthesize and output report
 
-Using the data from Steps 3–4h, write the following report. Populate each section
+Using the data from Steps 3–4i, write the following report. Populate each section
 with real numbers and real pattern names — do not leave placeholders.
 
 ```markdown
@@ -1176,6 +1248,23 @@ Mean: [tokens.mean, or "n/a" when null]
 [Framing — render verbatim under the list:]
 Reporting only — no target or threshold applies to these values.
 
+### Rework and Gate-2 Load
+[From Step 4i. Omit this section entirely if noMerges is true or Step 4i exited
+ non-zero (then say why in one line).]
+Rework window: [windowDays] days (RAD_REWORK_WINDOW_DAYS, default 14)
+[Table of the most recent 10 deliver merges, newest first; render null as "n/a":]
+| Feature | PR | Rework rate | Reworked / files | Weighted | Window complete | Files / lines | Opened→merged |
+|---------|----|-------------|------------------|----------|-----------------|---------------|---------------|
+| [feature] | #[pr] | [rate as %] | [reworkedFiles]/[files] | [weightedRework, 2 dp] | [yes/no] | [files] / [linesChanged] | [duration] |
+Trends (older half vs newer half):
+- Rework rate: [arrow] (n=[n], complete windows only)
+- PR size (lines): [arrow] (n=[n])
+- Review latency: [arrow] (n=[n])
+[If any load row has merged: false:] Open, not yet merged: [features]
+[If unresolved > 0:] [unresolved] deliver merge(s) could not be tied to a feature.
+[Framing — render verbatim under the trends:]
+Reporting only — no target or threshold applies to these values.
+
 ### Recommended Focus Areas
 [Top 2–3 patterns that are both frequent and high-severity. Each as one sentence:
  "Address [category] — appears in [N] cycles ([%]) and always blocks architect review."]
@@ -1211,6 +1300,10 @@ Reporting only — no target or threshold applies to these values.
   CLAUDE.md or scripts/lint-plan.sh from this skill; every block must carry the
   "Suggestion — apply via PR; never auto-applied" framing
 - RAD_FINDINGS_THRESHOLD parses via Number.parseInt; unset/0/NaN/negative → default 5
+- Rework and Gate-2 load (Step 4i) MUST come from `readDeliveryHistory` and the folds in
+  `harness/delivery-metrics.js`; they are information only — never read to block, warn
+  or gate, never turned into a target, and never a Recommended Focus Area on their own
+- RAD_REWORK_WINDOW_DAYS parses via Number.parseInt; unset/0/NaN/negative → default 14
 - The plan drafter (`--draft-plans`, `scripts/draft-insights-plan.sh`) runs ONLY when
   that flag is passed; it writes only the one plan doc and its new
   `rad/insights-proposals-<date>` branch — never pushes, never approves, never
