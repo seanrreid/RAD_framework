@@ -145,6 +145,13 @@ The `claude` CLI prints its token counts in `--output-format json`, not as a
 - **Transparent on failure** — if stdout is not a `result` object with a string
   `result`, the CLI's raw stdout and stderr are passed through unchanged with no
   `RAD_USAGE` line.
+- **Permission mode** — the wrapper adds `--permission-mode acceptEdits` unless
+  the forwarded arguments already carry `--permission-mode` (as `X` or `=X`).
+  Code, `AGENTS.md`, `CLAUDE.md` and `.rad/skills/**` become writable; `.claude/`
+  stays protected (generated output). Shell commands are not covered: forward
+  `--allowedTools "Bash(...)"` in the `command:` string. `lint-plan.sh` warns
+  (advisory, exit code unchanged) when a plan's Files in Scope names a path under
+  `.claude/`, pointing at the source under `.rad/`.
 
 A malformed, absent, or unparseable `tasks` block **degrades to omission of the
 key** — it is never a thrown error, and it never by itself produces

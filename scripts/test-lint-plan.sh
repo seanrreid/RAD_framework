@@ -221,6 +221,24 @@ t_exit_zero_invariance() {
 }
 
 # ── AC#2: self-protected path advisory fires unconditionally ────────────────────
+t_generated_output_advisory() {
+  local plan="$TMP/generated-output.md" baseline="$TMP/generated-baseline.md"
+  write_plan "$plan" "| .claude/commands/x.md | 1-2 | x |
+| docs/rad-cli.md | 1-2 | x |" "docs/rad-cli.md:1-10"
+  write_plan "$baseline" "| scripts/lint-plan.sh | 1-2 | x |
+| docs/rad-cli.md | 1-2 | x |" "docs/rad-cli.md:1-10"
+  run_lint "$baseline"
+  local base_code="$LINT_CODE"
+  printf '%s\n' "$LINT_OUT" | grep -q "Plan edits generated output directly" \
+    && fail "generated-output: scripts/ + docs rows wrongly warned"
+  run_lint "$plan"
+  printf '%s\n' "$LINT_OUT" | grep -q "Plan edits generated output directly: .claude/commands/x.md — edit the source under .rad/" \
+    || fail "generated-output: .claude/ row did not warn"
+  [[ "$LINT_CODE" -eq "$base_code" ]] \
+    || fail "generated-output: exit $LINT_CODE differs from baseline $base_code"
+  echo "✓ AC#4: .claude/ path warns (exit unchanged); scripts/ rows do not"
+}
+
 t_self_protected_advisory() {
   # harness/gates.js is real, on-disk, matches no high-risk default token, and
   # sits squarely in the self-protected set.
@@ -1535,4 +1553,5 @@ t_consistency_edge_cases
 t_capability_advisory
 t_issue_header
 t_last_wave_verify_advisory
+t_generated_output_advisory
 echo "ALL PASS"

@@ -84,10 +84,44 @@ scenario args
 printf '%s' "$JSON_OK" > "$FAKE_STDOUT"
 run_wrapper "$TMP/prompt.txt" --model sonnet --allowedTools "Edit Bash"
 expect_rc 0 "args"
-printf '%s\n' -p --output-format json --model sonnet --allowedTools "Edit Bash" > "$D/want"
+printf '%s\n' -p --output-format json --permission-mode acceptEdits --model sonnet --allowedTools "Edit Bash" > "$D/want"
 expect_same "$FAKE_ARGS_OUT" "$D/want" "forwarded arguments"
 expect_same "$FAKE_STDIN_OUT" "$TMP/prompt.txt" "prompt on stdin"
 pass "pass-through — arguments follow -p --output-format json; prompt reaches stdin"
+
+# ── permission mode: default acceptEdits unless the caller chose one ──────
+scenario permdefault
+printf '%s' "$JSON_OK" > "$FAKE_STDOUT"
+run_wrapper "$TMP/prompt.txt"
+expect_rc 0 "permission default"
+printf '%s\n' -p --output-format json --permission-mode acceptEdits > "$D/want"
+expect_same "$FAKE_ARGS_OUT" "$D/want" "default permission mode (no args)"
+expect_same "$FAKE_STDIN_OUT" "$TMP/prompt.txt" "prompt on stdin"
+pass "permission mode — acceptEdits applied by default with no arguments"
+
+scenario permspace
+printf '%s' "$JSON_OK" > "$FAKE_STDOUT"
+run_wrapper "$TMP/prompt.txt" --permission-mode plan
+expect_rc 0 "permission caller (space)"
+printf '%s\n' -p --output-format json --permission-mode plan > "$D/want"
+expect_same "$FAKE_ARGS_OUT" "$D/want" "caller --permission-mode plan"
+pass "permission mode — caller '--permission-mode plan' suppresses the default"
+
+scenario permequals
+printf '%s' "$JSON_OK" > "$FAKE_STDOUT"
+run_wrapper "$TMP/prompt.txt" --permission-mode=plan --model sonnet
+expect_rc 0 "permission caller (equals)"
+printf '%s\n' -p --output-format json --permission-mode=plan --model sonnet > "$D/want"
+expect_same "$FAKE_ARGS_OUT" "$D/want" "caller --permission-mode=plan"
+pass "permission mode — caller '--permission-mode=plan' suppresses the default"
+
+scenario permempty
+printf '%s' "$JSON_OK" > "$FAKE_STDOUT"
+run_wrapper "$TMP/empty.txt"
+expect_rc 0 "permission default (empty argv, empty prompt)"
+printf '%s\n' -p --output-format json --permission-mode acceptEdits > "$D/want"
+expect_same "$FAKE_ARGS_OUT" "$D/want" "default permission mode (empty argv)"
+pass "permission mode — empty argv still gets the default"
 
 # ── large prompt (> 1 MiB) and empty prompt ───────────────────────────────
 scenario large

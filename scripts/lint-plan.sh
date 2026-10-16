@@ -382,6 +382,17 @@ while IFS= read -r path; do
   fi
 done < <(plan_scope_paths "$PLAN_FILE")
 
+# ── Generated-output advisory ─────────────────────────────────────────────────
+# Over the same path union, warn (never error) for any path under .claude/:
+# that directory is generated from .rad/ sources, and the headless claude
+# preset cannot write it even under acceptEdits. WARNING only; exit unaffected.
+while IFS= read -r path; do
+  [[ -z "$path" ]] && continue
+  if [[ "$path" == .claude/* ]]; then
+    WARNINGS+=("Plan edits generated output directly: $path — edit the source under .rad/ and run rad generate (the headless claude preset cannot write .claude/ even under acceptEdits)")
+  fi
+done < <(plan_scope_paths "$PLAN_FILE")
+
 # ── Last-wave Verify advisory (#236) ──────────────────────────────────────────
 # Any plan whose last wave declares no `Verify:` (state `no`) or a bare
 # `Verify: none` (state `bare`) will be BLOCKED at approval (missing-verify, see
