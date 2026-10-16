@@ -305,6 +305,13 @@ set). With the wrapper, `RAD_TOKEN_BUDGET` counts input + output + cache creatio
 cache read tokens per wave, so a trivial call already costs about 27K; `cost` is
 reported separately and is not counted. See `docs/rad-wave-contract.md`.
 
+The wrapper passes `--permission-mode acceptEdits` unless the `command:` already
+forwards a `--permission-mode` of its own. Under `acceptEdits` code, `AGENTS.md`,
+`CLAUDE.md` and `.rad/skills/**` are writable, while `.claude/` stays protected
+(generated output, produced by `rad generate` from `.rad/`). Shell commands (tests,
+`rad generate`) are not covered; forward `--allowedTools "Bash(...)"` in the
+`command:` string to allow them.
+
 `RAD_MAX_FAILED_ATTEMPTS` (opt-in) stops deliver with `failed-attempt-cap` once the
 non-success wave-attempts since the latest `deliver-stopped` reach it; a malformed
 value (non-numeric, zero, negative) is a hard error — **exit 2** before any event.
