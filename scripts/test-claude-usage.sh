@@ -189,6 +189,62 @@ expect_rc 0 "non-string result"
 expect_same "$D/out" "$FAKE_STDOUT" "non-string result stdout"
 pass "result that is not a string — raw pass-through, no usage line"
 
+# ── permission denials: RAD_DENIALS after the usage line, before the text ──
+scenario denials
+cat > "$FAKE_STDOUT" <<'JSON'
+{"type":"result","is_error":false,"result":"Done.","usage":{"input_tokens":1,"output_tokens":2},"permission_denials":[{"tool_name":"Bash","tool_input":{"command":"rm -rf build"}},{"tool_name":"Edit","tool_input":{"file_path":"/etc/hosts"}},{"tool_name":"Read","tool_input":{"path":"/secret"}}]}
+JSON
+run_wrapper "$TMP/prompt.txt"
+expect_rc 0 "denials"
+printf 'RAD_USAGE {"input_tokens":1,"output_tokens":2,"total":3}\nRAD_DENIALS [{"tool":"Bash","path":"rm -rf build"},{"tool":"Edit","path":"/etc/hosts"},{"tool":"Read","path":"/secret"}]\nDone.\n' > "$D/want"
+expect_same "$D/out" "$D/want" "denials stdout"
+pass "permission denials — RAD_DENIALS line after RAD_USAGE, before the text"
+
+scenario denialsabsent
+cat > "$FAKE_STDOUT" <<'JSON'
+{"type":"result","is_error":false,"result":"Hello there.","total_cost_usd":0.5,"usage":{"input_tokens":10,"output_tokens":5,"cache_read_input_tokens":100,"cache_creation_input_tokens":20},"permission_denials":[]}
+JSON
+run_wrapper "$TMP/prompt.txt"
+expect_rc 0 "empty denials"
+printf '%s\nHello there.\n' "$EXPECTED_USAGE" > "$D/want"
+expect_same "$D/out" "$D/want" "empty denials stdout"
+printf '%s' '{"type":"result","is_error":false,"result":"Hello there.","total_cost_usd":0.5,"usage":{"input_tokens":10,"output_tokens":5,"cache_read_input_tokens":100,"cache_creation_input_tokens":20},"permission_denials":"nope"}' > "$FAKE_STDOUT"
+run_wrapper "$TMP/prompt.txt"
+expect_same "$D/out" "$D/want" "non-array denials stdout"
+pass "permission denials — empty or non-array: no line, output unchanged"
+
+scenario denialsmalformed
+printf '%s' '{"type":"result","is_error":false,"result":"ok","permission_denials":[null,42,"x",{},{"tool_name":7},{"tool_name":"Write","tool_input":{"file_path":"a\nb\u001b[31m"}}]}' > "$FAKE_STDOUT"
+run_wrapper "$TMP/prompt.txt"
+expect_rc 0 "malformed denial entries"
+printf 'RAD_DENIALS [{"tool":"Write","path":"a b [31m"}]\nok\n' > "$D/want"
+expect_same "$D/out" "$D/want" "malformed entries stdout"
+pass "permission denials — malformed entries dropped, control characters stripped"
+
+scenario denialsallbad
+printf '%s' '{"type":"result","is_error":false,"result":"ok","permission_denials":[null,{}]}' > "$FAKE_STDOUT"
+run_wrapper "$TMP/prompt.txt"
+printf 'ok\n' > "$D/want"
+expect_same "$D/out" "$D/want" "all-malformed denials stdout"
+pass "permission denials — only malformed entries: no line"
+
+scenario denialsmany
+"$NODE" -e '
+const d = Array.from({ length: 12 }, (_, i) => ({ tool_name: "T" + i, tool_input: { file_path: "p" + i } }));
+d[0].tool_input.file_path = "x".repeat(500);
+process.stdout.write(JSON.stringify({ type: "result", result: "ok", permission_denials: d }));
+' > "$FAKE_STDOUT"
+run_wrapper "$TMP/prompt.txt"
+expect_rc 0 "many denials"
+[ "$(grep -c '^RAD_DENIALS' "$D/out")" -eq 1 ] || fail "many denials: expected exactly one RAD_DENIALS line"
+"$NODE" -e '
+const fs = require("fs");
+const line = fs.readFileSync(process.argv[1], "utf8").split("\n").find((l) => l.startsWith("RAD_DENIALS "));
+const list = JSON.parse(line.slice("RAD_DENIALS ".length));
+if (list.length !== 10 || list[9].tool !== "T9" || list[0].path.length !== 200) process.exit(1);
+' "$D/out" || fail "many denials: expected 10 entries with the path capped at 200"
+pass "permission denials — capped at 10 entries, each string at 200 chars"
+
 # ── CLI not on PATH ────────────────────────────────────────────────────────
 scenario nocli
 run_wrapper_no_cli "$TMP/prompt.txt"

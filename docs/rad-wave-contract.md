@@ -124,6 +124,27 @@ RAD_USAGE {"input_tokens":10,"output_tokens":5,"cache_read_input_tokens":800,"co
 - **Malformed line** — unparseable JSON, or no usable `input` / `output` /
   `total`, is non-fatal: `usage` is omitted and the wave outcome is unaffected.
 
+### The `RAD_DENIALS` line (command adapter)
+
+A wrapper that learns the agent CLI refused tool calls (a permission denial) may
+print a single line on stdout, so the spine can stop at once instead of retrying
+a refusal that cannot succeed:
+
+```
+RAD_DENIALS [{"tool":"Bash","path":"git status"},{"tool":"Edit","path":"/repo/.claude/x.md"}]
+```
+
+- **Format** — the literal token `RAD_DENIALS`, whitespace, then one JSON array
+  on the same line (first match wins). It may appear anywhere in stdout.
+- **Entries** — each is `{tool, path}`; every string is capped at 200
+  characters and the array at 10 entries. An entry missing both fields is
+  dropped.
+- **Malformed line** — unparseable JSON or no usable entry is non-fatal: the
+  line is ignored, `result.denials` is omitted and nothing is thrown.
+- **Effect** — see the `permission-denied` row of the Stop contract. Denials
+  alone never stop a run: an attempt whose outcome still advances is unchanged.
+  The `wave-attempt` event for a stopped attempt records the denials.
+
 #### The `claude` wrapper (`scripts/claude-usage.mjs`)
 
 The `claude` CLI prints its token counts in `--output-format json`, not as a
@@ -145,6 +166,10 @@ The `claude` CLI prints its token counts in `--output-format json`, not as a
 - **Transparent on failure** — if stdout is not a `result` object with a string
   `result`, the CLI's raw stdout and stderr are passed through unchanged with no
   `RAD_USAGE` line.
+- **Denials** — when the CLI result carries a non-empty `permission_denials`
+  array, the wrapper prints `RAD_DENIALS {json}` after the `RAD_USAGE` line and
+  before the result text (at most 10 `{tool, path}` entries). With none or
+  malformed data no line is printed and the output is unchanged.
 - **Permission mode** — the wrapper adds `--permission-mode acceptEdits` unless
   the forwarded arguments already carry `--permission-mode` (as `X` or `=X`).
   Code, `AGENTS.md`, `CLAUDE.md` and `.rad/skills/**` become writable; `.claude/`
@@ -424,6 +449,7 @@ plan — re-running unchanged cannot succeed).
 | `matrix`, action `abort` | `failed` | matrix outcome | `{wave}: {outcome} — the work is wrong for the plan; fix the plan or the code and re-run` |
 | `hook-veto` | per its action (`surface` / `abort`, as above) | matrix outcome | the matching matrix line + ` — vetoed by hook {hook} at {point}` |
 | `doom-loop` | `failed` | `doom-loop` | `{wave} failed identically twice — a retry cannot fix it` |
+| `permission-denied` | `failed` | `permission-denied` | `permission refused: {detail}; grant it in the agent's permission configuration (e.g. --permission-mode / --allowedTools in the command) and re-run` |
 | `budget` (maxAttempts) | `failed` | `budget` | `{wave} exhausted its attempts` |
 | `post-check` | `failed` | `post-check` | `post-check {check} exited {status}` |
 | `resume-verify` | `failed` | `resume-verify` | `resume verify: a test file promised by an already-completed wave is missing; restore it and re-run` |
@@ -435,6 +461,11 @@ plan — re-running unchanged cannot succeed).
 | `merge-conflict` | `needs-decision` | `merge-conflict` | `merging origin/{base} into {branch} conflicts ({detail}); resolve the conflict on the branch, commit, and re-run with --resume` |
 | `prepare-failed` | `failed` | `prepare-failed` | `prepare failed: {detail}` |
 | `finish-failed` | `failed` | `finish-failed` | `finishing the run failed: {detail}; re-run rad deliver to finish` |
+
+`permission-denied` is raised by the spine, not the matrix: it fires when an
+attempt's outcome is not advancing and its result carries denials. It is never
+retried and gives no doom-loop verdict; `{detail}` names each denied tool and
+path, and the `deliver-stopped` event carries `reason: 'permission-denied'`.
 
 `{wave}` renders as `wave N` (or `the wave` when absent); any other absent
 placeholder renders as `unknown`.

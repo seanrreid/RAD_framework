@@ -233,6 +233,66 @@ test('(e) a matrix abort outcome stops the spine with stopped:matrix', async () 
   assert.ok(!state.appended.some((e) => e.type === 'pr-opened'));
 });
 
+const DENIALS = [{ tool: 'Bash', path: '/etc/hosts' }, { tool: 'Write', path: 'src/a.js' }];
+
+async function runWithResults(results) {
+  const state = makeFakeState({ gateResult: passingGate, plan: { waves: [{ n: 1 }] } });
+  let calls = 0;
+  const result = await deliverSpine({
+    feature: 'demo',
+    state,
+    docs: {},
+    matrix: MATRIX,
+    gates: {},
+    runWave: async () => results[Math.min(calls++, results.length - 1)],
+    sh: () => ({ status: 0 }),
+    now: fixedClock(),
+  });
+  return { state, result, calls: () => calls };
+}
+
+test('(e2) denials on a non-advancing attempt stop at once as permission-denied', async () => {
+  const { state, result, calls } = await runWithResults([{ outcome: 'fail-tests', summary: 's', denials: DENIALS }]);
+  assert.equal(result.stopped, 'permission-denied');
+  assert.equal(result.ok, false);
+  assert.equal(calls(), 1, 'no retry');
+  assert.ok(!state.appended.some((e) => e.type === 'wave-failed'), 'no doom-loop verdict');
+  const attempt = state.appended.find((e) => e.type === 'wave-attempt');
+  assert.deepEqual(attempt.data.denials, DENIALS);
+  const stopped = state.appended.find((e) => e.type === 'deliver-stopped');
+  assert.equal(stopped.data.reason, 'permission-denied');
+  assert.equal(stopped.data.class, 'failed');
+  assert.match(stopped.data.decision, /Bash \/etc\/hosts; Write src\/a\.js/);
+  assert.match(stopped.data.decision, /permission configuration/);
+});
+
+test('(e3) fail-scope plus denials stops as permission-denied, not matrix', async () => {
+  const { result } = await runWithResults([{ outcome: 'fail-scope', denials: DENIALS }]);
+  assert.equal(result.stopped, 'permission-denied');
+});
+
+test('(e4) denials on an advancing attempt do not stop; event still records them', async () => {
+  const { state, result } = await runWithResults([{ outcome: 'success', denials: DENIALS }]);
+  assert.equal(result.stopped, undefined);
+  assert.ok(state.appended.some((e) => e.type === 'wave-complete'));
+  assert.ok(!state.appended.some((e) => e.type === 'deliver-stopped'));
+});
+
+test('(e5) no denials: wave-attempt carries no denials key and behaviour is unchanged', async () => {
+  const { state, result } = await runWithResults([{ outcome: 'fail-scope' }, { outcome: 'fail-scope', denials: [] }]);
+  assert.equal(result.stopped, 'matrix');
+  const attempt = state.appended.find((e) => e.type === 'wave-attempt');
+  assert.ok(!('denials' in attempt.data));
+});
+
+test('(e6) denial strings are sanitized and capped in the stop detail', async () => {
+  const evil = [{ tool: 'Bash\n\u001b[31m', path: 'p'.repeat(1000) }];
+  const { state } = await runWithResults([{ outcome: 'fail-tests', denials: evil }]);
+  const { decision } = state.appended.find((e) => e.type === 'deliver-stopped').data;
+  assert.ok(!/[\u0000-\u001f]/.test(decision));
+  assert.ok(decision.length < 600);
+});
+
 test('(f) a fail-timeout outcome surfaces via the matrix (stopped:matrix, action:surface)', async () => {
   const state = makeFakeState({ gateResult: passingGate, plan: { waves: [{ n: 1 }] } });
   const runWave = async () => ({ outcome: 'fail-timeout' }); // matrix → surface

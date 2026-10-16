@@ -394,6 +394,46 @@ function extractUsage(stdout) {
   }
 }
 
+/** Most denials kept from a `RAD_DENIALS` line, and the cap on each string. */
+const MAX_DENIALS = 10;
+const MAX_DENIAL_FIELD_CHARS = 200;
+
+/** A denial entry holding only its string `tool` / `path` (capped), or null when it has neither. */
+function normalizeDenial(entry) {
+  if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null;
+  const out = {};
+  for (const key of ['tool', 'path']) {
+    if (typeof entry[key] === 'string' && entry[key] !== '') {
+      out[key] = entry[key].slice(0, MAX_DENIAL_FIELD_CHARS);
+    }
+  }
+  return Object.keys(out).length > 0 ? out : null;
+}
+
+/**
+ * Best-effort extraction of the first `RAD_DENIALS [json]` line a wrapper
+ * (scripts/claude-usage.mjs) emits when the agent CLI refused tool calls.
+ * Returns up to MAX_DENIALS `{ tool?, path? }` entries, or undefined when the
+ * line is absent, malformed, or holds no usable entry — never throws.
+ *
+ * @param {string} stdout
+ * @returns {Array<{ tool?: string, path?: string }> | undefined}
+ */
+export function extractDenials(stdout) {
+  const match = /^RAD_DENIALS\s+(\[.*\])\s*$/m.exec(stdout || '');
+  if (!match) return undefined;
+  let list;
+  try {
+    list = JSON.parse(match[1]);
+  } catch {
+    // Malformed denials line is non-fatal: the field stays optional, omit it.
+    return undefined;
+  }
+  if (!Array.isArray(list)) return undefined;
+  const denials = list.map(normalizeDenial).filter(Boolean).slice(0, MAX_DENIALS);
+  return denials.length > 0 ? denials : undefined;
+}
+
 /**
  * Classify a finished run: a non-null terminal result for an output-cap
  * overflow or a non-zero exit, null for a clean exit.
@@ -454,7 +494,7 @@ async function runWithReprompt(ctx, prompt, waveId, effectiveModel) {
   if (first.terminal) return first.terminal;
 
   let block = extractWaveResultBlock(first.stdout);
-  if (block) return toWaveResult(parseWaveResult(block), extractUsage(first.stdout));
+  if (block) return toWaveResult(parseWaveResult(block), extractUsage(first.stdout), extractDenials(first.stdout));
 
   const reprompt =
     prompt +
@@ -466,7 +506,7 @@ async function runWithReprompt(ctx, prompt, waveId, effectiveModel) {
   if (second.terminal) return second.terminal;
 
   block = extractWaveResultBlock(second.stdout);
-  if (block) return toWaveResult(parseWaveResult(block), extractUsage(second.stdout));
+  if (block) return toWaveResult(parseWaveResult(block), extractUsage(second.stdout), extractDenials(second.stdout));
 
   // Still no protocol block after one reprompt — terminal protocol failure.
   return {

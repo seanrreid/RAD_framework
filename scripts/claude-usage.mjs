@@ -18,6 +18,13 @@ const PERMISSION_MODE_FLAG = '--permission-mode';
 const DEFAULT_PERMISSION_MODE = 'acceptEdits';
 const RESULT_TYPE = 'result';
 const USAGE_PREFIX = 'RAD_USAGE ';
+const DENIALS_PREFIX = 'RAD_DENIALS ';
+/** Most denials the RAD_DENIALS line carries; the rest are dropped. */
+const MAX_DENIALS = 10;
+/** Cap on each denied tool name or path (agent-influenced strings). */
+const MAX_DENIAL_FIELD_CHARS = 200;
+// eslint-disable-next-line no-control-regex -- control chars are exactly what is stripped
+const CONTROL_CHARS = /[\u0000-\u001f\u007f]/g;
 /** Largest CLI output the wrapper will buffer (the prompt may be large; answers rarely are). */
 const MAX_BUFFER_BYTES = 512 * 1024 * 1024;
 /** Exit status when the CLI could not be spawned or died without a status. */
@@ -53,6 +60,41 @@ export function buildUsage(parsed) {
   return usage;
 }
 
+/** A string with control characters (newlines included) replaced, capped; else undefined. */
+function cleanDenialField(v) {
+  if (typeof v !== 'string') return undefined;
+  const cleaned = v.replace(CONTROL_CHARS, ' ').trim().slice(0, MAX_DENIAL_FIELD_CHARS);
+  return cleaned === '' ? undefined : cleaned;
+}
+
+/** One `{tool, path}` entry from a CLI permission denial, or null when it names neither. */
+function denialEntry(denial) {
+  const input = denial?.tool_input;
+  const path = cleanDenialField(input?.file_path) ?? cleanDenialField(input?.path) ?? cleanDenialField(input?.command);
+  const tool = cleanDenialField(denial?.tool_name);
+  if (!tool && !path) return null;
+  const entry = {};
+  if (tool) entry.tool = tool;
+  if (path) entry.path = path;
+  return entry;
+}
+
+/**
+ * The entries for the RAD_DENIALS line (at most MAX_DENIALS), or null when
+ * `permission_denials` is absent, not an array, or yields no usable entry.
+ */
+export function buildDenials(parsed) {
+  const raw = parsed?.permission_denials;
+  if (!Array.isArray(raw)) return null;
+  const entries = [];
+  for (const denial of raw) {
+    const entry = denialEntry(denial);
+    if (entry) entries.push(entry);
+    if (entries.length === MAX_DENIALS) break;
+  }
+  return entries.length > 0 ? entries : null;
+}
+
 /**
  * Parse the CLI's stdout. Returns the parsed result object when it is a JSON
  * object of type `result` with a string `result`, otherwise null (pass through).
@@ -72,11 +114,16 @@ export function parseCliResult(stdout) {
 
 /**
  * The wrapper's stdout: the usage line FIRST (the adapter takes the first
- * RAD_USAGE line, so agent text after it cannot spoof usage), then the text.
+ * RAD_USAGE line, so agent text after it cannot spoof usage), then the
+ * RAD_DENIALS line when the CLI refused any tool call (same first-line rule),
+ * then the text.
  */
 export function renderOutput(parsed) {
   const usage = buildUsage(parsed);
-  const head = usage ? `${USAGE_PREFIX}${JSON.stringify(usage)}\n` : '';
+  const denials = buildDenials(parsed);
+  const usageLine = usage ? `${USAGE_PREFIX}${JSON.stringify(usage)}\n` : '';
+  const denialsLine = denials ? `${DENIALS_PREFIX}${JSON.stringify(denials)}\n` : '';
+  const head = usageLine + denialsLine;
   const text = parsed.result;
   return head + text + (text.endsWith('\n') ? '' : '\n');
 }

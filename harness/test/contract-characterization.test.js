@@ -13,7 +13,9 @@ import {
   buildWavePrompt,
   classifyError,
   parseWaveResult,
+  toWaveResult,
 } from '../adapters/agent/contract.js';
+import { extractDenials } from '../adapters/agent/command.js';
 
 const GOLDEN_PATH = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -246,3 +248,56 @@ for (const [name, block] of PARSE_CASES) {
     assert.deepStrictEqual(parseWaveResult(block), golden.parseWaveResult[name]);
   });
 }
+
+// ---------------------------------------------------------------------------
+// RAD_DENIALS extraction (not golden: new behavior, asserted directly)
+// ---------------------------------------------------------------------------
+
+const denialsLine = (json) => `RAD_USAGE {"input_tokens":1}\nRAD_DENIALS ${json}\nWAVE_RESULT\n`;
+
+test('extractDenials: a valid line yields the entries', () => {
+  const out = extractDenials(denialsLine('[{"tool":"Bash","path":"rm -rf x"},{"tool":"Edit","path":"/a"}]'));
+  assert.deepStrictEqual(out, [{ tool: 'Bash', path: 'rm -rf x' }, { tool: 'Edit', path: '/a' }]);
+});
+
+test('extractDenials: malformed JSON yields undefined, never throws', () => {
+  assert.strictEqual(extractDenials(denialsLine('[{"tool":')), undefined);
+});
+
+test('extractDenials: a non-array payload is not matched', () => {
+  assert.strictEqual(extractDenials('RAD_DENIALS {"tool":"Bash"}\n'), undefined);
+});
+
+test('extractDenials: entries missing both fields or of the wrong type are dropped', () => {
+  const out = extractDenials(denialsLine('[null,42,"x",{},{"tool":7},{"tool":"Read"},{"path":"/p"}]'));
+  assert.deepStrictEqual(out, [{ tool: 'Read' }, { path: '/p' }]);
+  assert.strictEqual(extractDenials(denialsLine('[{},null]')), undefined);
+  assert.strictEqual(extractDenials(denialsLine('[]')), undefined);
+});
+
+test('extractDenials: strings capped at 200 chars and the list at 10', () => {
+  const many = Array.from({ length: 12 }, (_, i) => ({ tool: `T${i}`, path: 'p'.repeat(500) }));
+  const out = extractDenials(denialsLine(JSON.stringify(many)));
+  assert.strictEqual(out.length, 10);
+  assert.strictEqual(out[0].path.length, 200);
+  assert.strictEqual(out[9].tool, 'T9');
+});
+
+test('extractDenials: absent line, empty and undefined stdout yield undefined', () => {
+  assert.strictEqual(extractDenials('WAVE_RESULT\nEND_WAVE_RESULT'), undefined);
+  assert.strictEqual(extractDenials(''), undefined);
+  assert.strictEqual(extractDenials(undefined), undefined);
+});
+
+test('extractDenials: only the first RAD_DENIALS line counts', () => {
+  const out = extractDenials('RAD_DENIALS [{"tool":"A"}]\nRAD_DENIALS [{"tool":"B"}]\n');
+  assert.deepStrictEqual(out, [{ tool: 'A' }]);
+});
+
+test('toWaveResult: denials set only when non-empty', () => {
+  const parsed = { status: 'failed', tasks: [] };
+  assert.deepStrictEqual(toWaveResult(parsed, undefined, [{ tool: 'Bash' }]).denials, [{ tool: 'Bash' }]);
+  assert.ok(!('denials' in toWaveResult(parsed, undefined, [])));
+  assert.ok(!('denials' in toWaveResult(parsed, undefined, undefined)));
+  assert.ok(!('denials' in toWaveResult(parsed, undefined, 'nope')));
+});

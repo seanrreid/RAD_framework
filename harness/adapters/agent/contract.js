@@ -480,11 +480,15 @@ export function resultToOutcome(parsed) {
  *     adapter that observes no token counts omits it and contributes 0 to the
  *     token budget.
  *
+ *   - `denials` — the `{tool, path}` permission denials the agent CLI reported
+ *     (command adapter's extractDenials); omitted when empty or absent.
+ *
  * @param {{ status?: string, tasks?: Array } | null | undefined} parsed
  * @param {{ input: number, output: number, total: number }} [usage]
- * @returns {{ outcome: string, status: string, tasks?: Array, usage?: Object }}
+ * @param {Array<{ tool?: string, path?: string }>} [denials]
+ * @returns {{ outcome: string, status: string, tasks?: Array, usage?: Object, denials?: Array }}
  */
-export function toWaveResult(parsed, usage) {
+export function toWaveResult(parsed, usage, denials) {
   const result = {
     outcome: resultToOutcome(parsed),
     status: parsed?.status ?? 'failed',
@@ -493,6 +497,7 @@ export function toWaveResult(parsed, usage) {
     result.tasks = parsed.tasks;
   }
   if (usage) result.usage = usage;
+  if (Array.isArray(denials) && denials.length > 0) result.denials = denials;
   return result;
 }
 
