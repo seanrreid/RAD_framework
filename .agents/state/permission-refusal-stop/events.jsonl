@@ -18,3 +18,4 @@
 {"feature":"permission-refusal-stop","type":"wave-started","actor":"harness","ts":"2026-10-16T19:33:50.053Z","data":{"wave":3,"attempt":1}}
 {"feature":"permission-refusal-stop","type":"wave-attempt","actor":"harness","ts":"2026-10-16T19:47:57.950Z","data":{"wave":3,"attempt":1,"outcome":"success","usage":{"input":16,"output":2733,"total":350658,"cacheRead":313912,"cacheWrite":33997,"cost":0.19474119999999998},"tasks":[{"title":"Document the line and the stop","status":"complete","commit":"800632e","concern":"—","error":"—"}],"verify":{"command":"exec bash scripts/verify-all.sh","status":0,"passed":true}}}
 {"feature":"permission-refusal-stop","type":"wave-complete","actor":"harness","ts":"2026-10-16T19:47:57.952Z","data":{"wave":3}}
+{"feature":"permission-refusal-stop","type":"pr-opened","actor":"harness","ts":"2026-10-16T19:48:08.968Z"}
