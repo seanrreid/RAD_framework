@@ -61,6 +61,7 @@ Columns:
 | rad-review | `.claude/commands/team/rad-review.md` (hand-written, not generated) | `.agents/skills/rad-review/SKILL.md` | `.rad/skills/rad-review/SKILL.md` (Codex-only, `claude: none`) | n/a (Codex only) | sub-agent, `$ARGUMENTS` | Claude: artifact (`.agents/findings.jsonl`); Codex: no | Codex generated (#171 part 2); Claude hand-written |
 | quality-review | `.claude/commands/team/quality-review.md` | `.agents/skills/quality-review/SKILL.md` | `.rad/skills/quality-review/SKILL.md` | wrapper | sub-agent, `$ARGUMENTS` | no | generated (#171 part 2) |
 | accessibility-review | `.claude/commands/team/accessibility-review.md` | `.agents/skills/accessibility-review/SKILL.md` | `.rad/skills/accessibility-review/SKILL.md` | wrapper | sub-agent, `$ARGUMENTS` | no | generated (#171 part 2) |
+| ui-integrity-review | `.claude/commands/team/ui-integrity-review.md` | `.agents/skills/ui-integrity-review/SKILL.md` | `.rad/skills/ui-integrity-review/SKILL.md` | wrapper | sub-agent, `$ARGUMENTS` | no | generated (ui-integrity-critic) |
 
 ### Skills
 
@@ -75,6 +76,7 @@ Columns:
 |------|-------------|------------|--------|------|------|-------|--------|
 | quality-reviewer | `.claude/agents/quality-reviewer.md` | `.codex/agents/quality-reviewer.toml` | `.rad/agents/quality-reviewer.md` | as-is | none (tools: Read, Bash) | no | generated (#171 part 2) |
 | accessibility-reviewer | `.claude/agents/accessibility-reviewer.md` | `.codex/agents/accessibility-reviewer.toml` | `.rad/agents/accessibility-reviewer.md` | as-is | none (tools: Read, Bash) | no | generated (#171 part 2) |
+| ui-integrity-reviewer | `.claude/agents/ui-integrity-reviewer.md` | `.codex/agents/ui-integrity-reviewer.toml` | `.rad/agents/ui-integrity-reviewer.md` | as-is | none (tools: Read, Bash) | no | generated (ui-integrity-critic) |
 | 27 orchestrator and mapper agents | `.claude/agents/*-orchestrator.md`, `*-mapper.md` | `.codex/agents/*-orchestrator.toml`, `*-mapper.toml` | `.rad/agents-internal/<name>.md` | as-is | none (tools: Task, or Read, Grep, Glob) | no | generated (#186 part 3f-ii), internal: .rad/agents-internal, not shipped |
 
 ### Why the borderline rows landed where they did
@@ -254,7 +256,7 @@ the manual move. `scripts/lint-claude-md.sh` checks both files against the
 
 | Gap | Effect | Fixed by |
 |-----|--------|----------|
-| `quality-reviewer` and `accessibility-reviewer` are not shipped by core (`.claude/agents/` is user data in `harness/install-manifest.js`), yet `rad review` loads `.claude/agents/<reviewer>.md` | `rad review` fails in an installed project that never ran `/rad-design` | Fixed in part 2: core ships the `.rad/agents` and `.rad/skills` sources and every marked file under `.claude/agents`, `.agents/skills` and `.codex/agents` |
+| `quality-reviewer`, `accessibility-reviewer` and `ui-integrity-reviewer` are not shipped by core (`.claude/agents/` is user data in `harness/install-manifest.js`), yet `rad review` loads `.claude/agents/<reviewer>.md` | `rad review` fails in an installed project that never ran `/rad-design` | Fixed in part 2: core ships the `.rad/agents` and `.rad/skills` sources and every marked file under `.claude/agents`, `.agents/skills` and `.codex/agents` |
 | `scripts/deliver-gate-hook.mjs` and its `.claude/settings.json` registration are not shipped | Installed projects get the harness check but not the hook layer | Fixed in #186 part 1: core ships `scripts/*.mjs`, and install merges the registration via `rad install-hooks` |
 | `scripts/lint-agent-files.sh:15-17` says reviewers have no `roles:`, but they do | Misleading comment only | Fixed in part 2 (comment corrected with the reviewer migration) |
 

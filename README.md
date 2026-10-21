@@ -108,7 +108,7 @@ RAD delegates heavy context work to sub-agents so main sessions stay lean:
 | `/rad-design` file generation | Parallel Haiku sub-agents: one per agent file | Completion confirmations |
 | `/rad-plan` research | Explore sub-agent: searches codebase, returns `RESEARCH_SUMMARY` | The summary block (~20 lines) |
 | `/rad-deliver` per wave | `rad deliver` runs one configured-agent call per wave (e.g. `claude -p`): loads files, implements, validates, commits | The command's exit code and result lines |
-| `/rad-review` | quality-reviewer + accessibility-reviewer agents | Finding summaries |
+| `/rad-review` | quality-reviewer + accessibility-reviewer agents (+ ui-integrity-reviewer when frontend files changed) | Finding summaries |
 
 The plan linter enforces a **context budget** on the Files in Scope table:
 - **Warn** at >800 lines in scope — consider splitting

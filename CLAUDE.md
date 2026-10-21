@@ -15,7 +15,7 @@ under `.claude/commands/`; a bare `/rad-plan` does not resolve. Use:
 
 - Team: `/team:rad-plan`, `/team:rad-adopt`, `/team:rad-research`,
   `/team:rad-deliver`, `/team:rad-review`, `/team:quality-review`,
-  `/team:accessibility-review`
+  `/team:accessibility-review`, `/team:ui-integrity-review`
 - Architect: `/architect:rad-approve`, `/architect:rad-design`,
   `/architect:rad-epic-decompose`
 - Shared: `/shared:rad-status`, `/shared:rad-insights`

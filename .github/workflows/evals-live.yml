@@ -21,6 +21,7 @@ on:
     paths:
       - .claude/agents/quality-reviewer.md
       - .claude/agents/accessibility-reviewer.md
+      - .claude/agents/ui-integrity-reviewer.md
       - 'harness/evals/reviewers/**'
 
 jobs:
