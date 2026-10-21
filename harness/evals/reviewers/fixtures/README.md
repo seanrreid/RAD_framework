@@ -52,6 +52,19 @@ run it directly: `node --test <path>`.
 | `clean-alt-images` | negative | Informative portraits and the map image have descriptive `alt` text, and the decorative divider has `alt=""`. The section has a heading and uses `<figure>` with `<figcaption>`. |
 | `clean-button-controls` | negative | Every control is a native `<button type="button">` with visible, specific text. The icon-only delete button has an `aria-label`, and its SVG is `aria-hidden` and not focusable. There is intentionally no `role="toolbar"`, which would imply an arrow-key roving-focus pattern, and no disabled-while-saving state, which would drop focus. Either could draw a legitimate HIGH finding. |
 
+## ui-integrity-reviewer
+
+| Fixture | Expect | Planted defect, or why it is clean |
+|---|---|---|
+| `decorative-button` | positive, `decorative-ui`, MEDIUM | In `SaveBar.jsx`, "Save draft" only flips local `saved` state, so the banner reads "All changes saved" while nothing is persisted. The "Publish" button next to it is wired to `onSave`. |
+| `nan-at-zero-total` | positive, `edge-input`, MEDIUM | In `CartSummary.jsx`, `discounted / total` is `NaN` for an empty cart, which renders "You saved NaN%". The total itself is fine. |
+| `sibling-left-unfixed` | positive, `sibling-sweep`, MEDIUM | `base/` has `CalendarView.jsx` and `AgendaList.jsx`, which both call `new Date(e.startsAt).toLocaleDateString()`. The change guards the date in `CalendarView.jsx` only, so `AgendaList.jsx` still renders "Invalid Date". |
+| `toothless-negative-assertion` | positive, `assertion-audit`, MEDIUM | `ErrorBanner.spec.js` asserts the markup does not contain `error-banner-visible`, a class the component never renders, so the check passes whether or not the banner shows. |
+| `clean-wired-button` | negative | The save button awaits `onSave`, tracks saving, saved and error status, and rethrows failures. |
+| `clean-guarded-average` | negative | `discountPercent` returns 0 when the total is not positive, and the spec covers the empty cart and all-zero prices. |
+| `clean-sibling-covered` | negative | Both date-rendering siblings in `base/` now go through one shared `formatDay` helper, so the sweep finds no uncovered instance. |
+| `clean-strong-assertions` | negative | The spec asserts the exact remediation text and the `role="alert"` attribute, so a missing or wrong banner fails it. |
+
 ## minPriority judgment calls
 
 - **`unlabeled-input`: MEDIUM, not HIGH.** The reviewer's checklist rates
