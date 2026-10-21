@@ -39,3 +39,8 @@
 {"feature":"ui-integrity-critic","type":"wave-failed","actor":"harness","ts":"2026-10-21T14:07:47.394Z","data":{"wave":4,"action":"abort"}}
 {"feature":"ui-integrity-critic","type":"deliver-stopped","actor":"harness","ts":"2026-10-21T14:07:47.396Z","data":{"class":"failed","reason":"fail-scope","decision":"wave 4: fail-scope — the work is wrong for the plan; fix the plan or the code and re-run","wave":4,"action":"abort","outcome":"fail-scope"}}
 {"feature":"ui-integrity-critic","type":"approved","actor":"sean@torchcodelab.com","role":"architect","ts":"2026-10-21T14:09:06.936Z","recordedBy":"sean@torchcodelab.com","data":{"fingerprint":"3bddf3df88d208d44eba7c50422570e68c1e90c5ab345939acba557a5cd612a0"}}
+{"feature":"ui-integrity-critic","type":"deliver-started","actor":"harness","ts":"2026-10-21T14:09:19.783Z"}
+{"feature":"ui-integrity-critic","type":"run-prepared","actor":"harness","ts":"2026-10-21T14:09:23.581Z","data":{"base":"main","merged":false,"fastForwarded":false,"committed":true,"pushed":true}}
+{"feature":"ui-integrity-critic","type":"wave-started","actor":"harness","ts":"2026-10-21T14:09:23.590Z","data":{"wave":4,"attempt":1}}
+{"feature":"ui-integrity-critic","type":"wave-attempt","actor":"harness","ts":"2026-10-21T14:16:51.200Z","data":{"wave":4,"attempt":1,"outcome":"success","usage":{"input":12,"output":2266,"total":267431,"cacheRead":231218,"cacheWrite":33935,"cost":0.18154580000000003},"tasks":[{"title":"Install test, CI trigger and docs","status":"complete","commit":"66fe39f","concern":"—","error":"—"}],"verify":{"command":"exec bash scripts/verify-all.sh","status":0,"passed":true}}}
+{"feature":"ui-integrity-critic","type":"wave-complete","actor":"harness","ts":"2026-10-21T14:16:51.202Z","data":{"wave":4}}
