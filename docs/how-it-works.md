@@ -129,7 +129,7 @@ See [`rad deliver`](rad-cli.md#rad-deliver) for the full lifecycle.
 `/team:rad-review` runs on the branch before you request architect review:
 - scope check (out-of-scope files are HIGH),
 - plan fidelity + **acceptance-criteria coverage** (an AC no task delivers is HIGH),
-- the `quality-reviewer` and (for frontend) `accessibility-reviewer` agents,
+- the `quality-reviewer` and (for frontend) `accessibility-reviewer` and `ui-integrity-reviewer` agents,
 - test coverage,
 - **Step 4c — behavioral exercise**: when the plan has an optional `## Exercise`
   section, `rad exercise` launches the delivered branch and observes it; findings
