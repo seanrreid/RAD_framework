@@ -48,17 +48,16 @@ Research used one Explore sub-agent; no scope-mapped agents were called. The cha
 | .agents/skills/ui-integrity-review/SKILL.md | 1-40 | generated |
 | .agents/skills/rad-review/SKILL.md | 55-110 | generated |
 | harness/evals/reviewers/fixtures/ui-integrity-reviewer | 1-200 | new eval cases (clean controls plus one defect per class) |
-| harness/evals/reviewers.eval.js | 1-60 | register the new reviewer if cases are not auto-discovered |
 | scripts/test-install-harness.sh | 530-545 | add the new skill and agent to the slice lists |
 | harness/test/install-manifest.test.js | 583-592 | add the new reviewer to the shipped-path fixtures |
 | .github/workflows/evals-live.yml | 20-25 | add the new agent file to the path trigger |
 | CLAUDE.md | 15-20 | add `/team:ui-integrity-review` to the command list |
 | README.md | 105-115 | mention the reviewer in the `/rad-review` row |
-| docs/rad-tool-portability.md | 20-90, 257 | surface-table rows for the new reviewer; correct the stale "not shipped by core" gap row |
-| docs/evals.md | 84-90 | list the new reviewer's eval cases |
-| docs/daily-workflow.md | 1-400 | add `ui-integrity-review` to the command list |
-| docs/how-it-works.md | 120-145 | add the reviewer to the list of reviewer agents |
-| harness/evals/reviewers/fixtures/README.md | 1-80 | document the new reviewer's fixture cases |
+| docs/rad-tool-portability.md | 62-66, 77-81, 257-261 | surface-table rows for the new reviewer; correct the stale "not shipped by core" gap row |
+| docs/evals.md | 84-90, 145-149 | list the new reviewer's eval cases |
+| docs/daily-workflow.md | 18-22 | add `ui-integrity-review` to the command list |
+| docs/how-it-works.md | 130-134 | add the reviewer to the list of reviewer agents |
+| harness/evals/reviewers/fixtures/README.md | 53-70 | document the new reviewer's fixture cases |
 
 ## Program Design
 Findings record (unchanged shape, new reviewer name and categories):
@@ -122,7 +121,7 @@ Validate: AC#6 — re-running `rad generate` produces no diff and `scripts/lint-
 Depends on: Wave 2 complete
 
 #### Task 3.1: Eval fixtures and registration
-File: harness/evals/reviewers/fixtures/ui-integrity-reviewer:1-200, harness/evals/reviewers.eval.js:1-60, harness/evals/reviewers/fixtures/README.md:1-80
+File: harness/evals/reviewers/fixtures/ui-integrity-reviewer:1-200, harness/evals/reviewers/fixtures/README.md:53-70
 What: Add `harness/evals/reviewers/fixtures/ui-integrity-reviewer/<case>/` with clean controls plus one defect per class (decorative button, NaN at zero total, sibling left unfixed, toothless negative assertion); register in `reviewers.eval.js` only if cases are not auto-discovered.
 Validate: AC#7 — `node --test harness/test/reviewer-evals.test.js` passes. Edge cases: a clean control must yield zero findings; a case with an empty diff yields an empty findings array.
 
@@ -131,7 +130,7 @@ Depends on: Wave 3 complete
 Verify: exec bash scripts/verify-all.sh
 
 #### Task 4.1: Install test, CI trigger and docs
-File: scripts/test-install-harness.sh:530-545, harness/test/install-manifest.test.js:583-592, .github/workflows/evals-live.yml:20-25, CLAUDE.md:15-20, README.md:105-115, docs/rad-tool-portability.md:20-90, 257, docs/evals.md:84-90, docs/daily-workflow.md:1-400, docs/how-it-works.md:120-145
+File: scripts/test-install-harness.sh:530-545, harness/test/install-manifest.test.js:583-592, .github/workflows/evals-live.yml:20-25, CLAUDE.md:15-20, README.md:105-115, docs/rad-tool-portability.md:62-66, 77-81, 257-261, docs/evals.md:84-90, 145-149, docs/daily-workflow.md:18-22, docs/how-it-works.md:130-134
 What: Add the new skill and agent to the slice lists and the `for r in` loop (the install test asserts the reviewer and skill are in the shipped slice), add the agent file to the evals-live path trigger, and add the command and reviewer to the doc lists.
 Validate: AC#8 — `bash scripts/test-install-harness.sh` passes; doc lists name the new command. Edge case: the install test must assert the new agent and skill are present in the shipped slice, not merely skip when absent.
 
