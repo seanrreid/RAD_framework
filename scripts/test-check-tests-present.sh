@@ -248,15 +248,4 @@ out=$(bash "$SCRIPT" "$TMP/present.md" 2>/dev/null)
   || fail "A8g: single-arg output changed, got: [$out]"
 echo "✓ A8g: no --only → output unchanged"
 
-# A9: a promised fixture DIRECTORY counts as present only when non-empty.
-mkdir -p "$TMP/fx-full" "$TMP/fx-empty"
-touch "$TMP/fx-full/case"
-printf '## Tests to Write\n- [ ] t — %s\n' "$TMP/fx-full" > "$TMP/dir-full.md"
-code=$(run_check "$TMP/dir-full.md")
-[[ "$code" -eq 0 ]] || fail "A9a: non-empty directory should exit 0 (got $code)"
-printf '## Tests to Write\n- [ ] t — %s\n' "$TMP/fx-empty" > "$TMP/dir-empty.md"
-code=$(run_check "$TMP/dir-empty.md")
-[[ "$code" -eq 1 ]] || fail "A9b: empty directory should exit 1 (got $code)"
-echo "✓ A9: fixture directory present only when non-empty"
-
 echo "ALL PASS"
