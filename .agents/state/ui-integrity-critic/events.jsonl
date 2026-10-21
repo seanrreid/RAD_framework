@@ -21,3 +21,9 @@
 {"feature":"ui-integrity-critic","type":"wave-failed","actor":"harness","ts":"2026-10-21T13:32:11.701Z","data":{"wave":3,"action":"abort"}}
 {"feature":"ui-integrity-critic","type":"deliver-stopped","actor":"harness","ts":"2026-10-21T13:32:11.701Z","data":{"class":"failed","reason":"fail-scope","decision":"wave 3: fail-scope — the work is wrong for the plan; fix the plan or the code and re-run","wave":3,"action":"abort","outcome":"fail-scope"}}
 {"feature":"ui-integrity-critic","type":"approved","actor":"sean@torchcodelab.com","role":"architect","ts":"2026-10-21T13:34:31.456Z","recordedBy":"sean@torchcodelab.com","data":{"fingerprint":"1a86976a9170fb97bfd5aca00d2ea933b46fa31546069d71c3445bdcfad1874a"}}
+{"feature":"ui-integrity-critic","type":"deliver-started","actor":"harness","ts":"2026-10-21T13:35:31.635Z"}
+{"feature":"ui-integrity-critic","type":"run-prepared","actor":"harness","ts":"2026-10-21T13:35:35.809Z","data":{"base":"main","merged":false,"fastForwarded":false,"committed":true,"pushed":true}}
+{"feature":"ui-integrity-critic","type":"wave-started","actor":"harness","ts":"2026-10-21T13:35:35.813Z","data":{"wave":3,"attempt":1}}
+{"feature":"ui-integrity-critic","type":"wave-attempt","actor":"harness","ts":"2026-10-21T13:45:37.167Z","data":{"wave":3,"attempt":1,"outcome":"fail-timeout","tasks":[{"title":"3","status":"blocked_code","commit":"—","concern":"—","error":"wave timed out after 600000ms"}]}}
+{"feature":"ui-integrity-critic","type":"wave-failed","actor":"harness","ts":"2026-10-21T13:45:37.169Z","data":{"wave":3,"action":"surface"}}
+{"feature":"ui-integrity-critic","type":"deliver-stopped","actor":"harness","ts":"2026-10-21T13:45:37.170Z","data":{"class":"needs-decision","reason":"fail-timeout","decision":"wave 3: fail-timeout — non-deterministic failure (e.g. timeout/orphaned attempt); retry, raise the limit, or split the wave","wave":3,"action":"surface","outcome":"fail-timeout"}}
