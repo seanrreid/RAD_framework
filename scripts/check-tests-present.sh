@@ -59,6 +59,13 @@ in_only_list() {
   return 1
 }
 
+# A promised test is a regular file, or a directory holding at least one entry
+# (fixture-directory tests, e.g. eval cases). An empty directory is missing.
+is_present_test() {
+  [[ -f "$1" ]] && return 0
+  [[ -d "$1" && -n "$(ls -A "$1")" ]]
+}
+
 MISSING=()
 FOUND=()
 UNRESOLVABLE=()
@@ -95,7 +102,7 @@ while IFS= read -r line; do
       continue
     fi
 
-    if [[ -f "$testfile" ]]; then
+    if is_present_test "$testfile"; then
       FOUND+=("$testfile")
     else
       MISSING+=("$testfile")
