@@ -44,3 +44,4 @@
 {"feature":"ui-integrity-critic","type":"wave-started","actor":"harness","ts":"2026-10-21T14:09:23.590Z","data":{"wave":4,"attempt":1}}
 {"feature":"ui-integrity-critic","type":"wave-attempt","actor":"harness","ts":"2026-10-21T14:16:51.200Z","data":{"wave":4,"attempt":1,"outcome":"success","usage":{"input":12,"output":2266,"total":267431,"cacheRead":231218,"cacheWrite":33935,"cost":0.18154580000000003},"tasks":[{"title":"Install test, CI trigger and docs","status":"complete","commit":"66fe39f","concern":"—","error":"—"}],"verify":{"command":"exec bash scripts/verify-all.sh","status":0,"passed":true}}}
 {"feature":"ui-integrity-critic","type":"wave-complete","actor":"harness","ts":"2026-10-21T14:16:51.202Z","data":{"wave":4}}
+{"feature":"ui-integrity-critic","type":"pr-opened","actor":"harness","ts":"2026-10-21T14:16:59.843Z"}
