@@ -10,3 +10,5 @@
 | 3.1 | Wave 3 | Eval fixtures and registration | ✓ complete | 76afe2e | 08:49 |
 | 3.2 | Wave 3 | Install test, CI trigger and docs | ✓ complete | 38145aa | 08:49 |
 | 3.1-3.2 | Wave 3 | Fixture-directory presence check fix | ✓ complete | 6b8f516 | 08:55 |
+| 3.1 | Wave 3 | Eval fixtures and registration | ✓ complete | 76afe2e | 09:27 |
+| 3.2 | Wave 3 | Install test, CI trigger and docs | ✓ complete | d0b93d7 | 09:27 |
