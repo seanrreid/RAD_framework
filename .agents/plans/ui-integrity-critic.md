@@ -130,7 +130,7 @@ What: Add the new skill and agent to the slice lists and the `for r in` loop (th
 Validate: AC#8 — `bash scripts/test-install-harness.sh` passes; doc lists name the new command. Edge case: the install test must assert the new agent and skill are present in the shipped slice, not merely skip when absent.
 
 ## Tests to Write
-- [ ] Reviewer eval cases, clean controls plus one defect per rubric class — harness/evals/reviewers/fixtures/ui-integrity-reviewer
+- [ ] Reviewer eval cases, clean controls plus one defect per rubric class — harness/evals/reviewers/fixtures/ui-integrity-reviewer/decorative-button/expect.json
 - [ ] Install-slice assertion for the new skill and agent — scripts/test-install-harness.sh
 
 ## Exercise
