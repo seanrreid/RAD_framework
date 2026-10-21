@@ -47,10 +47,11 @@ Research used one Explore sub-agent; no scope-mapped agents were called. The cha
 | harness/evals/reviewers/fixtures/ui-integrity-reviewer | 1-200 | new eval cases (clean controls plus one defect per class) |
 | harness/evals/reviewers.eval.js | 1-60 | register the new reviewer if cases are not auto-discovered |
 | scripts/test-install-harness.sh | 530-545 | add the new skill and agent to the slice lists |
+| harness/test/install-manifest.test.js | 583-592 | add the new reviewer to the shipped-path fixtures |
 | .github/workflows/evals-live.yml | 20-25 | add the new agent file to the path trigger |
 | CLAUDE.md | 15-20 | add `/team:ui-integrity-review` to the command list |
 | README.md | 105-115 | mention the reviewer in the `/rad-review` row |
-| docs/rad-tool-portability.md | 20-90 | surface-table rows for the new reviewer |
+| docs/rad-tool-portability.md | 20-90, 257 | surface-table rows for the new reviewer; correct the stale "not shipped by core" gap row |
 | docs/evals.md | 84-90 | list the new reviewer's eval cases |
 
 ## Program Design
@@ -75,8 +76,8 @@ Flow: `/rad-review` → changed files include frontend sources? → `node harnes
 ### Reminders
 - Run `rad generate` after every `.rad/` edit and commit the output.
 - Rubric rules must cite a regression class and the report must show the sweep.
-- [NEEDS CLARIFICATION: Does `rad generate` auto-discover a new `.rad/agents/` file and `.rad/skills/<name>/` directory with no code change? (generate.js was not read during research; Wave 2 depends on it.)]
-- Decided: `ui-integrity-reviewer` exists in the repo source tree only. Per docs/rad-tool-portability.md:257 reviewers are not shipped by core, so the installer manifest is not changed.
+- Resolved: `rad generate` discovers new sources by directory scan (`readdirSync` over `.rad/skills` and `.rad/agents` in harness/generate.js), so no generator change is needed. The command path comes from the skill's `targets:` frontmatter.
+- Decided: `ui-integrity-reviewer` ships, like `quality-reviewer` and `accessibility-reviewer`: source in `.rad/agents/` (shipped), not `.rad/agents-internal/`. The `docs/rad-tool-portability.md:257` "not shipped by core" row is stale (the same table marks it fixed in part 2).
 
 ## Wave Plan
 
@@ -121,9 +122,9 @@ What: Add `harness/evals/reviewers/fixtures/ui-integrity-reviewer/<case>/` with 
 Validate: AC#7 — `node --test harness/test/reviewer-evals.test.js` passes. Edge cases: a clean control must yield zero findings; a case with an empty diff yields an empty findings array.
 
 #### Task 3.2: Install test, CI trigger and docs
-File: scripts/test-install-harness.sh:530-545, .github/workflows/evals-live.yml:20-25, CLAUDE.md:15-20, README.md:105-115, docs/rad-tool-portability.md:20-90, docs/evals.md:84-90
-What: Add the new skill and agent to the slice lists and the `for r in` loop (the install test asserts the reviewer is not shipped to downstream installs), add the agent file to the evals-live path trigger, and add the command and reviewer to the doc lists.
-Validate: AC#8 — `bash scripts/test-install-harness.sh` passes; doc lists name the new command. Edge case: if the reviewer is not shipped by the installer, the install test must assert it is absent rather than silently skipping.
+File: scripts/test-install-harness.sh:530-545, harness/test/install-manifest.test.js:583-592, .github/workflows/evals-live.yml:20-25, CLAUDE.md:15-20, README.md:105-115, docs/rad-tool-portability.md:20-90, 257, docs/evals.md:84-90
+What: Add the new skill and agent to the slice lists and the `for r in` loop (the install test asserts the reviewer and skill are in the shipped slice), add the agent file to the evals-live path trigger, and add the command and reviewer to the doc lists.
+Validate: AC#8 — `bash scripts/test-install-harness.sh` passes; doc lists name the new command. Edge case: the install test must assert the new agent and skill are present in the shipped slice, not merely skip when absent.
 
 ## Tests to Write
 - [ ] Reviewer eval cases, clean controls plus one defect per rubric class — harness/evals/reviewers/fixtures/ui-integrity-reviewer
@@ -144,5 +145,5 @@ None. Edits to `.rad/`, `harness/test` and `scripts/` are self-protected and fla
 
 ## Risks
 - The reviewer may be noisy on RAD itself, which has little frontend code; the frontend-file gate limits this.
-- Install-slice tests assume specific reviewers; the new reviewer must be asserted absent from the shipped slice.
+- Install-slice tests list specific reviewers; the new reviewer must be added so a downstream install is verified to receive it. The installer manifest is dir-based for `.rad/agents`, so no manifest code change is expected.
 - Hand-edited generated files would fail `generated-drift`.
