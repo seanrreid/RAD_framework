@@ -3,7 +3,7 @@ name: rad-review
 description: >
   Read-only review of the current rad/ work branch against its plan: runs the
   deterministic scope, plan-lint, approval-blocker and test-presence checks,
-  then the quality and accessibility reviewer sub-agents, and reports a
+  then the quality, accessibility and ui-integrity reviewer sub-agents, and reports a
   combined summary. Never edits files, commits, or pushes.
 targets:
   claude: none
@@ -66,6 +66,12 @@ review.
    `accessibility-reviewer` sub-agent, defined at
    `.codex/agents/accessibility-reviewer.toml`, on those files and include its
    full findings report. Otherwise note that no UI files changed.
+3. When any UI file changed, also spawn the `ui-integrity-reviewer` sub-agent,
+   defined at `.codex/agents/ui-integrity-reviewer.toml`, on those files and
+   include its full findings report and sibling-sweep table. Otherwise print
+   `UI integrity: skipped (no frontend files changed)` and continue. It is
+   advisory: its findings are listed but never counted as blocking, and never
+   approve a plan or change severity routing.
 
 If a sub-agent cannot be spawned, say so in the report; do not review the
 files yourself in its place.
@@ -97,7 +103,7 @@ only; write nothing.
 Report, in order:
 - the branch, plan, and base;
 - each deterministic check with its exit code and output;
-- each reviewer's findings;
+- each reviewer's findings (quality, accessibility, and ui-integrity when it ran);
 - a "Behavioral Exercise" section (recipe present or skipped, mode, findings);
 - a summary listing every blocking item (out-of-scope files, approval
   blockers, missing tests, HIGH findings, and HIGH exercise findings in
