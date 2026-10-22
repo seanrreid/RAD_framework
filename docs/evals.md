@@ -83,8 +83,8 @@ model's refusal is not deterministic, so the twin would be flaky.
 
 ## Reviewer fixtures
 
-`harness/evals/reviewers.eval.js` runs the real `quality-reviewer` and
-`accessibility-reviewer` against golden changes. Each fixture lives at
+`harness/evals/reviewers.eval.js` runs the real `quality-reviewer`,
+`accessibility-reviewer` and `ui-integrity-reviewer` against golden changes. Each fixture lives at
 `harness/evals/reviewers/fixtures/<reviewer>/<id>/`:
 
 - `change/`: files on the review branch, as a repo-relative tree.
@@ -144,7 +144,8 @@ Configure these repo variables and the secret under Settings → Secrets and var
 
 - On `workflow_dispatch`, run by hand.
 - On a PR that touches `.claude/agents/quality-reviewer.md`,
-  `.claude/agents/accessibility-reviewer.md` or `harness/evals/reviewers/**`.
+  `.claude/agents/accessibility-reviewer.md`, `.claude/agents/ui-integrity-reviewer.md` or
+  `harness/evals/reviewers/**`.
 
 GitHub withholds secrets from fork PRs, so the key check fails those runs. An unset
 variable makes its job show as SKIPPED. **The workflow never reports a pass without

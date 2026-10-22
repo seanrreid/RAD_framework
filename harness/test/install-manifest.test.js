@@ -584,12 +584,17 @@ const MARKED_FIXTURE = {
   '.agents/skills/quality-review/SKILL.md': markedMd('quality-review'),
   '.agents/skills/quality-review/agents/openai.yaml': markedHash('quality-review'),
   '.codex/agents/quality-reviewer.toml': markedHash('quality-reviewer'),
+  '.claude/agents/ui-integrity-reviewer.md': markedMd('ui-integrity-reviewer'),
+  '.agents/skills/ui-integrity-review/SKILL.md': markedMd('ui-integrity-review'),
+  '.codex/agents/ui-integrity-reviewer.toml': markedHash('ui-integrity-reviewer'),
 };
 /** The generator source trees. */
 const SOURCE_FIXTURE = {
   '.rad/skills/quality-review/SKILL.md': 'source skill\n',
   '.rad/skills/quality-review/codex.md': 'codex body\n',
   '.rad/agents/quality-reviewer.md': 'source agent\n',
+  '.rad/skills/ui-integrity-review/SKILL.md': 'source skill\n',
+  '.rad/agents/ui-integrity-reviewer.md': 'source agent\n',
 };
 
 test('listCoreFiles — a marked file under each new root ships', () => {

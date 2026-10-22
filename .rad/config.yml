@@ -130,3 +130,7 @@ agent_scope_map:
     type: reviewer
     reads: "current diff or specified files, AGENTS.md stack info"
     roles: [architect, developer, designer]
+  - agent: ui-integrity-reviewer
+    type: reviewer
+    reads: "current diff or specified files, AGENTS.md stack info, frontend source tree (sibling sweep)"
+    roles: [architect, developer, designer]

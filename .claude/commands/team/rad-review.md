@@ -163,6 +163,29 @@ Use the accessibility-reviewer agent on all files changed since branching from t
 Include the agent's full output. HIGH findings are blocking; MEDIUM findings
 should be addressed before merge.
 
+### Step 4b2: UI integrity review
+
+UI integrity files are changed files ending in `.html`, `.css`, `.scss`,
+`.jsx`, `.tsx`, `.vue` or `.svelte`. When none changed, skip this step and
+print `UI integrity: skipped (no frontend files changed)`; the review
+otherwise proceeds as before.
+
+Otherwise, if `RAD_REVIEW_AGENT_CMD` is set, run
+`node harness/cli.js review ui-integrity-reviewer --base "$BASE"` exactly as in
+Step 4: its stdout is the ui-integrity-reviewer's full output, and a non-zero
+exit → record the exit code and stderr line in the report and continue.
+
+Otherwise, spawn the `ui-integrity-reviewer` agent on changed frontend files:
+
+```
+Use the ui-integrity-reviewer agent on all frontend files changed since branching from the default branch.
+```
+
+Include the agent's full output, including its sibling-sweep table. This
+reviewer is advisory: list its findings but do not count them in
+`Blocking issues`, and never use them to approve a plan or change severity
+routing.
+
 ### Step 4c: Exercise the artifact
 
 If `$ARGUMENTS` contains `--no-exercise`, remove that token from the file list,
@@ -298,6 +321,10 @@ Status: [PASS | FAIL]
 **Advisory (SOFT):**
 - [finding] — [file:line]
 
+### UI Integrity (advisory)
+[skipped (no frontend files changed) | ✗ failed (exit [N]): [stderr] — review continued]
+- [HIGH | MEDIUM | LOW] [finding] — [file:line] (advisory; never blocking)
+
 ### Behavioral Exercise
 Recipe: [present | skipped (no recipe) | skipped (--no-exercise) | ✗ failed (exit [N]): [stderr] — review continued]
 Mode: [observe-only | blocking]
@@ -315,8 +342,8 @@ Blocking issues: [N]
 
 ### Step 7: Persist findings to insights log
 
-Extract the `rad-findings` JSON blocks from the quality-reviewer, accessibility-reviewer
-and (when Step 4c ran) exercise outputs. Combine with cycle metadata and append to `.agents/findings.jsonl`.
+Extract the `rad-findings` JSON blocks from the quality-reviewer, accessibility-reviewer,
+ui-integrity-reviewer (when Step 4b2 ran) and (when Step 4c ran) exercise outputs. Combine with cycle metadata and append to `.agents/findings.jsonl`.
 
 Get cycle metadata:
 
@@ -328,7 +355,9 @@ CYCLE_ID="${FEATURE}-${DATE}"
 
 For each finding in each reviewer's `rad-findings` block, append one line to
 `.agents/findings.jsonl`. Findings from quality-reviewer omit the `wcag` field;
-findings from accessibility-reviewer include it. Exercise findings are written
+findings from accessibility-reviewer include it. Findings from
+ui-integrity-reviewer are written with `reviewer: "ui-integrity-reviewer"` and
+`wcag: null`. Exercise findings are written
 with `reviewer: "exercise"`, `category: "behavior"` and `wcag: null`.
 
 ```json

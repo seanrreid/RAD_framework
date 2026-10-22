@@ -17,7 +17,7 @@ Architect:  [merges deliver PR]    ← plan doc + code reach the default branch;
 
 > **Command names.** Claude Code namespaces RAD's commands by role:
 > `/team:…` (`rad-plan`, `rad-research`, `rad-adopt`, `rad-deliver`,
-> `rad-review`, `quality-review`, `accessibility-review`), `/architect:…`
+> `rad-review`, `quality-review`, `accessibility-review`, `ui-integrity-review`), `/architect:…`
 > (`rad-approve`, `rad-design`, `rad-epic-decompose`) and `/shared:…`
 > (`rad-status`, `rad-insights`). Only `/kickoff` and `/wrap` are bare. In
 > Codex the same steps are the `rad-*` skills in `.agents/skills/`.
