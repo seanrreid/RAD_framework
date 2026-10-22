@@ -657,6 +657,50 @@ plan_vague_wording_findings() {
 VAGUE_FINDINGS=$(plan_vague_wording_findings)
 append_warning_lines "$VAGUE_FINDINGS"
 
+# ── Tests to Write: directory entries (advisory) ──────────────────────────────
+# check-tests-present.sh counts an entry only when `-f` holds, so a bullet that
+# resolves to an existing directory can never be satisfied. Entry parsing mirrors
+# that script: the path is the text after the FINAL "— " separator, backticks,
+# surrounding space and one trailing " (...)" annotation stripped. Fenced blocks
+# are skipped. Paths resolve against the working directory, like Files in Scope.
+
+# preflight_scan_failed <helper> <rc> — fail closed: a scan that could not run
+# must never read as "nothing to advise". Called in the parent shell.
+preflight_scan_failed() {
+  ERRORS+=("preflight scan failed: $1 exited $2 for $PLAN_FILE — preflight advisories could not be verified")
+}
+
+plan_tests_to_write_paths() {
+  LC_ALL=C awk '
+    /^[[:space:]]*```/ { fenced = !fenced; next }
+    fenced { next }
+    /^## / { in_tests = ($0 ~ /^## Tests to Write/); next }
+    !in_tests || !/^- / { next }
+    {
+      found = 0; rest = $0
+      while ((i = index(rest, "— ")) > 0) { found = 1; rest = substr(rest, i + 4) }
+      if (!found) next
+      path = rest
+      gsub(/`/, "", path)
+      sub(/^[[:space:]]+/, "", path); sub(/[[:space:]]+$/, "", path)
+      sub(/[[:space:]]+\([^()]*\)$/, "", path)
+      if (path != "") print path
+    }
+  ' "$PLAN_FILE"
+}
+
+scan_directory_tests() {
+  local paths rc=0 entry
+  paths=$(plan_tests_to_write_paths) || rc=$?
+  [[ "$rc" -eq 0 ]] || { preflight_scan_failed plan_tests_to_write_paths "$rc"; return 0; }
+  while IFS= read -r entry; do
+    [[ -n "$entry" && -d "$entry" ]] || continue
+    WARNINGS+=("Tests to Write entry '$entry' is a directory — check-tests-present.sh requires a regular file")
+  done <<< "$paths"
+}
+
+scan_directory_tests
+
 # ── Context budget ────────────────────────────────────────────────────────────
 # Sum line ranges from the Files in Scope table (column 3 = Lines).
 # Range "45-120" → 76 lines. Plain number "150" → 1 line (a single line
