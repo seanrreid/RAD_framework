@@ -599,6 +599,20 @@ The set lives as a literal (`RAD_SELF_PROTECTED_PATTERN`) in
 `scripts/lib/plan-paths.sh`; changing it requires a reviewed commit — there is
 deliberately no env var.
 
+`scripts/lint-plan.sh` also runs two preflight advisories (#298, #299). Both warn
+only — the exit code never changes, fenced code blocks are ignored, and a scan
+that cannot run adds an ERROR rather than passing silently:
+
+- `Tests to Write entry '<path>' is a directory — check-tests-present.sh requires a regular file`
+  — a `Tests to Write` bullet resolves to an existing directory, which the test
+  gate can never satisfy. A file, or a path that does not exist yet, is silent.
+- `Task <N.M> says "<phrase>" but declares <k> doc file(s); also naming the same items: <paths>`
+  — a task `What:` says "doc list(s)" or "to the list(s)", and a tracked `.md`
+  file outside the task's `File:` paths and `## Files in Scope` shares a
+  kebab-case token with every markdown file the task declares. At most 5 paths
+  are listed; silent when the task declares no `.md`, no token is shared, or
+  every match is already in scope.
+
 ### Wave-Lifecycle Hooks
 
 OPTIONAL and backward-compatible — absent, `rad deliver` behaves exactly as
