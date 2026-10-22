@@ -33,6 +33,11 @@ MISSING_IN_SCOPE=""
 # (fenced code and inline `backtick` spans excluded). Advisory only.
 VAGUE_WORDS=(scalable intuitive fast robust user-friendly seamless efficient easy
   flexible performant appropriate properly "as needed" "etc.")
+# Doc-list sibling advisory (#299): a task What: using this phrase (ERE,
+# case-insensitive) is extending a list of docs; DOC_LIST_MAX_SIBLINGS caps the
+# undeclared sibling paths named in the warning.
+DOC_LIST_PHRASE_RE='doc lists?|to the lists?'
+DOC_LIST_MAX_SIBLINGS=5
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -700,6 +705,119 @@ scan_directory_tests() {
 }
 
 scan_directory_tests
+
+# ── Doc-list siblings (advisory) ──────────────────────────────────────────────
+# A task whose What: says it extends a "doc list" / "to the list" and declares
+# markdown files may have missed siblings that name the same items. The items
+# are the kebab-case tokens present in EVERY declared .md file; tracked .md
+# files outside the task's File: paths and Files in Scope that contain any of
+# them are listed (capped). Fenced blocks are skipped. Silent when no declared
+# .md exists, no token is shared, or every match is already in scope.
+
+# plan_doc_list_tasks — one "<Task N.M>\t<phrase>\t<File: values>" row per task
+# whose What: field (continuation lines included) matches DOC_LIST_PHRASE_RE.
+plan_doc_list_tasks() {
+  LC_ALL=C awk -v re="$DOC_LIST_PHRASE_RE" '
+    function flush() { if (task != "" && phrase != "") print task "\t" phrase "\t" files }
+    /^[[:space:]]*```/ { fenced = !fenced; next }
+    fenced { next }
+    /^#+ / {
+      flush(); task = ""; phrase = ""; files = ""; field = ""
+      if ($0 ~ /^#### Task/) { task = $0; sub(/^#### /, "", task); sub(/:.*/, "", task) }
+      next
+    }
+    task != "" && /^[A-Z][A-Za-z-]*:/ {
+      field = ($0 ~ /^What:/) ? "What" : ""
+      if ($0 ~ /^File:/) { v = $0; sub(/^File:/, "", v); files = files "," v }
+    }
+    task != "" && field == "What" && phrase == "" {
+      s = tolower($0); if (match(s, re)) phrase = substr(s, RSTART, RLENGTH)
+    }
+    END { flush() }
+  ' "$PLAN_FILE"
+}
+
+# doc_list_declared_docs <File: values> — existing .md paths the task declares.
+doc_list_declared_docs() {
+  local path
+  while IFS= read -r path; do
+    if [[ "$path" == *.md && -f "$path" ]]; then printf '%s\n' "$path"; fi
+  done < <(split_task_file_value "$1")
+}
+
+# doc_list_tokens <file> — sorted unique lowercase kebab-case tokens.
+doc_list_tokens() {
+  LC_ALL=C tr 'A-Z' 'a-z' < "$1" \
+    | { grep -oE '[a-z0-9]+(-[a-z0-9]+)+' || [ $? -eq 1 ]; } | sort -u
+}
+
+# doc_list_shared_tokens <newline-separated docs> — tokens present in every doc.
+# Prints nothing as soon as the intersection is empty (never a blank line: a
+# blank pattern would match every file downstream).
+doc_list_shared_tokens() {
+  local doc toks shared="" first=1
+  while IFS= read -r doc; do
+    toks=$(doc_list_tokens "$doc") || return $?
+    if [[ "$first" -eq 1 ]]; then
+      shared="$toks"; first=0
+    elif [[ -n "$shared" && -n "$toks" ]]; then
+      shared=$(comm -12 <(printf '%s\n' "$shared") <(printf '%s\n' "$toks")) || return $?
+    else
+      shared=""
+    fi
+    if [[ -z "$shared" ]]; then return 0; fi
+  done <<< "$1"
+  printf '%s\n' "$shared"
+}
+
+# doc_list_sibling_paths <tokens> <excluded paths> — up to DOC_LIST_MAX_SIBLINGS
+# tracked .md files outside <excluded> that contain any token.
+doc_list_sibling_paths() {
+  local tokens="$1" excluded="$2" f rc found=0 tracked
+  tracked=$(git ls-files '*.md') || return $?
+  while IFS= read -r f; do
+    if [[ -z "$f" || ! -f "$f" ]]; then continue; fi
+    if grep -qFx -- "$f" <<< "$excluded"; then continue; fi
+    rc=0
+    grep -qiF -f <(printf '%s\n' "$tokens") -- "$f" || rc=$?
+    case "$rc" in
+      0) printf '%s\n' "$f"; found=$((found + 1)) ;;
+      1) ;;
+      *) return "$rc" ;;
+    esac
+    if [[ "$found" -ge "$DOC_LIST_MAX_SIBLINGS" ]]; then break; fi
+  done <<< "$tracked"
+}
+
+# doc_list_check_task <id> <phrase> <File: values> — append the warning when
+# siblings exist; non-zero only when a scan helper failed.
+doc_list_check_task() {
+  local id="$1" phrase="$2" files="$3" docs tokens excluded siblings count joined
+  docs=$(doc_list_declared_docs "$files") || return $?
+  if [[ -z "$docs" ]]; then return 0; fi
+  tokens=$(doc_list_shared_tokens "$docs") || return $?
+  if [[ -z "$tokens" ]]; then return 0; fi
+  excluded=$({ printf '%s\n' "$docs"; plan_files_in_scope "$PLAN_FILE"; }) || return $?
+  siblings=$(doc_list_sibling_paths "$tokens" "$excluded") || return $?
+  if [[ -z "$siblings" ]]; then return 0; fi
+  count=$(grep -c '' <<< "$docs") || return $?
+  joined=$(paste -sd, - <<< "$siblings" | sed 's/,/, /g') || return $?
+  WARNINGS+=("$id says \"$phrase\" but declares $count doc file(s); also naming the same items: $joined")
+}
+
+scan_doc_list_siblings() {
+  local rows rc=0 id phrase files
+  rows=$(plan_doc_list_tasks) || rc=$?
+  [[ "$rc" -eq 0 ]] || { preflight_scan_failed plan_doc_list_tasks "$rc"; return 0; }
+  while IFS=$'\t' read -r id phrase files; do
+    if [[ -z "$id" ]]; then continue; fi
+    rc=0
+    doc_list_check_task "$id" "$phrase" "$files" || rc=$?
+    [[ "$rc" -eq 0 ]] || preflight_scan_failed doc_list_check_task "$rc"
+  done <<< "$rows"
+}
+
+scan_doc_list_siblings
 
 # ── Context budget ────────────────────────────────────────────────────────────
 # Sum line ranges from the Files in Scope table (column 3 = Lines).
