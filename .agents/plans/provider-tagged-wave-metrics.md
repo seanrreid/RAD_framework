@@ -1,7 +1,10 @@
 # Plan: Provider-Tagged Wave Metrics
 Created: 2026-10-23
 Author: developer
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-10-23T14:54:11.518Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/provider-tagged-wave-metrics
 Source-Author: none (no source issue)
 Source-Comments: none
