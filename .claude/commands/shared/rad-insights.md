@@ -693,6 +693,58 @@ Reading the output:
   "No spend advisories: N group(s) met the floor" line, N = the count of
   non-`unrecorded` groups at or above `minFeatures`.
 
+### Step 4f4: Fold spend by provider
+
+Every `wave-attempt` that `rad deliver` appends carries `data.agent` — the selected
+adapter kind and, when one applied, the model. Grouping attempts by
+`adapter/model` gives per-PROVIDER spend and reliability. The counting lives in
+`harness/events.js` (`providerSpend`) — import it, never re-implement it. Same
+invocation convention as Steps 4c–4f3: run from the repo root; `RAD_STATE_DIR`
+(default `.agents/state`) exists only for fixture testing. This step only reads;
+it writes nothing.
+
+```bash
+node --input-type=module -e '
+import { readFileSync, readdirSync, existsSync } from "node:fs";
+import { join } from "node:path";
+const { providerSpend } = await import("./harness/events.js");
+
+const stateDir = process.env.RAD_STATE_DIR || ".agents/state";
+const features = existsSync(stateDir)
+  ? readdirSync(stateDir, { withFileTypes: true })
+      .filter((d) => d.isDirectory())
+      .map((d) => d.name)
+      .filter((f) => existsSync(join(stateDir, f, "events.jsonl")))
+      .sort()
+  : [];
+
+// Groups key on the attempt tag, not on (feature, wave), so one concatenated
+// history is safe.
+const history = features.flatMap((feature) =>
+  readFileSync(join(stateDir, feature, "events.jsonl"), "utf8")
+    .split("\n").filter(Boolean).map((l) => JSON.parse(l)));
+const stats = providerSpend(history);
+
+const pct = (n, d) => (d === 0 ? 0 : Math.round((100 * n) / d));
+const groups = Object.fromEntries(Object.entries(stats.groups).map(([key, g]) =>
+  [key, { ...g, passPct: pct(g.passed, g.attempts) }]));
+console.log(JSON.stringify({ groups, features: stats.features }, null, 2));
+'
+```
+
+Reading the output:
+
+- **`groups`** — keyed by `adapter/model`: `command/<model>`, `sdk/<model>`,
+  `<adapter>/none` (a tagged attempt that applied no model — e.g. `acp`, or a
+  `command` cmd with no `{model}` token), or `unknown` (an attempt recorded before
+  provider tagging; its adapter is unknowable). Per group: `attempts` (every rate
+  is out of this n), `passed` / `passPct` (outcome `success`), `retries` (attempts
+  numbered > 1), `tokens` (summed over attempts that reported usage), `unknownUsage`
+  (usage-less attempts, excluded from tokens — never counted as 0), `features`.
+- **`features`** — distinct features contributing attempts across all groups.
+- **Non-zero exit** — the fold or a log read failed. Omit the Spend by provider
+  subsection and continue the report; never stop on it.
+
 ### Step 4g: Route recurring signals to prompt surfaces
 
 Some failure signals point at the INSTRUCTIONS the wave agent was given, not at
@@ -1183,6 +1235,22 @@ tokens, never counted as 0.
 [Suggestion only — never edit plans, never block. Always quote the n; a group
  with small n is weak evidence even above the feature floor.]
 
+#### Spend by provider
+[From Step 4f4. Omit this subsection if Step 4f4 exited non-zero — the rest of
+ the report still renders. If `groups` is empty, render the table header with no
+ rows. One row per group; split the key on its first `/` into adapter and model
+ (`unknown` renders as adapter `unknown`, model `—`).]
+| Adapter | Model | Attempts | Pass rate | Retries | Tokens | Unknown-usage attempts |
+|---------|-------|----------|-----------|---------|--------|------------------------|
+| `[adapter]` | `[model]` | [attempts] | [passPct]% (n=[attempts]) | [retries] | [tokens] | [unknownUsage] |
+...
+
+[Render this note verbatim whenever the subsection renders:]
+`unknown` = attempts recorded before this change (no `agent` tag on the
+`wave-attempt`); its provider is unknowable. `<adapter>/none` means the adapter
+applied no model. Unknown-usage attempts add nothing to tokens, never counted as 0.
+[Read-only — never edit plans or config, never block.]
+
 ### Cache-Hit Readout
 [From Step 4f2. Omit this section entirely if no per-feature events.jsonl exists.]
 [If noCacheData: true, render EXACTLY this line and nothing else in the section —
@@ -1285,6 +1353,9 @@ Reporting only — no target or threshold applies to these values.
   skill only derives the retry-dropped-to-0 flag and percentages from its output. With no
   attempt reporting `cacheRead`, render the explicit "no cache data reported" line —
   never a 0% ratio and never silence
+- Spend by provider (Step 4f4) MUST come from `providerSpend` in `harness/events.js`;
+  the skill only derives the pass-rate percentage. A fold error omits the subsection,
+  never the report
 - Prompt-surface routing (Step 4g) reads counts ONLY from `attemptOutcomeCounts`,
   `failReasonCounts` and `blockedReasonCounts`; routing lives ONLY in the
   `PROMPT_SURFACE_MAP` table and the threshold ONLY in `PROMPT_SIGNAL_THRESHOLD`.
