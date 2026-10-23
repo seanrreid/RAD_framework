@@ -132,6 +132,10 @@ invariants:
         surface: "self-protected path findings are advisory"
         guarded: "no"
         note: "by design: lint-plan.sh warns for architect review; a self-protected finding is not an approval blocker"
+      - id: agent-prose-protected-seam-edits
+        surface: "authority-agent Rules forbidding edits to harness/gates.js, the events writer, or integrity/lint script internals"
+        guarded: "no"
+        note: "prose-only: a plan that lists the file in scope passes check-scope; the self-protected flag is advisory, so the agent's rule is the only stop"
 
   - id: rad-config-is-data
     claim: "RAD's roles, platform, default branch and agent scope map are read only from .rad/config.yml (never from CLAUDE.md prose), and that file is self-protected"
@@ -305,3 +309,46 @@ invariants:
         surface: "a hand-written file without the generated marker"
         guarded: "no"
         note: "unmarked files are outside the drift check by design (e.g. the Claude rad-review command)"
+
+  # The Rules prose of the 16 purpose: authority agents (.rad/agents-internal/)
+  # is classified by kind; the per-agent table is the addendum in
+  # docs/agent-hierarchy-audit.md. Kinds already enforced elsewhere get no bypass:
+  #   writes outside the plan's Files in Scope        -> scope-enforced
+  #   Status header is a display mirror, not the gate -> unapproved-deliver-cannot-run
+  #   veto hooks emit only matrix-vocabulary outcomes -> hook-veto-fail-closed
+  #   existing event lines are never modified         -> events-append-only
+  # Protected-seam edits are hosted under self-protected-paths-flagged; every
+  # other prose-only kind is hosted here.
+  - id: authority-agent-boundaries
+    claim: "Every agent source that declares roles: also declares a purpose: drawn from authority | context-discipline | capacity, and the agent-file lint exits non-zero otherwise."
+    authority: "the purpose: frontmatter field, checked against PURPOSE_VALUES in scripts/lint-agent-files.sh"
+    not_evalable: "repo-convention lint with no agent-reachable surface; covered by scripts/test-lint-agent-files.sh"
+    enforced_by:
+      - { file: scripts/lint-agent-files.sh, symbol: "check_purpose() {", note: "a missing, empty or unlisted purpose is a violation" }
+      - { file: scripts/lint-agent-files.sh, symbol: "readonly PURPOSE_VALUES=\"authority context-discipline capacity\"", note: "the one definition of the allowed values" }
+      - { file: .github/workflows/ci.yml, symbol: "run: scripts/lint-agent-files.sh", note: "CI runs the lint on every PR" }
+    bypasses:
+      - id: agent-prose-direct-reads
+        surface: "authority-agent Rules: never read files directly / outside the declared scope"
+        guarded: "no"
+        note: "tools: Task is structural for pure-Task orchestrators, but the lint applies tool rules only to context tools, so an orchestrator that gains Read is not flagged; read scope is never checked"
+      - id: agent-prose-raw-content-return
+        surface: "authority-agent Rules: never return raw file contents, summarize to the output format"
+        guarded: "no"
+        note: "prose-only: nothing inspects what a sub-agent returns to its parent"
+      - id: agent-prose-design-seam
+        surface: "authority-agent Rules fixing design seams (evaluateGate stays a pure fold, architecture-approved is audit-only, no check logic in workflow YAML, reuse existing matchers, keep the fetch in sync-transport)"
+        guarded: "no"
+        note: "prose-only: the gate's own invariants test its behaviour, not where a delivered change puts the logic; review at Gate 2 is the only check"
+      - id: agent-prose-transport
+        surface: "authority-agent Rules for sync transport (plain git only, inherit git credentials, offline fail-safe)"
+        guarded: "no"
+        note: "prose-only: no lint or test pins the transport choice of a delivered change"
+      - id: agent-prose-behavioural
+        surface: "authority-agent Rules on behaviour (fail-closed checks, deterministic hooks, advisory-only ownership, suggestions not auto-edits, no new event writes, keep parts separable, call the mapper first)"
+        guarded: "no"
+        note: "prose-only: these steer the agent's proposal; whatever ships is tested on its own terms, not against the rule"
+      - id: agent-prose-role-agent-selection
+        surface: "rad-plan Step 1 (only call agents available to your role) and Architect-only agent Rules"
+        guarded: "no"
+        note: "prose-only: agent_scope_map roles are data, but nothing stops a plan run from calling an agent outside the caller's role"
