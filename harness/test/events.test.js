@@ -25,6 +25,7 @@ import {
   dormantStop,
   modelTierSpend,
   modelTierAdvisories,
+  providerSpend,
   UPGRADE_RETRY_RATE,
   DEFICITS,
   fileDeficitSignals,
@@ -1492,4 +1493,82 @@ test('forecastForPaths returns [] on non-object signals or non-array paths', () 
   for (const bad of [null, undefined, 7, 'x']) assert.deepStrictEqual(forecastForPaths(bad, ['src/a.js']), []);
   for (const bad of [null, undefined, 'src/a.js', {}]) assert.deepStrictEqual(forecastForPaths({ files: {} }, bad), []);
   assert.deepStrictEqual(forecastForPaths({ files: null }, ['src/a.js']), []);
+});
+
+// ── providerSpend ────────────────────────────────────────────────────────────
+// Expected values are hand-computed from harness/test/fixtures/insights/provider;
+// the arithmetic is in comments.
+
+const PROVIDER_ZERO = { groups: {}, features: 0 };
+
+/** One provider group, zeroed, overridden per case. */
+const providerGroup = (overrides) => ({ attempts: 0, passed: 0, retries: 0, tokens: 0, unknownUsage: 0, features: 0, ...overrides });
+
+test('providerSpend is zeroed on empty, null, and non-array input', () => {
+  for (const input of [[], null, undefined, 'x', 7, {}, { length: 2 }]) {
+    assert.deepStrictEqual(providerSpend(input), PROVIDER_ZERO);
+  }
+});
+
+test('providerSpend skips malformed events and never throws', () => {
+  const history = deepFreeze([
+    null,
+    7,
+    'wave-attempt',
+    { type: 'wave-attempt' },
+    { feature: '', type: 'wave-attempt', data: { outcome: 'success', agent: { adapter: 'sdk' } } },
+    { feature: 7, type: 'wave-attempt', data: { outcome: 'success' } },
+    { feature: 'f', type: 'wave-attempt', data: null },
+    { feature: 'f', type: 'wave-attempt', data: 'x' },
+    { feature: 'f', type: 'wave-started', data: { wave: 1, agent: { adapter: 'sdk' } } },
+  ]);
+  assert.deepStrictEqual(providerSpend(history), PROVIDER_ZERO);
+});
+
+test('providerSpend groups the provider fixture by adapter/model per attempt', () => {
+  assert.deepStrictEqual(providerSpend(loadInsightsFixture('provider')), {
+    groups: {
+      // alpha w1 a1 (success, 100+50) + alpha w2 a1 (fail-tests, 200+100+300 cacheRead) → 150 + 600 = 750.
+      'command/claude-sonnet-4-6': providerGroup({ attempts: 2, passed: 1, tokens: 750, features: 1 }),
+      // alpha w2 a2 resumed on sdk (400+100+50 cacheWrite = 550) + beta a1 (15, fail-timeout) + beta a2 (30) → 595.
+      // Retries: alpha w2 a2 and beta a2.
+      'sdk/claude-opus-4-8': providerGroup({ attempts: 3, passed: 2, retries: 2, tokens: 595, features: 2 }),
+      // gamma: acp applies no model → <adapter>/none. 70 + 30 = 100.
+      'acp/none': providerGroup({ attempts: 1, passed: 1, tokens: 100, features: 1 }),
+      // delta legacy untagged: w1 = 40 + 10 = 50; w2 has no usage → unknownUsage, adds 0. data:null line skipped.
+      unknown: providerGroup({ attempts: 2, passed: 2, tokens: 50, unknownUsage: 1, features: 1 }),
+    },
+    features: 4, // alpha, beta, gamma, delta
+  });
+});
+
+test('providerSpend buckets a malformed agent tag as unknown and a blank model as none', () => {
+  const history = deepFreeze([
+    { feature: 'f', type: 'wave-attempt', data: { attempt: 1, outcome: 'success', agent: null } },
+    { feature: 'f', type: 'wave-attempt', data: { attempt: 1, outcome: 'success', agent: { adapter: '' } } },
+    { feature: 'f', type: 'wave-attempt', data: { attempt: '2', outcome: 'success', agent: { adapter: 'command', model: '' } } },
+    { feature: 'f', type: 'wave-attempt', data: { attempt: 3, outcome: 'fail-tests', agent: { adapter: 'command', model: 7 } } },
+  ]);
+  assert.deepStrictEqual(providerSpend(history).groups, {
+    unknown: providerGroup({ attempts: 2, passed: 2, unknownUsage: 2, features: 1 }),
+    // attempt '2' is not an integer → not a retry; attempt 3 is.
+    'command/none': providerGroup({ attempts: 2, passed: 1, retries: 1, unknownUsage: 2, features: 1 }),
+  });
+});
+
+test('existing folds are identical on the provider fixture with and without agent keys', () => {
+  const tagged = deepFreeze(loadInsightsFixture('provider'));
+  const stripped = deepFreeze(
+    tagged.map((event) => {
+      if (event.type !== 'wave-attempt' || !event.data || !('agent' in event.data)) return event;
+      const { agent, ...data } = event.data;
+      return { ...event, data };
+    }),
+  );
+  assert.equal(JSON.stringify(stripped).includes('"agent"'), false);
+  assert.equal(JSON.stringify(tagged).includes('"agent"'), true);
+  const folds = { waveReliability, totalUsage, cacheUsage, modelTierSpend, retryCounts, reduce };
+  for (const [name, fold] of Object.entries(folds)) {
+    assert.deepStrictEqual(fold(tagged), fold(stripped), name);
+  }
 });
