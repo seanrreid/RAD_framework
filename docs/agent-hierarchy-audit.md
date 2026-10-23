@@ -13,6 +13,11 @@ exist for authority and eleven for context discipline. None exists only
 because a read would not fit in the context window, so nothing here is
 provisional debt that larger windows will retire.
 
+That headline answers "is the governance wanted?", not "does it need a
+separate agent loop?". The [addendum](#addendum-the-authority-test-reframed)
+re-asks the second question: no `authority` agent meets a keep condition, and
+most of their prose rules are not deterministically enforced.
+
 Source: issue [#46](https://github.com/seanrreid/RAD_framework/issues/46) and
 its comments; the agent files themselves; `.rad/config.yml` `agent_scope_map`.
 Captured: 2026-10-06
@@ -215,7 +220,101 @@ This doc is part 1 of 2. Part 2 covers:
   rejects unknown keys, so tagging them needs generator support for
   `purpose:` first.
 - **Lint enforcement:** `scripts/lint-agent-files.sh` requires `purpose:` on
-  every scope-map agent. It waits until every agent is tagged, so it never
-  fails on the current tree.
+  every agent that declares `roles:`, and exits non-zero when it is missing,
+  empty or outside `authority | context-discipline | capacity`
+  (`check_purpose`; invariant `authority-agent-boundaries`).
 - **`/rad-design` emitting `purpose:`** with a one-line justification for each
   new agent, and flagging any `capacity` tag as provisional.
+
+---
+
+## Addendum: The Authority Test, Reframed
+
+Captured: 2026-10-23
+
+### The reframed test
+
+The taxonomy's `authority` question ("would this boundary still be wanted with
+a perfect, free, infinite-context model?") shows that the governance is
+wanted. It does not show that the governance needs its own agent. The
+reframed test is:
+
+> **Does this governance need a separate agent loop?**
+
+Anthropic's "When to fold subagents into your main agent loop" (2026-10-22)
+keeps a subagent only when one of three conditions holds:
+
+1. **Context bloat**: its work would flood the parent's context (large reads,
+   long logs), with measured degradation.
+2. **Parallel fresh context**: independent work runs in parallel, each in a
+   clean, discardable window.
+3. **Tool/instruction conflict**: it needs tools or instructions that would
+   conflict with the parent's.
+
+Authority alone is not on the list. A rule that must hold belongs in a
+deterministic check (a lint, a gate or a plan scope rule) that returns a
+readable refusal, not in an agent's prose. `/rad-design` now asks each
+proposed subagent to name its keep condition.
+
+### What the prose actually enforces
+
+Each authority agent's Rules section was classified by constraint *kind*. The
+registry (`docs/invariants.yaml`) records the result: kinds already enforced
+elsewhere point at that invariant; every prose-only kind is a `bypasses` entry
+with `guarded: "no"`, listed by `scripts/lint-invariants.sh --inventory`.
+The one deterministic fact about these agents, that each declares a valid
+`purpose:`, is invariant `authority-agent-boundaries`.
+
+| Kind | Example rule | Status |
+|---|---|---|
+| direct reads | "Never read files directly / outside the declared scope" | Prose-only: `agent-prose-direct-reads` (`tools: Task` is structural, but the lint does not check orchestrator tools) |
+| raw-content return | "Never return raw file contents" | Prose-only: `agent-prose-raw-content-return` |
+| protected-seam edits | "Never modify `harness/gates.js`, the events writer, ..." | Prose-only: `agent-prose-protected-seam-edits` (writes outside a plan's Files in Scope are `scope-enforced`; a plan that lists the file passes) |
+| design seam | "`evaluateGate` stays a pure fold", "no check logic in workflow YAML" | Prose-only: `agent-prose-design-seam` |
+| transport | "plain git only", "inherit git credentials", "offline fail-safe" | Prose-only: `agent-prose-transport` |
+| behavioural | "fail-closed", "deterministic hooks", "suggestions only", "keep parts separable" | Prose-only: `agent-prose-behavioural` |
+| role selection | "Architect-only" (`roles: [architect]`) | Prose-only: `agent-prose-role-agent-selection` |
+| Status header is a mirror | "The `Status` header is a display mirror ... never the gate" | Enforced: `unapproved-deliver-cannot-run` |
+| veto vocabulary | "a veto hook may only emit an outcome from the fixed matrix vocabulary" | Enforced: `hook-veto-fail-closed` |
+
+### Per-agent table
+
+Every authority agent has `tools: Task` and `reads: nothing`, so none of them
+reads anything that could bloat a parent (condition 1). That load sits in the
+mappers, which stay. None runs work in parallel that its mapper or sibling
+could not run directly (condition 2), and none carries tools or instructions
+that conflict with its parent's (condition 3). Restricting an agent to `Task`
+is a fence, which is authority, not a conflict.
+
+| Agent | Constraint kinds | Enforced / Prose-only | Keep condition met |
+|---|---|---|---|
+| approval-authority-parent-orchestrator | direct reads, raw-content return, design seam, role selection | Prose-only | none: pure router over two orchestrators |
+| harness-ci-parent-orchestrator | direct reads, raw-content return, design seam, protected-seam edits, behavioural, role selection | Prose-only | none: pure router over three orchestrators |
+| hooks-parent-orchestrator | direct reads, behavioural, veto vocabulary, role selection | Enforced: veto vocabulary (`hook-veto-fail-closed`); rest prose-only | none: pure router over two orchestrators |
+| insights-feedback-parent-orchestrator | direct reads, raw-content return, protected-seam edits, behavioural | Prose-only | none: pure router over two orchestrators |
+| portable-memory-parent-orchestrator | direct reads, raw-content return, design seam, role selection | Prose-only | none: pure router over two orchestrators |
+| approval-command-integration-orchestrator | direct reads, raw-content return, design seam, behavioural, Status header is a mirror, role selection | Enforced: Status mirror (`unapproved-deliver-cannot-run`); rest prose-only | none: Task-only; reading sits in approval-command-mapper |
+| approval-event-model-orchestrator | direct reads, raw-content return, design seam, behavioural, role selection | Prose-only | none: Task-only; reading sits in approval-event-mapper |
+| ci-wiring-orchestrator | direct reads, raw-content return, design seam, protected-seam edits, behavioural, role selection | Prose-only | none: Task-only; reading sits in ci-surface-mapper |
+| convention-lints-orchestrator | direct reads, raw-content return, design seam, behavioural, role selection | Prose-only | none: Task-only; reading sits in lint-surface-mapper |
+| event-fold-orchestrator | direct reads, raw-content return, design seam, behavioural, role selection | Prose-only | none: Task-only; reading sits in event-fold-mapper |
+| event-metrics-orchestrator | direct reads, raw-content return, protected-seam edits, behavioural | Prose-only | none: Task-only; reading sits in event-metrics-mapper |
+| findings-loop-orchestrator | direct reads, raw-content return, behavioural | Prose-only | none: Task-only; reading sits in findings-surface-mapper |
+| hook-runtime-orchestrator | direct reads, behavioural, role selection | Prose-only | none: Task-only; reading sits in hook-surface-mapper |
+| integrity-checks-orchestrator | direct reads, raw-content return, protected-seam edits, behavioural, role selection | Prose-only | none: Task-only; reading sits in integrity-surface-mapper |
+| spine-integration-orchestrator | direct reads, design seam, behavioural, veto vocabulary, role selection | Enforced: veto vocabulary (`hook-veto-fail-closed`); rest prose-only | none: Task-only; reading sits in spine-mapper |
+| sync-transport-orchestrator | direct reads, raw-content return, transport, design seam, role selection | Prose-only | none: Task-only; reading sits in sync-surface-mapper |
+
+### Fold candidates
+
+All 16 authority agents meet no keep condition, so all 16 are fold candidates
+for step 5 of the subagent topology update. Nothing is removed, merged or
+edited here. Folding waits on the topology eval, goes one agent per PR, and
+starts with the five parent-orchestrators, which are pure routers that add a
+hop between the caller and the orchestrators. Folding an orchestrator moves
+its mapper delegation up one level; the 11 `context-discipline` mappers are
+split by context and are not candidates.
+
+The governance does not disappear when an agent folds. Each prose-only kind
+above is a `guarded: "no"` bypass in the registry, the list of rules to turn
+into deterministic checks rather than carry in agent prose.

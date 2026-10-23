@@ -75,6 +75,7 @@ Parent Orchestrator
 - Type: `parent-orchestrator` | `role-orchestrator` | `context-tool`
 - Roles: who can invoke it (inherit from parent orchestrator for context tools)
 - Purpose: why the boundary exists — `authority` | `context-discipline` | `capacity`, plus a one-line justification
+- Keep condition: which keep condition (below) justifies a separate agent loop, with evidence
 - Model: `claude-sonnet-4-6` for orchestrators, `claude-haiku-4-5-20251001` for context tools
 - Tools: `Task` for anything that delegates, `Read, Grep, Glob` for anything that reads
 - Reads: exact directories/patterns, or "nothing — delegates only"
@@ -89,12 +90,27 @@ Every agent gets exactly one `purpose`. Ask these in order; the first "yes" wins
 | `authority` | Would this boundary still be wanted with a perfect, free, infinite-context model? |
 | `context-discipline` | Is it here because reading everything is too expensive or too distracting? |
 | `capacity` | Is it here only because the read wouldn't fit? |
+| keep condition | Then, for every agent: does this governance need a separate agent loop? Name the condition below that holds, or `none` |
 
 - Orchestrators that only delegate are usually `authority`
 - Mappers that return anchors are usually `context-discipline`
 - `capacity` is provisional: its justification must name the read that wouldn't fit
 - Tie-breaker between the last two: would we keep this with an infinite but costly window? Yes means `context-discipline`
 - See `docs/agent-hierarchy-audit.md` for worked examples
+
+**Keep-condition rules:**
+A subagent is kept only when one of these holds; cite the evidence:
+
+1. **Context bloat** — its work would flood the parent's context (large reads, long logs)
+2. **Parallel fresh context** — independent work runs in parallel, each in a clean window
+3. **Tool/instruction conflict** — it needs tools or instructions that would conflict with the parent's
+
+- At design time condition 1 may be cited as *expected* bloat with a stated reason; mark it
+  `(provisional — confirm with the topology eval or /rad-insights)`
+- Authority alone is not a keep condition. A rule that must hold ("never edit X", "stay a
+  pure fold") belongs in a deterministic check — a lint, a gate or a plan scope rule — not
+  in a separate agent's prose. Name that check in Notes instead
+- `none` is a valid answer: the agent is a fold candidate, so say so in Notes
 
 **Role assignment rules:**
 - Parent orchestrator → `architect` only
@@ -131,6 +147,7 @@ Research: .agents/research/[slug].md
 - Type: [parent-orchestrator | role-orchestrator | context-tool]
 - Roles: [architect | developer | designer — comma-separated]
 - Purpose: [authority | context-discipline | capacity]: [one-line justification]
+- Keep condition: [1 context bloat | 2 parallel fresh context | 3 tool/instruction conflict | none]: [evidence]
 - Model: [claude-sonnet-4-6 | claude-haiku-4-5-20251001]
 - Tools: [Task | Read, Grep, Glob]
 - Reads: [exact scope, or "nothing — delegates only"]
@@ -153,8 +170,10 @@ Research: .agents/research/[slug].md
 The artifact is written with `Status: draft`. Do **not** stop and ask the architect
 to re-run — present the design inline and gate here. Render the hierarchy tree, the
 Scope Map table, a Purpose table, and the Notes section, then ask. Build the Purpose
-table (agent | purpose | justification) from the `Purpose:` lines in Agent
-Definitions, and mark each `capacity` row "(provisional)".
+table (agent | purpose | justification | keep condition) from the `Purpose:` and
+`Keep condition:` lines in Agent Definitions, and mark each `capacity` row
+"(provisional)". Keep the provisional marker on any design-time condition 1, and
+flag every `none` row as a fold candidate.
 
 ```
 Architecture drafted: .agents/architecture/[slug].md
@@ -163,9 +182,9 @@ Architecture drafted: .agents/architecture/[slug].md
 
 [Scope Map table]
 
-| Agent | Purpose | Justification |
-|-------|---------|---------------|
-| [name] | [purpose, plus "(provisional)" if capacity] | [one-line justification] |
+| Agent | Purpose | Justification | Keep condition |
+|-------|---------|---------------|----------------|
+| [name] | [purpose, plus "(provisional)" if capacity] | [one-line justification] | [1 / 2 / 3 / none: evidence] |
 
 [Notes]
 
@@ -237,7 +256,7 @@ codex:
 Include the codex: block only for context-tool agents (tools within
 Read, Grep, Glob); omit it for every other agent.
 
-Copy only the purpose value. The justification stays in the architecture artifact, never in the agent file.
+Copy only the purpose value. The justification and the keep condition stay in the architecture artifact, never in the agent file.
 
 Body sections (use exactly these headings):
 
