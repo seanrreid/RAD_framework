@@ -8,3 +8,4 @@
 | 4 | Wave 2 | Add the provider fixture | ✓ complete | c76f200 | 10:58 |
 | 5 | Wave 3 | Add "Spend by provider" to /rad-insights | ✓ complete (wave Verify FAIL: lint-function-length, harness/spine.js::deliverSpine 41>40 from faa1726) | 354b689 | 11:06 |
 | 6 | Wave 3 | Keep deliverSpine under the function-length limit (retry fix) | ✓ complete | c32c37b | 11:14 |
+| — | Wave 3 | Extract runPendingWaves from deliverSpine (lint-function-length fix) | ✓ complete | 06e9d6c | 11:25 |
