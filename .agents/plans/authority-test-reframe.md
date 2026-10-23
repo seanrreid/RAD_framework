@@ -1,7 +1,8 @@
 # Plan: Reframe the Authority Test
 Created: 2026-10-23
 Author: architect
-Status: in-progress
+Status: complete
+Completed-At: 2026-10-23T16:00:33.645Z
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-10-23T15:59:46.744Z
 Recorded-By: sean@torchcodelab.com
