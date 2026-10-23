@@ -1507,9 +1507,17 @@ export async function deliverSpine({
     runHooks, approvalIntact, maxFailedAttempts, resume, pushGuard, testsByWave, waveTasks, hookPreflight, prepare, finish, testWave, agent };
   const { stop, waves, completed } = await startRun(loop);
   if (stop) return stop;
+  const halt = await runPendingWaves(waves, completed, loop);
+  if (halt) return halt;
+  return finishRun(loop);
+}
+
+// Runs each plan wave a prior run has not completed, in order; returns the first
+// halting result, or null when every wave proceeded.
+async function runPendingWaves(waves, completed, loop) {
   for (const wave of waves) {
     const halt = completed.has(wave.n) ? null : await runOneWave(wave, loop);
     if (halt) return halt;
   }
-  return finishRun(loop);
+  return null;
 }
