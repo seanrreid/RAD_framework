@@ -85,7 +85,7 @@ Validate: AC#3 — the table has exactly 16 rows matching the agents with `purpo
 Verify: exec bash scripts/verify-all.sh
 
 ## Tests to Write
-- [ ] No new test file: this plan changes data (registry entries), docs and a skill prompt. Coverage comes from the existing `scripts/test-lint-invariants.sh` / `harness/test/invariants.test.js` (registry validity and anchor resolution), `harness/test/skill-bodies.test.js`, and the `generate-drift` check — all run by the last-wave Verify.
+- None. This plan changes registry data, docs and a skill prompt only; the existing invariant lint, skill-body test and generated-drift check in the last-wave Verify cover it.
 
 ## Non-Goals
 - No agent is removed, merged or edited; folding is step 5, gated on the topology eval.
