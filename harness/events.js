@@ -136,6 +136,10 @@
  *   in order: the ACP tool kind (null when the agent sent none) and RAD's
  *   decision. Data-only, like `tasks` and `verify`: no fold reads it. Omitted
  *   when the wave result carries none or an empty array.
+ * @property {{adapter: 'command'|'acp'|'sdk', model?: string}} [agent] - the
+ *   adapter kind that ran the attempt and the model applied to it (`model`
+ *   omitted when none applies). Data-only, like `tasks` and `verify`: no fold
+ *   reads it except `providerSpend`. Omitted when the spine had no agent identity.
  */
 
 /**
@@ -1033,6 +1037,76 @@ export function modelTierSpend(history) {
     if (wave.attempts.length === 0) continue;
     features.add(wave.feature);
     addWaveToGroup(out.groups, wave);
+  }
+  for (const group of Object.values(out.groups)) group.features = group.features.size;
+  out.features = features.size;
+  return out;
+}
+
+// ── Provider spend (appended; pure fold, no I/O) ─────────────────────────────
+
+/** Group key for a wave attempt that carries no `agent` tag (legacy logs). */
+const PROVIDER_UNKNOWN = 'unknown';
+/** Model segment for a tagged attempt that applied no model (e.g. acp). */
+const MODEL_NONE = 'none';
+
+const isNonEmptyString = (v) => typeof v === 'string' && v !== '';
+
+/** `adapter/model` key for one attempt; `unknown` when untagged or malformed. */
+function providerKeyOf(data) {
+  const agent = data.agent;
+  if (!agent || typeof agent !== 'object' || !isNonEmptyString(agent.adapter)) return PROVIDER_UNKNOWN;
+  return `${agent.adapter}/${isNonEmptyString(agent.model) ? agent.model : MODEL_NONE}`;
+}
+
+/** Fold one attempt into its provider group (feature sets are sized later). */
+function addProviderAttempt(groups, feature, data) {
+  const key = providerKeyOf(data);
+  const group = groups[key] ||
+    (groups[key] = { attempts: 0, passed: 0, retries: 0, tokens: 0, unknownUsage: 0, features: new Set() });
+  group.attempts += 1;
+  group.features.add(feature);
+  if (data.outcome === 'success') group.passed += 1;
+  if (Number.isInteger(data.attempt) && data.attempt > 1) group.retries += 1;
+  const usage = usageOf(data);
+  if (usage === null) {
+    group.unknownUsage += 1;
+    return;
+  }
+  for (const field of TIER_TOKEN_FIELDS) if (isTokenCount(usage[field])) group.tokens += usage[field];
+}
+
+/**
+ * Pure fold over an event history → per-PROVIDER wave-attempt spend, keyed by
+ * `adapter/model` from each `wave-attempt`'s `data.agent`. Attribution is per
+ * ATTEMPT, so a resumed run that switched provider splits across groups. An
+ * attempt with no (or a malformed) `agent` falls in `unknown`; a tagged attempt
+ * with no model falls in `<adapter>/none`. Per group:
+ *   - `attempts`     — wave attempts in the group
+ *   - `passed`       — attempts whose `outcome` is 'success'
+ *   - `retries`      — attempts whose integer `data.attempt` is > 1
+ *   - `tokens`       — input + output + cacheRead + cacheWrite over attempts
+ *                      that reported a usage object (invalid fields count 0)
+ *   - `unknownUsage` — attempts with no usage object; they add nothing to tokens
+ *   - `features`     — distinct features in the group (a number)
+ * Top-level `features` counts distinct features overall. Events lacking an
+ * object `data` or a non-empty string `feature` are skipped;
+ * `{ groups: {}, features: 0 }` on [] / null / non-array; never throws.
+ *
+ * @param {Event[]} history - in-memory event array (no I/O performed)
+ * @returns {{ groups: Object<string,{ attempts: number, passed: number,
+ *   retries: number, tokens: number, unknownUsage: number, features: number }>,
+ *   features: number }}
+ */
+export function providerSpend(history) {
+  const out = { groups: {}, features: 0 };
+  if (!Array.isArray(history)) return out;
+  const features = new Set();
+  for (const event of history) {
+    if (!event || typeof event !== 'object' || event.type !== 'wave-attempt') continue;
+    if (!event.data || typeof event.data !== 'object' || !isNonEmptyString(event.feature)) continue;
+    features.add(event.feature);
+    addProviderAttempt(out.groups, event.feature, event.data);
   }
   for (const group of Object.values(out.groups)) group.features = group.features.size;
   out.features = features.size;
