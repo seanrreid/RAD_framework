@@ -16,3 +16,4 @@
 {"feature":"authority-test-reframe","type":"approved","actor":"sean@torchcodelab.com","role":"architect","ts":"2026-10-23T15:59:46.744Z","recordedBy":"sean@torchcodelab.com","data":{"fingerprint":"86860c25d9a724af16f222e563dc598543df91687c9cd4fbee4aca93833a9c64"}}
 {"feature":"authority-test-reframe","type":"deliver-started","actor":"harness","ts":"2026-10-23T16:00:29.050Z"}
 {"feature":"authority-test-reframe","type":"run-prepared","actor":"harness","ts":"2026-10-23T16:00:33.360Z","data":{"base":"main","merged":false,"fastForwarded":false,"committed":true,"pushed":true}}
+{"feature":"authority-test-reframe","type":"pr-opened","actor":"harness","ts":"2026-10-23T16:00:41.592Z"}
