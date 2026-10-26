@@ -96,6 +96,24 @@ t_file_and_missing_entries_silent() {
   echo "✓ DIR(b): regular-file entry and not-yet-existing path ⇒ no directory warning"
 }
 
+PROSE_WARN="does not name a path — check-tests-present.sh treats it as unresolvable"
+
+t_prose_item_warns() {
+  write_plan prose.md '- [ ] No new test file: nothing to add — all run by the last-wave Verify.'
+  lint prose.md
+  assert_has "PROSE(a)" "⚠ Tests to Write item 'all run by the last-wave Verify.' $PROSE_WARN"
+  assert_code "PROSE(a)" 0
+  echo "✓ PROSE(a): prose item (whitespace in resolved path) ⇒ warning, exit 0"
+}
+
+t_well_formed_plan_no_prose_warning() {
+  write_plan wf.md $'- [ ] covers it — src/app.js\n- [ ] annotated — src/app.js (Amendment 1)'
+  lint wf.md
+  assert_lacks "PROSE(b)" "$PROSE_WARN"
+  assert_code "PROSE(b)" 0
+  echo "✓ PROSE(b): well-formed plan ⇒ no non-path warning"
+}
+
 t_empty_section_silent() {
   write_plan empty.md ''
   lint empty.md
@@ -232,6 +250,8 @@ setup_fixture
 setup_docs
 t_directory_entry_warns
 t_file_and_missing_entries_silent
+t_prose_item_warns
+t_well_formed_plan_no_prose_warning
 t_empty_section_silent
 t_trailing_whitespace_and_decoration
 t_fenced_entry_silent

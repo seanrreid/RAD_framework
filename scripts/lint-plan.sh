@@ -666,7 +666,9 @@ append_warning_lines "$VAGUE_FINDINGS"
 # check-tests-present.sh counts an entry only when `-f` holds, so a bullet that
 # resolves to an existing directory can never be satisfied. Entry parsing mirrors
 # that script: the path is the text after the FINAL "— " separator, backticks,
-# surrounding space and one trailing " (...)" annotation stripped. Fenced blocks
+# surrounding space and one trailing " (...)" annotation stripped. A resolved
+# path containing whitespace is prose, which that script treats as unresolvable,
+# so it warns too. Fenced blocks
 # are skipped. Paths resolve against the working directory, like Files in Scope.
 
 # preflight_scan_failed <helper> <rc> — fail closed: a scan that could not run
@@ -699,6 +701,10 @@ scan_directory_tests() {
   paths=$(plan_tests_to_write_paths) || rc=$?
   [[ "$rc" -eq 0 ]] || { preflight_scan_failed plan_tests_to_write_paths "$rc"; return 0; }
   while IFS= read -r entry; do
+    if [[ "$entry" =~ [[:space:]] ]]; then
+      WARNINGS+=("Tests to Write item '$entry' does not name a path — check-tests-present.sh treats it as unresolvable")
+      continue
+    fi
     [[ -n "$entry" && -d "$entry" ]] || continue
     WARNINGS+=("Tests to Write entry '$entry' is a directory — check-tests-present.sh requires a regular file")
   done <<< "$paths"
