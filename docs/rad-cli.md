@@ -8,7 +8,7 @@ and execution.
 The CLI never calls a model itself. `rad approve` is pure git/state work; `rad
 deliver` delegates every model call to the configured agent adapter (`command`,
 `acp` or `sdk`) and opens the single deliver PR through `scripts/open-pr.sh`.
-The verbs that push a branch are `approve`, `plan-open`, `plan-status`, `wrap` and
+The verbs that push a branch are `approve`, `plan-open`, `plan-status`, `record-pr`, `wrap` and
 `deliver` (its prepare phase, finish phase and a rerun of an already delivered
 feature, plus `open-pr.sh` for the PR head). `checkout` switches the checked-out
 branch but never pushes.
@@ -222,6 +222,46 @@ message that a rerun is safe; the rerun resumes. There is no rollback.
 
 **Exit codes:** 0 committed (if needed) and pushed; 1 a publish step failed
 (rerun resumes); 2 refused, nothing changed.
+
+---
+
+### rad record-pr
+
+```
+rad record-pr <feature> --pr <n>
+```
+
+Records the `pr-opened` event for a delivery **finished by hand**: the deliver PR
+was opened outside `rad deliver`, so the event log never saw it. It is for
+hand-finished deliveries only; a normal `rad deliver` records `pr-opened` itself.
+It:
+1. looks the PR up with `gh pr view <n> --json state,headRefName`;
+2. appends exactly one `pr-opened` event with `data: { pr: <n>, handFinished: true }`;
+3. sets the plan `Status: complete` and adds `Completed-At:` (an existing one is kept);
+4. commits **only** the plan file and `.agents/state/<feature>/events.jsonl` on the
+   work branch, pushes it, and labels the issue `review`.
+
+Run it from the work branch (`rad/<feature>`).
+
+**Refusals (exit 2, nothing written):**
+- bad argv, an invalid feature name, or `--pr` missing, non-integer or not positive
+- no plan file at `.agents/plans/<feature>.md`
+- the feature is not approved
+- the history already records a `pr-opened` after the last `deliver-started`
+  (other than this verb's own earlier record of the same PR, which is a rerun)
+- HEAD is not the work branch, or staged changes are present
+- the PR lookup fails (reported with the `gh` reason, never treated as success)
+- the PR is not open, or its head is not the work branch
+
+**Rerun:** if a publish step fails (exit 1), a rerun finds its own `pr-opened`
+already recorded, skips the lookup and the append, and resumes at the publish.
+It never appends a second `pr-opened`.
+
+**Success line:**
+`rad record-pr: ok feature=<f> pr=<n> committed=<bool> pushed=<bool> issue=<n|none>`.
+
+**Exit codes:** 0 recorded and published; 1 a publish step failed (rerun
+resumes); 2 refused, nothing written.
 
 ---
 
