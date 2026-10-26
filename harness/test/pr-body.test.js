@@ -259,6 +259,10 @@ test('testsToWritePaths: mirrors the check-tests-present.sh rule', () => {
     '- [ ] placeholder — [file]',
     '- [ ] annotation only — (later)',
     '- [ ] no path here',
+    '- [ ] No new test file: nothing to add — all run by the last-wave Verify.',
+    '- [ ] a — b — c — all run by the last-wave Verify.',
+    '- [ ] trailing bare separator — ',
+    '- [ ] real — harness/test/x.test.js',
     '  - indented ignored — x/y.js',
     'not a list item — x/z.js',
   ] });
@@ -269,6 +273,10 @@ test('testsToWritePaths: mirrors the check-tests-present.sh rule', () => {
     { unresolvable: '- [ ] placeholder — [file]' },
     { unresolvable: '- [ ] annotation only — (later)' },
     { unresolvable: '- [ ] no path here' },
+    { unresolvable: '- [ ] No new test file: nothing to add — all run by the last-wave Verify.' },
+    { unresolvable: '- [ ] a — b — c — all run by the last-wave Verify.' },
+    { unresolvable: '- [ ] trailing bare separator — ' },
+    { path: 'harness/test/x.test.js' },
   ]);
 });
 

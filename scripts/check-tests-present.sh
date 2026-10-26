@@ -75,6 +75,9 @@ FILE_SEPARATOR='— '
 # inside a path are kept; a bare group with no path before it is unresolvable.
 ANNOTATED_PATH_RE='^(.*[^[:space:]])[[:space:]]+\([^()]*\)$'
 ANNOTATION_ONLY_RE='^\([^()]*\)$'
+# A candidate containing whitespace is prose (e.g. "all run by the last-wave
+# Verify."), not a path. Mirrors itemPath in harness/pr-body.js.
+WHITESPACE_RE='[[:space:]]'
 
 while IFS= read -r line; do
   if [[ "$line" =~ —[[:space:]]+[^[:space:]]. ]]; then
@@ -86,7 +89,7 @@ while IFS= read -r line; do
       testfile="${BASH_REMATCH[1]}"
     fi
 
-    if [[ -z "$testfile" || "$testfile" == "[file]" || "$testfile" =~ $ANNOTATION_ONLY_RE ]]; then
+    if [[ -z "$testfile" || "$testfile" == "[file]" || "$testfile" =~ $ANNOTATION_ONLY_RE || "$testfile" =~ $WHITESPACE_RE ]]; then
       [[ "$ONLY_MODE" -eq 1 ]] || UNRESOLVABLE+=("$line")
       continue
     fi

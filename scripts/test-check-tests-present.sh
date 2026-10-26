@@ -102,6 +102,29 @@ printf '%s\n' "$out" | grep -q "No file path found" \
   || fail "A6: trailing bare separator not reported as unresolvable"
 echo "✓ A6: em-dash in description → path after final separator (present → 0, missing → 1 naming only the path)"
 
+# A9 (gate-script-fixes AC#3/AC#4): a candidate containing whitespace is prose,
+# not a path — unresolvable (non-fatal), never reported missing. Real and
+# annotated paths still resolve. Edge cases: several em-dashes, empty path.
+printf '## Tests to Write\n- [ ] No new test file: nothing to add — all run by the last-wave Verify.\n' > "$TMP/prose.md"
+printf '## Tests to Write\n- [ ] a — b — c — all run by the last-wave Verify.\n'                      > "$TMP/prose-multi.md"
+printf '## Tests to Write\n- [ ] covers x — %s\n' "$HERE/get-default-branch.sh"                       > "$TMP/real.md"
+printf '## Tests to Write\n- [ ] covers x — %s (Amendment 1)\n' "$HERE/get-default-branch.sh"         > "$TMP/real-ann.md"
+for f in prose prose-multi; do
+  code=$(run_check "$TMP/$f.md")
+  [[ "$code" -eq 0 ]] || fail "A9: $f prose line should be unresolvable, exit 0 (got $code)"
+  out=$(bash "$SCRIPT" "$TMP/$f.md" 2>&1)  # exit 0 asserted above
+  printf '%s\n' "$out" | grep -q "No file path found" || fail "A9: $f not reported as unresolvable"
+  printf '%s\n' "$out" | grep -q "✗" && fail "A9: $f prose must not be reported missing"
+done
+bash "$SCRIPT" "$TMP/prose.md" --only "$HERE/get-default-branch.sh" >/dev/null 2>&1 \
+  || fail "A9: prose under --only should be ignored, exit 0"
+for f in real real-ann; do
+  code=$(run_check "$TMP/$f.md")
+  [[ "$code" -eq 0 ]] || fail "A9: $f should resolve to the existing path, exit 0 (got $code)"
+  bash "$SCRIPT" "$TMP/$f.md" 2>&1 | grep -q "No file path found" && fail "A9: $f wrongly unresolvable"
+done
+echo "✓ A9: whitespace candidate → unresolvable; real and annotated paths still resolve"
+
 # ── Part B: stale-reference guard ─────────────────────────────────────────────
 # SELF-MATCH HAZARD, and the approach chosen:
 # A guard that searches every live surface for the pre-rename name would match
@@ -158,7 +181,7 @@ guard_stale_reference
 # A7 (followups-87 AC#5): a single trailing " (...)" annotation is stripped
 # after the backtick strip and before the existence test.
 A7_MISSING="scripts/does-not-exist-a7.sh"
-A7_MIDNAME="$TMP/mid (v2) name.sh"
+A7_MIDNAME="$TMP/mid(v2)name.sh"
 : > "$A7_MIDNAME"
 printf '## Tests to Write\n- [ ] x — %s (Amendment 1)\n' "$HERE/get-default-branch.sh" > "$TMP/ann-present.md"
 printf '## Tests to Write\n- [ ] x — `%s` (Amendment 1)\n' "$A7_MISSING"               > "$TMP/ann-missing.md"
