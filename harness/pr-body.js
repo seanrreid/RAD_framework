@@ -30,7 +30,9 @@ const SECTION_SEPARATOR = '\n\n';
 const CLOSING_KEYWORD_RE = /\b(close[sd]?|fix(?:e[sd])?|resolve[sd]?)(\s+)#([0-9]+)/gi;
 const LINE_BREAK_RE = /\s*[\r\n]+\s*/g;
 
-// Tests-to-Write parsing — a port of scripts/check-tests-present.sh.
+// Tests-to-Write parsing — a port of scripts/check-tests-present.sh. The two
+// parsers (and scripts/lint-plan.sh's whitespace advisory) are mirrors: a path
+// candidate containing whitespace is prose, not a path, in all of them.
 const TESTS_SECTION_RE = /^## Tests to Write/;
 const ANY_SECTION_RE = /^## /;
 const LIST_ITEM_RE = /^- /;
@@ -40,6 +42,7 @@ const FILE_SEPARATOR = '— ';
 const ANNOTATED_PATH_RE = /^(.*\S)\s+\([^()]*\)$/;
 const ANNOTATION_ONLY_RE = /^\([^()]*\)$/;
 const PLACEHOLDER_PATH = '[file]';
+const WHITESPACE_RE = /\s/;
 
 /**
  * Defang GitHub/GitLab closing keywords: `fixes #12` → `fixes issue 12`. The
@@ -113,6 +116,7 @@ function itemPath(line) {
   const annotated = ANNOTATED_PATH_RE.exec(path);
   if (annotated) path = annotated[1];
   if (path === '' || path === PLACEHOLDER_PATH || ANNOTATION_ONLY_RE.test(path)) return null;
+  if (WHITESPACE_RE.test(path)) return null;
   return path;
 }
 

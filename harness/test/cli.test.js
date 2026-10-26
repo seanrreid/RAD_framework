@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 
 import {
   approveCommand, gateCommand, parsePlanCtx, resolveVerifyTimeoutSeconds, deliverCommand, stopStatusCommand, forecastCommand, digestCommand, prBodyCommand,
-  resolveHooksDir, makeSpineScriptPort, SCRIPT_ARG_KEYS, reviewCommand, resolveAgent, isMainModule,
+  resolveHooksDir, makeSpineScriptPort, makeScriptCtx, SCRIPT_ARG_KEYS, reviewCommand, resolveAgent, isMainModule,
   capabilitiesCommand, installCoreCommand, installPresetCommand, installStatusCommand, configCommand,
   acpCheckCommand, generateCommand, main, tokenBudgetWarning,
 } from '../cli.js';
@@ -1477,6 +1477,46 @@ test('script args — an unknown script throws naming it, never runs', () => {
   assert.throws(() => port('scripts/unknown.sh', 'f'), /^Error: rad deliver: no argument contract for scripts\/unknown\.sh$/);
   assert.throws(() => port('toString', 'f'), /no argument contract for toString/);
   assert.equal(calls.length, 0);
+});
+
+test('script resolution — a plan-declared script runs from the run root', () => {
+  const { sh, calls } = recordingSh();
+  const scriptCtx = { planPath: '/w/p.md', declaredScripts: new Set(['scripts/check-tests-present.sh']) };
+  const port = makeSpineScriptPort({ sh, repoRoot: '/r', root: '/w', scriptCtx });
+  port('scripts/check-tests-present.sh', 'f');
+  assert.equal(calls[0].file, '/w/scripts/check-tests-present.sh');
+});
+
+test('script resolution — an undeclared script runs from the harness root', () => {
+  const { sh, calls } = recordingSh();
+  const scriptCtx = { planPath: '/w/p.md', baseArgs: () => [], branch: 'b', declaredScripts: new Set(['scripts/check-tests-present.sh']) };
+  const port = makeSpineScriptPort({ sh, repoRoot: '/r', root: '/w', scriptCtx });
+  port('scripts/check-scope.sh', 'f');
+  assert.equal(calls[0].file, '/r/scripts/check-scope.sh');
+});
+
+test('script resolution — root === repoRoot and absent declaredScripts keep the old path', () => {
+  const { sh, calls } = recordingSh();
+  const declared = new Set(['scripts/check-verify.sh']);
+  makeSpineScriptPort({ sh, repoRoot: '/r', root: '/r', scriptCtx: { declaredScripts: declared } })('scripts/check-verify.sh', 'cmd');
+  makeSpineScriptPort({ sh, repoRoot: '/r', root: '/w', scriptCtx: {} })('scripts/check-verify.sh', 'cmd');
+  assert.equal(calls[0].file, '/r/scripts/check-verify.sh');
+  assert.equal(calls[1].file, '/r/scripts/check-verify.sh');
+});
+
+test('script resolution — an unreadable plan yields an empty declared set and logs the reason', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'rad-ctx-'));
+  const writes = [];
+  const orig = process.stderr.write;
+  process.stderr.write = (m) => { writes.push(String(m)); return true; };
+  try {
+    const ctx = makeScriptCtx({ sh: okSh, repoRoot: dir, root: dir, feature: 'nope', branch: 'b', state: {} });
+    assert.equal(ctx.declaredScripts.size, 0);
+  } finally {
+    process.stderr.write = orig;
+    rmSync(dir, { recursive: true, force: true });
+  }
+  assert.match(writes.join(''), /cannot read plan for declared scripts/);
 });
 
 test('script args — a real deliver passes each script its argv contract', async () => {
