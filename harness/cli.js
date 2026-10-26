@@ -14,6 +14,7 @@
  *   approve <feature> [--on-behalf-of <name>] [--evidence <text>] [--no-commit] [--trailer "Key: Value"]...
  *   plan-open <plan-file> [--trailer "Key: Value"]...
  *   plan-status <feature> <rejected|needs-revision> [--trailer "Key: Value"]...
+ *   record-pr <feature> --pr <n>
  *   checkout <feature | .agents/plans/<feature>.md>
  *   wrap <feature>
  *   provenance <feature>
@@ -72,6 +73,7 @@ import { publishPlanChange, requirePublishReady } from './branch-publish.js';
 import { planOpenCommand, PLAN_OPEN_USAGE } from './plan-open.js';
 import { provenanceCommand, PROVENANCE_USAGE } from './provenance.js';
 import { planStatusCommand, PLAN_STATUS_USAGE } from './plan-status.js';
+import { recordPrCommand, RECORD_PR_USAGE } from './record-pr.js';
 import { checkoutCommand, CHECKOUT_USAGE } from './checkout.js';
 import { wrapCommand, WRAP_USAGE } from './wrap.js';
 import { labelCommand, LABEL_USAGE } from './label.js';
@@ -232,6 +234,11 @@ const SUBCOMMANDS = {
     summary: "Record a plan review (rejected or needs-revision): set its Status, commit the plan, push, and label its issue.",
     usage: PLAN_STATUS_USAGE,
     run: (argv, ctx) => planStatusCommand(argv, ctx),
+  },
+  'record-pr': {
+    summary: 'Record the pr-opened event for a hand-finished delivery: mark the plan complete and publish the plan and events log.',
+    usage: RECORD_PR_USAGE,
+    run: (argv, ctx) => recordPrCommand(argv, ctx),
   },
   checkout: {
     summary: "Check out a plan's work branch at its remote tip.",
