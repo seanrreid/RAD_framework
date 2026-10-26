@@ -1,7 +1,10 @@
 # Plan: Opt-in Credential Sandbox for the Command Agent (#244)
 Created: 2026-10-26
 Author: developer
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-10-26T19:30:01.772Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/agent-credential-sandbox
 Issue: 244
 Source-Author: seanrreid (OWNER)
