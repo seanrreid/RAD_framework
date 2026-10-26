@@ -2085,6 +2085,34 @@ async function resolveDeliverSettings(ctx, repoRoot, parsed) {
   return { selection, model, failedCap, settings };
 }
 
+/** The `{model}` placeholder a command cmd must carry for a model to apply. */
+const MODEL_TOKEN = '{model}';
+
+/**
+ * The wave agent's identity for `wave-attempt` tagging: the selected adapter
+ * kind and whether a model actually reaches the agent. A `command` cmd applies
+ * one only through its `{model}` token (the adapter's substitution rule); `sdk`
+ * always passes one; `acp` never does (ACP v1 has no stable model selector).
+ *
+ * @param {{ kind: string, cmd?: string }} selection - selectAgent's result
+ * @returns {{ adapter: string, modelApplies: boolean }}
+ */
+export function agentIdentity(selection) {
+  const { kind, cmd } = selection;
+  if (kind === 'command') return { adapter: kind, modelApplies: typeof cmd === 'string' && cmd.includes(MODEL_TOKEN) };
+  return { adapter: kind, modelApplies: kind === 'sdk' };
+}
+
+/**
+ * The spine's `agent` arg: identity plus the run-default model. Null for an
+ * injected ctx.runWave (tests), whose selection is unchecked, so its events
+ * stay byte-identical to an untagged run.
+ */
+function deliverAgent(ctx, cfg) {
+  if (ctx.runWave) return null;
+  return { ...agentIdentity(cfg.selection), ...(cfg.model ? { model: cfg.model } : {}) };
+}
+
 /**
  * Pre-spine phase 3: delivered short-circuit, --resume eligibility, then setup
  * (worktree or main checkout).
@@ -2159,7 +2187,7 @@ function buildDeliverRun({ ctx, sh, repoRoot, feature, cfg, mode }) {
   });
   return {
     feature, state, matrix, runWave, port, finishPort, sh, repoRoot, root, scriptCtx, now, runHooks,
-    tokenBudget, planCtx, failedCap: cfg.failedCap, resume, worktree, workBranch,
+    tokenBudget, planCtx, failedCap: cfg.failedCap, resume, worktree, workBranch, agent: deliverAgent(ctx, cfg),
   };
 }
 
@@ -2230,6 +2258,9 @@ function buildSpineArgs(run) {
     maxFailedAttempts: run.failedCap.cap,
     // Only a --resume run passes the key; otherwise the call is today's.
     ...(resume ? { resume } : {}),
+    // Adapter kind + run-default model, tagged onto each wave-attempt; null
+    // (an injected runWave) records no `agent` key.
+    agent: run.agent,
   };
 }
 

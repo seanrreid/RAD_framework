@@ -615,6 +615,24 @@ function appendWaveStarted({ state, feature, now, wave, attempt, waveModels, wav
   });
 }
 
+/**
+ * The model actually applied to `wave`: the same precedence as
+ * appendWaveStarted (plan `Model:` map, then `wave.model`), falling back to the
+ * run default `agent.model`. Undefined when the adapter applies no model
+ * (`agent.modelApplies` false) or none is set, so the caller omits the key.
+ */
+function appliedModel(agent, waveModels, wave) {
+  if (!agent.modelApplies) return undefined;
+  return declaredModel(waveModels[wave.n]) ?? declaredModel(wave.model) ?? declaredModel(agent.model) ?? undefined;
+}
+
+/** `{ agent: { adapter, model? } }` when the run carries agent identity, else `{}`. */
+function agentTag(agent, waveModels, wave) {
+  if (!agent) return {};
+  const model = appliedModel(agent, waveModels, wave);
+  return { agent: { adapter: agent.adapter, ...(model ? { model } : {}) } };
+}
+
 /** True when the agent result carries at least one permission denial. */
 function hasDenials(result) {
   return Array.isArray(result.denials) && result.denials.length > 0;
@@ -643,16 +661,19 @@ function denialDetail(denials) {
  * i.e. the resolved action was retry/revision; `permissions` (the acp adapter's
  * permission decisions) only when `result.permissions` is a non-empty array;
  * `denials` (the command adapter's refused tool/paths) likewise.
+ * `agent` (adapter kind and applied model) only when the run carries agent
+ * identity, so an untagged run's event is byte-identical to before it existed.
  * Optional keys are spread, never present-and-undefined. Post-wave veto
  * provenance keeps its prior shape.
  */
-function attemptData({ wave, attempt, outcome, result, evidence, vetoSource, print }) {
+function attemptData({ wave, attempt, outcome, result, evidence, vetoSource, print, tag }) {
   const printEvidence = print ? { fingerprint: print } : {};
   const hasPermissions = Array.isArray(result.permissions) && result.permissions.length > 0;
   const permissions = hasPermissions ? { permissions: result.permissions } : {};
   const denials = hasDenials(result) ? { denials: result.denials } : {};
   const base = {
     wave: wave.n, attempt, outcome, usage: result.usage, ...evidence, ...printEvidence, ...permissions, ...denials,
+    ...tag,
   };
   return vetoSource
     ? { ...base, source: 'hook', point: vetoSource.point, hook: vetoSource.hook }
@@ -965,7 +986,7 @@ function applyPostWaveGates(wave, loop, result) {
  * is dropped. Returns { outcome, action, print, gateOutput, vetoSource }.
  */
 function recordAttempt(wave, loop, attempt, { result, tipBefore, tipAfter }, gates) {
-  const { state, feature, now, matrix, pushGuard } = loop;
+  const { state, feature, now, matrix, pushGuard, agent, waveModels } = loop;
   let { outcome, gated, gateOutput, vetoSource } = gates;
   const pushDemoted = pushGuard ? pushGuardDemotion(tipBefore, tipAfter) : null;
   if (pushDemoted) {
@@ -992,6 +1013,7 @@ function recordAttempt(wave, loop, attempt, { result, tipBefore, tipAfter }, gat
     ts: now(),
     data: attemptData({
       wave, attempt, outcome, result, evidence: { ...taskEvidence, ...gates.verifyEvidence }, vetoSource, print,
+      tag: agentTag(agent, waveModels, wave),
     }),
   });
   // Accumulate this attempt's token spend for the budget breaker. A missing
@@ -1442,6 +1464,12 @@ async function finishRun(loop) {
  *   already has `tasks` (the synthetic test wave) or has no entry is passed
  *   unchanged. Events and every other call are unaffected. Absent (default `{}`)
  *   passes each wave exactly as before.
+ * @param {{ adapter: string, modelApplies: boolean, model?: string }|null} [args.agent]
+ *   OPTIONAL agent identity (cli.js agentIdentity plus the run-default model).
+ *   When set, each `wave-attempt` records `agent: { adapter, model? }` — `model`
+ *   is the applied one (per-wave override, else the default) and is omitted when
+ *   the adapter applies none. DATA-ONLY: no gate or existing fold reads it.
+ *   Null/absent (default) records no `agent` key — byte-for-byte today's events.
  * @returns {Promise<Object>} structured terminal result
  */
 export async function deliverSpine({
@@ -1469,18 +1497,27 @@ export async function deliverSpine({
   testsByWave = null,
   testWave = null,
   waveTasks = {},
+  agent = null,
 }) {
   const g = await state.gate(feature, 'approved');
   if (!g.passed) {
     return { stopped: 'gate', gate: 'approved', reason: g.reason };
   }
   const loop = { state, feature, now, matrix, runWave, sh, maxAttempts, tokenBudget, waveVerify, waveModels, waveCapabilities,
-    runHooks, approvalIntact, maxFailedAttempts, resume, pushGuard, testsByWave, waveTasks, hookPreflight, prepare, finish, testWave };
+    runHooks, approvalIntact, maxFailedAttempts, resume, pushGuard, testsByWave, waveTasks, hookPreflight, prepare, finish, testWave, agent };
   const { stop, waves, completed } = await startRun(loop);
   if (stop) return stop;
+  const halt = await runPendingWaves(waves, completed, loop);
+  if (halt) return halt;
+  return finishRun(loop);
+}
+
+// Runs each plan wave a prior run has not completed, in order; returns the first
+// halting result, or null when every wave proceeded.
+async function runPendingWaves(waves, completed, loop) {
   for (const wave of waves) {
     const halt = completed.has(wave.n) ? null : await runOneWave(wave, loop);
     if (halt) return halt;
   }
-  return finishRun(loop);
+  return null;
 }
