@@ -23,6 +23,7 @@ const PR_OPENED = 'pr-opened';
 const PROCESS_ARTIFACT_PREFIX = '.agents/';
 const RENAMED = 'R';
 const DELETED = 'D';
+const COPIED = 'C';
 const ARROW = Object.freeze({ UP: '↑', DOWN: '↓', FLAT: '→' });
 
 const list = (value) => (Array.isArray(value) ? value : []).filter((v) => v && typeof v === 'object');
@@ -108,12 +109,13 @@ function commitsInWindow(commits, excludeSha, startMs, endMs) {
 function reworkTouches(commit, live, scoped) {
   const touched = [];
   for (const touch of list(commit.touches)) {
-    const from = touch.oldPath ?? touch.path;
+    const status = String(touch.status ?? '');
+    // A copy leaves its source untouched: only the destination can be rework.
+    const from = status.startsWith(COPIED) ? touch.path : touch.oldPath ?? touch.path;
     if (!live.has(from)) continue;
     const original = live.get(from);
     const planned = scoped && (scoped.has(touch.path) || scoped.has(from));
     if (!planned) touched.push(original);
-    const status = String(touch.status ?? '');
     if (status.startsWith(RENAMED) || status.startsWith(DELETED)) live.delete(from);
     if (status.startsWith(RENAMED)) live.set(touch.path, original);
   }
