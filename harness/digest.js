@@ -7,7 +7,7 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  deliverCompleted, fileDeficitSignals, forecastForPaths, latestStop,
+  deliverCompleted, fileDeficitSignals, forecastForPaths, currentStop,
   outcomeCounts, retryCounts, totalUsage,
 } from './events.js';
 import { evaluateGate } from './gates.js';
@@ -189,7 +189,7 @@ function runItems(history, waveCount) {
   for (const [outcome, n] of Object.entries(outcomeCounts(history))) {
     if (!['success', 'total'].includes(outcome) && n > 0) out.push(item('run', null, `${n} wave(s) ended ${outcome}`));
   }
-  const stop = latestStop(history);
+  const stop = currentStop(history);
   if (stop) out.push(item('run', null, `stopped: ${stop.class ?? '?'}/${stop.reason ?? '?'}${stop.detail ? ` — ${stop.detail}` : ''}`));
   if (Number.isInteger(waveCount) && !deliverCompleted(history, waveCount)) {
     out.push(item('run', null, `completion not evidenced for ${waveCount} wave(s)`));
