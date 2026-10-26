@@ -1922,7 +1922,8 @@ async function deliveredShortCircuit({ ctx, sh, repoRoot, feature }) {
  * lazily, once per run, only when a script needs it; the wave count is read
  * from the same plan the spine walks.
  */
-function makeScriptCtx({ sh, repoRoot, root, feature, branch, state }) {
+export function makeScriptCtx({ sh, repoRoot, root, feature, branch, state }) {
+  const planPath = join(root, '.agents', 'plans', `${feature}.md`);
   let base;
   const resolveBase = () => {
     if (base === undefined) base = readDefaultBranch({ sh, repoRoot, root });
@@ -1931,11 +1932,29 @@ function makeScriptCtx({ sh, repoRoot, root, feature, branch, state }) {
   return {
     feature,
     branch,
-    planPath: join(root, '.agents', 'plans', `${feature}.md`),
+    planPath,
+    declaredScripts: readDeclaredScripts(planPath),
     baseArgs: () => (resolveBase() === '' ? [] : [base]),
     waveCount: () => (state.plan(feature)?.waves ?? []).length,
     prBody: () => deliverPrBody({ sh, root, feature, state, resolveBase }),
   };
+}
+
+const SCRIPTS_DIR_PREFIX = 'scripts/';
+
+/**
+ * The gate scripts the approved (fingerprinted) plan declares via task `File:`
+ * lines. Declared-in-plan is the trust boundary for running a run-root copy.
+ * An unreadable plan yields an empty set, reported on stderr.
+ */
+function readDeclaredScripts(planPath) {
+  try {
+    const files = Object.values(taskFilesFromPlanText(readFileSync(planPath, 'utf8'))).flat();
+    return new Set(files.filter((f) => typeof f === 'string' && f.startsWith(SCRIPTS_DIR_PREFIX)));
+  } catch (err) {
+    process.stderr.write(`rad deliver: cannot read plan for declared scripts (${err.message}); using harness-root scripts\n`);
+    return new Set();
+  }
 }
 
 /**
@@ -1968,14 +1987,17 @@ function deliverPrHistory(state, feature) {
 
 /**
  * Build the deliverSpine `sh` port: each script string the spine passes is
- * mapped through SCRIPT_ARGS to its real argv and run with cwd = root.
+ * mapped through SCRIPT_ARGS to its real argv and run with cwd = root. A script
+ * the plan declares runs from root's copy; any other from the harness root.
  * An unknown script throws — it is never run with a guessed argv.
  */
 export function makeSpineScriptPort({ sh, repoRoot, root, scriptCtx }) {
   return (script, arg) => {
     const build = Object.hasOwn(SCRIPT_ARGS, script) ? SCRIPT_ARGS[script] : null;
     if (!build) throw new Error(`rad deliver: no argument contract for ${script}`);
-    return sh(join(repoRoot, script), build(scriptCtx, arg), { cwd: root });
+    const declared = scriptCtx?.declaredScripts instanceof Set && scriptCtx.declaredScripts.has(script);
+    const scriptRoot = declared && root !== repoRoot ? root : repoRoot;
+    return sh(join(scriptRoot, script), build(scriptCtx, arg), { cwd: root });
   };
 }
 
