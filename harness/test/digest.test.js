@@ -49,6 +49,17 @@ const flaggedInputs = () => ({
   ],
 });
 
+const stopLineCount = (history) =>
+  buildDigest({ ...flaggedInputs(), history }).items.filter((i) => i.kind === 'run' && /^stopped:/.test(i.detail)).length;
+
+test('buildDigest omits the stopped line once a pr-opened follows the stop, keeps it otherwise', () => {
+  const stop = { type: 'deliver-stopped', data: { class: 'failed', reason: 'budget-exhausted' } };
+  const pr = { type: 'pr-opened', data: {} };
+  assert.equal(stopLineCount([{ type: 'deliver-started', data: {} }, stop]), 1);
+  assert.equal(stopLineCount([{ type: 'deliver-started', data: {} }, stop, pr]), 0);
+  assert.equal(stopLineCount([pr, stop]), 1);
+});
+
 test('buildDigest ranks items across all 8 kinds in DIGEST_RANK order', () => {
   const digest = buildDigest(flaggedInputs());
   const kinds = [...new Set(digest.items.map((i) => i.kind))];

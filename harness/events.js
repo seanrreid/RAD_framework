@@ -1329,6 +1329,23 @@ export function latestStop(history) {
 }
 
 /**
+ * Pure fold → the latest stop's `data` unless a `pr-opened` event comes after
+ * it (the delivery was finished past the stop), then null. Audit read only.
+ * `latestStop`/`dormantStop` keep their own semantics. Throws on a non-array
+ * history.
+ *
+ * @param {Event[]} history - in-memory event array (no I/O performed)
+ * @returns {(Object|null)} the still-standing stop's data, or null
+ */
+export function currentStop(history) {
+  if (!Array.isArray(history)) throw new Error('currentStop: history must be an array');
+  const index = lastDeliverStoppedIndex(history);
+  if (index === -1) return null;
+  const supersededByPr = history.slice(index + 1).some((event) => event && event.type === 'pr-opened');
+  return supersededByPr ? null : history[index].data;
+}
+
+/**
  * Pure fold → the latest stop's `data` only while it is still DORMANT: its
  * class is `needs-decision` AND no `deliver-started` follows it (a later run
  * has not already picked it up). Else null. A `failed` stop is never dormant —

@@ -130,6 +130,43 @@ test('reworkRate: a delete counts as a touch', () => {
   assert.equal(row.reworkCommits, 1);
 });
 
+test('reworkRate: a copy of a live source is not rework and leaves the source live', () => {
+  const commits = [commit('c1', 1, [touch('c.js', 'C100', 'a.js')]), commit('c2', 2, [touch('a.js')])];
+  const row = only(reworkRate([merge()], commits, OPTS));
+  assert.equal(row.reworkedFiles, 1);
+  assert.equal(row.reworkCommits, 1);
+});
+
+test('reworkRate: a copy alone does not count as rework', () => {
+  const row = only(reworkRate([merge()], [commit('c1', 1, [touch('c.js', 'C100', 'a.js')])], OPTS));
+  assert.equal(row.reworkedFiles, 0);
+  assert.equal(row.reworkCommits, 0);
+});
+
+test('reworkRate: a copy onto a live destination is judged by the destination', () => {
+  const row = only(reworkRate([merge()], [commit('c1', 1, [touch('b.js', 'C100', 'a.js')])], OPTS));
+  assert.equal(row.reworkedFiles, 1);
+  assert.equal(row.reworkCommits, 1);
+});
+
+test('reworkRate: a copy with no oldPath is judged by its path', () => {
+  const live = only(reworkRate([merge()], [commit('c1', 1, [touch('a.js', 'C')])], OPTS));
+  assert.equal(live.reworkedFiles, 1);
+  const other = only(reworkRate([merge()], [commit('c1', 1, [touch('z.js', 'C')])], OPTS));
+  assert.equal(other.reworkedFiles, 0);
+});
+
+test('reworkRate: rename, delete and modify still count after the copy change', () => {
+  const commits = [
+    commit('c1', 1, [touch('x.js', 'R100', 'a.js')]),
+    commit('c2', 2, [touch('b.js', 'D')]),
+    commit('c3', 3, [touch('x.js')]),
+  ];
+  const row = only(reworkRate([merge()], commits, OPTS));
+  assert.equal(row.reworkedFiles, 2);
+  assert.equal(row.reworkCommits, 3);
+});
+
 test('reworkRate: a later deliver merge is excluded only for its own scoped files', () => {
   const later = merge({ feature: 'g', sha: 'm2', mergedAt: at(3), files: [file('a.js'), file('b.js')], scopedFiles: ['a.js'] });
   const commits = [commit('m2', 3, [touch('a.js'), touch('b.js')], { isDeliver: true, feature: 'g' })];

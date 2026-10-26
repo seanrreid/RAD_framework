@@ -22,6 +22,7 @@ import {
   priorAttemptState,
   deliverCompleted,
   latestStop,
+  currentStop,
   dormantStop,
   modelTierSpend,
   modelTierAdvisories,
@@ -1326,6 +1327,32 @@ test('latestStop and dormantStop throw on a non-array history', () => {
   for (const bad of [null, undefined, 7, 'x', {}]) {
     assert.throws(() => latestStop(bad), { message: 'latestStop: history must be an array' });
     assert.throws(() => dormantStop(bad), { message: 'dormantStop: history must be an array' });
+  }
+});
+
+test('currentStop returns the stop data when no pr-opened follows it', () => {
+  const history = [started(), stopped('failed', 'agent-error', 1)];
+  assert.deepStrictEqual(currentStop(history), { class: 'failed', reason: 'agent-error', wave: 1 });
+});
+
+test('currentStop is null when a pr-opened comes after the stop', () => {
+  const history = [started(), stopped('failed', 'agent-error', 1), { feature: 'f', type: 'pr-opened', data: {} }];
+  assert.equal(currentStop(history), null);
+});
+
+test('currentStop returns the stop when it comes after the pr-opened', () => {
+  const history = [{ feature: 'f', type: 'pr-opened', data: {} }, stopped('failed', 'agent-error', 2)];
+  assert.deepStrictEqual(currentStop(history), { class: 'failed', reason: 'agent-error', wave: 2 });
+});
+
+test('currentStop is null with no stop and on an empty history', () => {
+  assert.equal(currentStop([started(), { feature: 'f', type: 'pr-opened', data: {} }]), null);
+  assert.equal(currentStop([]), null);
+});
+
+test('currentStop throws on a non-array history', () => {
+  for (const bad of [null, undefined, 7, 'x', {}]) {
+    assert.throws(() => currentStop(bad), { message: 'currentStop: history must be an array' });
   }
 });
 
