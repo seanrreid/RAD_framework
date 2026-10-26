@@ -194,9 +194,7 @@ test('refused: not on the work branch', async () => {
     await approve(root);
     const co = git(root, ['checkout', '-q', '-b', 'other']);
     assert.equal(co.status, 0, co.stderr);
-    const r = await run(root, [SLUG, '--pr', String(PR)]);
-    assert.equal(r.code, 2, r.stdout);
-    assert.match(r.stderr, /not the work branch/);
+    await assertRefused(root, [SLUG, '--pr', String(PR)], /not the work branch/);
   });
 });
 
