@@ -1,7 +1,7 @@
 # Plan: Gate Script Fixes (#298, #303)
 Created: 2026-10-26
 Author: developer
-Status: approved
+Status: in-progress
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-10-26T15:05:00.198Z
 Recorded-By: sean@torchcodelab.com
