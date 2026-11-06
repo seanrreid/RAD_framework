@@ -20,7 +20,7 @@
 #
 # Mirrors the .github/workflows/ci.yml jobs: harness-tests, evals-scripted,
 # script-tests, generated-drift, playbook-lint, invariant-lint, agent-file-lint,
-# claude-md-budget, shell-safety-lint, plan-lint, events-append-only (plus
+# claude-md-budget, shell-safety-lint, plan-lint, events-append-only, ledger-append-only (plus
 # `config validate`). EXCLUDED: deliver-integrity and matrix-replay — both need
 # PR context (head ref, base ref, rad/* branch tips) that a local run lacks.
 #
@@ -69,7 +69,8 @@ builtin_checks() {
     "lint-shell-safety${TAB}scripts/lint-shell-safety.sh" \
     "lint-function-length${TAB}node scripts/lint-function-length.mjs" \
     "plan-lint${TAB}rc=0; for p in \$(git diff --name-only \"\$VERIFY_ALL_BASE\"...HEAD -- '.agents/plans/*.md'); do [ -f \"\$p\" ] || continue; scripts/lint-plan.sh \"\$p\" || rc=1; done; exit \$rc${TAB}${BASE_MARKER}" \
-    "events-append-only${TAB}scripts/check-events-append-only.sh \"\$VERIFY_ALL_BASE\"${TAB}${BASE_MARKER}"
+    "events-append-only${TAB}scripts/check-events-append-only.sh \"\$VERIFY_ALL_BASE\"${TAB}${BASE_MARKER}" \
+    "ledger-append-only${TAB}scripts/check-ledger-append-only.sh \"\$VERIFY_ALL_BASE\"${TAB}${BASE_MARKER}"
 }
 
 checks_table() {

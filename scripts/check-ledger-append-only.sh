@@ -35,6 +35,14 @@ HEAD_REF="${2:-HEAD}"
   exit 2
 }
 
+# Refs are interpolated into git commands: allow only ref-safe characters and
+# never a leading '-' (option injection).
+readonly REF_RE='^[A-Za-z0-9._/@^~][A-Za-z0-9._/@^~-]*$'
+[[ "$BASE_REF" =~ $REF_RE ]] \
+  || { echo "FAIL: base ref must match $REF_RE. Failing closed."; exit 1; }
+[[ "$HEAD_REF" =~ $REF_RE ]] \
+  || { echo "FAIL: head ref must match $REF_RE. Failing closed."; exit 1; }
+
 command -v jq >/dev/null 2>&1 || { echo "FAIL: jq is required. Failing closed."; exit 1; }
 
 # Fail closed on unresolvable refs — an undiffable range is ambiguity, not a pass.
