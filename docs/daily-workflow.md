@@ -490,3 +490,25 @@ locally or on `origin`, when `origin` can't be checked, or when more than 15
 categories qualify (the plan-lint task cap). It exits 2 on a missing findings log
 or an unknown flag. It prints `nothing to draft` and exits 0 when no category
 reaches the threshold.
+
+#### Disposition ledger
+
+`.agents/insights-ledger.jsonl` (override: `RAD_INSIGHTS_LEDGER`) is an
+append-only record of what you decided about each category. One JSON row per line:
+`{"category","disposition","date"}` plus optional `reason`, `ref`, `expires`;
+`disposition` is `adopted`, `declined` or `deferred`.
+
+- **Baseline rule.** The drafter counts only findings dated strictly after the
+  category's latest ledger row. A category with no row counts every finding, and a
+  missing or empty ledger leaves the drafter's output unchanged.
+- **Declined skip.** A category whose latest row is `declined` and unexpired is
+  skipped; the plan (or `nothing to draft`) says which category and why. Once
+  `expires` passes, it is drafted again.
+- **Malformed rows** make the drafter exit 2 naming the line.
+
+Record a disposition with `scripts/record-insights-disposition.sh <category>
+<adopted|declined|deferred> [--reason <text>] [--ref <text>] [--expires
+<YYYY-MM-DD>]`, or at approval time with `rad approve <feature> --disposition
+<category>:<disposition>[:<reason>]` (repeatable; all validated before the
+approval is recorded). `scripts/check-ledger-append-only.sh` runs in
+`verify-all.sh` and CI and fails any diff that edits or removes an existing row.
