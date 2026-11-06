@@ -1,7 +1,10 @@
 # Plan: Insights Disposition Ledger
 Created: 2026-11-06
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-11-06T16:07:34.136Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/insights-disposition-ledger
 Source-Author: none (no source issue)
 Source-Comments: none
