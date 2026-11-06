@@ -47,6 +47,9 @@ Research was run inline by the planner (no sub-agent). No architect-only agent i
 | scripts/record-insights-disposition.sh | 1-90 | New: validated append-only writer for one ledger row |
 | scripts/test-record-insights-disposition.sh | 1-100 | New: fixture tests for the writer |
 | .rad/skills/rad-approve/SKILL.md | 390-456 | Step 4: disposition prompt for insights-proposals plans (source file) |
+| .agents/skills/rad-approve/SKILL.md | 392-460 | Generated copy, regenerated from the source by `rad generate` |
+| .claude/commands/architect/rad-approve.md | 392-460 | Generated copy, regenerated from the source by `rad generate` |
+| .agents/skills/rad-approve/agents/openai.yaml | 1-30 | Generated; regenerated alongside the skill (expected unchanged) |
 | harness/cli.js | 86-86 | `APPROVE_USAGE` gains `--disposition` |
 | harness/cli.js | 2785-2905 | `approveCommand` parses, validates and applies `--disposition` |
 | harness/test/cli-approve-disposition.test.js | 1-120 | New: tests for the flag |
@@ -56,6 +59,9 @@ Research was run inline by the planner (no sub-agent). No architect-only agent i
 | .github/workflows/ci.yml | 72-82 | Add a thin job invoking the sibling check |
 | docs/invariants.yaml | 112-120 | Register the ledger append-only invariant |
 | .rad/skills/rad-insights/SKILL.md | 79-140 | Document the ledger, baseline and declined skip (source file) |
+| .agents/skills/rad-insights/SKILL.md | 81-145 | Generated copy, regenerated from the source by `rad generate` |
+| .claude/commands/shared/rad-insights.md | 81-145 | Generated copy, regenerated from the source by `rad generate` |
+| .agents/skills/rad-insights/agents/openai.yaml | 1-30 | Generated; regenerated alongside the skill (expected unchanged) |
 | docs/daily-workflow.md | 468-492 | Document the ledger beside `--draft-plans` |
 
 ## Program Design
@@ -78,7 +84,7 @@ File-tree diff: add `scripts/lib/insights-ledger.sh`, `scripts/record-insights-d
 - harness/gates.js, harness/events.js, harness/transitions.js, harness/gates.yaml — the gate fold and event writer are read-only for this plan
 - scripts/check-events-append-only.sh — unchanged; the ledger gets a sibling check
 - .agents/findings.jsonl — never rewritten
-- .agents/skills/, .claude/ — generated; edit `.rad/skills/` and run `rad generate`
+- Never hand-edit the generated copies under `.agents/skills/` and `.claude/commands/`: edit the `.rad/skills/` source and run `rad generate`. The regenerated rad-approve and rad-insights copies are declared in Files in Scope; no other generated file may change.
 
 ### Key Files
 - scripts/draft-insights-plan.sh — the drafter being changed
@@ -134,7 +140,7 @@ What: Add a repeatable `--disposition <category>:<disposition>[:<reason>]` flag.
 Validate: AC#6 — `node --test harness/test/cli-approve-disposition.test.js`; edge cases: no flag (behavior unchanged), invalid disposition (nothing written), reason containing `:`, two flags for one category (latest wins), append failure after approval.
 
 #### Task 3.3: `rad-approve` skill step
-File: .rad/skills/rad-approve/SKILL.md:390-456
+File: .rad/skills/rad-approve/SKILL.md:390-456, .agents/skills/rad-approve/SKILL.md:392-460, .claude/commands/architect/rad-approve.md:392-460, .agents/skills/rad-approve/agents/openai.yaml:1-30
 What: For an `insights-proposals-*` plan, extend Step 4 (record the approval) so that the architect confirms a disposition per category and the skill calls `rad approve ... --disposition` (or the recording script). Run `node harness/cli.js generate` so the generated copies match.
 Validate: AC#7 — `node harness/cli.js generate` then `git status` shows only the expected generated files changed; the skill text names the flag and the recording script.
 
@@ -155,7 +161,7 @@ Validate: AC#8 — `bash scripts/lint-invariants.sh` and `bash scripts/verify-al
 Depends on: Wave 4 complete
 
 #### Task 5.1: Skill source and regeneration
-File: .rad/skills/rad-insights/SKILL.md:79-140
+File: .rad/skills/rad-insights/SKILL.md:79-140, .agents/skills/rad-insights/SKILL.md:81-145, .claude/commands/shared/rad-insights.md:81-145, .agents/skills/rad-insights/agents/openai.yaml:1-30
 What: Describe the ledger, the baseline-by-date rule, declined skip and expiry in Step 3b and the `--draft-plans` block, then run `node harness/cli.js generate`.
 Validate: AC#9 — `node harness/cli.js generate` then `git status` shows only the expected generated files changed.
 
