@@ -7,3 +7,5 @@
 | 7 | Wave 3 | rad-approve skill step | ✓ complete | 33f16bf | 11:14 |
 | 8 | Wave 4 | Sibling append-only check | ✓ complete | c50084a | 11:19 |
 | 9 | Wave 4 | Wire the check | ✓ complete (concern: lint-shell-safety fails on wave-3 record-insights-disposition.sh) | f8ab68a | 11:27 |
+| 10 | Wave 5 | Skill source and regeneration | ✓ complete | ecd5d70 | 11:40 |
+| 11 | Wave 5 | Workflow docs | ✓ complete | 1481a10 | 11:40 |
