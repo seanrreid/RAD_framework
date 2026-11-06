@@ -47,6 +47,10 @@ expect_refused() {
 # Refusals while the ledger is absent leave no file behind.
 expect_refused "empty category" 2 "category must not be empty" "" adopted --reason x
 expect_refused "whitespace category" 2 "category must not be empty" "  " adopted
+expect_refused "category with a space" 2 "category must match" "code clarity" adopted
+expect_refused "category with a quote" 2 "category must match" "te'sting" adopted
+expect_refused "category with a slash" 2 "category must match" "a/b" adopted
+expect_refused "category with command substitution" 2 "category must match" '$(id)' adopted
 expect_refused "unknown disposition" 2 "unknown disposition" testing maybe
 expect_refused "missing disposition" 2 "Usage" testing
 expect_refused "unknown option" 2 "unknown option" testing adopted --bogus x

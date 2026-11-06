@@ -44,6 +44,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -n "${CATEGORY//[[:space:]]/}" ]] || die 2 "category must not be empty"
+[[ "$CATEGORY" =~ ^[A-Za-z0-9._-]+$ ]] || die 2 "category must match [A-Za-z0-9._-]+ (got '$CATEGORY')"
 case " $LEDGER_VALID_DISPOSITIONS " in
   *" $DISPOSITION "*) ;;
   *) die 2 "unknown disposition '$DISPOSITION' (expected: $LEDGER_VALID_DISPOSITIONS)" ;;
