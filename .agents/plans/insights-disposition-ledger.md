@@ -1,7 +1,7 @@
 # Plan: Insights Disposition Ledger
 Created: 2026-11-06
 Author: architect
-Status: approved
+Status: in-progress
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-11-06T16:17:03.568Z
 Recorded-By: sean@torchcodelab.com
