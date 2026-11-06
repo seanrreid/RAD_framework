@@ -15,13 +15,19 @@
 #
 #   RAD_BRANCH_PREFIX       work-branch prefix (default rad/)
 #
+# Disposition ledger (.agents/insights-ledger.jsonl, optional): a category whose
+# latest ledger row has date D counts only findings dated strictly after D; one
+# whose latest row is `declined` and unexpired is skipped, and the skip (with
+# its reason) is named in the plan Context or the `nothing to draft` output.
+# No ledger (absent or empty) → output identical to a run without this feature.
+#
 # Exit codes:
 #   0 = drafted (prints `drafted: <plan> on <branch>`), --dry-run printed the
 #       plan, or `nothing to draft (threshold <t>)`
 #   1 = refused, nothing written: dirty tracked worktree, target branch exists
 #       locally or on origin, origin cannot be verified, too many categories for
 #       one lint-valid plan, or a git step failed
-#   2 = usage error, missing/unreadable findings log, unreadable conventions
+#   2 = usage error, missing/unreadable findings log, malformed ledger row, unreadable conventions
 #       file (AGENTS.md / CLAUDE.md), malformed findings line,
 #       RAD_FINDINGS_FILE starting with '-' or containing a newline, or an
 #       invalid branch name from RAD_BRANCH_PREFIX
@@ -38,8 +44,11 @@ readonly NEW_FILE_LINES="1-40"
 readonly FALLBACK_CONVENTIONS_LINES="1-1"
 readonly AGENTS_FILE="AGENTS.md"
 readonly CLAUDE_FILE="CLAUDE.md"
+readonly LEDGER_FILE=".agents/insights-ledger.jsonl"
 readonly NO_MATCH_EXIT=1 # grep: no line matched (any higher status is an error)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/insights-ledger.sh
+source "$SCRIPT_DIR/lib/insights-ledger.sh"
 
 die() { echo "$SELF: $2" >&2; exit "$1"; }
 
@@ -83,14 +92,60 @@ hint_for() {
   esac
 }
 
-# crossing_rows <threshold> — "count<TAB>category", count desc then name.
+# ledger_baselines_json — {"<category>":"<latest ledger date>"} for every
+# finding category that has a ledger row; {} when there is no ledger.
+ledger_baselines_json() {
+  local b='{}' c d
+  [[ -s "$LEDGER_FILE" ]] || { echo "$b"; return; }
+  while IFS= read -r c; do
+    d=$(ledger_baseline "$LEDGER_FILE" "$c") || return 1
+    if [[ -n "$d" ]]; then b=$(jq -c --arg c "$c" --arg d "$d" '.[$c]=$d' <<< "$b"); fi
+  done < <(jq -r 'select(.type=="finding") | .category // empty' "$FINDINGS_FILE" | sort -u)
+  echo "$b"
+}
+
+# crossing_rows <threshold> — "count<TAB>category", count desc then name. A
+# category with a ledger baseline D counts only findings dated strictly after D
+# (a finding with no date cannot be shown to postdate D, so it is not counted).
 crossing_rows() {
-  local cats
-  cats=$(jq -r 'select(.type=="finding") | .category' "$FINDINGS_FILE") \
+  local cats baselines
+  baselines=$(ledger_baselines_json) || die 2 "cannot read insights ledger baselines: $LEDGER_FILE"
+  cats=$(jq -r --argjson b "$baselines" '
+      select(.type=="finding")
+      | select(($b[.category // ""]) as $d | $d == null or ((.date // "") > $d))
+      | .category' "$FINDINGS_FILE") \
     || die 2 "malformed findings log: $FINDINGS_FILE (jq failed to parse it)"
   [[ -z "$cats" ]] && return 0
   printf '%s\n' "$cats" | sort | uniq -c | sed -E 's/^ *([0-9]+) /\1	/' \
     | awk -F'\t' -v t="$1" '$1 >= t+0' | sort -t "$(printf '\t')" -k1,1nr -k2,2
+}
+
+# validate_ledger — exit 2 naming file:line on any malformed ledger row.
+validate_ledger() {
+  local msg
+  msg=$(ledger_validate "$LEDGER_FILE" 2>&1) || die 2 "malformed insights ledger: $msg"
+}
+
+# skip_reason <category> — "declined D[, expires E][: reason]" from the latest row.
+skip_reason() {
+  _ledger_latest_row "$LEDGER_FILE" "$1" | jq -r '
+    "declined \(.date)" + (if .expires then ", expires \(.expires)" else "" end)
+    + (if .reason then ": \(.reason)" else "" end)'
+}
+
+# apply_declined <rows> — sets ROWS (rows minus unexpired-declined categories)
+# and SKIP_TEXT (one "<category> — <reason>" line per skipped category).
+apply_declined() {
+  local count cat
+  ROWS="" SKIP_TEXT=""
+  while IFS="$(printf '\t')" read -r count cat; do
+    [[ -z "$cat" ]] && continue
+    if ledger_declined_active "$LEDGER_FILE" "$cat" "$TODAY"; then
+      SKIP_TEXT="${SKIP_TEXT:+$SKIP_TEXT$'\n'}$cat — $(skip_reason "$cat")"
+    else
+      ROWS="${ROWS:+$ROWS$'\n'}$count	$cat"
+    fi
+  done <<< "$1"
 }
 
 # conventions_file — the project conventions file: AGENTS.md when it exists,
@@ -117,6 +172,7 @@ conventions_range() {
 }
 
 render_header() {
+  local line
   cat <<EOF
 # Plan: Insights Proposals $DATE
 Created: $DATE
@@ -132,6 +188,10 @@ Recurrence evidence (threshold: $THRESHOLD findings):
 EOF
   local i
   for ((i = 0; i < N; i++)); do echo "- \`${CATS[$i]}\`: ${COUNTS[$i]} findings (threshold $THRESHOLD)"; done
+  if [[ -n "$SKIP_TEXT" ]]; then
+    printf '\nSkipped (declined in `%s`):\n' "$LEDGER_FILE"
+    while IFS= read -r line; do echo "- $line"; done <<< "$SKIP_TEXT"
+  fi
   printf '\n## Scope\n\n| In scope | Out of scope |\n|---|---|\n'
   for ((i = 0; i < N; i++)); do
     if is_mapped "${CATS[$i]}"; then echo "| \`${SLUGS[$i]}\`: $CONV_FILE convention bullet | Rewriting existing code for \`${SLUGS[$i]}\` |"
@@ -281,9 +341,16 @@ main() {
   [[ $# -le 1 ]] || die 2 "usage: $SELF [--dry-run]"
   validate_findings_file
   [[ -f "$FINDINGS_FILE" && -r "$FINDINGS_FILE" ]] || die 2 "findings log not found or unreadable: $FINDINGS_FILE"
+  validate_ledger
   THRESHOLD=$(parse_threshold)
-  rows=$(crossing_rows "$THRESHOLD")
-  [[ -z "$rows" ]] && { echo "nothing to draft (threshold $THRESHOLD)"; exit 0; }
+  TODAY=$(date +%Y-%m-%d)
+  apply_declined "$(crossing_rows "$THRESHOLD")"
+  rows="$ROWS"
+  if [[ -z "$rows" ]]; then
+    echo "nothing to draft (threshold $THRESHOLD)"
+    [[ -z "$SKIP_TEXT" ]] || printf 'skipped (declined in %s):\n%s\n' "$LEDGER_FILE" "$SKIP_TEXT"
+    exit 0
+  fi
   N=0 HAS_MAPPED=0
   while IFS="$(printf '\t')" read -r count cat; do
     CATS[N]="$cat" COUNTS[N]="$count" SLUGS[N]=$(slugify "$cat")
@@ -292,7 +359,7 @@ main() {
   done <<< "$rows"
   ((N <= MAX_WAVES * TASKS_PER_WAVE)) \
     || die 1 "$N categories cross the threshold (max $((MAX_WAVES * TASKS_PER_WAVE)) per plan); raise RAD_FINDINGS_THRESHOLD"
-  DATE=$(date +%Y-%m-%d) SLUG="insights-proposals-$DATE"
+  DATE="$TODAY" SLUG="insights-proposals-$DATE"
   BRANCH="${RAD_BRANCH_PREFIX:-rad/}$SLUG"
   found=$(conventions_file)
   CONV_RANGE=$(conventions_range "$found")

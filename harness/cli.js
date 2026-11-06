@@ -11,7 +11,7 @@
  * through the `approve`, `plan-open`, `plan-status` and `wrap` publish steps.
  *
  * Subcommands:
- *   approve <feature> [--on-behalf-of <name>] [--evidence <text>] [--no-commit] [--trailer "Key: Value"]...
+ *   approve <feature> [--on-behalf-of <name>] [--evidence <text>] [--no-commit] [--trailer "Key: Value"]... [--disposition <category>:<disposition>[:<reason>]]...
  *   plan-open <plan-file> [--trailer "Key: Value"]...
  *   plan-status <feature> <rejected|needs-revision> [--trailer "Key: Value"]...
  *   record-pr <feature> --pr <n>
@@ -83,7 +83,7 @@ import { makePreparePort } from './deliver-prepare.js';
 import { makeFinishPort, executionLogPaths } from './deliver-finish.js';
 
 /** Usage line for `rad approve` (parse errors and the command table). */
-const APPROVE_USAGE = 'rad approve <feature> [--on-behalf-of <name>] [--evidence <text>] [--no-commit] [--trailer "Key: Value"]...';
+const APPROVE_USAGE = 'rad approve <feature> [--on-behalf-of <name>] [--evidence <text>] [--no-commit] [--trailer "Key: Value"]... [--disposition <category>:<disposition>[:<reason>]]...';
 /** Usage line for `rad deliver` (help, parse errors, and the command table). */
 const DELIVER_USAGE = 'rad deliver <feature> [--model <model-id>] [--resume --context <text>]';
 /** Usage line for `rad stop-status`. */
@@ -446,7 +446,7 @@ export async function main(argv, opts = {}) {
  * so malformed invocations fail loudly rather than silently mis-parse.
  *
  * @param {string[]} argv
- * @returns {{ feature?: string, onBehalfOf?: string, evidence?: string, noCommit: boolean, trailers: string[] }}
+ * @returns {{ feature?: string, onBehalfOf?: string, evidence?: string, noCommit: boolean, trailers: string[], dispositions: string[] }}
  */
 function parseApproveArgs(argv) {
   let feature;
@@ -454,6 +454,7 @@ function parseApproveArgs(argv) {
   let evidence;
   let noCommit = false;
   const trailers = [];
+  const dispositions = [];
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -471,6 +472,10 @@ function parseApproveArgs(argv) {
       if (argv[i + 1] === undefined) throw new Error('--trailer requires a "Key: Value" argument');
       trailers.push(argv[i + 1]);
       i += 1;
+    } else if (arg === '--disposition') {
+      if (argv[i + 1] === undefined) throw new Error('--disposition requires a <category>:<disposition>[:<reason>] value');
+      dispositions.push(argv[i + 1]);
+      i += 1;
     } else if (arg.startsWith('--')) {
       throw new Error(`unknown option '${arg}'`);
     } else if (feature === undefined) {
@@ -480,7 +485,60 @@ function parseApproveArgs(argv) {
     }
   }
 
-  return { feature, onBehalfOf, evidence, noCommit, trailers };
+  return { feature, onBehalfOf, evidence, noCommit, trailers, dispositions };
+}
+
+/** Dispositions the insights ledger accepts (mirrors scripts/lib/insights-ledger.sh). */
+const LEDGER_DISPOSITIONS = ['adopted', 'declined', 'deferred'];
+/** The sanctioned ledger writer and the ledger file it appends to. */
+const RECORD_DISPOSITION_SCRIPT = 'record-insights-disposition.sh';
+const INSIGHTS_LEDGER_REL = '.agents/insights-ledger.jsonl';
+
+/**
+ * Parse repeated `--disposition <category>:<disposition>[:<reason>]` values. The
+ * reason is everything after the second colon (it may itself contain ':'). Two
+ * values for one category collapse to the LAST, in first-seen order. Throws on
+ * an empty category or an unknown disposition so nothing is written.
+ *
+ * @param {string[]} values
+ * @returns {{ category: string, disposition: string, reason: string }[]}
+ */
+function parseDispositions(values) {
+  const byCategory = new Map();
+  for (const value of values) {
+    const first = value.indexOf(':');
+    const second = first === -1 ? -1 : value.indexOf(':', first + 1);
+    const category = (first === -1 ? value : value.slice(0, first)).trim();
+    const disposition = first === -1 ? '' : value.slice(first + 1, second === -1 ? undefined : second).trim();
+    const reason = second === -1 ? '' : value.slice(second + 1);
+    if (category === '') throw new Error(`--disposition '${value}': category must not be empty`);
+    if (!LEDGER_DISPOSITIONS.includes(disposition)) {
+      throw new Error(`--disposition '${value}': unknown disposition '${disposition}' (expected: ${LEDGER_DISPOSITIONS.join(', ')})`);
+    }
+    byCategory.set(category, { category, disposition, reason });
+  }
+  return [...byCategory.values()];
+}
+
+/**
+ * Append each disposition row through the sanctioned recording script (never by
+ * writing the ledger directly). Stops at the first failure, reports it on stderr
+ * and returns APPROVE_FAILED_EXIT; returns 0 when every row was appended.
+ *
+ * @returns {number}
+ */
+function appendDispositions(sh, repoRoot, rows) {
+  const script = join(repoRoot, 'scripts', RECORD_DISPOSITION_SCRIPT);
+  for (const { category, disposition, reason } of rows) {
+    const args = [category, disposition, ...(reason === '' ? [] : ['--reason', reason])];
+    const res = sh(script, args, { cwd: repoRoot });
+    if (res.status !== 0) {
+      const detail = (res.stderr || res.stdout || '').trim();
+      process.stderr.write(`rad approve: approval recorded but the insights-ledger append failed for '${category}' — ${detail || `exit ${res.status}`}\n`);
+      return APPROVE_FAILED_EXIT;
+    }
+  }
+  return 0;
 }
 
 /** True when a string is present and not whitespace-only. */
@@ -2567,7 +2625,7 @@ function approveUsageError(message, code) {
  * Parse and pre-validate argv. Every trailer refusal (invalid trailer, or
  * `--trailer` with `--no-commit`) is exit 2 and runs before any read or write.
  *
- * @returns {{ code: number } | { feature: string, onBehalfOf?: string, evidence?: string, noCommit: boolean, trailers: string[] }}
+ * @returns {{ code: number } | { feature: string, onBehalfOf?: string, evidence?: string, noCommit: boolean, trailers: string[], dispositions: string[], dispositionRows: object[] }}
  */
 function parseApproveRequest(argv) {
   let parsed;
@@ -2586,7 +2644,11 @@ function parseApproveRequest(argv) {
   if (!isNonEmpty(parsed.feature)) {
     return { code: approveUsageError('a feature name is required', APPROVE_FAILED_EXIT) };
   }
-  return parsed;
+  try {
+    return { ...parsed, dispositionRows: parseDispositions(parsed.dispositions) };
+  } catch (err) {
+    return { code: approveUsageError(err.message, APPROVE_REFUSED_EXIT) };
+  }
 }
 
 /** Proxy mode: --evidence is mandatory and the named approver must be an architect. */
@@ -2727,6 +2789,9 @@ function approveAndPublish(sh, store, a) {
   }
   const rec = recordOrResume(store, a);
   if (rec.code !== undefined) return rec.code;
+  // Ledger rows land after the approval is recorded and before the commit, so they ride in it.
+  const appended = appendDispositions(a.sh, a.repoRoot, a.dispositionRows);
+  if (appended !== 0) return appended;
   const message = approveCommitMessage(a.planText, {
     feature: a.feature, reapproval: rec.reapproval, approvedBy: rec.who.approvedBy,
     recordedBy: rec.who.recordedBy, evidence: rec.evidence, proxy: rec.who.proxy,
@@ -2734,7 +2799,11 @@ function approveAndPublish(sh, store, a) {
   const result = publishPlanChange(sh, a.repoRoot, {
     verb: APPROVE_VERB,
     branch: a.workBranch,
-    paths: [`.agents/plans/${a.feature}.md`, `.agents/state/${a.feature}/events.jsonl`],
+    paths: [
+      `.agents/plans/${a.feature}.md`,
+      `.agents/state/${a.feature}/events.jsonl`,
+      ...(a.dispositionRows.length > 0 ? [INSIGHTS_LEDGER_REL] : []),
+    ],
     message,
     issue: planIssueNumber(a.planText),
     labelStatus: APPROVE_LABEL_STATUS,
@@ -2749,7 +2818,11 @@ function approveAndPublish(sh, store, a) {
 }
 
 /**
- * `approve <feature> [--on-behalf-of <name>] [--evidence <text>] [--no-commit] [--trailer "Key: Value"]...`.
+ * `approve <feature> [--on-behalf-of <name>] [--evidence <text>] [--no-commit] [--trailer "Key: Value"]... [--disposition <category>:<disposition>[:<reason>]]...`.
+ *
+ * `--disposition` (insights-proposals plans) is validated up front (exit 2, nothing
+ * written), then each row is appended via scripts/record-insights-disposition.sh
+ * AFTER the approval is recorded; an append failure exits 1 on stderr.
  *
  * Enforces architect authority with parity to the prose rules and, on success,
  * performs the bootstrap DUAL-WRITE: (a) appends the `approved` event via
@@ -2809,10 +2882,12 @@ export async function approveCommand(argv, ctx) {
     process.stderr.write(blockers.message);
     return APPROVE_FAILED_EXIT;
   }
-  const a = { repoRoot, feature, evidence, planFile, planText, planHash, workBranch, who, blockers, trailers: req.trailers };
+  const a = { repoRoot, feature, evidence, planFile, planText, planHash, workBranch, who, blockers, trailers: req.trailers, dispositionRows: req.dispositionRows, sh };
   if (!req.noCommit) return approveAndPublish(sh, store, a);
   const rec = recordApprovalAndStatus(store, a);
   if (rec.code !== undefined) return rec.code;
+  const appended = appendDispositions(sh, repoRoot, a.dispositionRows);
+  if (appended !== 0) return appended;
   // Record-only: best-effort RAD_SYNC publish, never fails the verb (offline-fail-safe).
   bestEffortSyncPush(repoRoot, workBranch, sh);
   printApproveOk(feature, who, rec.ts, '', rec.status);
@@ -2928,6 +3003,10 @@ function parseArchitectureApproveArgs(argv) {
     return null;
   }
   const { feature: slug, onBehalfOf, evidence } = parsed;
+  if (parsed.dispositions.length > 0) {
+    refuseArchitectureApprove('--disposition is only valid for `rad approve`', true);
+    return null;
+  }
   if (!isNonEmpty(slug)) {
     refuseArchitectureApprove('a slug is required', true);
     return null;
