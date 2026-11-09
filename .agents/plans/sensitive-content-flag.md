@@ -44,6 +44,8 @@ Research used a read-only Explore sub-agent over `scripts/`, `harness/`, `.rad/s
 | scripts/test-check-approval-blockers.sh | 330-347 | New cases: blocker, waived, stale waiver, tag line |
 | scripts/lint-plan.sh | 935-965 | Sensitive-content blockers and stale-waiver exemption |
 | scripts/test-lint-plan.sh | 1540-1557 | New cases for sensitive-content lint behavior |
+| scripts/test-draft-insights-plan.sh | 38-46 | Fixture copies `check-sensitive-content.sh` into its temp repo (lint-plan.sh now calls it) |
+| scripts/test-lint-plan-preflight.sh | 32-40 | Fixture copies `check-sensitive-content.sh` into its temp repo (lint-plan.sh now calls it) |
 | harness/cli.js | 2551-2580 | `parseBlockerStdout` second tag branch |
 | harness/cli.js | 2720-2730 | Pass `sensitiveContentPattern` into `recordApproval` |
 | harness/adapters/git-state-store.js | 146-152 | Validate the optional field |
