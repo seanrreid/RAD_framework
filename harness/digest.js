@@ -186,7 +186,7 @@ function highRiskItems(highRisk, waivers) {
 
 /** Frozen approved-event waivers win; the plan's waivers apply only when the approval froze none. */
 function sensitiveItems(hits, approval, waivers) {
-  const frozen = avail(approval) && Array.isArray(approval.frozenWaivers) ? approval.frozenWaivers : null;
+  const frozen = approval != null && avail(approval) && Array.isArray(approval.frozenWaivers) ? approval.frozenWaivers : null;
   const source = frozen ?? (avail(waivers) && Array.isArray(waivers) ? waivers : []);
   const waived = new Map(source.map((w) => [w.id, w.justification]));
   return hits.map((h) => {

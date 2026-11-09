@@ -116,6 +116,21 @@ test('uncovered sensitive diff hit is HIGH; waived hit shows its justification',
   assert.deepEqual([ev.ok, ev.detail], [false, '1 unwaived, 1 waived']);
 });
 
+test('a missing or unavailable approval falls back to the plan waivers', () => {
+  for (const approval of [undefined, { unavailable: 'no approval' }]) {
+    const kinds = buildDigest({ ...flaggedInputs(), approval }).items.map((i) => i.kind);
+    assert.ok(kinds.includes('sensitive-content'), `approval=${JSON.stringify(approval)}`);
+    assert.ok(kinds.includes('sensitive-content-waived'), `approval=${JSON.stringify(approval)}`);
+  }
+});
+
+test('a null approval is reported as malformed inputs, never as a clean digest', () => {
+  const digest = buildDigest({ ...flaggedInputs(), approval: null });
+  assert.doesNotThrow(() => renderDigest(digest));
+  assert.deepEqual(digest.items, []);
+  assert.ok(digest.unavailable.some((u) => u.input === 'digest' && /malformed inputs/.test(u.reason)));
+});
+
 test('frozen approved-event waiver is preferred over the plan waivers', () => {
   const inputs = flaggedInputs();
   inputs.approval = { ...inputs.approval, frozenWaivers: [{ id: 'sensitive-content:auth-change', justification: 'frozen' }] };

@@ -16,8 +16,10 @@
 #         Waivers, ...) are never scanned.
 # diff    Scan only the lines ADDED by the three-dot diff `base...head` (deleted
 #         and context lines are never flagged). Added comment lines ARE scanned.
-#         Not scanned: test files (RAD_TEST_PATH_RE), markdown (`.md`), anything
-#         under `.agents/`; binary files and rename-only changes add no lines.
+#         Not scanned: test files (RAD_TEST_PATH_RE), markdown (`.md`, any case),
+#         anything under `.agents/`, and this script itself (its pattern table
+#         would otherwise flag every edit to it); binary files and rename-only
+#         changes add no lines.
 #         Output is one line per matched id, in built-in table order:
 #           sensitive-content:<id><TAB><hit count><TAB><path:line,path:line,...>
 #         with at most MAX_LOCATIONS locations in diff order. A base or head
@@ -49,6 +51,9 @@ readonly FINDING_PREFIX="sensitive-content:"
 readonly CUSTOM_ID="custom"
 # Most path:line locations reported per id in diff mode.
 readonly MAX_LOCATIONS=5
+# The one file diff mode never scans: it defines the patterns, so every edit to
+# the table would be reported against itself.
+readonly SELF_PATH="scripts/check-sensitive-content.sh"
 # The only characters a diff-mode ref may contain (checked before git sees it).
 readonly SAFE_REF_RE='^[A-Za-z0-9._/@^~-]+$'
 # Built-in pattern ids, in report order. Regexes live in builtin_regex.
@@ -206,20 +211,21 @@ validate_ref() {
 }
 
 # is_scanned_path <path>
-# True iff diff mode scans the file: not a test, not markdown, not under .agents/.
+# True iff diff mode scans the file: not a test, not markdown (any case), not
+# under .agents/, and not the script that defines the patterns.
 is_scanned_path() {
   case "$1" in
-    *.md | .agents/*) return 1 ;;
+    *.[Mm][Dd] | .agents/* | "$SELF_PATH") return 1 ;;
   esac
   ! path_matches "$1" "$RAD_TEST_PATH_RE"
 }
 
-# added_rows <diff-text>
-# Print `path<TAB>line<TAB>text` for every added line of a zero-context diff.
-# Hunk header counts keep an added line that starts with `++` from being read
-# as a file header.
+# added_rows   (zero-context diff on stdin)
+# Print `path<TAB>line<TAB>text` for every added line. Hunk header counts keep
+# an added line that starts with `++` from being read as a file header.
 added_rows() {
-  printf '%s\n' "$1" | awk '
+  awk '
+    BEGIN { oldrem = 0; newrem = 0; nl = 0; file = "" }
     function count(s,   a) { split(s, a, ","); return (a[2] == "") ? 1 : a[2] + 0 }
     function start(s,   a) { split(s, a, ","); return a[1] + 0 }
     oldrem > 0 || newrem > 0 {
@@ -246,18 +252,19 @@ added_rows() {
 # diff_added_lines <base-sha> <head-sha>
 # Print `path<TAB>line<TAB>text` for added lines in scanned files only.
 diff_added_lines() {
-  local raw path line text last_path="" skip=0
-  raw=$(git -c core.quotepath=off diff --no-color --no-ext-diff --no-textconv -M \
-    --unified=0 --src-prefix=a/ --dst-prefix=b/ "$1...$2" --) \
-    || die "git diff failed for $1...$2"
-  added_rows "$raw" | while IFS=$'\t' read -r path line text; do
-    if [[ "$path" != "$last_path" ]]; then
-      last_path="$path"
-      skip=0
-      is_scanned_path "$path" || skip=1
-    fi
-    [[ "$skip" -eq 1 ]] || printf '%s\t%s\t%s\n' "$path" "$line" "$text"
-  done
+  local path line text last_path="" skip=0
+  # Streamed, never buffered; pipefail turns a failure of git or awk into exit 2.
+  git -c core.quotepath=off diff --no-color --no-ext-diff --no-textconv -M \
+    --unified=0 --src-prefix=a/ --dst-prefix=b/ "$1...$2" -- \
+    | added_rows \
+    | while IFS=$'\t' read -r path line text; do
+        if [[ "$path" != "$last_path" ]]; then
+          last_path="$path"
+          skip=0
+          is_scanned_path "$path" || skip=1
+        fi
+        [[ "$skip" -eq 1 ]] || printf '%s\t%s\t%s\n' "$path" "$line" "$text"
+      done || die "git diff failed for $1...$2"
 }
 
 # hit_locations <numbers> <locations>

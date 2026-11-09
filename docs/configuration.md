@@ -611,9 +611,11 @@ table but never disable the scan: an empty value falls back to the built-in tabl
 `scripts/check-sensitive-content.sh diff <base> <head>` applies the same table (and the
 same `RAD_SENSITIVE_CONTENT_PATTERNS` override, reported under `custom`) to the lines
 a branch *added*, using the three-dot diff `base...head`. Deleted and context lines are
-never flagged. Exclusions: test files (the shared `RAD_TEST_PATH_RE`), markdown (`.md`)
-and anything under `.agents/`. An added comment line is still scanned. Binary files,
-rename-only changes and an empty diff yield no hits.
+never flagged. Exclusions: test files (the shared `RAD_TEST_PATH_RE`), markdown (`.md`,
+any case), anything under `.agents/`, and `scripts/check-sensitive-content.sh` itself
+(its pattern table would otherwise be reported against itself on every edit). An added
+comment line is still scanned. Binary files, rename-only changes and an empty diff
+yield no hits.
 
 Output is one line per matched id, in built-in table order: `sensitive-content:<id>`, a
 tab, the hit count, a tab, then up to 5 comma-separated `path:line` locations in diff

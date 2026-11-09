@@ -238,6 +238,32 @@ printf '++ sudo z\n' > "$REPO/plus.sh"
 PLUS=$(commit_all plus)
 diff_run -- diff "$MANY" "$PLUS"; expect "diff: added line starting with ++" 0 "${PREFIX}privilege-escalation${TAB}1${TAB}plus.sh:1"
 
+# file names with spaces and non-ASCII characters are reported unquoted
+printf 'sudo a\n' > "$REPO/my file.sh"; printf 'sudo b\n' > "$REPO/café.sh"
+SPACES=$(commit_all spaces)
+diff_run -- diff "$PLUS" "$SPACES"
+expect "diff: space and non-ASCII file names" 0 "${PREFIX}privilege-escalation${TAB}2${TAB}café.sh:1,my file.sh:1"
+
+# a rename WITH edits scans the added lines under the new name
+printf 'a\nb\nc\nd\ne\nf\ng\nh\n' > "$REPO/orig2.txt"
+SEED=$(commit_all seed2)
+git -C "$REPO" mv orig2.txt renamed2.sh
+printf 'a\nb\nc\nd\ne\nf\ng\nh\nsudo extra\n' > "$REPO/renamed2.sh"
+RENAMED=$(commit_all rename-edit)
+diff_run -- diff "$SEED" "$RENAMED"
+expect "diff: rename with edits flagged under the new name" 0 "${PREFIX}privilege-escalation${TAB}1${TAB}renamed2.sh:9"
+
+# markdown is excluded whatever the case of the extension
+printf 'sudo x\n' > "$REPO/NOTES.MD"; printf 'sudo y\n' > "$REPO/more.Md"
+UPPER=$(commit_all upper-md)
+diff_run -- diff "$RENAMED" "$UPPER"; expect "diff: .MD and .Md files not scanned" 0 ""
+
+# the script that defines the patterns is never scanned (its table would flag itself)
+# appended as comments: the copy under test must stay runnable
+printf '# edit\n# sudo y\n' >> "$REPO/scripts/check-sensitive-content.sh"
+SELFED=$(commit_all self-edit)
+diff_run -- diff "$UPPER" "$SELFED"; expect "diff: the pattern script itself is not scanned" 0 ""
+
 # plan mode and pattern mode are unchanged
 make_plan "$PLAN" "uses sudo now"
 run_script -- plan "$PLAN"; expect "diff: plan mode unchanged" 0 "${PREFIX}privilege-escalation"
