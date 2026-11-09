@@ -52,3 +52,12 @@ test('Codex source uses {{args}} and the generated body has no $ARGUMENTS', () =
 test('Codex body reports a Behavioral Exercise section', () => {
   assert.ok(CODEX_SOURCE.includes('Behavioral Exercise'));
 });
+
+for (const [name, body] of Object.entries(BODIES)) {
+  test(`${name} body runs the sensitive-content diff scan as an advisory`, () => {
+    assert.match(body, /scripts\/check-sensitive-content\.sh diff "\$BASE" HEAD/);
+    assert.match(body, /advisory/i);
+    assert.match(body, /never (changes READY|change the\s+review outcome|a Blocking issue)|never a Blocking issue/i);
+    assert.match(body, /exit 2/i);
+  });
+}
