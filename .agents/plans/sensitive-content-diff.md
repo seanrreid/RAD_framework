@@ -1,7 +1,10 @@
 # Plan: Sensitive Content Flag (diff-time)
 Created: 2026-11-09
 Author: developer
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-11-09T17:23:00.338Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/sensitive-content-diff
 Source-Author: none (no source issue)
 Source-Comments: none
