@@ -410,8 +410,38 @@ node harness/cli.js approve "$FEATURE" \
 Pass one `--trailer "Key: Value"` per attribution line your tool requires on
 commits (single-line each); pass none if it requires none.
 
+**Insights-proposals plans — record a disposition per category.** When the plan
+is an `insights-proposals-*` plan (the feature name starts with
+`insights-proposals-`), ask the architect, for **each finding category the plan
+proposes**, to confirm a disposition before running the command:
+
+- `adopted` — the proposal is accepted into the plan,
+- `declined` — rejected (the drafter then skips the category; optionally
+  expiring via the recording script's `--expires <YYYY-MM-DD>`),
+- `deferred` — revisit later.
+
+Add one `--disposition <category>:<disposition>[:<reason>]` flag per category
+to the Step 4 command (the reason is everything after the second `:`):
+
+```bash
+node harness/cli.js approve "$FEATURE" \
+  --disposition "testing:adopted:wired into verify-all" \
+  --disposition "naming:declined:house style"
+```
+
+`rad approve` validates every disposition first (a bad one exits 2 with nothing
+recorded), records the approval, appends the rows to
+`.agents/insights-ledger.jsonl` through `scripts/record-insights-disposition.sh`
+and commits the ledger with the approval. Never edit the ledger by hand. To
+record a disposition outside an approval, or with `--ref` / `--expires`, call
+the script directly: `scripts/record-insights-disposition.sh <category>
+<adopted|declined|deferred> --reason <text> [--ref <text>] [--expires <date>]`.
+If the ledger append fails after the approval is recorded, `rad approve` exits
+1 and names the failing category — fix the cause and rerun (a rerun resumes).
+
 After recording, the CLI also publishes the approval itself: it commits **only**
-the plan file and `.agents/state/$FEATURE/events.jsonl` to the work branch
+the plan file and `.agents/state/$FEATURE/events.jsonl` (plus
+`.agents/insights-ledger.jsonl` when `--disposition` was passed) to the work branch
 (subject `approve: <feature>`, or `approve: <feature> (re-approval)`; body
 `Plan:`, `Issue:`, `Approved-By:`, plus `Recorded-By:` and `Approval-Evidence:`
 in proxy mode, then the `--trailer` lines), pushes the work branch, and labels the

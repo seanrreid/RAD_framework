@@ -5,7 +5,9 @@
 # categories (one mapped, one unmapped), the drafted plan linting clean yet
 # blocked by check-approval-blockers.sh (markers), refusals (existing branch,
 # dirty tracked file → exit 1, nothing written), missing log → exit 2,
-# --dry-run touching nothing, and the Step 3b threshold fallback. Runs in a
+# --dry-run touching nothing, the Step 3b threshold fallback, and the
+# disposition ledger (baseline reset, strict > on the baseline date, declined
+# skip + expiry, malformed ledger → exit 2, absent ledger unchanged). Runs in a
 # hermetic GREPO fixture with a local bare origin. bash 3.2+ safe.
 #
 # Usage: scripts/test-draft-insights-plan.sh   (exit 0 + "ALL PASS")
@@ -38,7 +40,7 @@ setup_grepo() {
   mkdir -p "$GREPO/scripts/lib" "$GREPO/.agents" "$GREPO/harness" "$GREPO/.rad"
   cp "$HERE/draft-insights-plan.sh" "$HERE/lint-plan.sh" "$HERE/check-approval-blockers.sh" \
     "$HERE/get-default-branch.sh" "$GREPO/scripts/"
-  cp "$HERE/lib/plan-paths.sh" "$GREPO/scripts/lib/"
+  cp "$HERE/lib/plan-paths.sh" "$HERE/lib/insights-ledger.sh" "$GREPO/scripts/lib/"
   for p in "$HERE/../harness/"*; do
     case "$(basename "$p")" in node_modules|test) ;; *) cp -R "$p" "$GREPO/harness/" ;; esac
   done
@@ -184,6 +186,119 @@ for bad_prefix in "-bad/" "has space/" "a/../b/"; do
   [[ ! -e "$GREPO/.agents/plans" ]] || [[ -z "$(ls "$GREPO/.agents/plans")" ]] || fail "AC#10: prefix [$bad_prefix] wrote a plan"
 done
 echo "✓ AC#10: RAD_FINDINGS_FILE='-x' and unsafe RAD_BRANCH_PREFIX (-bad/, space, ..) exit 2, nothing written"
+
+# ── Disposition ledger (.agents/insights-ledger.jsonl) ───────────────────────
+LEDGER="$GREPO/.agents/insights-ledger.jsonl"
+
+# add_dated <file> <category> <date> <n> — n finding records carrying a date.
+add_dated() {
+  local i
+  for ((i = 0; i < $4; i++)); do
+    printf '{"type":"finding","category":"%s","date":"%s","issue":"x"}\n' "$2" "$3" >> "$1"
+  done
+}
+# ledger_row <disposition> <category> <date> [extra-json-fields] — append a row.
+ledger_row() {
+  printf '{"type":"disposition","category":"%s","disposition":"%s","date":"%s"%s}\n' \
+    "$2" "$1" "$3" "${4:+,$4}" >> "$LEDGER"
+}
+# expect_out <label> <fixed-string> — the last run's stdout contains the string.
+expect_out() { grep -qF -- "$2" "$OUT" || fail "$1: output lacks '$2': $(cat "$OUT")"; }
+expect_not_out() { grep -qF -- "$2" "$OUT" && fail "$1: output must not contain '$2'"; return 0; }
+FD="$TMP/findings.jsonl"
+
+# Absent or empty ledger → byte-identical output.
+write_findings "$FD" testing:6 portability:7
+run_draft -- --dry-run; expect "AC#1 no ledger" 0
+cp "$OUT" "$TMP/baseline-out.txt"
+: > "$LEDGER"
+run_draft -- --dry-run; expect "AC#1 empty ledger" 0
+cmp -s "$OUT" "$TMP/baseline-out.txt" || fail "AC#1: empty ledger changed the drafter output"
+rm -f "$LEDGER"
+echo "✓ AC#1: absent and empty ledger → identical output"
+
+# Baseline reset: only findings strictly after the latest row's date count.
+: > "$FD"; add_dated "$FD" testing 2026-01-01 6
+ledger_row adopted testing 2026-02-01
+run_draft -- --dry-run; expect "AC#2 reset" 0
+expect_out "AC#2 reset" "nothing to draft (threshold 5)"
+add_dated "$FD" testing 2026-03-01 5
+run_draft -- --dry-run; expect "AC#2 post-baseline" 0
+expect_out "AC#2 post-baseline" '`testing`: 5 findings (threshold 5)'
+echo "✓ AC#2: findings on or before the baseline do not count; 5 after it cross (count == threshold)"
+
+# Strict >: a finding dated exactly D does not count.
+: > "$FD"; add_dated "$FD" testing 2026-02-01 5
+run_draft -- --dry-run; expect "AC#2 strict" 0
+expect_out "AC#2 strict" "nothing to draft (threshold 5)"
+add_dated "$FD" testing 2026-02-02 4; add_dated "$FD" testing 2026-02-01 3
+run_draft -- --dry-run; expect "AC#2 strict below" 0
+expect_out "AC#2 strict below" "nothing to draft (threshold 5)"
+add_dated "$FD" testing 2026-02-02 1
+run_draft -- --dry-run; expect "AC#2 strict cross" 0
+expect_out "AC#2 strict cross" '`testing`: 5 findings (threshold 5)'
+echo "✓ AC#2: a finding dated exactly the baseline is excluded (strict >)"
+
+# A category with no ledger row, and an undated finding under a baseline.
+: > "$FD"; add_dated "$FD" portability 2020-01-01 6
+printf '{"type":"finding","category":"testing","issue":"undated"}\n%.0s' 1 2 3 4 5 6 >> "$FD"
+run_draft -- --dry-run; expect "AC#2 no row" 0
+expect_out "AC#2 no row" '`portability`: 6 findings (threshold 5)'
+expect_not_out "AC#2 undated under baseline" '`testing`'
+echo "✓ AC#2: no ledger row counts all findings; undated findings do not pass a baseline"
+
+# Declined skip (no expiry) with another category still drafting.
+rm -f "$LEDGER"; : > "$FD"
+add_dated "$FD" testing 2026-03-01 6; add_dated "$FD" portability 2026-03-01 6
+ledger_row declined testing 2026-02-01 '"reason":"wording too vague"'
+run_draft -- --dry-run; expect "AC#3 declined" 0
+expect_out "AC#3 declined" '`portability`: 6 findings'
+expect_not_out "AC#3 declined evidence" '`testing`: 6 findings'
+expect_out "AC#3 declined" 'Skipped (declined in `.agents/insights-ledger.jsonl`):'
+expect_out "AC#3 declined" "- testing — declined 2026-02-01: wording too vague"
+# All categories declined → nothing to draft, reason shown.
+ledger_row declined portability 2026-02-01
+run_draft -- --dry-run; expect "AC#3 all declined" 0
+expect_out "AC#3 all declined" "nothing to draft (threshold 5)"
+expect_out "AC#3 all declined" "testing — declined 2026-02-01: wording too vague"
+expect_out "AC#3 all declined" "portability — declined 2026-02-01"
+echo "✓ AC#3: unexpired declined category is skipped and named with its reason; all declined → nothing to draft + reasons"
+
+# Expiry: a past or today expiry stops suppressing; a future expiry still skips.
+rm -f "$LEDGER"; : > "$FD"; add_dated "$FD" testing 2026-03-01 6
+ledger_row declined testing 2026-02-01 '"expires":"2000-01-01"'
+run_draft -- --dry-run; expect "AC#3 expired" 0
+expect_out "AC#3 expired" '`testing`: 6 findings'
+expect_not_out "AC#3 expired" "Skipped"
+rm -f "$LEDGER"; ledger_row declined testing 2026-02-01 "\"expires\":\"$DATE\""
+run_draft -- --dry-run; expect "AC#3 expires today" 0
+expect_out "AC#3 expires today" '`testing`: 6 findings'
+rm -f "$LEDGER"; ledger_row declined testing 2026-02-01 '"expires":"2999-01-01"'
+run_draft -- --dry-run; expect "AC#3 future expiry" 0
+expect_out "AC#3 future expiry" "testing — declined 2026-02-01, expires 2999-01-01"
+# A later non-declined row for the category supersedes the declined one.
+ledger_row deferred testing 2026-02-15
+run_draft -- --dry-run; expect "AC#3 superseded" 0
+expect_out "AC#3 superseded" '`testing`: 6 findings'
+echo "✓ AC#3: expired/today declined stops suppressing; future expiry skips; a later row supersedes"
+
+# Malformed ledger → exit 2 naming the line, nothing written.
+before_b="$(branches)" before_s="$(status)"
+GOOD='{"type":"disposition","category":"testing","disposition":"adopted","date":"2026-02-01"}'
+for bad in 'not json' \
+  '{"disposition":"adopted","date":"2026-02-01"}' \
+  '{"category":"testing","date":"2026-02-01"}' \
+  '{"category":"testing","disposition":"adopted"}' \
+  '{"category":"testing","disposition":"ignored","date":"2026-02-01"}' \
+  ''; do
+  printf '%s\n%s\n' "$GOOD" "$bad" > "$LEDGER"
+  run_draft -- ; expect "AC#4 malformed [$bad]" 2
+  grep -q "insights-ledger.jsonl:2:" "$ERR" || fail "AC#4: [$bad] stderr does not name line 2: $(cat "$ERR")"
+  [[ "$(branches)" == "$before_b" && "$(status)" == "$before_s" ]] || fail "AC#4: [$bad] changed git state"
+done
+echo "✓ AC#4: invalid JSON / missing category, disposition, date / unknown disposition / blank line → exit 2 naming line 2"
+rm -f "$LEDGER"
+write_findings "$FD" testing:6 portability:7
 
 # ── Dirty tracked file → exit 1, nothing written ──────────────────────────────
 echo "dirty" >> "$GREPO/CLAUDE.md"

@@ -81,6 +81,16 @@ jobs:
           fetch-depth: 0
       - run: scripts/check-events-append-only.sh "${{ github.event.pull_request.base.sha }}"
 
+  # All PRs — the /rad-insights disposition ledger is append-only (fail-closed).
+  ledger-append-only:
+    runs-on: ubuntu-latest
+    steps:
+      # fetch-depth: 0 — same reason as events-append-only: the base sha must resolve.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: scripts/check-ledger-append-only.sh "${{ github.event.pull_request.base.sha }}"
+
   # All PRs — agent frontmatter lint + CLAUDE.md scope-map sync (fail-closed).
   # KNOWN: this job currently fails on pre-existing scope-map drift in the
   # real tree; the drift reconciliation lands before merge. Wired fail-closed

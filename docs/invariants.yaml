@@ -118,6 +118,15 @@ invariants:
       - { file: harness/adapters/git-state-store.js, symbol: "appendFileSync", note: "the writer only appends" }
     bypasses: []
 
+  - id: insights-ledger-append-only
+    claim: "The /rad-insights disposition ledger is only ever appended to; no change may remove or modify an existing row or add a malformed one."
+    authority: "the append-only ledger .agents/insights-ledger.jsonl"
+    not_evalable: "repo-convention check with no agent-reachable surface; covered by scripts/test-check-ledger-append-only.sh"
+    enforced_by:
+      - { file: scripts/check-ledger-append-only.sh, symbol: "git diff --name-only", note: "CI: fails on any removed/modified line or malformed added row in the ledger" }
+      - { file: scripts/record-insights-disposition.sh, symbol: "ledger_validate", note: "the sanctioned writer only appends, and refuses a malformed ledger" }
+    bypasses: []
+
   - id: self-protected-paths-flagged
     claim: "Any plan path touching RAD's own machinery (harness/, scripts/, .claude/, .agents/state/, .rad/, gates/matrix YAML) is always flagged for architect review, regardless of RAD_HIGH_RISK_PATTERNS."
     authority: "the RAD_SELF_PROTECTED_PATTERN literal in scripts/lib/plan-paths.sh"

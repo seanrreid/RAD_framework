@@ -128,6 +128,29 @@ until a human finishes it — Gate 1 is never bypassed.
 scripts/draft-insights-plan.sh
 ```
 
+**Disposition ledger.** `.agents/insights-ledger.jsonl` (append-only; override
+with `RAD_INSIGHTS_LEDGER`) records what the architect decided per category as
+rows `{category, disposition, date, reason?, ref?, expires?}` with `disposition`
+one of `adopted` | `declined` | `deferred`. The drafter applies two rules:
+
+- **Baseline by date.** A category whose latest ledger row has date D counts only
+  findings with `date` strictly after D (a finding dated exactly D does not
+  count). A category with no ledger row counts every finding. A missing or empty
+  ledger changes nothing.
+- **Declined skip.** A category whose latest row is `declined` and unexpired
+  (`expires` absent or not before today) is skipped; the drafted plan or the
+  `nothing to draft` output states which category was skipped and why. An expired
+  `declined` row stops suppressing it.
+
+A malformed ledger row (invalid JSON, missing `category`/`disposition`/`date`,
+unknown `disposition`) makes the drafter exit 2 naming the line. Rows are appended
+only via `scripts/record-insights-disposition.sh <category>
+<adopted|declined|deferred> [--reason T] [--ref T] [--expires YYYY-MM-DD]`, or at
+approval time with `rad approve <feature> --disposition
+<category>:<disposition>[:<reason>]` (repeatable). `scripts/check-ledger-append-only.sh`
+fails any diff that edits or removes an existing row.
+
+
 - **Exit 0** — report its stdout verbatim: either the branch + plan path, or
   `nothing to draft` (no category crossed the threshold). On a drafted plan, print
   the next steps for the human:
