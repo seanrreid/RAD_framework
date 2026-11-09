@@ -1,7 +1,10 @@
 # Plan: Sensitive Content Flag (plan-time)
 Created: 2026-11-09
 Author: developer
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-11-09T14:19:43.737Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/sensitive-content-flag
 Source-Author: none (no source issue)
 Source-Comments: none
