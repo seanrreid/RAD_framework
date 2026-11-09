@@ -2554,7 +2554,8 @@ const SENSITIVE_PATTERN_TAG = 'sensitive-content-patterns';
  * `{ waivers: [{id, justification}], highRiskPattern?: string, sensitiveContentPattern?: string }`.
  * Blank lines are ignored. Throws (the caller fails closed — nothing unparseable
  * is ever silently dropped) on: a non-blank line without a TAB, a second
- * `high-risk-pattern` tag, or a tag with an empty value. The pattern value is
+ * `high-risk-pattern` or `sensitive-content-patterns` tag, or a tag with an empty
+ * value. The pattern value is
  * kept verbatim (it contains regex metacharacters such as | ( ) ^ $).
  */
 function parseBlockerStdout(stdout) {

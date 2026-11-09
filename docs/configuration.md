@@ -577,8 +577,15 @@ high-risk check: it scans the plan's *prose* for sensitive behavior described in
 innocuously named file. It prints one `sensitive-content:<id>` line per matched id:
 `dynamic-eval`, `permission-change`, `destructive-sql`, `credential-handling`,
 `network-egress`, `privilege-escalation`. Exit 0 means the scan ran (possibly with no
-hits); exit 2 means a missing or unreadable plan or an invalid pattern, with nothing
-on stdout.
+hits); exit 2 means a missing or unreadable plan, a code fence that is never closed, or
+an invalid pattern, with nothing on stdout (a scan error is never reported as "no hits").
+
+The built-in patterns are code-shaped, not bare words: a call such as `eval(`, a command
+with an argument such as `curl -s https://...`, `chmod`/`sudo` followed by an argument,
+a secret moved by a verb (`logs the api key`), or an assignment such as `password =`.
+Plain prose like "evaluation", "regression" or "secret garden" does not match. Across
+this repository's own plans the table flags about 2% (guarded by
+`scripts/test-check-sensitive-content.sh`).
 
 Only the Context, Scope, wave task `What:` text and Files-in-Scope Change cells are
 scanned. Fenced code blocks and the `## Non-Goals`, `### Do Not Touch` and

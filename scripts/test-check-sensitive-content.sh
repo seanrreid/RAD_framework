@@ -59,12 +59,12 @@ check_id() {
   make_plan "$PLAN" "$2"
   run_script -- plan "$PLAN"; expect "id $1" 0 "$PREFIX$1"
 }
-check_id dynamic-eval "calls eval on input"
-check_id permission-change "runs chmod on the output"
+check_id dynamic-eval "calls eval(input) at startup"
+check_id permission-change "runs chmod 600 on the output"
 check_id destructive-sql "will drop table users"
-check_id credential-handling "stores the api key"
-check_id network-egress "uses curl to upload"
-check_id privilege-escalation "invokes sudo"
+check_id credential-handling "logs the api key to disk"
+check_id network-egress "runs curl -s https://x to upload"
+check_id privilege-escalation "invokes sudo rm on it"
 
 # --- fences and ignored sections ---
 printf '# Plan: T\n\n## Context\nplain\n```\nchmod 777 x\n```\n\n## Scope\nplain\n' > "$PLAN"
@@ -94,12 +94,42 @@ run_script -- plan "$PLAN"; expect "task What: flagged" 0 "${PREFIX}privilege-es
 printf '# Plan: T\n\n## Files in Scope\n| File | Lines | Change |\n|---|---|---|\n| sudo.sh | 1-5 | calls chmod |\n' > "$PLAN"
 run_script -- plan "$PLAN"; expect "Change cell flagged, File cell not" 0 "${PREFIX}permission-change"
 
+# --- bare words in prose are not code-shaped: never flagged ---
+make_plan "$PLAN" "evaluation of a regression, the secret garden, egress policy docs, webhook docs, eval fixture"
+run_script -- plan "$PLAN"; expect "bare words in prose not flagged" 0 ""
+make_plan "$PLAN" 'runs eval "$cmd" once'
+run_script -- plan "$PLAN"; expect "eval with a quoted argument flagged" 0 "${PREFIX}dynamic-eval"
+
+# --- unterminated fence fails closed (never reported as "no hits") ---
+printf '# Plan: T\n\n## Context\nplain\n```\nnever closed\n\n## Scope\nruns sudo rm now\n' > "$PLAN"
+run_script -- plan "$PLAN"; expect "unterminated fence exits 2, stdout empty" 2 ""
+grep -q "never closed\|code fence" "$ERR" || fail "unterminated fence: stderr does not name the fence ($(cat "$ERR"))"
+printf '# Plan: T\n\n## Context\nplain\n```\nclosed\n```\n\n## Scope\nruns sudo rm now\n' > "$PLAN"
+run_script -- plan "$PLAN"; expect "closed fence still scans later sections" 0 "${PREFIX}privilege-escalation"
+
+# --- corpus guard: the built-in table must stay quiet on this repo's own plans ---
+CORPUS="$HERE/../.agents/plans"
+if [[ -d "$CORPUS" ]]; then
+  total=0 flagged=0 errored=0
+  for f in "$CORPUS"/*.md; do
+    [[ -f "$f" ]] || continue
+    total=$((total + 1))
+    run_script -- plan "$f"
+    [[ "$RC" -eq 0 ]] || { errored=$((errored + 1)); echo "  corpus error: $f ($(cat "$ERR"))"; continue; }
+    [[ -s "$OUT" ]] && flagged=$((flagged + 1))
+  done
+  [[ "$errored" -eq 0 ]] || fail "corpus: $errored plan(s) exited non-zero"
+  # at most 10% of existing plans may need a waiver (measured at about 2%)
+  [[ $((flagged * 10)) -le "$total" ]] || fail "corpus: $flagged of $total plans flagged (limit 10%)"
+  echo "✓ corpus: $flagged of $total existing plans flagged"
+fi
+
 # --- missing plan / usage ---
 run_script -- plan "$TMP/nope.md"; expect "missing plan" 2 ""
 run_script -- bogus; expect "bad mode" 2 ""
 
 # --- override: unset-equivalents use the default table ---
-make_plan "$PLAN" "uses sudo"
+make_plan "$PLAN" "uses sudo now"
 run_script RAD_SENSITIVE_CONTENT_PATTERNS= -- plan "$PLAN"; expect "empty override = default" 0 "${PREFIX}privilege-escalation"
 run_script "RAD_SENSITIVE_CONTENT_PATTERNS=   " -- plan "$PLAN"; expect "whitespace override = default" 0 "${PREFIX}privilege-escalation"
 

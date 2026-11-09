@@ -16,6 +16,10 @@
 # pattern Print the effective RAD_SENSITIVE_CONTENT_PATTERNS override, or
 #         nothing when the built-in table is in effect.
 #
+# The built-in patterns are deliberately code-shaped (a call, a command with an
+# argument, a secret moved by a verb), not bare words: bare words such as "eval",
+# "egress" or "secret" flagged about a third of this repo's own plans.
+#
 # RAD_SENSITIVE_CONTENT_PATTERNS (extended regex, case-sensitive) replaces the
 # built-in table and is reported under the single id `custom`. Empty or
 # whitespace-only means unset. A leading `-`, a newline, or a regex that does
@@ -23,7 +27,8 @@
 #
 # Exit codes:
 #   0 = scan done (stdout lists hits, possibly none)
-#   2 = usage error, unreadable plan, or invalid pattern — stdout EMPTY.
+#   2 = usage error, unreadable plan, an unterminated code fence, or invalid
+#       pattern — stdout EMPTY.
 #       Fail closed: an error is never reported as "no hits".
 
 set -euo pipefail
@@ -36,6 +41,11 @@ readonly CUSTOM_ID="custom"
 readonly BUILTIN_IDS="dynamic-eval permission-change destructive-sql credential-handling network-egress privilege-escalation"
 readonly WORD_START='(^|[^[:alnum:]_])'
 readonly WORD_END='([^[:alnum:]_]|$)'
+# A quote or shell expansion: the start of a command argument, not of prose.
+readonly QUOTE_OR_EXPANSION="[\"'\$\`]"
+# Verbs that move a secret somewhere it should not go (hard-code, log, commit...).
+readonly SECRET_VERBS='(hard-?cod(e|es|ed|ing)|embed(s|ded|ding)?|print(s|ed|ing)?|log(s|ged|ging)?|echo(es|ed|ing)?|writ(e|es|ing)|stor(e|es|ed|ing)|persist(s|ed|ing)?|commit(s|ted|ting)?)'
+readonly SECRET_NOUNS='(password|passwd|secret|api[_ -]?key|private[_ -]key|credentials?|access[_ -]token)'
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/plan-paths.sh
@@ -50,12 +60,12 @@ die() {
 # Print the extended regex (matched case-insensitively) for a built-in id.
 builtin_regex() {
   case "$1" in
-    dynamic-eval) printf '%s' "${WORD_START}(eval|exec)${WORD_END}|new Function|child_process|shell=True" ;;
-    permission-change) printf '%s' "${WORD_START}(chmod|chown|chgrp|setfacl)${WORD_END}|world-writable|${WORD_START}0?777${WORD_END}" ;;
+    dynamic-eval) printf '%s' "${WORD_START}(eval|exec)\\(|new Function\\(|child_process|shell=True|${WORD_START}eval[[:space:]]+${QUOTE_OR_EXPANSION}" ;;
+    permission-change) printf '%s' "${WORD_START}(chmod|chown|chgrp|setfacl)[[:space:]]|world-writable|${WORD_START}0?777${WORD_END}" ;;
     destructive-sql) printf '%s' 'drop[[:space:]]+(table|database|schema|index)|truncate[[:space:]]+table|delete[[:space:]]+from|alter[[:space:]]+table' ;;
-    credential-handling) printf '%s' 'password|passwd|secret|api[_ -]?key|private[_ -]key|credential|access[_ -]token' ;;
-    network-egress) printf '%s' "${WORD_START}(curl|wget|netcat)${WORD_END}|webhook|outbound|egress|XMLHttpRequest|fetch\\(" ;;
-    privilege-escalation) printf '%s' "${WORD_START}(sudo|doas|setuid|setgid)${WORD_END}|run as root|root privilege|privilege escalation" ;;
+    credential-handling) printf '%s' "${SECRET_VERBS}[^.|]{0,40}${SECRET_NOUNS}|(password|passwd|secret|api[_-]?key)[[:space:]]*=|BEGIN [A-Z ]*PRIVATE KEY" ;;
+    network-egress) printf '%s' "${WORD_START}(curl|wget|netcat)[[:space:]]+(-|https?:|${QUOTE_OR_EXPANSION})|XMLHttpRequest|${WORD_START}fetch\\(" ;;
+    privilege-escalation) printf '%s' "${WORD_START}(sudo|doas)[[:space:]]|${WORD_START}(setuid|setgid)${WORD_END}|run as root|privilege escalation" ;;
     *) die "unknown built-in id: $1" ;;
   esac
 }
@@ -101,6 +111,7 @@ plan_scan_text() {
   awk -v fence_re="$RAD_FENCE_LINE_RE" '
     $0 ~ fence_re { fenced = !fenced; next }
     fenced { next }
+    END { if (fenced) exit 3 }
     /^## / { sec = $0; sub(/^## /, "", sec); sub(/[ \t\r]+$/, "", sec); what = 0; next }
     sec == "Context" || sec == "Scope" { print; next }
     sec == "Files in Scope" && /^\|/ {
@@ -137,7 +148,7 @@ run_plan() {
   local plan_file="$1" override text
   [[ -f "$plan_file" && -r "$plan_file" ]] || die "plan file missing or unreadable: '$plan_file'"
   override=$(effective_pattern)
-  text=$(plan_scan_text "$plan_file") || die "cannot read plan: '$plan_file'"
+  text=$(plan_scan_text "$plan_file") || die "cannot scan plan (unreadable, or a code fence is never closed): '$plan_file'"
   matched_ids "$text" "$override"
 }
 
