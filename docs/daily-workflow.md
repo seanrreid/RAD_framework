@@ -512,3 +512,15 @@ Record a disposition with `scripts/record-insights-disposition.sh <category>
 <category>:<disposition>[:<reason>]` (repeatable; all validated before the
 approval is recorded). `scripts/check-ledger-append-only.sh` runs in
 `verify-all.sh` and CI and fails any diff that edits or removes an existing row.
+
+#### Ledger staleness
+
+`/rad-insights` ends its ledger handling with a read-only `### Ledger Staleness`
+section from `scripts/report-ledger-staleness.sh`. Only each category's latest row
+is evaluated. An `adopted` row is flagged `recurred` when findings dated strictly
+after it number at least `RAD_FINDINGS_THRESHOLD`, and `aged` when it is more than
+`RAD_STALE_DAYS` days old (default 90). A `declined` or `deferred` row is flagged
+`expired` when `expires` is today or earlier, `expiring` when `expires` falls within
+the 14-day warning window, and `aged` when it has no `expires` and is more than
+`RAD_STALE_DAYS` days old. A missing or empty ledger prints an empty-section message;
+a malformed row exits 2 naming `file:line`. The script never writes a file.

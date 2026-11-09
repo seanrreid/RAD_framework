@@ -214,6 +214,25 @@ Reading the output:
 - Any `skipping malformed JSON at <file>:<line>` stderr line MUST be surfaced in
   the report under the section — the skip is never silent.
 
+### Step 3d: Ledger staleness (read-only)
+
+Run `scripts/report-ledger-staleness.sh` from the repo root. It is read-only: it
+writes nothing, and you never pass it `--draft-plans` or any other flag. It
+flags each category whose LATEST ledger row has gone stale: `adopted` rows as
+`recurred` (findings dated strictly after the row's date number at least
+`RAD_FINDINGS_THRESHOLD`) or `aged` (older than `RAD_STALE_DAYS`, default 90);
+`declined`/`deferred` rows as `expired` (`expires` is today or earlier),
+`expiring` (`expires` within the 14-day warning window) or `aged` (no `expires`
+and older than `RAD_STALE_DAYS`).
+
+- **Exit 0** — report its stdout verbatim (it already starts with the
+  `### Ledger Staleness` heading; a missing or empty ledger prints an
+  empty-section message).
+- **Non-zero exit** — report its stderr verbatim in the Ledger Staleness section
+  (exit 2: invalid `RAD_STALE_DAYS` or `RAD_FINDINGS_FILE`, a malformed findings
+  line, or a malformed ledger row naming `file:line`; an unparseable
+  `RAD_FINDINGS_THRESHOLD` falls back to 5, as in Step 3b). Never retry.
+
 ### Step 4: Compute cycle outcomes and trajectory
 
 ```bash
@@ -1071,6 +1090,10 @@ Cycles analyzed: [N]  |  Date range: [earliest date] → [latest date]
 [Only with --draft-plans: the drafter's reported stdout (branch + plan path, or
  "nothing to draft") and, on a drafted plan, the three next steps from Step 3b; on
  a non-zero exit, the stderr reason.]
+
+### Ledger Staleness
+[From Step 3d: the script's stdout verbatim (it carries its own heading), or on a
+ non-zero exit the stderr reason under this heading.]
 
 ### Reviewer Calibration
 [From Step 3c. Omit this section entirely if findingsLog is false.]
