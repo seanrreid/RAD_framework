@@ -1,7 +1,10 @@
 # Plan: Insights Ledger Staleness Report
 Created: 2026-11-09
 Author: developer
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-11-09T13:26:39.455Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/insights-ledger-staleness-report
 Source-Author: none (no source issue)
 Source-Comments: none
