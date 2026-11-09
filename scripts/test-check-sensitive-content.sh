@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # test-check-sensitive-content.sh
-# Hermetic tests for scripts/check-sensitive-content.sh: `plan` and `pattern`
-# modes, fence/section awareness, and RAD_SENSITIVE_CONTENT_PATTERNS validation.
+# Hermetic tests for scripts/check-sensitive-content.sh: `plan`, `diff` and
+# `pattern` modes, fence/section awareness, and RAD_SENSITIVE_CONTENT_PATTERNS validation.
 # Runs under bash 3.2+.
 #
 # Usage: scripts/test-check-sensitive-content.sh   (exit 0 + "ALL PASS")
@@ -147,5 +147,100 @@ run_script "RAD_SENSITIVE_CONTENT_PATTERNS=zzz-no-match" -- plan "$PLAN"; expect
 run_script -- pattern; expect "pattern default" 0 ""
 run_script "RAD_SENSITIVE_CONTENT_PATTERNS=foo|bar" -- pattern; expect "pattern override" 0 "foo|bar"
 run_script RAD_SENSITIVE_CONTENT_PATTERNS=-x -- pattern; expect "pattern invalid" 2 ""
+
+# --- diff mode: hermetic temp repo (the script only sources plan-paths.sh) ---
+REPO="$TMP/repo"
+mkdir -p "$REPO/scripts/lib" "$REPO/tests" "$REPO/.agents"
+cp "$HERE/check-sensitive-content.sh" "$REPO/scripts/"
+cp "$HERE/lib/plan-paths.sh" "$REPO/scripts/lib/"
+DSCRIPT="$REPO/scripts/check-sensitive-content.sh"
+TAB=$'\t'
+repo_git() { git -C "$REPO" -c user.email=t@t -c user.name=t -c commit.gpgsign=false "$@" >/dev/null; }
+commit_all() { repo_git add -A; repo_git commit -q -m "$1"; git -C "$REPO" rev-parse HEAD; }
+# diff_run [env-assignment...] -- <args...>   (runs inside the temp repo)
+diff_run() {
+  local envs=()
+  while [[ "$1" != "--" ]]; do envs+=("$1"); shift; done
+  shift
+  if (cd "$REPO" && env -u RAD_SENSITIVE_CONTENT_PATTERNS ${envs[@]+"${envs[@]}"} bash "$DSCRIPT" "$@") >"$OUT" 2>"$ERR"; then
+    RC=0
+  else
+    RC=$?
+  fi
+}
+
+repo_git init -q -b main
+printf 'safe\nold sudo rm\n' > "$REPO/app.sh"
+printf 'x\n' > "$REPO/tests/t.sh"; printf 'x\n' > "$REPO/doc.md"; printf 'x\n' > "$REPO/.agents/n.txt"
+printf 'bin\000a\n' > "$REPO/blob.bin"; printf 'one\ntwo\nthree\nfour\nfive\nsix\n' > "$REPO/orig.txt"
+BASE=$(commit_all base)
+repo_git checkout -q -b feature
+
+diff_run -- diff "$BASE" "$BASE"; expect "diff: empty diff" 0 ""
+
+printf 'safe\n' > "$REPO/app.sh"
+DEL=$(commit_all deleted)
+diff_run -- diff "$BASE" "$DEL"; expect "diff: only deleted sensitive line not flagged" 0 ""
+
+printf 'safe\nrun sudo rm now\n# chmod 600 key\n' > "$REPO/app.sh"
+ADD=$(commit_all added)
+WANT_ADD="${PREFIX}permission-change${TAB}1${TAB}app.sh:3
+${PREFIX}privilege-escalation${TAB}1${TAB}app.sh:2"
+diff_run -- diff "$BASE" "$ADD"; expect "diff: added line + comment line flagged, table order" 0 "$WANT_ADD"
+diff_run -- diff main feature; expect "diff: branch names as refs" 0 "$WANT_ADD"
+
+printf 'sudo x\n' > "$REPO/tests/t.sh"; printf 'sudo x\n' > "$REPO/doc.md"; printf 'sudo x\n' > "$REPO/.agents/n.txt"
+TESTS=$(commit_all excluded)
+diff_run -- diff "$ADD" "$TESTS"; expect "diff: test, markdown and .agents files not scanned" 0 ""
+
+printf 'bin\000sudo rm\n' > "$REPO/blob.bin"
+BIN=$(commit_all binary)
+diff_run -- diff "$TESTS" "$BIN"; expect "diff: binary file yields no hits" 0 ""
+
+git -C "$REPO" mv orig.txt moved.txt
+MV=$(commit_all rename)
+diff_run -- diff "$BIN" "$MV"; expect "diff: rename with no added lines" 0 ""
+
+diff_run -- diff "$BASE" 0000000000000000000000000000000000000001; expect "diff: unreachable head" 2 ""
+grep -q "head" "$ERR" || fail "unreachable head: stderr does not name head ($(cat "$ERR"))"
+diff_run -- diff 0000000000000000000000000000000000000001 "$ADD"; expect "diff: unreachable base" 2 ""
+grep -q "base" "$ERR" || fail "unreachable base: stderr does not name base ($(cat "$ERR"))"
+
+diff_run -- diff -evil "$ADD"; expect "diff: leading dash base" 2 ""
+diff_run -- diff "$BASE" --output=x; expect "diff: leading dash head" 2 ""
+diff_run -- diff "$BASE
+$ADD" "$ADD"; expect "diff: newline in ref" 2 ""
+diff_run -- diff 'main;touch x' "$ADD"; expect "diff: semicolon in ref" 2 ""
+diff_run -- diff '$(id)' "$ADD"; expect "diff: command substitution in ref" 2 ""
+diff_run -- diff 'a b' "$ADD"; expect "diff: space in ref" 2 ""
+[[ ! -e "$REPO/x" ]] || fail "hostile ref created a file"
+diff_run -- diff "$BASE"; expect "diff: missing head arg" 2 ""
+diff_run -- diff; expect "diff: no args" 2 ""
+
+diff_run RAD_SENSITIVE_CONTENT_PATTERNS=-evil -- diff "$BASE" "$ADD"; expect "diff: override leading dash" 2 ""
+diff_run "RAD_SENSITIVE_CONTENT_PATTERNS=(" -- diff "$BASE" "$ADD"; expect "diff: override uncompilable" 2 ""
+diff_run "RAD_SENSITIVE_CONTENT_PATTERNS=chmod [0-9]+" -- diff "$BASE" "$ADD"
+expect "diff: valid override -> custom" 0 "${PREFIX}custom${TAB}1${TAB}app.sh:3"
+diff_run "RAD_SENSITIVE_CONTENT_PATTERNS=zzz-no-match" -- diff "$BASE" "$ADD"; expect "diff: override no hit" 0 ""
+
+# count and MAX_LOCATIONS cap (5): seven hits -> count 7, first five locations
+printf 'sudo a\nsudo b\nsudo c\nsudo d\nsudo e\nsudo f\nsudo g\n' > "$REPO/many.sh"
+MANY=$(commit_all many)
+WANT_MANY="${PREFIX}privilege-escalation${TAB}7${TAB}many.sh:1,many.sh:2,many.sh:3,many.sh:4,many.sh:5"
+diff_run -- diff "$MV" "$MANY"; expect "diff: count and location cap" 0 "$WANT_MANY"
+FIRST=$(cat "$OUT")
+diff_run -- diff "$MV" "$MANY"
+[[ "$(cat "$OUT")" == "$FIRST" ]] || fail "diff: output order not stable across runs"
+echo "✓ diff: order stable across two runs"
+
+# a line starting with '++' is added content, not a file header
+printf '++ sudo z\n' > "$REPO/plus.sh"
+PLUS=$(commit_all plus)
+diff_run -- diff "$MANY" "$PLUS"; expect "diff: added line starting with ++" 0 "${PREFIX}privilege-escalation${TAB}1${TAB}plus.sh:1"
+
+# plan mode and pattern mode are unchanged
+make_plan "$PLAN" "uses sudo now"
+run_script -- plan "$PLAN"; expect "diff: plan mode unchanged" 0 "${PREFIX}privilege-escalation"
+run_script -- pattern; expect "diff: pattern mode unchanged" 0 ""
 
 echo "ALL PASS"
