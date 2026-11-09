@@ -1,7 +1,7 @@
 # Plan: Sensitive Content Flag (plan-time)
 Created: 2026-11-09
 Author: developer
-Status: approved
+Status: in-progress
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-11-09T14:52:07.792Z
 Recorded-By: sean@torchcodelab.com
