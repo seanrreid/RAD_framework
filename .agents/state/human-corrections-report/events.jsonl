@@ -10,3 +10,4 @@
 {"feature":"human-corrections-report","type":"wave-started","actor":"harness","ts":"2026-11-09T16:16:20.514Z","data":{"wave":3,"attempt":1}}
 {"feature":"human-corrections-report","type":"wave-attempt","actor":"harness","ts":"2026-11-09T16:30:00.756Z","data":{"wave":3,"attempt":1,"outcome":"success","usage":{"input":8,"output":683,"total":205166,"cacheRead":203372,"cacheWrite":1103,"cost":0.3626886},"tasks":[{"title":"Skill source step and report section","status":"complete","commit":"bce4e5a","concern":"—","error":"—"},{"title":"Workflow doc","status":"complete","commit":"9e07b3d","concern":"—","error":"—"}],"verify":{"command":"exec bash scripts/verify-all.sh","status":0,"passed":true},"agent":{"adapter":"command"}}}
 {"feature":"human-corrections-report","type":"wave-complete","actor":"harness","ts":"2026-11-09T16:30:00.758Z","data":{"wave":3}}
+{"feature":"human-corrections-report","type":"pr-opened","actor":"harness","ts":"2026-11-09T16:30:08.593Z"}
