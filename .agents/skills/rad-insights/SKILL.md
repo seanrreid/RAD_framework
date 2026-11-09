@@ -163,24 +163,6 @@ fails any diff that edits or removes an existing row.
   missing) and stop drafting. Never retry, never pass a force flag, never delete
   or rename a branch to make room.
 
-### Step 3d: Ledger staleness (read-only)
-
-Run `scripts/report-ledger-staleness.sh` from the repo root. It is read-only: it
-writes nothing, and you never pass it `--draft-plans` or any other flag. It
-flags each category whose LATEST ledger row has gone stale: `adopted` rows as
-`recurred` (findings dated strictly after the row's date number at least
-`RAD_FINDINGS_THRESHOLD`) or `aged` (older than `RAD_STALE_DAYS`, default 90);
-`declined`/`deferred` rows as `expired` (`expires` is today or earlier),
-`expiring` (`expires` within the 14-day warning window) or `aged` (no `expires`
-and older than `RAD_STALE_DAYS`).
-
-- **Exit 0** — report its stdout verbatim (it already starts with the
-  `### Ledger Staleness` heading; a missing or empty ledger prints an
-  empty-section message).
-- **Non-zero exit** — report its stderr verbatim in the Ledger Staleness section
-  (exit 2: invalid `RAD_STALE_DAYS`, `RAD_FINDINGS_THRESHOLD` or
-  `RAD_FINDINGS_FILE`, or a malformed ledger row naming `file:line`). Never retry.
-
 ### Step 3c: Reviewer calibration
 
 How often each reviewer's findings turn out real. The verdict per finding and the
@@ -225,6 +207,25 @@ Reading the output:
 - **`minLabeled`** — the floor applied (`CALIBRATION_MIN_LABELED`, default 5).
 - Any `skipping malformed JSON at <file>:<line>` stderr line MUST be surfaced in
   the report under the section — the skip is never silent.
+
+### Step 3d: Ledger staleness (read-only)
+
+Run `scripts/report-ledger-staleness.sh` from the repo root. It is read-only: it
+writes nothing, and you never pass it `--draft-plans` or any other flag. It
+flags each category whose LATEST ledger row has gone stale: `adopted` rows as
+`recurred` (findings dated strictly after the row's date number at least
+`RAD_FINDINGS_THRESHOLD`) or `aged` (older than `RAD_STALE_DAYS`, default 90);
+`declined`/`deferred` rows as `expired` (`expires` is today or earlier),
+`expiring` (`expires` within the 14-day warning window) or `aged` (no `expires`
+and older than `RAD_STALE_DAYS`).
+
+- **Exit 0** — report its stdout verbatim (it already starts with the
+  `### Ledger Staleness` heading; a missing or empty ledger prints an
+  empty-section message).
+- **Non-zero exit** — report its stderr verbatim in the Ledger Staleness section
+  (exit 2: invalid `RAD_STALE_DAYS` or `RAD_FINDINGS_FILE`, a malformed findings
+  line, or a malformed ledger row naming `file:line`; an unparseable
+  `RAD_FINDINGS_THRESHOLD` falls back to 5, as in Step 3b). Never retry.
 
 ### Step 4: Compute cycle outcomes and trajectory
 

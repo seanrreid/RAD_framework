@@ -95,7 +95,8 @@ validate_findings_file() {
   esac
   [[ ! -e "$FINDINGS_FILE" || -f "$FINDINGS_FILE" ]] || die 2 "findings log is not a file: $FINDINGS_FILE"
   if [[ -f "$FINDINGS_FILE" ]]; then
-    jq -e . "$FINDINGS_FILE" >/dev/null 2>&1 || die 2 "malformed findings log: $FINDINGS_FILE"
+    # `jq empty` accepts a zero-byte log; `jq -e .` exits 4 on empty input.
+    jq empty "$FINDINGS_FILE" >/dev/null 2>&1 || die 2 "malformed findings log: $FINDINGS_FILE"
   fi
 }
 

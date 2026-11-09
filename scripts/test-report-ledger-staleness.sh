@@ -73,6 +73,8 @@ grep -q "$LEDGER:2" "$ERR" && echo "✓ malformed row names file:line" || fail "
 # --- adopted: recurrence ---------------------------------------------------
 new_case; ledger_row testing adopted 2026-06-01 > "$LEDGER"; run "no findings" --today "$TODAY"
 expect "category with no findings file: not flagged" 0 "No stale ledger entries." -
+new_case; ledger_row testing adopted 2026-06-01 > "$LEDGER"; : > "$FINDINGS"; run "empty findings" --today "$TODAY"
+expect "zero-byte findings file: zero recurrence, exit 0" 0 "No stale ledger entries." -
 new_case; ledger_row testing adopted 2026-06-01 > "$LEDGER"
 for i in 1 2 3 4 5; do finding testing 2026-06-01; done > "$FINDINGS"; run "same-day" --today "$TODAY"
 expect "finding on adoption date not counted" 0 "No stale ledger entries." -
