@@ -148,8 +148,15 @@ Exit 0 means no blockers remain; stdout lists one `<id>\t<justification>` line p
 applied waiver. When the effective high-risk pattern (`RAD_HIGH_RISK_PATTERNS`,
 empty → default) differs from the built-in default, stdout begins with one extra
 `high-risk-pattern\t<pattern>` line — this is the narrowed pattern the approval will
-be recorded under, **not** a waiver. Exit 1 means blockers remain — each is named on stderr: an
-unresolved clarification marker, or an un-waived `high-risk:<path>` finding. Exit 2
+be recorded under, **not** a waiver. Likewise, when `RAD_SENSITIVE_CONTENT_PATTERNS`
+is set, stdout carries a `sensitive-content-patterns\t<pattern>` tag line — also
+**not** a waiver. Prose-described sensitive behavior surfaces as
+`sensitive-content:<id>` findings (ids: `dynamic-eval`, `permission-change`,
+`destructive-sql`, `credential-handling`, `network-egress`, `privilege-escalation`,
+or `custom`); each is waived by a `- sensitive-content:<id>: <justification>` bullet
+in `## Waivers`. Exit 1 means blockers remain — each is named on stderr: an
+unresolved clarification marker, an un-waived `high-risk:<path>` finding, or an
+un-waived `sensitive-content:<id>` finding. Exit 2
 is a usage or unreadable-plan error — stop and surface it. Do not stop on exit 1;
 carry the blockers and waivers into the Step 3 summary.
 
@@ -214,9 +221,11 @@ Waves: [N] | Tasks: [total] | ACs: [count] | Out-of-scope deps: [yes/no]
 
 Blockers & Waivers
   Blockers: [none | one line per blocker from check-approval-blockers.sh stderr]
-  Waivers:  [none | one line per applied waiver: high-risk:<path> — <justification>]
+  Waivers:  [none | one line per applied waiver: high-risk:<path> or sensitive-content:<id> — <justification>]
   [only if stdout had a high-risk-pattern line:]
   Recorded under a non-default high-risk pattern: <pattern>
+  [only if stdout had a sensitive-content-patterns line:]
+  Recorded under a non-default sensitive-content pattern: <pattern>
 
 Capabilities
   [default (fs_read, fs_write, shell) for every wave
@@ -255,6 +264,12 @@ confirmation prompt:
   high-risk pattern: <pattern>` so you see the narrowing. Never list it as a waiver.
   Judge whether the narrowed pattern is acceptable: `rad approve` freezes it into
   the `approved` event as `highRiskPattern`, and CI surfaces it as an advisory.
+- **Sensitive-content findings and pattern** — a `sensitive-content:<id>` blocker
+  must be resolved (reword the plan) or waived with a justified bullet in
+  `## Waivers`; judge each justification yourself. If stdout began with a
+  `sensitive-content-patterns\t<pattern>` line, render it as `Recorded under a
+  non-default sensitive-content pattern: <pattern>` and never list it as a waiver;
+  `rad approve` freezes it into the `approved` event as `sensitiveContentPattern`.
 
 **Capabilities** — render this block from the Step 2 `rad capabilities` call,
 right after Blockers & Waivers:
