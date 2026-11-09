@@ -946,6 +946,20 @@ collect_high_risk_blockers() {
   done <<< "$HIGH_RISK_FINDINGS"
 }
 
+# Sensitive-content findings (check-sensitive-content.sh) block like high-risk
+# paths and join HIGH_RISK_FINDINGS so a matching waiver is never reported stale.
+collect_sensitive_content_blockers() {
+  local findings id rc=0
+  findings=$("$SCRIPT_DIR/check-sensitive-content.sh" plan "$PLAN_FILE") || rc=$?
+  [[ "$rc" -eq 0 ]] || { blocker_scan_failed check-sensitive-content "$rc"; return 0; }
+  while IFS= read -r id; do
+    [[ -z "$id" ]] && continue
+    HIGH_RISK_FINDINGS="${HIGH_RISK_FINDINGS:+$HIGH_RISK_FINDINGS$'\n'}$id"
+    printf '%s\n' "$WAIVER_IDS" | grep -Fxq -e "$id" && continue
+    BLOCKERS+=("$id — waive under ## Waivers or reword the plan")
+  done <<< "$findings"
+}
+
 # Waivers that apply to nothing: a clarify id (markers are resolve-only) or an id
 # matching no current finding (stale). Neither is applied by the blocker check.
 # `test-removal:<path>` ids are waivers for check-scope.sh's test-integrity guard,
@@ -983,6 +997,7 @@ collect_empty_justification_warnings() {
 collect_marker_blockers
 collect_light_blockers
 collect_high_risk_blockers
+collect_sensitive_content_blockers
 collect_waiver_warnings
 collect_empty_justification_warnings
 
