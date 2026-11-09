@@ -32,7 +32,8 @@ CODE=0
 setup_fixture() {
   local p
   mkdir -p "$REPO/scripts/lib" "$REPO/harness" "$REPO/.rad" "$REPO/src/dir" "$REPO/.agents/plans"
-  cp "$HERE/lint-plan.sh" "$HERE/get-default-branch.sh" "$REPO/scripts/"
+  cp "$HERE/lint-plan.sh" "$HERE/get-default-branch.sh" \
+    "$HERE/check-sensitive-content.sh" "$REPO/scripts/"
   cp "$HERE/lib/plan-paths.sh" "$REPO/scripts/lib/"
   for p in "$HERE/../harness/"*; do
     case "$(basename "$p")" in node_modules|test) ;; *) cp -R "$p" "$REPO/harness/" ;; esac

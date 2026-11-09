@@ -39,7 +39,7 @@ setup_grepo() {
   local p
   mkdir -p "$GREPO/scripts/lib" "$GREPO/.agents" "$GREPO/harness" "$GREPO/.rad"
   cp "$HERE/draft-insights-plan.sh" "$HERE/lint-plan.sh" "$HERE/check-approval-blockers.sh" \
-    "$HERE/get-default-branch.sh" "$GREPO/scripts/"
+    "$HERE/get-default-branch.sh" "$HERE/check-sensitive-content.sh" "$GREPO/scripts/"
   cp "$HERE/lib/plan-paths.sh" "$HERE/lib/insights-ledger.sh" "$GREPO/scripts/lib/"
   for p in "$HERE/../harness/"*; do
     case "$(basename "$p")" in node_modules|test) ;; *) cp -R "$p" "$GREPO/harness/" ;; esac
