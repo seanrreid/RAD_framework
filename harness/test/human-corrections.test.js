@@ -143,7 +143,33 @@ test('formatCorrections prints counts, top features and unavailable features', (
   const text = formatCorrections(buildCorrections({ histories, postDeliver }));
   assert.match(text, /By category:\n- reapproval: 1/);
   assert.match(text, /Top features:\n- f: 1\n {2}- 2026-11-02 reapproval — approved event #2/);
-  assert.match(text, /Unavailable: f \(no pr-opened event\)/);
+  assert.match(text, /Unavailable: 1 feature\(s\) whose post-deliver fixes could not be counted\n- no pr-opened event: 1/);
+});
+
+test('unavailable features are summarized by kind, never listed one line per feature', () => {
+  const histories = { f: [approved('2026-11-01T00:00:00Z'), approved('2026-11-02T00:00:00Z')] };
+  const postDeliver = {};
+  for (let i = 0; i < 30; i += 1) {
+    histories[`old-${i}`] = [];
+    postDeliver[`old-${i}`] = { rows: [], unavailable: 'no pr-opened event' };
+  }
+  for (let i = 0; i < 4; i += 1) {
+    histories[`gone-${i}`] = [];
+    postDeliver[`gone-${i}`] = { rows: [], unavailable: `no rad/gone-${i} branch ref (local or origin)` };
+  }
+  const text = formatCorrections(buildCorrections({ histories, postDeliver }));
+  assert.match(text, /Unavailable: 34 feature\(s\) whose post-deliver fixes could not be counted\n- no branch ref: 4\n- no pr-opened event: 30$/);
+  assert.equal(text.split('\n').filter((l) => l.startsWith('Unavailable')).length, 1);
+  assert.doesNotMatch(text, /old-1|gone-1/);
+});
+
+test('the reserved project log is not a feature: no rows, no unavailable entry', () => {
+  const histories = { _architecture: [approved('2026-11-01T00:00:00Z'), approved('2026-11-02T00:00:00Z')] };
+  const postDeliver = { _architecture: { rows: [], unavailable: 'no pr-opened event' } };
+  const result = buildCorrections({ histories, postDeliver });
+  assert.equal(result.rows.length, 0);
+  assert.deepEqual(result.unavailable, []);
+  assert.deepEqual(postDeliverFixRows('_architecture', [], { root: '/nonexistent' }), { rows: [], unavailable: null });
 });
 
 test('the folds do not mutate frozen inputs', () => {
@@ -200,6 +226,21 @@ test('a missing branch ref or missing pr-opened is unavailable, not an error', (
   withFeatureRepo((root) => {
     assert.match(postDeliverFixRows('nobranch', [opened], { root }).unavailable, /no rad\/nobranch branch ref/);
     assert.match(postDeliverFixRows('feat', [], { root }).unavailable, /no pr-opened event/);
-    assert.throws(() => postDeliverFixRows('../evil', [opened], { root }), /invalid feature slug/);
+    assert.throws(() => postDeliverFixRows('../evil', [opened], { root }), /unsafe feature name/);
+  });
+});
+
+test('a git log failure on an existing ref is thrown naming the ref and exit code', () => {
+  withFeatureRepo((root) => {
+    const sh = (file, args, o) =>
+      args[0] === 'log' ? { status: 128, stdout: '', stderr: 'boom' } : spawnSync(file, args, { ...o, encoding: 'utf8' });
+    assert.throws(() => postDeliverFixRows('feat', [opened], { root, sh }), /refs\/heads\/rad\/feat.*exit 128.*boom/);
+  });
+});
+
+test('post-deliver evidence is a 7-character sha and the commit subject', () => {
+  withFeatureRepo((root) => {
+    const { rows } = postDeliverFixRows('feat', [opened], { root });
+    assert.match(rows[0].evidence, /^[0-9a-f]{7} fix: later bug$/);
   });
 });

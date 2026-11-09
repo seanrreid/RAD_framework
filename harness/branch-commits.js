@@ -13,10 +13,14 @@
  */
 import { defaultSh } from './adapters/git-state-store.js';
 
-const SAFE_FEATURE = /^[a-z0-9][a-z0-9-]{0,99}$/;
+// Same base grammar as isSafeFeature in adapters/git-state-store.js, without its
+// reserved `_architecture` literal: that project log is not a feature branch.
+const SAFE_FEATURE = /^[a-z0-9][a-z0-9-]*$/;
 const HARNESS_SUBJECT_PREFIXES = Object.freeze(['deliver(', 'approve:', 'review:']);
 const MS_PER_SECOND = 1000;
+// FIELD is the git format token for the separator character SEPARATOR; keep them paired.
 const FIELD = '%x1f';
+const SEPARATOR = '\x1f';
 const LOG_FORMAT = `--format=%H${FIELD}%ct${FIELD}%cI${FIELD}%s`;
 
 const refsFor = (feature) => [`refs/heads/rad/${feature}`, `refs/remotes/origin/rad/${feature}`];
@@ -35,15 +39,16 @@ const isHarnessSubject = (subject) => HARNESS_SUBJECT_PREFIXES.some((p) => subje
 
 function parseCommits(out) {
   return out.split('\n').filter((l) => l !== '').map((line) => {
-    const [sha, seconds, date, ...subject] = line.split('\x1f');
-    return { sha, seconds: Number(seconds), date, subject: subject.join('\x1f') };
+    const [sha, seconds, date, ...subject] = line.split(SEPARATOR);
+    return { sha, seconds: Number(seconds), date, subject: subject.join(SEPARATOR) };
   });
 }
 
 /**
  * @param {{ root: string, feature: string, since: (string|number|undefined), sh?: Function }} opts
  *   `since` is the `pr-opened` event timestamp
- * @returns {{ available: true, ref: string, commits: {sha: string, date: string, subject: string}[] }
+ * @returns {{ available: true, ref: string,
+ *     commits: {sha: string, seconds: number, date: string, subject: string}[] }
  *   | { available: false, reason: string }}
  * @throws {Error} on an unsafe feature name or a git failure on an existing ref
  */
@@ -61,6 +66,6 @@ export function readBranchCommits({ root, feature, since, sh = defaultSh }) {
   }
   const commits = parseCommits(res.stdout)
     .filter((c) => c.seconds > floor && !isHarnessSubject(c.subject))
-    .map(({ sha, date, subject }) => ({ sha, date, subject }));
+    .map(({ sha, seconds, date, subject }) => ({ sha, seconds, date, subject }));
   return { available: true, ref, commits };
 }

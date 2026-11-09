@@ -109,6 +109,23 @@ test('hostile feature names are rejected before reaching git', () => {
   });
 });
 
+test('a long but well-formed feature name is accepted, matching the harness slug rule', () => {
+  withRepo((root) => {
+    const result = readBranchCommits({ root, feature: 'a'.repeat(120), since: PR_OPENED });
+    assert.equal(result.available, false);
+    assert.match(result.reason, /branch ref/);
+  });
+});
+
+test('returned commits carry their committer time in whole seconds', () => {
+  withRepo((root) => {
+    git(root, ['checkout', '-q', '-b', `rad/${FEATURE}`]);
+    commitAt(root, 'fix: later', '2026-01-02T00:00:00Z');
+    const result = readBranchCommits({ root, feature: FEATURE, since: PR_OPENED });
+    assert.equal(result.commits[0].seconds, Date.parse('2026-01-02T00:00:00Z') / 1000);
+  });
+});
+
 test('a git failure on an existing ref is thrown, not swallowed', () => {
   withRepo((root) => {
     git(root, ['checkout', '-q', '-b', `rad/${FEATURE}`]);

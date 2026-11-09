@@ -3,13 +3,14 @@
  * had to correct the delivery: a re-approval, a resume answer, a confirmed
  * review finding, a commit pushed after the deliver PR opened. Information
  * only: nothing here may be read to block, warn or gate a command, and
- * nothing here writes a file. The only I/O is `git` read commands in
- * `postDeliverFixRows`; every other export is pure.
+ * nothing here writes a file. The only I/O is the `git` read commands made by
+ * `readBranchCommits` (harness/branch-commits.js) for `postDeliverFixRows`;
+ * every other export is pure.
  *
  * A correction row is `{ date: 'YYYY-MM-DD', feature, category, evidence }`.
  */
 import { VERDICTS, findingVerdict } from './findings.js';
-import { defaultSh, isSafeFeature } from './adapters/git-state-store.js';
+import { readBranchCommits } from './branch-commits.js';
 
 export const TOP_FEATURES = 5;
 export const MAX_ROWS_PER_FEATURE = 5;
@@ -27,10 +28,11 @@ const UNKNOWN = 'unknown';
 const DAY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const DAY_CHARS = 10;
 const MS_PER_SECOND = 1000;
-const IGNORED_SUBJECT_PREFIXES = Object.freeze(['deliver(', 'approve:', 'review:']);
-const FIELD = '\x1f';
-const COMMIT_FORMAT = `--format=%ct${FIELD}%h${FIELD}%s`;
+const SHORT_SHA_CHARS = 7;
+const RESERVED_LOG_PREFIX = '_'; // project logs such as `_architecture` belong to no feature
 const EMPTY_STATE = 'No human corrections recorded.';
+const UNAVAILABLE_NO_PR = 'no pr-opened event';
+const UNAVAILABLE_NO_REF = 'no branch ref';
 
 const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 const asArray = (v) => (Array.isArray(v) ? v : []);
@@ -98,48 +100,29 @@ export function reviewFixRows(feature, records) {
     }));
 }
 
-function resolveBranchRef(sh, root, feature) {
-  for (const ref of [`refs/heads/rad/${feature}`, `refs/remotes/origin/rad/${feature}`]) {
-    if (sh('git', ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], { cwd: root }).status === 0) return ref;
-  }
-  return null;
-}
-
-function parseCommits(stdout) {
-  return stdout.split('\n').filter((l) => l !== '').map((line) => {
-    const [ct, sha, ...subject] = line.split(FIELD);
-    return { seconds: Number.parseInt(ct, 10), sha, subject: subject.join(FIELD) };
-  });
-}
+const isReservedLog = (name) => typeof name === 'string' && name.startsWith(RESERVED_LOG_PREFIX);
 
 /**
  * Commits on `rad/<feature>` strictly later than the pr-opened event (second
- * precision), minus harness commits. A missing ref or missing pr-opened is
- * reported as `unavailable`, never thrown.
+ * precision), minus harness commits; the git reading lives in
+ * `readBranchCommits`. A missing ref or missing pr-opened is reported as
+ * `unavailable`, never thrown; a reserved project log (`_architecture`) is not
+ * a feature and yields nothing.
  *
  * @returns {{ rows: Object[], unavailable: ?string }}
+ * @throws {Error} on an unsafe feature name or a git failure on an existing ref
  */
-export function postDeliverFixRows(feature, events, { root, sh = defaultSh } = {}) {
-  if (!isSafeFeature(feature)) throw new Error(`human-corrections: invalid feature slug ${JSON.stringify(feature)}`);
+export function postDeliverFixRows(feature, events, { root, sh } = {}) {
+  if (isReservedLog(feature)) return { rows: [], unavailable: null };
   const opened = asArray(events).filter((e) => isObject(e) && e.type === EVENT.PR_OPENED).at(-1);
-  const openedMs = opened ? Date.parse(opened.ts) : NaN;
-  if (!Number.isFinite(openedMs)) return { rows: [], unavailable: 'no pr-opened event' };
-  const ref = resolveBranchRef(sh, root, feature);
-  if (ref === null) return { rows: [], unavailable: `no rad/${feature} branch ref` };
-  const res = sh('git', ['log', COMMIT_FORMAT, ref], { cwd: root });
-  if (res.status !== 0) {
-    throw new Error(`human-corrections: git log ${ref} failed (exit ${res.status}): ${(res.stderr || '').trim()}`);
-  }
-  const openedSeconds = Math.floor(openedMs / MS_PER_SECOND);
-  const rows = parseCommits(res.stdout)
-    .filter((c) => c.seconds > openedSeconds)
-    .filter((c) => !IGNORED_SUBJECT_PREFIXES.some((p) => c.subject.startsWith(p)))
-    .map((c) => ({
-      date: new Date(c.seconds * MS_PER_SECOND).toISOString().slice(0, DAY_CHARS),
-      feature,
-      category: CATEGORY.POST_DELIVER_FIX,
-      evidence: `${c.sha} ${c.subject}`,
-    }));
+  const result = readBranchCommits({ root, feature, since: opened ? opened.ts : undefined, sh });
+  if (!result.available) return { rows: [], unavailable: result.reason };
+  const rows = result.commits.map((c) => ({
+    date: new Date(c.seconds * MS_PER_SECOND).toISOString().slice(0, DAY_CHARS),
+    feature,
+    category: CATEGORY.POST_DELIVER_FIX,
+    evidence: `${c.sha.slice(0, SHORT_SHA_CHARS)} ${c.subject}`,
+  }));
   return { rows, unavailable: null };
 }
 
@@ -165,7 +148,7 @@ export function buildCorrections({ histories = {}, findings = [], postDeliver = 
   if (since !== undefined && !DAY_PATTERN.test(since)) {
     throw new Error(`human-corrections: --since must be YYYY-MM-DD, got ${JSON.stringify(since)}`);
   }
-  const features = Object.keys(histories).sort();
+  const features = Object.keys(histories).filter((f) => !isReservedLog(f)).sort();
   const unavailable = [];
   const all = [];
   for (const feature of features) {
@@ -186,6 +169,21 @@ export function buildCorrections({ histories = {}, findings = [], postDeliver = 
   return { rows, counts: Object.fromEntries([...countBy(rows, 'category')].sort()), topFeatures, shown, unavailable };
 }
 
+/** Feature-agnostic kind of an unavailable reason, so the report can group them. */
+function unavailableKind(reason) {
+  if (reason.startsWith(UNAVAILABLE_NO_PR)) return UNAVAILABLE_NO_PR;
+  return /branch ref/.test(reason) ? UNAVAILABLE_NO_REF : reason;
+}
+
+/** One summary line plus one line per kind, never one line per feature. */
+function unavailableLines(unavailable) {
+  if (unavailable.length === 0) return [];
+  const kinds = countBy(unavailable.map((u) => ({ kind: unavailableKind(u.reason) })), 'kind');
+  const lines = [`Unavailable: ${unavailable.length} feature(s) whose post-deliver fixes could not be counted`];
+  for (const [kind, n] of [...kinds].sort()) lines.push(`- ${kind}: ${n}`);
+  return lines;
+}
+
 /** Deterministic text for the report section; a single line when nothing was corrected. */
 export function formatCorrections(result) {
   if (!result || result.rows.length === 0) return EMPTY_STATE;
@@ -196,6 +194,6 @@ export function formatCorrections(result) {
     lines.push(`- ${feature}: ${count}`);
     for (const r of result.shown[feature]) lines.push(`  - ${r.date} ${r.category} — ${r.evidence}`);
   }
-  for (const u of result.unavailable) lines.push(`Unavailable: ${u.feature} (${u.reason})`);
+  lines.push(...unavailableLines(result.unavailable));
   return lines.join('\n');
 }

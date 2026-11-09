@@ -1078,7 +1078,6 @@ import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 const { parseEventLog, postDeliverFixRows, buildCorrections, formatCorrections } =
   await import("./harness/human-corrections.js");
-const { findingVerdict } = await import("./harness/findings.js");
 
 const stateDir = process.env.RAD_STATE_DIR || ".agents/state";
 const histories = {};
