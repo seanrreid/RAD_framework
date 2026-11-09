@@ -39,6 +39,7 @@ scripts/check-scope.sh "$PLAN" "$BRANCH" "$BASE"
 scripts/lint-plan.sh "$PLAN"
 scripts/check-approval-blockers.sh "$PLAN"
 scripts/check-tests-present.sh "$PLAN"
+scripts/check-sensitive-content.sh diff "$BASE" HEAD
 ```
 
 - `check-scope.sh`: any out-of-scope file is HIGH priority.
@@ -46,6 +47,10 @@ scripts/check-tests-present.sh "$PLAN"
 - `check-approval-blockers.sh`: exit 1 lists blockers on stderr; note that
   they will block approval. Exit 2 is an error; report it.
 - `check-tests-present.sh`: report any task missing its tests.
+- `check-sensitive-content.sh diff`: advisory only. Report each
+  `sensitive-content:<id>` hit not covered by a waiver; it never changes the
+  review outcome and is never a Blocking issue. Exit 2 is an error: report it
+  and continue; never read it as zero hits.
 
 A non-zero exit from any of these is reported, never a reason to stop the
 review.
@@ -97,6 +102,8 @@ only; write nothing.
 Report, in order:
 - the branch, plan, and base;
 - each deterministic check with its exit code and output;
+- the sensitive-content diff scan: uncovered hits as an advisory finding (never
+  READY / NEEDS FIXES, never a Blocking issue), or the exit 2 error reported;
 - each reviewer's findings (quality, accessibility, and ui-integrity when it ran);
 - a "Behavioral Exercise" section (recipe present or skipped, mode, findings);
 - a summary listing every blocking item (out-of-scope files, approval
