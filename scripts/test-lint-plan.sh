@@ -311,7 +311,7 @@ run_lint_in_repo() {
 copy_scripts() {
   local repo="$1" p
   mkdir -p "$repo/scripts/lib" "$repo/harness" "$repo/.rad"
-  cp "$HERE/lint-plan.sh" "$HERE/get-default-branch.sh" "$repo/scripts/"
+  cp "$HERE/lint-plan.sh" "$HERE/get-default-branch.sh" "$HERE/check-sensitive-content.sh" "$repo/scripts/"
   cp "$HERE/lib/plan-paths.sh" "$repo/scripts/lib/"
   for p in "$HERE/../harness/"*; do
     case "$(basename "$p")" in node_modules|test) ;; *) cp -R "$p" "$repo/harness/" ;; esac
@@ -696,6 +696,48 @@ t_blocker_high_risk() {
       && fail "BLK-HR(b): a valid waiver drew a waiver warning: $LINT_OUT" || true
   ) || exit 1
   echo "✓ BLK-HR(b): waived high-risk path ⇒ no blocker section; warning still shows the id"
+}
+
+t_blocker_sensitive_content() {
+  local sc_id="sensitive-content:permission-change"
+  local row="| $REAL_PATH | 1-2 | chmod the release files |"
+  # (a) Un-waived finding → blocker names the id; exit stays 0.
+  local plan="$TMP/blk-sc.md"
+  write_plan "$plan" "$row" "$REAL_PATH:1-2"
+  ( unset RAD_HIGH_RISK_PATTERNS RAD_SENSITIVE_CONTENT_PATTERNS; run_lint "$plan"
+    printf '%s\n' "$LINT_OUT" | grep -qF "  ⛔ $sc_id — waive under ## Waivers or reword the plan" \
+      || fail "BLK-SC(a): un-waived sensitive-content finding not listed as a blocker: $LINT_OUT"
+    [[ "$LINT_CODE" -eq 0 ]] || fail "BLK-SC(a): exited $LINT_CODE (expected 0)"
+  ) || exit 1
+  echo "✓ BLK-SC(a): un-waived sensitive-content finding ⇒ blocker names $sc_id"
+
+  # (b) Waived → no blocker and the waiver is not reported stale.
+  local waived="$TMP/blk-sc-waived.md"
+  write_plan "$waived" "$row" "$REAL_PATH:1-2" 1 false \
+    "$(printf '\n## Waivers\n- %s: modes are fixed and reviewed' "$sc_id")"
+  ( unset RAD_HIGH_RISK_PATTERNS RAD_SENSITIVE_CONTENT_PATTERNS; run_lint "$waived"; assert_no_blockers "BLK-SC(b)"
+    printf '%s\n' "$LINT_OUT" | grep -q "stale waiver" \
+      && fail "BLK-SC(b): a waiver for a current finding was reported stale: $LINT_OUT" || true
+  ) || exit 1
+  echo "✓ BLK-SC(b): waived finding ⇒ no blocker, waiver not stale"
+
+  # (c) Waiver for an id that is not a finding is still stale.
+  local stale="$TMP/blk-sc-stale.md"
+  write_plan "$stale" "| $REAL_PATH | 1-2 | x |" "$REAL_PATH:1-2" 1 false \
+    "$(printf '\n## Waivers\n- %s: nothing to waive' "$sc_id")"
+  ( unset RAD_HIGH_RISK_PATTERNS RAD_SENSITIVE_CONTENT_PATTERNS; run_lint "$stale"
+    printf '%s\n' "$LINT_OUT" | grep -qF "stale waiver: '$sc_id'" \
+      || fail "BLK-SC(c): waiver for a non-finding not reported stale: $LINT_OUT"
+  ) || exit 1
+  echo "✓ BLK-SC(c): waiver for a non-finding id is still stale"
+
+  # (d) Invalid pattern → scan failure is an ERROR (fail closed), not "no blockers".
+  ( unset RAD_HIGH_RISK_PATTERNS; export RAD_SENSITIVE_CONTENT_PATTERNS="-bad"; run_lint "$plan"
+    [[ "$LINT_CODE" -ne 0 ]] || fail "BLK-SC(d): invalid pattern exited 0: $LINT_OUT"
+    printf '%s\n' "$LINT_OUT" | grep -q "approval-blocker scan failed: check-sensitive-content" \
+      || fail "BLK-SC(d): scan failure not reported: $LINT_OUT"
+  ) || exit 1
+  echo "✓ BLK-SC(d): invalid pattern ⇒ scan-failed error, non-zero exit"
 }
 
 t_waiver_warnings() {
@@ -1529,6 +1571,7 @@ setup_badconfig_fixture
 t_freshness_config_error
 t_blocker_markers
 t_blocker_high_risk
+t_blocker_sensitive_content
 t_waiver_warnings
 t_test_removal_waiver
 t_fenced_waiver_ignored

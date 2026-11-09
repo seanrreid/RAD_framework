@@ -2546,32 +2546,39 @@ const WAIVER_FIELD_SEPARATOR = '\t';
  */
 const HIGH_RISK_PATTERN_TAG = 'high-risk-pattern';
 
+/** Same, for the non-default RAD_SENSITIVE_CONTENT_PATTERNS provenance line. */
+const SENSITIVE_PATTERN_TAG = 'sensitive-content-patterns';
+
 /**
  * Parse check-approval-blockers.sh exit-0 stdout into
- * `{ waivers: [{id, justification}], highRiskPattern?: string }`.
+ * `{ waivers: [{id, justification}], highRiskPattern?: string, sensitiveContentPattern?: string }`.
  * Blank lines are ignored. Throws (the caller fails closed — nothing unparseable
  * is ever silently dropped) on: a non-blank line without a TAB, a second
- * `high-risk-pattern` tag, or a tag with an empty value. The pattern value is
+ * `high-risk-pattern` or `sensitive-content-patterns` tag, or a tag with an empty
+ * value. The pattern value is
  * kept verbatim (it contains regex metacharacters such as | ( ) ^ $).
  */
 function parseBlockerStdout(stdout) {
   const waivers = [];
-  let highRiskPattern;
+  const tags = {};
   for (const line of String(stdout ?? '').split('\n')) {
     if (line.trim() === '') continue;
     const sep = line.indexOf(WAIVER_FIELD_SEPARATOR);
     if (sep === -1) throw new Error(`malformed waiver line (no TAB): ${JSON.stringify(line)}`);
     const first = line.slice(0, sep);
     const rest = line.slice(sep + 1);
-    if (first !== HIGH_RISK_PATTERN_TAG) {
+    if (first !== HIGH_RISK_PATTERN_TAG && first !== SENSITIVE_PATTERN_TAG) {
       waivers.push({ id: first, justification: rest });
       continue;
     }
-    if (highRiskPattern !== undefined) throw new Error(`duplicate ${HIGH_RISK_PATTERN_TAG} line`);
-    if (rest === '') throw new Error(`empty ${HIGH_RISK_PATTERN_TAG} value`);
-    highRiskPattern = rest;
+    if (tags[first] !== undefined) throw new Error(`duplicate ${first} line`);
+    if (rest === '') throw new Error(`empty ${first} value`);
+    tags[first] = rest;
   }
-  return highRiskPattern === undefined ? { waivers } : { waivers, highRiskPattern };
+  const out = { waivers };
+  if (tags[HIGH_RISK_PATTERN_TAG] !== undefined) out.highRiskPattern = tags[HIGH_RISK_PATTERN_TAG];
+  if (tags[SENSITIVE_PATTERN_TAG] !== undefined) out.sensitiveContentPattern = tags[SENSITIVE_PATTERN_TAG];
+  return out;
 }
 
 /**
@@ -2724,6 +2731,7 @@ function recordApprovalAndStatus(store, a) {
       fingerprint: a.planHash,
       waivers: a.blockers.waivers,
       highRiskPattern: a.blockers.highRiskPattern,
+      sensitiveContentPattern: a.blockers.sensitiveContentPattern,
     });
   } catch (err) {
     process.stderr.write(`rad approve: cannot record approval — ${err.message}\n`);

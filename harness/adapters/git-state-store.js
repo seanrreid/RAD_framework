@@ -152,6 +152,19 @@ function assertValidHighRiskPattern(highRiskPattern) {
   }
 }
 
+/**
+ * The optional sensitive-content pattern must be absent or a non-empty string —
+ * same provenance contract as the high-risk pattern: never silently dropped.
+ */
+function assertValidSensitiveContentPattern(sensitiveContentPattern) {
+  if (sensitiveContentPattern === undefined) return;
+  if (!isNonEmptyString(sensitiveContentPattern)) {
+    throw new Error(
+      `recordApproval: sensitiveContentPattern must be a non-empty string, got ${JSON.stringify(sensitiveContentPattern)}`,
+    );
+  }
+}
+
 /** Path to a feature's event log, relative to repoRoot. */
 function eventsPath(repoRoot, feature) {
   return join(repoRoot, '.agents', 'state', feature, 'events.jsonl');
@@ -414,7 +427,7 @@ function requireRole(ctx, label, requiredRole, actor) {
  * so a bare approval carries no undefined-valued keys (the public shape is the
  * key's ABSENCE). `waivers` is frozen only when non-empty.
  */
-function buildApprovalEvent({ feature, actor, requiredRole, recordedBy, ts, evidence, fingerprint, waivers, highRiskPattern }) {
+function buildApprovalEvent({ feature, actor, requiredRole, recordedBy, ts, evidence, fingerprint, waivers, highRiskPattern, sensitiveContentPattern }) {
   /** @type {import('../events.js').Event} */
   const event = {
     feature,
@@ -429,6 +442,7 @@ function buildApprovalEvent({ feature, actor, requiredRole, recordedBy, ts, evid
   if (fingerprint !== undefined) data.fingerprint = fingerprint;
   if (waivers !== undefined && waivers.length > 0) data.waivers = waivers;
   if (highRiskPattern !== undefined) data.highRiskPattern = highRiskPattern;
+  if (sensitiveContentPattern !== undefined) data.sensitiveContentPattern = sensitiveContentPattern;
   if (Object.keys(data).length > 0) event.data = data;
   return event;
 }
@@ -463,18 +477,23 @@ function buildApprovalEvent({ feature, actor, requiredRole, recordedBy, ts, evid
  * omitted yields an event identical to one recorded without the key. A present
  * value that is not a non-empty string throws before anything is written.
  *
- * @param {{ feature: string, actor: string, requiredRole?: string, recordedBy?: string, ts?: string, evidence?: Object, fingerprint?: string, waivers?: Array<{id: string, justification: string}>, highRiskPattern?: string }} a
+ * The optional `sensitiveContentPattern` (the non-default
+ * RAD_SENSITIVE_CONTENT_PATTERNS, from the `sensitive-content-patterns` tag
+ * line) is frozen into `data.sensitiveContentPattern` under the same rules.
+ *
+ * @param {{ feature: string, actor: string, requiredRole?: string, recordedBy?: string, ts?: string, evidence?: Object, fingerprint?: string, waivers?: Array<{id: string, justification: string}>, highRiskPattern?: string, sensitiveContentPattern?: string }} a
  */
-function recordApprovalFor(ctx, { feature, actor, requiredRole = 'architect', recordedBy, ts, evidence, fingerprint, waivers, highRiskPattern } = {}) {
+function recordApprovalFor(ctx, { feature, actor, requiredRole = 'architect', recordedBy, ts, evidence, fingerprint, waivers, highRiskPattern, sensitiveContentPattern } = {}) {
   if (!feature) throw new Error('recordApproval: feature is required');
   if (!actor) throw new Error('recordApproval: actor is required');
   assertValidWaivers(waivers);
   assertValidHighRiskPattern(highRiskPattern);
+  assertValidSensitiveContentPattern(sensitiveContentPattern);
 
   requireRole(ctx, 'recordApproval', requiredRole, actor);
   appendEvent(
     ctx,
-    buildApprovalEvent({ feature, actor, requiredRole, recordedBy, ts, evidence, fingerprint, waivers, highRiskPattern }),
+    buildApprovalEvent({ feature, actor, requiredRole, recordedBy, ts, evidence, fingerprint, waivers, highRiskPattern, sensitiveContentPattern }),
   );
 }
 

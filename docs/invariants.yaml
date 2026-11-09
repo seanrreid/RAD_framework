@@ -59,12 +59,13 @@ invariants:
         note: "the run refuses to act on any approved event after its deliver-started (checked before every wave and after the last); the event stays as evidence (#158)"
 
   - id: approval-blockers-refuse
-    claim: "rad approve refuses to record approval while clarification markers remain or a high-risk path finding is neither resolved nor waived."
+    claim: "rad approve refuses to record approval while clarification markers remain or a high-risk path or sensitive-content finding is neither resolved nor waived."
     authority: "the plan doc (NEEDS CLARIFICATION markers, Files in Scope, ## Waivers) as checked by scripts/check-approval-blockers.sh"
     evals: [harness/evals/approval.eval.js]
     enforced_by:
       - { file: scripts/check-approval-blockers.sh, symbol: "EXIT_BLOCKED" }
       - { file: harness/cli.js, symbol: "checkApprovalBlockers" }
+      - { file: scripts/check-sensitive-content.sh, symbol: "effective_pattern", note: "resolves the effective pattern; empty falls back to the built-in table, invalid input exits 2" }
       - { file: scripts/lib/plan-paths.sh, symbol: "plan_high_risk_pattern", note: "resolves the effective pattern env -> settings.high_risk_patterns -> default; an unreadable config fails closed (exit 2)" }
     bypasses:
       - id: high-risk-patterns-override
@@ -75,6 +76,10 @@ invariants:
         surface: "## Waivers section in the plan doc"
         guarded: "yes"
         note: "waivers are frozen into approved.data.waivers; NEEDS CLARIFICATION markers cannot be waived"
+      - id: sensitive-content-patterns-override
+        surface: "RAD_SENSITIVE_CONTENT_PATTERNS override"
+        guarded: "yes"
+        note: "empty or whitespace-only falls back to the built-in table (can replace, never disable); a leading dash, newline or non-compiling regex exits 2; a non-default pattern is printed as a sensitive-content-patterns tag line and frozen into approved.data.sensitiveContentPattern"
 
   - id: scope-enforced
     claim: "A wave that touches files outside the plan's declared scope is classified fail-scope and resolved through the matrix, never silently accepted."

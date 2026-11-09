@@ -15,6 +15,9 @@
 #     bare `Verify: none` with no reason). NON-WAIVABLE like light-tier; fix it
 #     with a real command or `Verify: none (<reason>)`. Light plans and plans with
 #     no waves are exempt.
+#   - a sensitive-content finding (`sensitive-content:<id>`,
+#     check-sensitive-content.sh): waivable by a `- sensitive-content:<id>:
+#     <justification>` bullet under `## Waivers`, exactly like a high-risk path.
 # For a standard plan (no `Tier: light`) the self-protected advisory is
 # deliberately NOT a blocker.
 #
@@ -32,6 +35,9 @@
 #         settings.high_risk_patterns in .rad/config.yml) differs from the built-in default
 #         (plan_high_risk_pattern_is_default). Under the default this line is
 #         absent, so stdout is byte-identical to the pre-tag contract.
+#       - `sensitive-content-patterns\t<pattern>` next, ONLY when
+#         RAD_SENSITIVE_CONTENT_PATTERNS overrides the built-in table (dash, not
+#         colon, so it can never parse as a waiver id).
 #       - each applied waiver as `<id>\t<justification>` (ids start `high-risk:`
 #         with a colon, so they can never collide with the dashed tag).
 #   1 = blockers found; each named on stderr, stdout EMPTY
@@ -47,6 +53,9 @@ readonly SELF="check-approval-blockers"
 # Exit-0 stdout tag naming a non-default effective high-risk pattern. Dash, not
 # colon: waiver ids are `high-risk:<path>`, so the tag never parses as one.
 readonly HIGH_RISK_PATTERN_TAG="high-risk-pattern"
+# Same contract for the sensitive-content override (ids are `sensitive-content:<id>`).
+readonly SENSITIVE_PATTERN_TAG="sensitive-content-patterns"
+readonly SENSITIVE_FINDING_PREFIX="sensitive-content:"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/plan-paths.sh
@@ -116,7 +125,11 @@ report_blockers() {
   if [[ -n "$findings" ]]; then
     while IFS= read -r id; do
       printf '%s\n' "$applied" | cut -f1 | grep -Fxq -- "$id" && continue
-      echo "✗ un-waived high-risk finding: $id (add a \"- $id: <justification>\" line under ## Waivers, or remove the path)" >&2
+      if [[ "$id" == "$SENSITIVE_FINDING_PREFIX"* ]]; then
+        echo "✗ un-waived sensitive-content finding: $id (add a \"- $id: <justification>\" line under ## Waivers, or reword the plan)" >&2
+      else
+        echo "✗ un-waived high-risk finding: $id (add a \"- $id: <justification>\" line under ## Waivers, or remove the path)" >&2
+      fi
       count=$((count + 1))
     done <<< "$findings"
   fi
@@ -146,11 +159,32 @@ report_pattern_tag() {
   printf '%s\t%s\n' "$HIGH_RISK_PATTERN_TAG" "$pattern"
 }
 
+# report_sensitive_tag
+# Print the `sensitive-content-patterns` tag line when an override is in effect.
+# An invalid override already died in the scan; a failed lookup dies here too.
+report_sensitive_tag() {
+  local pattern
+  pattern=$("$SCRIPT_DIR/check-sensitive-content.sh" pattern) || die "could not resolve the sensitive-content pattern"
+  [[ -z "$pattern" ]] && return 0
+  printf '%s\t%s\n' "$SENSITIVE_PATTERN_TAG" "$pattern"
+}
+
+# all_findings <plan-file>
+# High-risk path findings followed by sensitive-content findings, one per line.
+all_findings() {
+  local plan_file="$1" risk sensitive
+  risk=$(plan_high_risk_findings "$plan_file") || return 1
+  sensitive=$("$SCRIPT_DIR/check-sensitive-content.sh" plan "$plan_file") || return 1
+  [[ -n "$risk" ]] && printf '%s\n' "$risk"
+  [[ -n "$sensitive" ]] && printf '%s\n' "$sensitive"
+  return 0
+}
+
 main() {
   local plan_file="${1:-}" markers findings waivers applied light verify blockers
   validate_plan_arg "$#" "$plan_file"
   markers=$(plan_clarification_markers "$plan_file") || die "could not read clarification markers"
-  findings=$(plan_high_risk_findings "$plan_file") || die "could not compute high-risk findings"
+  findings=$(all_findings "$plan_file") || die "could not compute high-risk or sensitive-content findings"
   waivers=$(plan_waivers "$plan_file") || die "could not read ## Waivers"
   applied=$(applied_waivers "$findings" "$waivers") || die "could not match waivers to findings"
   light=$(plan_light_violations "$plan_file") || die "could not compute light-tier violations"
@@ -161,6 +195,7 @@ main() {
     exit "$EXIT_BLOCKED"
   fi
   report_pattern_tag
+  report_sensitive_tag
   [[ -n "$applied" ]] && printf '%s\n' "$applied"
   exit "$EXIT_OK"
 }

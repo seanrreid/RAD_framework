@@ -570,6 +570,42 @@ pattern, from either source, freezes it into the `approved` event as
 The lint warning stays advisory, but an un-waived high-risk finding now blocks
 `rad approve` (see Approval Rules).
 
+### Plan Lint — Sensitive Content
+
+`scripts/check-sensitive-content.sh plan <plan-file>` complements the path-based
+high-risk check: it scans the plan's *prose* for sensitive behavior described in an
+innocuously named file. It prints one `sensitive-content:<id>` line per matched id:
+`dynamic-eval`, `permission-change`, `destructive-sql`, `credential-handling`,
+`network-egress`, `privilege-escalation`. Exit 0 means the scan ran (possibly with no
+hits); exit 2 means a missing or unreadable plan, a code fence that is never closed, or
+an invalid pattern, with nothing on stdout (a scan error is never reported as "no hits").
+
+The built-in patterns are code-shaped, not bare words: a call such as `eval(`, a command
+with an argument such as `curl -s https://...`, `chmod`/`sudo` followed by an argument,
+a secret moved by a verb (`logs the api key`), or an assignment such as `password =`.
+Plain prose like "evaluation", "regression" or "secret garden" does not match. Across
+this repository's own plans the table flags about 2% (guarded by
+`scripts/test-check-sensitive-content.sh`).
+
+Only the Context, Scope, wave task `What:` text and Files-in-Scope Change cells are
+scanned. Fenced code blocks and the `## Non-Goals`, `### Do Not Touch` and
+`## Waivers` sections are ignored, so keep example terms fenced or in Non-Goals.
+
+An un-waived finding is an approval blocker (`scripts/check-approval-blockers.sh`).
+Waive one with a `## Waivers` bullet of the form
+`- sensitive-content:<id>: <justification>`; the justification must be non-empty and
+the id must currently be a finding. Applied waivers are frozen into
+`approved.data.waivers`. Clarification markers remain unwaivable.
+
+```
+RAD_SENSITIVE_CONTENT_PATTERNS: <extended regex>   # replaces the table; id `custom`
+```
+
+A non-default pattern is printed by the blocker check as a
+`sensitive-content-patterns\t<pattern>` tag line (never a waiver) and recorded in
+the `approved` event as `approved.data.sensitiveContentPattern`. It can replace the
+table but never disable the scan: an empty value falls back to the built-in table.
+
 ### Self-Protected Paths
 
 NOT optional and NOT configurable — unlike the neighboring knobs, this set is
@@ -703,4 +739,5 @@ Further `RAD_*` variables, each read where the table says. All are optional.
 | `RAD_ARCHITECT_OVERRIDE` | unset | Architect identity (or identities) the approval-authenticity check uses instead of `roles.architect`. With neither set, the check fails closed. | `scripts/check-approval-integrity.sh` |
 | `RAD_PLATFORM` | unset (detected) | Overrides `detect-platform.sh`. Anything other than `github` makes `fetch-provenance.sh` print `unsupported` and exit 3. | `scripts/fetch-provenance.sh`, `scripts/fetch-epic.sh` |
 | `RAD_INVARIANTS_ROOT` | repo root | Directory the invariant registry's anchor paths resolve against. A value with control characters exits 2. | `scripts/lint-invariants.sh` |
+| `RAD_SENSITIVE_CONTENT_PATTERNS` | unset (built-in table) | Extended regex that replaces the built-in sensitive-content table, reported under the single id `custom`. Empty or whitespace-only counts as unset; a leading `-`, a newline, or a regex that does not compile exits 2. See [Plan Lint — Sensitive Content](#plan-lint--sensitive-content). | `scripts/check-sensitive-content.sh` |
 | `RAD_HOOK_*` | set per hook run | The `RAD_HOOK_*` variables a wave-lifecycle hook receives; see [`scripts/hooks/README.md`](../scripts/hooks/README.md). | `scripts/hooks/README.md` |
