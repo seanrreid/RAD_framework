@@ -91,6 +91,20 @@ stdout with its justification. This is advisory here too, but note in the report
 that remaining blockers **will block `/rad-approve`**: `rad approve` refuses until
 each marker is answered and each high-risk finding is resolved or waived.
 
+Also run the sensitive-content diff scan over the branch diff and include its result:
+
+```bash
+scripts/check-sensitive-content.sh diff "$BASE" HEAD
+```
+
+Each stdout line is `sensitive-content:<id>`, the hit count, then up to a cap of
+`path:line` locations. Report every id not covered by a `sensitive-content:<id>`
+waiver (frozen approved event first, plan `## Waivers` otherwise) as an
+**advisory** finding under Conventions. It never changes READY or NEEDS FIXES and
+is never counted under Blocking issues. Exit 2 is an error: report its stderr in
+the Conventions section and **continue the review** — never a stop, never read as
+zero hits.
+
 ### Step 3: Plan fidelity check
 
 For each task in the plan, verify the implementation matches the description:
@@ -307,6 +321,9 @@ Files reviewed: [N]
 
 **Priority: LOW**
 - [note]
+
+**Sensitive-content diff scan (advisory — never changes READY / NEEDS FIXES, never a Blocking issue):**
+- [`sensitive-content:<id>` — [N] hits — [locations] | ✓ no uncovered hits | ✗ scan failed (exit 2): [stderr] — review continued]
 
 ### Test Coverage
 - [✓ | ✗] [test description] — [file]
