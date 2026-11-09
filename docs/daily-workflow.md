@@ -413,6 +413,11 @@ patterns across cycles:
   fix within `RAD_REWORK_WINDOW_DAYS`, default 14) and Gate-2 load (deliver-PR
   size and time from PR opened to merged), as trends — information only, with
   no thresholds
+- Human corrections: four categories of human intervention (`reapproval`,
+  `resume-answer`, `review-fix`, `post-deliver-fix`) with per-category counts and
+  the top features. `--since YYYY-MM-DD` keeps rows dated on or after that day. A
+  feature with no `pr-opened` event or no `rad/<feature>` branch is listed as
+  unavailable, never counted as zero. It only reads — it never writes or gates
 
 Optionally filter to a recent window:
 
