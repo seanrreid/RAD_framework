@@ -606,6 +606,31 @@ A non-default pattern is printed by the blocker check as a
 the `approved` event as `approved.data.sensitiveContentPattern`. It can replace the
 table but never disable the scan: an empty value falls back to the built-in table.
 
+#### Diff mode
+
+`scripts/check-sensitive-content.sh diff <base> <head>` applies the same table (and the
+same `RAD_SENSITIVE_CONTENT_PATTERNS` override, reported under `custom`) to the lines
+a branch *added*, using the three-dot diff `base...head`. Deleted and context lines are
+never flagged. Exclusions: test files (the shared `RAD_TEST_PATH_RE`), markdown (`.md`)
+and anything under `.agents/`. An added comment line is still scanned. Binary files,
+rename-only changes and an empty diff yield no hits.
+
+Output is one line per matched id, in built-in table order: `sensitive-content:<id>`, a
+tab, the hit count, a tab, then up to 5 comma-separated `path:line` locations in diff
+order. The exit code is 0 whether or not there are hits. A usage error, an unsafe ref
+(leading dash, newline, or characters outside a safe set), a base or head that does not
+resolve to a commit, or an invalid override exits 2 with empty stdout and a message on
+stderr; an error is never reported as no hits, and the script writes no file.
+
+Use in review: `harness/digest.js` takes the scan as a `sensitiveDiff` input. A hit with
+no waiver becomes a HIGH `sensitive-content` item; a hit covered by a
+`sensitive-content:<id>` waiver (frozen approved event first, plan `## Waivers` section
+otherwise) becomes `sensitive-content-waived`. A failed or impossible scan shows as
+unavailable with its reason, never as zero hits, and never fails the digest.
+`/rad-review` runs the scan and reports uncovered hits as an advisory finding: it does
+not change READY or NEEDS FIXES, is not a Blocking issue, and an exit 2 is reported
+rather than fatal.
+
 ### Self-Protected Paths
 
 NOT optional and NOT configurable — unlike the neighboring knobs, this set is
