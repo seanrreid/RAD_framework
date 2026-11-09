@@ -29,7 +29,7 @@ run_check() {
   local envs=()
   while [[ "$1" != "--" ]]; do envs+=("$1"); shift; done
   shift
-  if env -u RAD_HIGH_RISK_PATTERNS ${envs[@]+"${envs[@]}"} bash "$SCRIPT" "$@" >"$OUT" 2>"$ERR"; then
+  if env -u RAD_HIGH_RISK_PATTERNS -u RAD_SENSITIVE_CONTENT_PATTERNS ${envs[@]+"${envs[@]}"} bash "$SCRIPT" "$@" >"$OUT" 2>"$ERR"; then
     RC=0
   else
     RC=$?
@@ -343,5 +343,71 @@ printf '%s\t%s\n' "high-risk-pattern" "$META_PATTERN" > "$TMP/expected.txt"
 cmp -s "$OUT" "$TMP/expected.txt" \
   || fail "tag metachar pattern: pattern must survive verbatim, got: [$(cat "$OUT")]"
 echo "✓ pattern with | ( ) ^ \$ ⇒ tag line carries it verbatim"
+
+# ── sensitive-content findings ────────────────────────────────────────────────
+SC_ID="sensitive-content:permission-change"
+# write_sc_plan <file> <extra-body>: Scope prose naming chmod, optional extras
+write_sc_plan() {
+  cat > "$1" <<PLAN
+# Plan: fixture
+Status: pending-review
+
+## Scope
+Run chmod on the release files.
+
+## Files in Scope
+| File | Lines | Change |
+|------|-------|--------|
+| \`docs/readme.md\` | 1-10 | Modify |
+
+## Wave Plan
+### Wave 1
+$WAVE_VERIFY_LINE
+
+$2
+PLAN
+}
+
+write_sc_plan "$TMP/sc.md" ""
+run_check -- "$TMP/sc.md"
+expect "sc unwaived" 1; expect_empty_stdout "sc unwaived"
+grep -Fq "un-waived sensitive-content finding: $SC_ID" "$ERR" \
+  || fail "sc unwaived: stderr must name $SC_ID, got: [$(cat "$ERR")]"
+echo "✓ sensitive-content finding without waiver ⇒ exit 1, id named"
+
+write_sc_plan "$TMP/sc-waived.md" $'## Waivers\n- '"$SC_ID"': reviewed: modes are fixed'
+run_check -- "$TMP/sc-waived.md"
+expect "sc waived" 0
+[[ "$(cat "$OUT")" == "$SC_ID${TAB}reviewed: modes are fixed" ]] \
+  || fail "sc waived: stdout mismatch, got: [$(cat "$OUT")]"
+echo "✓ sensitive-content waiver ⇒ exit 0, '<id>\\t<justification>' on stdout"
+
+write_sc_plan "$TMP/sc-stale.md" $'## Waivers\n- sensitive-content:dynamic-eval: not a finding'
+run_check -- "$TMP/sc-stale.md"
+expect "sc stale waiver" 1; expect_empty_stdout "sc stale waiver"
+echo "✓ waiver for a non-finding id is not applied (blocker stands)"
+
+write_sc_plan "$TMP/sc-empty.md" $'## Waivers\n- '"$SC_ID"':'
+run_check -- "$TMP/sc-empty.md"
+expect "sc empty justification" 1
+echo "✓ empty justification is not applied"
+
+write_sc_plan "$TMP/sc-marker.md" $'## Waivers\n- '"$SC_ID"$': ok\n\nWhich? [NEEDS CLARIFICATION: pick]'
+run_check -- "$TMP/sc-marker.md"
+expect "sc marker unwaivable" 1; expect_empty_stdout "sc marker unwaivable"
+grep -q "clarification marker" "$ERR" || fail "sc marker: marker must still block, got: [$(cat "$ERR")]"
+echo "✓ clarification marker stays unwaivable alongside a waived finding"
+
+run_check "RAD_SENSITIVE_CONTENT_PATTERNS=zzz-none" -- "$TMP/clean.md"
+expect "sc tag present" 0
+printf '%s\t%s\n' "sensitive-content-patterns" "zzz-none" > "$TMP/expected.txt"
+cmp -s "$OUT" "$TMP/expected.txt" || fail "sc tag present: got [$(cat "$OUT")]"
+run_check -- "$TMP/clean.md"
+expect "sc tag absent" 0; expect_empty_stdout "sc tag absent"
+echo "✓ non-default pattern ⇒ tag line; default ⇒ none"
+
+run_check "RAD_SENSITIVE_CONTENT_PATTERNS=-bad" -- "$TMP/clean.md"
+expect "sc invalid pattern" 2; expect_empty_stdout "sc invalid pattern"
+echo "✓ invalid pattern ⇒ exit 2, empty stdout"
 
 echo "ALL PASS"
