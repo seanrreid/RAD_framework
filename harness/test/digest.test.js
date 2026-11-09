@@ -24,6 +24,7 @@ const cleanInputs = () => ({
   approval: { gatePassed: true, gateReason: 'ok', storedFingerprint: 'fp', currentFingerprint: 'fp', frozenWaivers: null },
   highRisk: [],
   waivers: [],
+  sensitiveDiff: [],
   selfProtected: [],
   deficits: [],
   findings: [],
@@ -37,7 +38,14 @@ const flaggedInputs = () => ({
   paths: ['src/a.js', 'src/auth/x.js', 'src/auth/y.js', 'harness/h.js'],
   approval: { gatePassed: true, gateReason: 'ok', storedFingerprint: 'old', currentFingerprint: 'new', frozenWaivers: null },
   highRisk: ['src/auth/x.js', 'src/auth/y.js'],
-  waivers: [{ id: 'high-risk:src/auth/y.js', justification: 'reviewed by security' }],
+  waivers: [
+    { id: 'high-risk:src/auth/y.js', justification: 'reviewed by security' },
+    { id: 'sensitive-content:crypto-use', justification: 'plan waiver' },
+  ],
+  sensitiveDiff: [
+    { id: 'auth-change', count: 2, locations: 'src/auth/x.js:4,src/auth/x.js:9' },
+    { id: 'crypto-use', count: 1, locations: 'src/c.js:3' },
+  ],
   selfProtected: ['harness/h.js'],
   deficits: [{ path: 'src/a.js', deficits: { insufficientTesting: { features: ['f1', 'f2'], waves: [], attempts: 3 } } }],
   findings: [{ type: 'finding', file: 'src/a.js', priority: 'HIGH', category: 'security' }],
@@ -60,7 +68,7 @@ test('buildDigest omits the stopped line once a pr-opened follows the stop, keep
   assert.equal(stopLineCount([pr, stop]), 1);
 });
 
-test('buildDigest ranks items across all 8 kinds in DIGEST_RANK order', () => {
+test('buildDigest ranks items across all 10 kinds in DIGEST_RANK order', () => {
   const digest = buildDigest(flaggedInputs());
   const kinds = [...new Set(digest.items.map((i) => i.kind))];
   assert.deepEqual(kinds, [...DIGEST_RANK]);
@@ -100,6 +108,29 @@ test('waived high-risk hits show their frozen justification', () => {
   assert.match(md, /\*\*high-risk\*\* `src\/auth\/x\.js` — high-risk path with no waiver/);
 });
 
+test('uncovered sensitive diff hit is HIGH; waived hit shows its justification', () => {
+  const md = renderDigest(buildDigest(flaggedInputs()));
+  assert.match(md, /\*\*sensitive-content\*\* `auth-change` — HIGH: .*2 added line\(s\): src\/auth\/x\.js:4,src\/auth\/x\.js:9/);
+  assert.match(md, /\*\*sensitive-content-waived\*\* `crypto-use` — waived: plan waiver/);
+  const ev = buildDigest(flaggedInputs()).evidence.find((e) => e.check === 'sensitive content waived');
+  assert.deepEqual([ev.ok, ev.detail], [false, '1 unwaived, 1 waived']);
+});
+
+test('frozen approved-event waiver is preferred over the plan waivers', () => {
+  const inputs = flaggedInputs();
+  inputs.approval = { ...inputs.approval, frozenWaivers: [{ id: 'sensitive-content:auth-change', justification: 'frozen' }] };
+  const md = renderDigest(buildDigest(inputs));
+  assert.match(md, /\*\*sensitive-content-waived\*\* `auth-change` — waived: frozen/);
+  assert.match(md, /\*\*sensitive-content\*\* `crypto-use` — HIGH/);
+});
+
+test('unavailable sensitive scan shows its reason, is not zero hits, and does not fail the digest', () => {
+  const digest = buildDigest({ ...cleanInputs(), sensitiveDiff: { unavailable: 'check-sensitive-content.sh exit 2: bad ref' } });
+  assert.deepEqual(digest.items, []);
+  assert.deepEqual(digest.evidence.find((e) => e.check === 'sensitive content waived'), { check: 'sensitive content waived', ok: false, detail: 'input unavailable' });
+  assert.match(renderDigest(digest), /unavailable: sensitiveDiff — check-sensitive-content\.sh exit 2: bad ref/);
+});
+
 test('gate not passing is an approval item', () => {
   const inputs = { ...cleanInputs(), approval: { ...cleanInputs().approval, gatePassed: false, gateReason: 'needs architect' } };
   const digest = buildDigest(inputs);
@@ -135,6 +166,9 @@ function fakeSh(calls) {
   return (cmd, args) => {
     calls.push(args);
     if (args[0] === 'scripts/check-scope.sh') return { status: 2, stdout: '', stderr: 'ERROR: work branch required\n' };
+    if (args[0] === 'scripts/check-sensitive-content.sh') {
+      return { status: 0, stdout: 'sensitive-content:auth-change\t2\tsrc/a.js:4,src/a.js:9\n', stderr: '' };
+    }
     const script = args[1];
     if (script.includes('plan_scope_paths')) return { status: 0, stdout: 'src/a.js\nharness/h.js\n', stderr: '' };
     if (script.includes('plan_high_risk_findings')) return { status: 0, stdout: '', stderr: '' };
@@ -157,6 +191,8 @@ test('gatherDigestInputs: failing check-scope.sh → scope unavailable; other in
     assert.equal(inputs.approval.storedFingerprint, inputs.approval.currentFingerprint);
     assert.equal(inputs.findings.length, 1);
     assert.equal(inputs.waveCount, 1);
+    assert.deepEqual(inputs.sensitiveDiff, [{ id: 'auth-change', count: 2, locations: 'src/a.js:4,src/a.js:9' }]);
+    assert.ok(calls.some((a) => a[0] === 'scripts/check-sensitive-content.sh' && a.slice(1).join(' ') === 'diff main rad/feat'));
     assert.deepEqual(inputs.deficits, []);
     const md = renderDigest(buildDigest(inputs));
     assert.match(md, /unavailable: scope — check-scope\.sh exit 2: ERROR: work branch required/);
@@ -204,5 +240,35 @@ test('gatherDigestInputs: unsafe feature name → every input unavailable, no fs
   const inputs = await gatherDigestInputs({ repoRoot: '/nonexistent', sh: fakeSh(calls), feature: '../etc', branch: 'b', base: 'main' });
   assert.equal(calls.length, 0);
   assert.match(inputs.scope.unavailable, /invalid feature name/);
-  assert.equal(buildDigest(inputs).unavailable.length, 10);
+  assert.equal(buildDigest(inputs).unavailable.length, 11);
+});
+
+test('gatherDigestInputs: non-zero sensitive scan → unavailable with stderr; missing base → unavailable', async () => {
+  const root = makeRepo();
+  try {
+    const failing = (cmd, args) => (args[0] === 'scripts/check-sensitive-content.sh'
+      ? { status: 2, stdout: '', stderr: 'ERROR: base does not resolve\n' } : fakeSh([])(cmd, args));
+    const bad = await gatherDigestInputs({ repoRoot: root, sh: failing, feature: FEATURE, branch: 'rad/feat', base: 'main' });
+    assert.match(bad.sensitiveDiff.unavailable, /exit 2: ERROR: base does not resolve/);
+    const noBase = await gatherDigestInputs({ repoRoot: root, sh: fakeSh([]), feature: FEATURE, branch: 'rad/feat', base: undefined });
+    assert.match(noBase.sensitiveDiff.unavailable, /no base ref/);
+    const garbled = (cmd, args) => (args[0] === 'scripts/check-sensitive-content.sh'
+      ? { status: 0, stdout: 'garbage\n', stderr: '' } : fakeSh([])(cmd, args));
+    const g = await gatherDigestInputs({ repoRoot: root, sh: garbled, feature: FEATURE, branch: 'rad/feat', base: 'main' });
+    assert.match(g.sensitiveDiff.unavailable, /unparseable scan line/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('gatherDigestInputs: clean scan (no output) → [] hits, not unavailable', async () => {
+  const root = makeRepo();
+  try {
+    const clean = (cmd, args) => (args[0] === 'scripts/check-sensitive-content.sh'
+      ? { status: 0, stdout: '', stderr: '' } : fakeSh([])(cmd, args));
+    const inputs = await gatherDigestInputs({ repoRoot: root, sh: clean, feature: FEATURE, branch: 'rad/feat', base: 'main' });
+    assert.deepEqual(inputs.sensitiveDiff, []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

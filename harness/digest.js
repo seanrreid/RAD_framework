@@ -15,13 +15,14 @@ import { findingsByFile } from './findings.js';
 import { planFingerprint } from './plan-fingerprint.js';
 import { mergeTaskFiles, taskFilesFromPlanText } from './plan-tasks.js';
 
-export const DIGEST_RANK = Object.freeze(['scope', 'approval', 'high-risk', 'high-risk-waived', 'self-protected', 'deficit', 'findings', 'run']);
+export const DIGEST_RANK = Object.freeze(['scope', 'approval', 'high-risk', 'high-risk-waived', 'sensitive-content', 'sensitive-content-waived', 'self-protected', 'deficit', 'findings', 'run']);
 
 const PLANS_DIR = join('.agents', 'plans');
 const STATE_DIR = join('.agents', 'state');
 const EVENTS_FILE = 'events.jsonl';
 const FINDINGS_FILE = join('.agents', 'findings.jsonl');
 const HIGH_RISK_PREFIX = 'high-risk:';
+const SENSITIVE_PREFIX = 'sensitive-content:';
 const SAFE_FEATURE = /^[a-z0-9][a-z0-9-]*$/;
 const WAVE_HEADER = /^### Wave [0-9]+\b/gm;
 const SCOPE_VIOLATION_LINE = /^\s*✗ (\S+)(?: — (.+))?$/;
@@ -33,7 +34,7 @@ const SCRIPTS = Object.freeze({
   waivers: `${PLAN_PATHS}plan_waivers "$1"`,
   selfProtected: `${PLAN_PATHS}for p in "$@"; do if path_is_self_protected "$p"; then printf '%s\\n' "$p"; fi; done`,
 });
-const INPUT_KEYS = Object.freeze(['scope', 'paths', 'approval', 'highRisk', 'waivers', 'selfProtected', 'deficits', 'findings', 'history', 'waveCount']);
+const INPUT_KEYS = Object.freeze(['scope', 'paths', 'approval', 'highRisk', 'waivers', 'sensitiveDiff', 'selfProtected', 'deficits', 'findings', 'history', 'waveCount']);
 const NOTHING_FLAGGED = 'nothing flagged — every check below stayed inside the lines';
 
 const isUnavailable = (v) => v !== null && typeof v === 'object' && !Array.isArray(v) && typeof v.unavailable === 'string';
@@ -123,6 +124,19 @@ function readWaivers(sh, repoRoot, planRel, approval) {
   });
 }
 
+/** check-sensitive-content.sh diff → [{id, count, locations}]; a missing ref or non-zero exit throws. */
+export function readSensitiveDiff(sh, repoRoot, branch, base) {
+  if (typeof base !== 'string' || base === '') throw new Error('no base ref to scan against');
+  if (typeof branch !== 'string' || branch === '') throw new Error('no branch ref to scan');
+  const res = sh('bash', ['scripts/check-sensitive-content.sh', 'diff', base, branch], { cwd: repoRoot });
+  if (res.status !== 0) throw new Error(`check-sensitive-content.sh exit ${res.status}: ${(res.stderr || res.stdout || '').trim()}`);
+  return lines(res.stdout).map((l) => {
+    const [tag, count, locations = ''] = l.split('\t');
+    if (!tag.startsWith(SENSITIVE_PREFIX) || !/^[0-9]+$/.test(count ?? '')) throw new Error(`unparseable scan line: ${l}`);
+    return { id: tag.slice(SENSITIVE_PREFIX.length), count: Number(count), locations };
+  });
+}
+
 /** Gather every digest input read-only. A failing source → `{ unavailable }` for that input. */
 export async function gatherDigestInputs({ repoRoot, sh, feature, branch, base }) {
   if (typeof feature !== 'string' || !SAFE_FEATURE.test(feature)) {
@@ -142,6 +156,7 @@ export async function gatherDigestInputs({ repoRoot, sh, feature, branch, base }
     approval,
     highRisk: attempt(() => runSh(sh, SCRIPTS.highRisk, [planRel], repoRoot).map((l) => l.slice(HIGH_RISK_PREFIX.length))),
     waivers: attempt(() => readWaivers(sh, repoRoot, planRel, approval)),
+    sensitiveDiff: attempt(() => readSensitiveDiff(sh, repoRoot, branch, base)),
     selfProtected: withPaths(() => (paths.length === 0 ? [] : runSh(sh, SCRIPTS.selfProtected, paths, repoRoot))),
     deficits: attempt(() => readDeficits(repoRoot, paths)),
     findings: attempt(() => readFindings(repoRoot)),
@@ -167,6 +182,19 @@ function highRiskItems(highRisk, waivers) {
   return highRisk.map((path) => (waived.has(HIGH_RISK_PREFIX + path)
     ? item('high-risk-waived', path, `waived: ${waived.get(HIGH_RISK_PREFIX + path)}`)
     : item('high-risk', path, 'high-risk path with no waiver')));
+}
+
+/** Frozen approved-event waivers win; the plan's waivers apply only when the approval froze none. */
+function sensitiveItems(hits, approval, waivers) {
+  const frozen = avail(approval) && Array.isArray(approval.frozenWaivers) ? approval.frozenWaivers : null;
+  const source = frozen ?? (avail(waivers) && Array.isArray(waivers) ? waivers : []);
+  const waived = new Map(source.map((w) => [w.id, w.justification]));
+  return hits.map((h) => {
+    const where = `${h.count} added line(s): ${h.locations}`;
+    return waived.has(SENSITIVE_PREFIX + h.id)
+      ? item('sensitive-content-waived', h.id, `waived: ${waived.get(SENSITIVE_PREFIX + h.id)} (${where})`)
+      : item('sensitive-content', h.id, `HIGH: sensitive pattern in the diff with no waiver (${where})`);
+  });
 }
 
 function deficitDetail(deficits) {
@@ -202,6 +230,7 @@ function collectItems(i) {
   if (avail(i.scope)) items.push(...i.scope.violations.map((v) => item('scope', v.path, v.detail)));
   if (avail(i.approval)) items.push(...approvalProblems(i.approval).map((d) => item('approval', null, d)));
   if (avail(i.highRisk)) items.push(...highRiskItems(i.highRisk, i.waivers));
+  if (avail(i.sensitiveDiff)) items.push(...sensitiveItems(i.sensitiveDiff, i.approval, i.waivers));
   if (avail(i.selfProtected)) items.push(...i.selfProtected.map((p) => item('self-protected', p, 'RAD machinery — architect review')));
   if (avail(i.deficits)) items.push(...i.deficits.map((r) => item('deficit', r.path, deficitDetail(r.deficits))));
   if (avail(i.findings) && avail(i.paths)) items.push(...findingItems(i.findings, i.paths));
@@ -223,6 +252,7 @@ function collectEvidence(i, items) {
     ? { check: 'completion evidenced', ok: deliverCompleted(i.history, i.waveCount), detail: `${i.waveCount} wave(s) declared` }
     : UNAVAILABLE_CHECK('completion evidenced'));
   ev.push(avail(i.highRisk) ? { check: 'high-risk waived', ok: count('high-risk') === 0, detail: `${count('high-risk')} unwaived, ${count('high-risk-waived')} waived` } : UNAVAILABLE_CHECK('high-risk waived'));
+  ev.push(avail(i.sensitiveDiff) ? { check: 'sensitive content waived', ok: count('sensitive-content') === 0, detail: `${count('sensitive-content')} unwaived, ${count('sensitive-content-waived')} waived` } : UNAVAILABLE_CHECK('sensitive content waived'));
   if (avail(i.history)) ev.push({ check: 'token usage', ok: true, detail: `${totalUsage(i.history).total} token(s)` });
   return ev;
 }
