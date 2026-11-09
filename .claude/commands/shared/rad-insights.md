@@ -1055,6 +1055,69 @@ Reading the output:
 These values are reporting only. They set no target or threshold, and nothing
 reads them to block, warn or gate a command.
 
+### Step 4j: Human corrections
+
+Where a human had to step in after the agent's work: re-approvals, resume answers,
+confirmed review findings and fix commits after the deliver PR opened. The rows,
+counts and text come from `harness/human-corrections.js` (`parseEventLog`,
+`postDeliverFixRows`, `buildCorrections`, `formatCorrections`); import them, never
+re-implement them in jq or shell. Unlike Steps 4c–4i, this step applies `--since`
+itself, on row dates (a row exactly on the boundary is kept). Run from the repo
+root; set `SINCE` to the `--since` value, or leave it empty:
+
+```bash
+SINCE="" node --input-type=module -e '
+import { readFileSync, readdirSync, existsSync } from "node:fs";
+import { join } from "node:path";
+const { parseEventLog, postDeliverFixRows, buildCorrections, formatCorrections } =
+  await import("./harness/human-corrections.js");
+const { findingVerdict } = await import("./harness/findings.js");
+
+const stateDir = process.env.RAD_STATE_DIR || ".agents/state";
+const histories = {};
+if (existsSync(stateDir)) {
+  for (const d of readdirSync(stateDir, { withFileTypes: true })) {
+    const log = join(stateDir, d.name, "events.jsonl");
+    if (!d.isDirectory() || !existsSync(log)) continue;
+    histories[d.name] = parseEventLog(readFileSync(log, "utf8"), log); // throws on a bad line
+  }
+}
+const findingsFile = process.env.RAD_FINDINGS_FILE || ".agents/findings.jsonl";
+const findings = [];
+if (existsSync(findingsFile)) {
+  readFileSync(findingsFile, "utf8").split("\n").forEach((line, i) => {
+    if (!line.trim()) return;
+    try { findings.push(JSON.parse(line)); }
+    catch (err) { console.error(`skipping malformed JSON at ${findingsFile}:${i + 1}: ${err.message}`); }
+  });
+}
+const postDeliver = {};
+for (const [feature, events] of Object.entries(histories)) {
+  postDeliver[feature] = postDeliverFixRows(feature, events, { root: process.cwd() });
+}
+const since = process.env.SINCE || undefined;
+console.log(formatCorrections(buildCorrections({ histories, findings, postDeliver, since })));
+'
+```
+
+A non-zero exit (a malformed events log names the log and line; a bad `--since`;
+a failed `git log`) is reported with its stderr and the section is omitted. It
+never stops the rest of the report.
+
+Reading the output:
+
+- **Categories** — `reapproval` (second or later `approved` event), `resume-answer`
+  (a `run-resumed` event with a non-empty answer), `review-fix` (a finding whose
+  `findingVerdict` is `confirmed`) and `post-deliver-fix` (a commit on the feature's
+  `rad/<feature>` branch after the `pr-opened` event, excluding `deliver(`,
+  `approve:` and `review:` subjects).
+- **`Unavailable:` lines** — the feature has no `pr-opened` event or no branch ref,
+  so post-deliver fixes could not be counted. Render them as given; never as zero.
+- A single empty-state line means no corrections were found.
+
+These values are reporting only. They set no target or threshold, and nothing
+reads them to block, warn or gate a command.
+
 ### Step 5: Synthesize and output report
 
 Using the data from Steps 3–4i, write the following report. Populate each section
@@ -1375,6 +1438,14 @@ Trends (older half vs newer half):
 [Framing — render verbatim under the trends:]
 Reporting only — no target or threshold applies to these values.
 
+### Human Corrections
+[From Step 4j. Omit this section entirely if the step printed only the empty-state
+ line or exited non-zero (then say why in one line).]
+[Render the step's output: total, per-category counts, top features with their rows,
+ and any Unavailable lines.]
+[Framing — render verbatim under the output:]
+Reporting only — no target or threshold applies to these values.
+
 ### Recommended Focus Areas
 [Top 2–3 patterns that are both frequent and high-severity. Each as one sentence:
  "Address [category] — appears in [N] cycles ([%]) and always blocks architect review."]
@@ -1416,6 +1487,9 @@ Reporting only — no target or threshold applies to these values.
 - Rework and Gate-2 load (Step 4i) MUST come from `readDeliveryHistory` and the folds in
   `harness/delivery-metrics.js`; they are information only — never read to block, warn
   or gate, never turned into a target, and never a Recommended Focus Area on their own
+- Human corrections (Step 4j) MUST come from `harness/human-corrections.js`; they are
+  information only — never read to block, warn or gate, never turned into a target,
+  and never a Recommended Focus Area on their own
 - RAD_REWORK_WINDOW_DAYS parses via Number.parseInt; unset/0/NaN/negative → default 14
 - The plan drafter (`--draft-plans`, `scripts/draft-insights-plan.sh`) runs ONLY when
   that flag is passed; it writes only the one plan doc and its new
