@@ -702,11 +702,11 @@ under-specified or mis-aimed. This step routes each such signal to the one promp
 surface that shaped it (rationale: `docs/harness-and-framework.md`, "Prompt
 surfaces as a feedback-loop target").
 
-The routing is ONE table — `PROMPT_SURFACE_MAP` in the snippet below. It is data:
+The routing is ONE table — `PROMPT_SURFACE_MAP` at the top of `harness/insights-prompt-surfaces.js`. It is data:
 to route a new signal, add a row; never add a special case elsewhere. Counts come
 from folds in `harness/events.js` — `attemptOutcomeCounts`, `failReasonCounts`
-(Step 4c) and `blockedReasonCounts` (Step 4d); this step only compares them with
-the threshold and looks up the table. `outcome:*` rows read `attemptOutcomeCounts`,
+(Step 4c) and `blockedReasonCounts` (Step 4d); the module only compares them with
+the threshold and looks up the table, then prints the result. `outcome:*` rows read `attemptOutcomeCounts`,
 NOT `outcomeCounts`: the spine records the outcome only on `wave-attempt` events
 (`wave-complete` carries `{ wave }` alone), so wave-complete outcomes never show
 a failure on a real log. Same invocation
@@ -715,99 +715,10 @@ convention as Steps 4c–4f: run from the repo root; `RAD_STATE_DIR` (default
 nothing.
 
 ```bash
-node --input-type=module -e '
-import { readFileSync, readdirSync, existsSync } from "node:fs";
-import { join } from "node:path";
-const { attemptOutcomeCounts, failReasonCounts, blockedReasonCounts } =
-  await import("./harness/events.js");
-
-// Minimum aggregate count before a signal renders a proposal. Below it, a
-// signal describes one bad wave, not an instruction that keeps misleading.
-const PROMPT_SIGNAL_THRESHOLD = 3;
-
-// THE mapping table: signal -> the prompt surface that shaped it.
-const PROMPT_SURFACE_MAP = {
-  "outcome:fail-protocol": {
-    target: "harness/adapters/agent/contract.js",
-    section: "buildWavePrompt \"## Return format\" block (prose mirror: .claude/commands/team/rad-deliver.md \"## Return format\")",
-    note: "Preserve the #112 prefix-ordering constraint: order the template so a retry extends a prefix instead of rewriting one.",
-  },
-  "outcome:fail-scope": {
-    target: ".claude/commands/team/rad-plan.md",
-    section: "Step 3 plan template, \"## Files in Scope\" guidance comment",
-    note: null,
-  },
-  "blocked:blocked_spec": {
-    target: ".claude/commands/team/rad-plan.md",
-    section: "Step 3 task template (What:/Validate:) and \"Wave rules\"",
-    note: null,
-  },
-  "blocked:blocked_intent": {
-    target: ".claude/commands/team/rad-plan.md",
-    section: "Step 3 task template (What:/Validate:) and \"Wave rules\"",
-    note: null,
-  },
-};
-
-// Outcome keys that are not failure signals.
-const NON_SIGNAL_OUTCOMES = new Set(["success", "unknown", "total"]);
-const BLOCKED_KEYS = ["blocked_code", "blocked_spec", "blocked_intent"];
-
-const stateDir = process.env.RAD_STATE_DIR || ".agents/state";
-const features = existsSync(stateDir)
-  ? readdirSync(stateDir, { withFileTypes: true })
-      .filter((d) => d.isDirectory())
-      .map((d) => d.name)
-      .filter((f) => existsSync(join(stateDir, f, "events.jsonl")))
-      .sort()
-  : [];
-
-// signal -> { count, features: { feature: n } }
-const signals = {};
-const add = (signal, feature, n) => {
-  if (n <= 0) return;
-  const s = signals[signal] || (signals[signal] = { count: 0, features: {} });
-  s.count += n;
-  s.features[feature] = (s.features[feature] || 0) + n;
-};
-
-let waveEvents = 0;
-let enrichedAttempts = 0;
-for (const feature of features) {
-  const history = readFileSync(join(stateDir, feature, "events.jsonl"), "utf8")
-    .split("\n").filter(Boolean).map((l) => JSON.parse(l));
-  const attempts = attemptOutcomeCounts(history);
-  const failReasons = failReasonCounts(history);
-  const blocked = blockedReasonCounts(history);
-  waveEvents += attempts.counts.total + failReasons.total;
-  enrichedAttempts += blocked.enrichedAttempts;
-  // Attribute each outcome to the features the fold saw record it (the event
-  // `feature` field); fall back to the state-dir name if none was recorded.
-  for (const [k, n] of Object.entries(attempts.counts)) {
-    if (NON_SIGNAL_OUTCOMES.has(k)) continue;
-    const named = attempts.features[k] || [];
-    add(`outcome:${k}`, named.length === 1 ? named[0] : feature, n);
-  }
-  for (const [r, n] of Object.entries(failReasons.reasons)) add(`wave-failed:${r}`, feature, n);
-  for (const k of BLOCKED_KEYS) add(`blocked:${k}`, feature, blocked[k]);
-}
-
-const crossing = Object.entries(signals)
-  .filter(([, s]) => s.count >= PROMPT_SIGNAL_THRESHOLD)
-  .sort(([a, x], [b, y]) => y.count - x.count || a.localeCompare(b));
-const proposals = crossing.filter(([sig]) => PROMPT_SURFACE_MAP[sig])
-  .map(([signal, s]) => ({ signal, ...s, ...PROMPT_SURFACE_MAP[signal] }));
-const unmapped = crossing.filter(([sig]) => !PROMPT_SURFACE_MAP[sig])
-  .map(([signal, s]) => ({ signal, ...s }));
-
-console.log(JSON.stringify({
-  threshold: PROMPT_SIGNAL_THRESHOLD,
-  noWaveData: waveEvents === 0,
-  noEnrichedData: enrichedAttempts === 0,
-  proposals, unmapped,
-}, null, 2));
-'
+node harness/insights-prompt-surfaces.js
 ```
+
+The output is `{ threshold, noWaveData, noEnrichedData, proposals, unmapped }`.
 
 Reading the output:
 
