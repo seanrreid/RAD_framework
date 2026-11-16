@@ -1,0 +1,982 @@
+=== enriched ===
+{
+  "noWaveData": false,
+  "aggregate": {
+    "outcomes": {
+      "success": 2,
+      "fail-tests": 0,
+      "fail-scope": 0,
+      "fail-protocol": 0,
+      "fail-timeout": 0,
+      "no-changes": 0,
+      "abort-user": 1,
+      "unknown": 0,
+      "total": 3
+    },
+    "failReasons": {
+      "total": 2,
+      "reasons": {
+        "budget-exhausted": 1,
+        "abort-user": 1
+      }
+    },
+    "retries": {
+      "total": 5,
+      "retriedWaves": 1
+    },
+    "hookVetoes": {
+      "vetoes": 1,
+      "vetoedAttempts": 1
+    },
+    "usage": {
+      "input": 420,
+      "output": 105,
+      "total": 525
+    }
+  },
+  "perFeature": {
+    "enriched": {
+      "outcomes": {
+        "success": 2,
+        "fail-tests": 0,
+        "fail-scope": 0,
+        "fail-protocol": 0,
+        "fail-timeout": 0,
+        "no-changes": 0,
+        "abort-user": 1,
+        "unknown": 0,
+        "total": 3
+      },
+      "failReasons": {
+        "total": 2,
+        "reasons": {
+          "budget-exhausted": 1,
+          "abort-user": 1
+        }
+      },
+      "retries": {
+        "total": 5,
+        "retriedWaves": 1,
+        "perWave": {
+          "1": 1,
+          "2": 3,
+          "3": 1
+        }
+      },
+      "hookVetoes": {
+        "vetoes": 1,
+        "vetoedAttempts": 1
+      },
+      "usage": {
+        "input": 420,
+        "output": 105,
+        "total": 525
+      },
+      "spendPerWave": {
+        "1": 250,
+        "2": 225,
+        "3": 50
+      }
+    }
+  }
+}
+=== legacy ===
+{
+  "noWaveData": false,
+  "aggregate": {
+    "outcomes": {
+      "success": 2,
+      "fail-tests": 0,
+      "fail-scope": 0,
+      "fail-protocol": 0,
+      "fail-timeout": 1,
+      "no-changes": 0,
+      "abort-user": 0,
+      "unknown": 0,
+      "total": 3
+    },
+    "failReasons": {
+      "total": 1,
+      "reasons": {
+        "unknown": 1
+      }
+    },
+    "retries": {
+      "total": 4,
+      "retriedWaves": 1
+    },
+    "hookVetoes": {
+      "vetoes": 0,
+      "vetoedAttempts": 0
+    },
+    "usage": {
+      "input": 180,
+      "output": 60,
+      "total": 240
+    }
+  },
+  "perFeature": {
+    "legacy": {
+      "outcomes": {
+        "success": 2,
+        "fail-tests": 0,
+        "fail-scope": 0,
+        "fail-protocol": 0,
+        "fail-timeout": 1,
+        "no-changes": 0,
+        "abort-user": 0,
+        "unknown": 0,
+        "total": 3
+      },
+      "failReasons": {
+        "total": 1,
+        "reasons": {
+          "unknown": 1
+        }
+      },
+      "retries": {
+        "total": 4,
+        "retriedWaves": 1,
+        "perWave": {
+          "1": 1,
+          "2": 2,
+          "3": 1
+        }
+      },
+      "hookVetoes": {
+        "vetoes": 0,
+        "vetoedAttempts": 0
+      },
+      "usage": {
+        "input": 180,
+        "output": 60,
+        "total": 240
+      },
+      "spendPerWave": {
+        "1": 140,
+        "2": 100,
+        "3": 0
+      }
+    }
+  }
+}
+=== mixed ===
+{
+  "noWaveData": false,
+  "aggregate": {
+    "outcomes": {
+      "success": 1,
+      "fail-tests": 1,
+      "fail-scope": 0,
+      "fail-protocol": 0,
+      "fail-timeout": 0,
+      "no-changes": 1,
+      "abort-user": 0,
+      "unknown": 0,
+      "total": 3
+    },
+    "failReasons": {
+      "total": 2,
+      "reasons": {
+        "doom-loop": 1,
+        "unknown": 1
+      }
+    },
+    "retries": {
+      "total": 5,
+      "retriedWaves": 2
+    },
+    "hookVetoes": {
+      "vetoes": 1,
+      "vetoedAttempts": 0
+    },
+    "usage": {
+      "input": 150,
+      "output": 35,
+      "total": 225
+    }
+  },
+  "perFeature": {
+    "mixed": {
+      "outcomes": {
+        "success": 1,
+        "fail-tests": 1,
+        "fail-scope": 0,
+        "fail-protocol": 0,
+        "fail-timeout": 0,
+        "no-changes": 1,
+        "abort-user": 0,
+        "unknown": 0,
+        "total": 3
+      },
+      "failReasons": {
+        "total": 2,
+        "reasons": {
+          "doom-loop": 1,
+          "unknown": 1
+        }
+      },
+      "retries": {
+        "total": 5,
+        "retriedWaves": 2,
+        "perWave": {
+          "1": 2,
+          "2": 1,
+          "3": 2
+        }
+      },
+      "hookVetoes": {
+        "vetoes": 1,
+        "vetoedAttempts": 0
+      },
+      "usage": {
+        "input": 150,
+        "output": 35,
+        "total": 225
+      },
+      "spendPerWave": {
+        "1": 150,
+        "2": 0,
+        "3": 75
+      }
+    }
+  }
+}
+=== provider ===
+{
+  "noWaveData": false,
+  "aggregate": {
+    "outcomes": {
+      "success": 6,
+      "fail-tests": 0,
+      "fail-scope": 0,
+      "fail-protocol": 0,
+      "fail-timeout": 0,
+      "no-changes": 0,
+      "abort-user": 0,
+      "unknown": 0,
+      "total": 6
+    },
+    "failReasons": {
+      "total": 0,
+      "reasons": {}
+    },
+    "retries": {
+      "total": 9,
+      "retriedWaves": 2
+    },
+    "hookVetoes": {
+      "vetoes": 0,
+      "vetoedAttempts": 0
+    },
+    "usage": {
+      "input": 840,
+      "output": 305,
+      "total": 1145
+    }
+  },
+  "perFeature": {
+    "provider": {
+      "outcomes": {
+        "success": 6,
+        "fail-tests": 0,
+        "fail-scope": 0,
+        "fail-protocol": 0,
+        "fail-timeout": 0,
+        "no-changes": 0,
+        "abort-user": 0,
+        "unknown": 0,
+        "total": 6
+      },
+      "failReasons": {
+        "total": 0,
+        "reasons": {}
+      },
+      "retries": {
+        "total": 9,
+        "retriedWaves": 2,
+        "perWave": {
+          "1": 5,
+          "2": 3
+        }
+      },
+      "hookVetoes": {
+        "vetoes": 0,
+        "vetoedAttempts": 0
+      },
+      "usage": {
+        "input": 840,
+        "output": 305,
+        "total": 1145
+      },
+      "spendPerWave": {
+        "1": 345,
+        "2": 800
+      }
+    }
+  }
+}
+=== tiered ===
+{
+  "noWaveData": false,
+  "aggregate": {
+    "outcomes": {
+      "success": 8,
+      "fail-tests": 0,
+      "fail-scope": 0,
+      "fail-protocol": 0,
+      "fail-timeout": 0,
+      "no-changes": 0,
+      "abort-user": 0,
+      "unknown": 0,
+      "total": 8
+    },
+    "failReasons": {
+      "total": 0,
+      "reasons": {}
+    },
+    "retries": {
+      "total": 10,
+      "retriedWaves": 2
+    },
+    "hookVetoes": {
+      "vetoes": 0,
+      "vetoedAttempts": 0
+    },
+    "usage": {
+      "input": 1120,
+      "output": 285,
+      "total": 1405
+    }
+  },
+  "perFeature": {
+    "tiered": {
+      "outcomes": {
+        "success": 8,
+        "fail-tests": 0,
+        "fail-scope": 0,
+        "fail-protocol": 0,
+        "fail-timeout": 0,
+        "no-changes": 0,
+        "abort-user": 0,
+        "unknown": 0,
+        "total": 8
+      },
+      "failReasons": {
+        "total": 0,
+        "reasons": {}
+      },
+      "retries": {
+        "total": 10,
+        "retriedWaves": 2,
+        "perWave": {
+          "1": 6,
+          "2": 4
+        }
+      },
+      "hookVetoes": {
+        "vetoes": 0,
+        "vetoedAttempts": 0
+      },
+      "usage": {
+        "input": 1120,
+        "output": 285,
+        "total": 1405
+      },
+      "spendPerWave": {
+        "1": 640,
+        "2": 765
+      }
+    }
+  }
+}
+=== all ===
+{
+  "noWaveData": false,
+  "aggregate": {
+    "outcomes": {
+      "success": 19,
+      "fail-tests": 1,
+      "fail-scope": 0,
+      "fail-protocol": 0,
+      "fail-timeout": 1,
+      "no-changes": 1,
+      "abort-user": 1,
+      "unknown": 0,
+      "total": 23
+    },
+    "failReasons": {
+      "total": 5,
+      "reasons": {
+        "budget-exhausted": 1,
+        "abort-user": 1,
+        "unknown": 2,
+        "doom-loop": 1
+      }
+    },
+    "retries": {
+      "total": 33,
+      "retriedWaves": 8
+    },
+    "hookVetoes": {
+      "vetoes": 2,
+      "vetoedAttempts": 1
+    },
+    "usage": {
+      "input": 2710,
+      "output": 790,
+      "total": 3540
+    }
+  },
+  "perFeature": {
+    "enriched": {
+      "outcomes": {
+        "success": 2,
+        "fail-tests": 0,
+        "fail-scope": 0,
+        "fail-protocol": 0,
+        "fail-timeout": 0,
+        "no-changes": 0,
+        "abort-user": 1,
+        "unknown": 0,
+        "total": 3
+      },
+      "failReasons": {
+        "total": 2,
+        "reasons": {
+          "budget-exhausted": 1,
+          "abort-user": 1
+        }
+      },
+      "retries": {
+        "total": 5,
+        "retriedWaves": 1,
+        "perWave": {
+          "1": 1,
+          "2": 3,
+          "3": 1
+        }
+      },
+      "hookVetoes": {
+        "vetoes": 1,
+        "vetoedAttempts": 1
+      },
+      "usage": {
+        "input": 420,
+        "output": 105,
+        "total": 525
+      },
+      "spendPerWave": {
+        "1": 250,
+        "2": 225,
+        "3": 50
+      }
+    },
+    "legacy": {
+      "outcomes": {
+        "success": 2,
+        "fail-tests": 0,
+        "fail-scope": 0,
+        "fail-protocol": 0,
+        "fail-timeout": 1,
+        "no-changes": 0,
+        "abort-user": 0,
+        "unknown": 0,
+        "total": 3
+      },
+      "failReasons": {
+        "total": 1,
+        "reasons": {
+          "unknown": 1
+        }
+      },
+      "retries": {
+        "total": 4,
+        "retriedWaves": 1,
+        "perWave": {
+          "1": 1,
+          "2": 2,
+          "3": 1
+        }
+      },
+      "hookVetoes": {
+        "vetoes": 0,
+        "vetoedAttempts": 0
+      },
+      "usage": {
+        "input": 180,
+        "output": 60,
+        "total": 240
+      },
+      "spendPerWave": {
+        "1": 140,
+        "2": 100,
+        "3": 0
+      }
+    },
+    "mixed": {
+      "outcomes": {
+        "success": 1,
+        "fail-tests": 1,
+        "fail-scope": 0,
+        "fail-protocol": 0,
+        "fail-timeout": 0,
+        "no-changes": 1,
+        "abort-user": 0,
+        "unknown": 0,
+        "total": 3
+      },
+      "failReasons": {
+        "total": 2,
+        "reasons": {
+          "doom-loop": 1,
+          "unknown": 1
+        }
+      },
+      "retries": {
+        "total": 5,
+        "retriedWaves": 2,
+        "perWave": {
+          "1": 2,
+          "2": 1,
+          "3": 2
+        }
+      },
+      "hookVetoes": {
+        "vetoes": 1,
+        "vetoedAttempts": 0
+      },
+      "usage": {
+        "input": 150,
+        "output": 35,
+        "total": 225
+      },
+      "spendPerWave": {
+        "1": 150,
+        "2": 0,
+        "3": 75
+      }
+    },
+    "provider": {
+      "outcomes": {
+        "success": 6,
+        "fail-tests": 0,
+        "fail-scope": 0,
+        "fail-protocol": 0,
+        "fail-timeout": 0,
+        "no-changes": 0,
+        "abort-user": 0,
+        "unknown": 0,
+        "total": 6
+      },
+      "failReasons": {
+        "total": 0,
+        "reasons": {}
+      },
+      "retries": {
+        "total": 9,
+        "retriedWaves": 2,
+        "perWave": {
+          "1": 5,
+          "2": 3
+        }
+      },
+      "hookVetoes": {
+        "vetoes": 0,
+        "vetoedAttempts": 0
+      },
+      "usage": {
+        "input": 840,
+        "output": 305,
+        "total": 1145
+      },
+      "spendPerWave": {
+        "1": 345,
+        "2": 800
+      }
+    },
+    "tiered": {
+      "outcomes": {
+        "success": 8,
+        "fail-tests": 0,
+        "fail-scope": 0,
+        "fail-protocol": 0,
+        "fail-timeout": 0,
+        "no-changes": 0,
+        "abort-user": 0,
+        "unknown": 0,
+        "total": 8
+      },
+      "failReasons": {
+        "total": 0,
+        "reasons": {}
+      },
+      "retries": {
+        "total": 10,
+        "retriedWaves": 2,
+        "perWave": {
+          "1": 6,
+          "2": 4
+        }
+      },
+      "hookVetoes": {
+        "vetoes": 0,
+        "vetoedAttempts": 0
+      },
+      "usage": {
+        "input": 1120,
+        "output": 285,
+        "total": 1405
+      },
+      "spendPerWave": {
+        "1": 640,
+        "2": 765
+      }
+    }
+  }
+}
+=== empty ===
+{
+  "noWaveData": true,
+  "aggregate": {
+    "outcomes": {
+      "success": 0,
+      "fail-tests": 0,
+      "fail-scope": 0,
+      "fail-protocol": 0,
+      "fail-timeout": 0,
+      "no-changes": 0,
+      "abort-user": 0,
+      "unknown": 0,
+      "total": 0
+    },
+    "failReasons": {
+      "total": 0,
+      "reasons": {}
+    },
+    "retries": {
+      "total": 0,
+      "retriedWaves": 0
+    },
+    "hookVetoes": {
+      "vetoes": 0,
+      "vetoedAttempts": 0
+    },
+    "usage": {
+      "input": 0,
+      "output": 0,
+      "total": 0
+    }
+  },
+  "perFeature": {}
+}
+=== 4e:enriched ===
+{
+  "mappedTitles": 3,
+  "reportedFiles": 0,
+  "files": {},
+  "belowFloor": 3,
+  "minFeatures": 2,
+  "deficits": {
+    "files": {},
+    "unattributable": 0,
+    "unenriched": 0,
+    "belowFloor": 2,
+    "minFeatures": 2
+  }
+}
+=== 4e:legacy ===
+{
+  "mappedTitles": 3,
+  "reportedFiles": 0,
+  "files": {},
+  "belowFloor": 0,
+  "minFeatures": 2,
+  "deficits": {
+    "files": {},
+    "unattributable": 0,
+    "unenriched": 4,
+    "belowFloor": 0,
+    "minFeatures": 2
+  }
+}
+=== 4e:mixed ===
+{
+  "mappedTitles": 3,
+  "reportedFiles": 0,
+  "files": {},
+  "belowFloor": 2,
+  "minFeatures": 2,
+  "deficits": {
+    "files": {},
+    "unattributable": 0,
+    "unenriched": 3,
+    "belowFloor": 2,
+    "minFeatures": 2
+  }
+}
+=== 4e:provider ===
+{
+  "mappedTitles": 3,
+  "reportedFiles": 0,
+  "files": {},
+  "belowFloor": 0,
+  "minFeatures": 2,
+  "deficits": {
+    "files": {},
+    "unattributable": 0,
+    "unenriched": 8,
+    "belowFloor": 0,
+    "minFeatures": 2
+  }
+}
+=== 4e:tiered ===
+{
+  "mappedTitles": 3,
+  "reportedFiles": 0,
+  "files": {},
+  "belowFloor": 0,
+  "minFeatures": 2,
+  "deficits": {
+    "files": {},
+    "unattributable": 0,
+    "unenriched": 10,
+    "belowFloor": 0,
+    "minFeatures": 2
+  }
+}
+=== 4e:all ===
+{
+  "mappedTitles": 3,
+  "reportedFiles": 2,
+  "files": {
+    "harness/events.js": {
+      "failures": 4,
+      "features": [
+        "enriched",
+        "mixed"
+      ]
+    },
+    "harness/test/events.test.js": {
+      "failures": 3,
+      "features": [
+        "enriched",
+        "mixed"
+      ]
+    }
+  },
+  "belowFloor": 1,
+  "minFeatures": 2,
+  "deficits": {
+    "files": {
+      "harness/events.js": {
+        "opaqueAbstraction": {
+          "features": [
+            "enriched",
+            "mixed"
+          ],
+          "waves": [
+            "enriched#2",
+            "mixed#3"
+          ],
+          "attempts": 2
+        },
+        "insufficientTesting": {
+          "features": [
+            "enriched",
+            "mixed"
+          ],
+          "waves": [
+            "enriched#2",
+            "mixed#3"
+          ],
+          "attempts": 2
+        }
+      },
+      "harness/test/events.test.js": {
+        "opaqueAbstraction": {
+          "features": [
+            "enriched",
+            "mixed"
+          ],
+          "waves": [
+            "enriched#2",
+            "mixed#3"
+          ],
+          "attempts": 2
+        },
+        "insufficientTesting": {
+          "features": [
+            "enriched",
+            "mixed"
+          ],
+          "waves": [
+            "enriched#2",
+            "mixed#3"
+          ],
+          "attempts": 2
+        }
+      }
+    },
+    "unattributable": 0,
+    "unenriched": 25,
+    "belowFloor": 0,
+    "minFeatures": 2
+  }
+}
+=== 4e:all-noplans ===
+{
+  "mappedTitles": 0,
+  "reportedFiles": 0,
+  "files": {},
+  "belowFloor": 0,
+  "minFeatures": 2,
+  "deficits": {
+    "files": {},
+    "unattributable": 3,
+    "unenriched": 25,
+    "belowFloor": 0,
+    "minFeatures": 2
+  }
+}
+=== 4e:empty ===
+{
+  "mappedTitles": 3,
+  "reportedFiles": 0,
+  "files": {},
+  "belowFloor": 0,
+  "minFeatures": 2,
+  "deficits": {
+    "files": {},
+    "unattributable": 0,
+    "unenriched": 0,
+    "belowFloor": 0,
+    "minFeatures": 2
+  }
+}
+=== 4g:enriched ===
+{
+  "threshold": 3,
+  "noWaveData": false,
+  "noEnrichedData": false,
+  "proposals": [],
+  "unmapped": []
+}
+=== 4g:legacy ===
+{
+  "threshold": 3,
+  "noWaveData": false,
+  "noEnrichedData": true,
+  "proposals": [],
+  "unmapped": []
+}
+=== 4g:mixed ===
+{
+  "threshold": 3,
+  "noWaveData": false,
+  "noEnrichedData": false,
+  "proposals": [],
+  "unmapped": []
+}
+=== 4g:provider ===
+{
+  "threshold": 3,
+  "noWaveData": false,
+  "noEnrichedData": true,
+  "proposals": [],
+  "unmapped": []
+}
+=== 4g:tiered ===
+{
+  "threshold": 3,
+  "noWaveData": false,
+  "noEnrichedData": true,
+  "proposals": [],
+  "unmapped": []
+}
+=== 4g:all ===
+{
+  "threshold": 3,
+  "noWaveData": false,
+  "noEnrichedData": false,
+  "proposals": [],
+  "unmapped": [
+    {
+      "signal": "outcome:fail-tests",
+      "count": 7,
+      "features": {
+        "enriched": 1,
+        "legacy": 1,
+        "mixed": 2,
+        "alpha": 1,
+        "tiered": 2
+      }
+    }
+  ]
+}
+=== 4g:empty ===
+{
+  "threshold": 3,
+  "noWaveData": true,
+  "noEnrichedData": true,
+  "proposals": [],
+  "unmapped": []
+}
+=== 4g:routed ===
+{
+  "threshold": 3,
+  "noWaveData": false,
+  "noEnrichedData": false,
+  "proposals": [
+    {
+      "signal": "blocked:blocked_spec",
+      "count": 3,
+      "features": {
+        "routed-a": 2,
+        "routed-b": 1
+      },
+      "target": ".claude/commands/team/rad-plan.md",
+      "section": "Step 3 task template (What:/Validate:) and \"Wave rules\"",
+      "note": null
+    },
+    {
+      "signal": "outcome:fail-protocol",
+      "count": 3,
+      "features": {
+        "routed-a": 2,
+        "routed-b": 1
+      },
+      "target": "harness/adapters/agent/contract.js",
+      "section": "buildWavePrompt \"## Return format\" block (prose mirror: .claude/commands/team/rad-deliver.md \"## Return format\")",
+      "note": "Preserve the #112 prefix-ordering constraint: order the template so a retry extends a prefix instead of rewriting one."
+    },
+    {
+      "signal": "outcome:fail-scope",
+      "count": 3,
+      "features": {
+        "routed-a": 1,
+        "routed-b": 2
+      },
+      "target": ".claude/commands/team/rad-plan.md",
+      "section": "Step 3 plan template, \"## Files in Scope\" guidance comment",
+      "note": null
+    }
+  ],
+  "unmapped": [
+    {
+      "signal": "blocked:blocked_code",
+      "count": 3,
+      "features": {
+        "routed-b": 3
+      }
+    },
+    {
+      "signal": "wave-failed:doom-loop",
+      "count": 3,
+      "features": {
+        "routed-a": 1,
+        "routed-b": 2
+      }
+    }
+  ]
+}

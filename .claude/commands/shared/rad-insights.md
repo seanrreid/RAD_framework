@@ -281,80 +281,19 @@ If no `.agents/state/*/events.jsonl` files exist, omit the cost section entirely
 
 ### Step 4c: Fold wave reliability from the event logs
 
-Reliability metrics come from the same per-feature audit logs as Step 4b, but the
+Reliability metrics come from the same per-feature audit logs as Step 4b. The
 counting logic is NOT re-implemented here — it lives in the pure read helpers
 exported by `harness/events.js` (`outcomeCounts`, `failReasonCounts`,
-`retryCounts`, `hookVetoCounts`, `totalUsage`). That module is the single source
-of truth for these folds; import it, never rewrite the counts in jq.
-
-`harness/events.js` is ESM, so use `node --input-type=module -e` (top-level
-`await import` works there and relative specifiers resolve against the cwd —
-run this from the repo root). `RAD_STATE_DIR` (default `.agents/state`) exists
-only so the same script is testable against a fixture dir:
+`retryCounts`, `hookVetoCounts`, `totalUsage`), and `harness/insights-reliability.js`
+aggregates them across features. Run it from the repo root and read its JSON
+output; do not rewrite the counts in jq. `RAD_STATE_DIR` (default
+`.agents/state`) exists only so the same module is testable against a fixture dir:
 
 ```bash
-node --input-type=module -e '
-import { readFileSync, readdirSync, existsSync } from "node:fs";
-import { join } from "node:path";
-const { outcomeCounts, failReasonCounts, retryCounts, hookVetoCounts, totalUsage } =
-  await import("./harness/events.js");
-
-const stateDir = process.env.RAD_STATE_DIR || ".agents/state";
-const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
-
-const features = existsSync(stateDir)
-  ? readdirSync(stateDir, { withFileTypes: true })
-      .filter((d) => d.isDirectory())
-      .map((d) => d.name)
-      .filter((f) => existsSync(join(stateDir, f, "events.jsonl")))
-      .sort()
-  : [];
-
-const agg = {
-  outcomes: outcomeCounts([]),
-  failReasons: failReasonCounts([]),
-  retries: { total: 0, retriedWaves: 0 },
-  hookVetoes: hookVetoCounts([]),
-  usage: totalUsage([]),
-};
-const perFeature = {};
-
-for (const feature of features) {
-  const history = readFileSync(join(stateDir, feature, "events.jsonl"), "utf8")
-    .split("\n").filter(Boolean).map((l) => JSON.parse(l));
-  const outcomes = outcomeCounts(history);
-  const failReasons = failReasonCounts(history);
-  const retries = retryCounts(history);
-  const vetoes = hookVetoCounts(history);
-  const usage = totalUsage(history);
-  // Per-wave token spend from wave-attempt data.usage (missing usage -> 0),
-  // mirroring the totalUsage total-vs-input+output preference per event.
-  const spendPerWave = {};
-  for (const e of history) {
-    if (!e || e.type !== "wave-attempt" || !e.data) continue;
-    const w = typeof e.data.wave === "number" && Number.isFinite(e.data.wave) ? String(e.data.wave) : "?";
-    const u = e.data.usage && typeof e.data.usage === "object" ? e.data.usage : null;
-    const t = u ? (Number.isFinite(u.total) ? u.total : num(u.input) + num(u.output)) : 0;
-    spendPerWave[w] = (spendPerWave[w] || 0) + t;
-  }
-  perFeature[feature] = { outcomes, failReasons, retries, hookVetoes: vetoes, usage, spendPerWave };
-
-  for (const k of Object.keys(agg.outcomes)) agg.outcomes[k] += outcomes[k];
-  agg.failReasons.total += failReasons.total;
-  for (const [r, n] of Object.entries(failReasons.reasons))
-    agg.failReasons.reasons[r] = (agg.failReasons.reasons[r] || 0) + n;
-  agg.retries.total += retries.total;
-  agg.retries.retriedWaves += retries.retriedWaves;
-  agg.hookVetoes.vetoes += vetoes.vetoes;
-  agg.hookVetoes.vetoedAttempts += vetoes.vetoedAttempts;
-  agg.usage.input += usage.input; agg.usage.output += usage.output; agg.usage.total += usage.total;
-}
-
-const noWaveData = agg.outcomes.total === 0 && agg.retries.total === 0 &&
-  agg.failReasons.total === 0 && agg.hookVetoes.vetoes === 0 && agg.hookVetoes.vetoedAttempts === 0;
-console.log(JSON.stringify({ noWaveData, aggregate: agg, perFeature }, null, 2));
-'
+node harness/insights-reliability.js
 ```
+
+The output is `{ noWaveData, aggregate, perFeature }`.
 
 Reading the output:
 
@@ -447,50 +386,16 @@ merged across plan docs with `mergeTaskFiles`) — shared with the plan-time
 `rad forecast` verb, so never re-implement it inline. This step passes the
 mapping to `fileFailureCounts` and `fileDeficitSignals` in `harness/events.js`
 — the folds themselves never touch the filesystem, and the counting must never
-be re-implemented in jq. Same invocation convention as Steps 4c/4d: run from
-the repo root; `RAD_STATE_DIR` (default `.agents/state`) and `RAD_PLANS_DIR`
-(default `.agents/plans`) exist only for fixture testing. This step only reads;
-it writes nothing.
+be re-implemented in jq. `harness/insights-blocked-files.js` joins them and prints the result. Same
+invocation convention as Steps 4c/4d: run from the repo root; `RAD_STATE_DIR`
+(default `.agents/state`) and `RAD_PLANS_DIR` (default `.agents/plans`) exist
+only for fixture testing. This step only reads; it writes nothing.
 
 ```bash
-node --input-type=module -e '
-import { readFileSync, readdirSync, existsSync } from "node:fs";
-import { join } from "node:path";
-const { fileFailureCounts, fileDeficitSignals } = await import("./harness/events.js");
-const { taskFilesFromPlanText, mergeTaskFiles } = await import("./harness/plan-tasks.js");
-
-const stateDir = process.env.RAD_STATE_DIR || ".agents/state";
-const plansDir = process.env.RAD_PLANS_DIR || ".agents/plans";
-
-const taskFiles = {};
-const planFiles = existsSync(plansDir)
-  ? readdirSync(plansDir).filter((f) => f.endsWith(".md")).sort() : [];
-for (const plan of planFiles) {
-  mergeTaskFiles(taskFiles, taskFilesFromPlanText(readFileSync(join(plansDir, plan), "utf8")));
-}
-
-const features = existsSync(stateDir)
-  ? readdirSync(stateDir, { withFileTypes: true })
-      .filter((d) => d.isDirectory())
-      .map((d) => d.name)
-      .filter((f) => existsSync(join(stateDir, f, "events.jsonl")))
-      .sort()
-  : [];
-// One history across all features; the feature name is stamped from the dir
-// only where an event omits it, so cross-feature counting always has a key.
-const history = features.flatMap((feature) =>
-  readFileSync(join(stateDir, feature, "events.jsonl"), "utf8")
-    .split("\n").filter(Boolean)
-    .map((l) => JSON.parse(l))
-    .map((e) => ({ ...e, feature: e.feature || feature })));
-
-const result = fileFailureCounts(history, taskFiles);
-const deficits = fileDeficitSignals(history, taskFiles);
-const mappedTitles = Object.keys(taskFiles).length;
-const reportedFiles = Object.keys(result.files).length;
-console.log(JSON.stringify({ mappedTitles, reportedFiles, ...result, deficits }, null, 2));
-'
+node harness/insights-blocked-files.js
 ```
+
+The output is `{ mappedTitles, reportedFiles, files, belowFloor, minFeatures, deficits }`.
 
 Reading the output:
 
@@ -797,11 +702,11 @@ under-specified or mis-aimed. This step routes each such signal to the one promp
 surface that shaped it (rationale: `docs/harness-and-framework.md`, "Prompt
 surfaces as a feedback-loop target").
 
-The routing is ONE table — `PROMPT_SURFACE_MAP` in the snippet below. It is data:
+The routing is ONE table — `PROMPT_SURFACE_MAP` at the top of `harness/insights-prompt-surfaces.js`. It is data:
 to route a new signal, add a row; never add a special case elsewhere. Counts come
 from folds in `harness/events.js` — `attemptOutcomeCounts`, `failReasonCounts`
-(Step 4c) and `blockedReasonCounts` (Step 4d); this step only compares them with
-the threshold and looks up the table. `outcome:*` rows read `attemptOutcomeCounts`,
+(Step 4c) and `blockedReasonCounts` (Step 4d); the module only compares them with
+the threshold and looks up the table, then prints the result. `outcome:*` rows read `attemptOutcomeCounts`,
 NOT `outcomeCounts`: the spine records the outcome only on `wave-attempt` events
 (`wave-complete` carries `{ wave }` alone), so wave-complete outcomes never show
 a failure on a real log. Same invocation
@@ -810,99 +715,10 @@ convention as Steps 4c–4f: run from the repo root; `RAD_STATE_DIR` (default
 nothing.
 
 ```bash
-node --input-type=module -e '
-import { readFileSync, readdirSync, existsSync } from "node:fs";
-import { join } from "node:path";
-const { attemptOutcomeCounts, failReasonCounts, blockedReasonCounts } =
-  await import("./harness/events.js");
-
-// Minimum aggregate count before a signal renders a proposal. Below it, a
-// signal describes one bad wave, not an instruction that keeps misleading.
-const PROMPT_SIGNAL_THRESHOLD = 3;
-
-// THE mapping table: signal -> the prompt surface that shaped it.
-const PROMPT_SURFACE_MAP = {
-  "outcome:fail-protocol": {
-    target: "harness/adapters/agent/contract.js",
-    section: "buildWavePrompt \"## Return format\" block (prose mirror: .claude/commands/team/rad-deliver.md \"## Return format\")",
-    note: "Preserve the #112 prefix-ordering constraint: order the template so a retry extends a prefix instead of rewriting one.",
-  },
-  "outcome:fail-scope": {
-    target: ".claude/commands/team/rad-plan.md",
-    section: "Step 3 plan template, \"## Files in Scope\" guidance comment",
-    note: null,
-  },
-  "blocked:blocked_spec": {
-    target: ".claude/commands/team/rad-plan.md",
-    section: "Step 3 task template (What:/Validate:) and \"Wave rules\"",
-    note: null,
-  },
-  "blocked:blocked_intent": {
-    target: ".claude/commands/team/rad-plan.md",
-    section: "Step 3 task template (What:/Validate:) and \"Wave rules\"",
-    note: null,
-  },
-};
-
-// Outcome keys that are not failure signals.
-const NON_SIGNAL_OUTCOMES = new Set(["success", "unknown", "total"]);
-const BLOCKED_KEYS = ["blocked_code", "blocked_spec", "blocked_intent"];
-
-const stateDir = process.env.RAD_STATE_DIR || ".agents/state";
-const features = existsSync(stateDir)
-  ? readdirSync(stateDir, { withFileTypes: true })
-      .filter((d) => d.isDirectory())
-      .map((d) => d.name)
-      .filter((f) => existsSync(join(stateDir, f, "events.jsonl")))
-      .sort()
-  : [];
-
-// signal -> { count, features: { feature: n } }
-const signals = {};
-const add = (signal, feature, n) => {
-  if (n <= 0) return;
-  const s = signals[signal] || (signals[signal] = { count: 0, features: {} });
-  s.count += n;
-  s.features[feature] = (s.features[feature] || 0) + n;
-};
-
-let waveEvents = 0;
-let enrichedAttempts = 0;
-for (const feature of features) {
-  const history = readFileSync(join(stateDir, feature, "events.jsonl"), "utf8")
-    .split("\n").filter(Boolean).map((l) => JSON.parse(l));
-  const attempts = attemptOutcomeCounts(history);
-  const failReasons = failReasonCounts(history);
-  const blocked = blockedReasonCounts(history);
-  waveEvents += attempts.counts.total + failReasons.total;
-  enrichedAttempts += blocked.enrichedAttempts;
-  // Attribute each outcome to the features the fold saw record it (the event
-  // `feature` field); fall back to the state-dir name if none was recorded.
-  for (const [k, n] of Object.entries(attempts.counts)) {
-    if (NON_SIGNAL_OUTCOMES.has(k)) continue;
-    const named = attempts.features[k] || [];
-    add(`outcome:${k}`, named.length === 1 ? named[0] : feature, n);
-  }
-  for (const [r, n] of Object.entries(failReasons.reasons)) add(`wave-failed:${r}`, feature, n);
-  for (const k of BLOCKED_KEYS) add(`blocked:${k}`, feature, blocked[k]);
-}
-
-const crossing = Object.entries(signals)
-  .filter(([, s]) => s.count >= PROMPT_SIGNAL_THRESHOLD)
-  .sort(([a, x], [b, y]) => y.count - x.count || a.localeCompare(b));
-const proposals = crossing.filter(([sig]) => PROMPT_SURFACE_MAP[sig])
-  .map(([signal, s]) => ({ signal, ...s, ...PROMPT_SURFACE_MAP[signal] }));
-const unmapped = crossing.filter(([sig]) => !PROMPT_SURFACE_MAP[sig])
-  .map(([signal, s]) => ({ signal, ...s }));
-
-console.log(JSON.stringify({
-  threshold: PROMPT_SIGNAL_THRESHOLD,
-  noWaveData: waveEvents === 0,
-  noEnrichedData: enrichedAttempts === 0,
-  proposals, unmapped,
-}, null, 2));
-'
+node harness/insights-prompt-surfaces.js
 ```
+
+The output is `{ threshold, noWaveData, noEnrichedData, proposals, unmapped }`.
 
 Reading the output:
 
