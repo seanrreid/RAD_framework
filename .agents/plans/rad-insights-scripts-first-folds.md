@@ -1,9 +1,9 @@
 # Plan: rad-insights scripts-first folds (4c, 4e, 4g)
 Created: 2026-11-16
 Author: architect
-Status: in-progress
+Status: approved
 Approved-By: sean@torchcodelab.com
-Approved-At: 2026-11-16T16:12:38.846Z
+Approved-At: 2026-11-16T16:28:41.090Z
 Recorded-By: sean@torchcodelab.com
 Branch: rad/rad-insights-scripts-first-folds
 Source-Author: none (no source issue)
@@ -16,7 +16,8 @@ of inline code every invocation. Steps 3d (`scripts/report-ledger-staleness.sh`)
 (`harness/human-corrections.js`) already show the scripts-first shape: a module does the
 deterministic fold and prints a compact section, and the skill only runs it and reads the
 output. This plan applies that shape to the three largest folds. It brings the skill to
-roughly 1180-1260 lines; reaching ~400-500 needs follow-up plans for 4f-4f4, 4h and 4i.
+about 1330 lines (a reduction of at least 165; wave 3 measured 1332); reaching ~400-500 needs
+follow-up plans for 4f-4f4, 4h and 4i.
 
 ## Scope
 | In scope | Out of scope |
@@ -31,7 +32,7 @@ roughly 1180-1260 lines; reaching ~400-500 needs follow-up plans for 4f-4f4, 4h 
 2. Parity: for each fold, the new module's output is byte-identical to golden output captured from the old inline snippet (at the base commit) on every fixture under `harness/test/fixtures/insights/` plus an empty state dir, and matches the old snippet on a read-only run against the live `.agents/state/*/events.jsonl` logs.
 3. Each module has a test for each named edge case: missing state dir, empty `events.jsonl`, missing field on an event, zero counts, and a non-array field; each case's expected behavior matches the old snippet and is asserted explicitly.
 4. In `.rad/skills/rad-insights/SKILL.md` the three snippets are replaced by run-and-read instructions; the interpretation prose, the Step 5 template and the strings pinned by `harness/test/skill-bodies.test.js` (`.agents/findings.jsonl`, `scripts/draft-insights-plan.sh`) are unchanged; the Step 5 template is byte-identical.
-5. The skill source shrinks from 1509 to 1260 lines or fewer.
+5. The skill source shrinks from 1509 to 1340 lines or fewer (a reduction of at least 165); the remaining inline snippets belong to out-of-scope steps and are handled by follow-up plans.
 6. `node harness/cli.js generate --check` passes, `npm test --prefix harness` passes, and `scripts/verify-all.sh` passes (including function-length and shell-safety lints).
 
 ## Agent Scope
@@ -59,6 +60,8 @@ plan touches; the plan runs under an architect author because it edits self-prot
 | harness/test/insights-prompt-surfaces.test.js | 1-60 | New: unit, parity and edge-case tests |
 | harness/test/fixtures/insights-parity/golden.txt | 1-60 | New: golden outputs captured from the old inline snippets |
 | harness/test/fixtures/insights-parity/plans/blocked-files.md | 1-14 | New: sample plan the 4e fold parses through plan-tasks.js in its tests |
+| harness/test/fixtures/insights-parity/prompt-surfaces/routed-a/events.jsonl | 1-10 | New: sample event log for the 4g routing tests |
+| harness/test/fixtures/insights-parity/prompt-surfaces/routed-b/events.jsonl | 1-10 | New: second sample event log for the 4g routing tests |
 
 ## Program Design
 Key signatures (each module; all functions kept under ~40 lines):
@@ -139,7 +142,7 @@ Validate: AC#4 — skill-bodies test passes and the Step 5 template is unchanged
 Depends on: Wave 2 complete. Step 4g: route recurring signals to prompt surfaces.
 
 #### Task 3.1: Capture golden output and write the 4g module
-File: harness/insights-prompt-surfaces.js:1-60, harness/test/fixtures/insights-parity/golden.txt:40-60
+File: harness/insights-prompt-surfaces.js:1-60, harness/test/fixtures/insights-parity/golden.txt:40-60, harness/test/fixtures/insights-parity/prompt-surfaces/routed-a/events.jsonl:1-10, harness/test/fixtures/insights-parity/prompt-surfaces/routed-b/events.jsonl:1-10
 What: Same procedure for the 4g snippet. `PROMPT_SURFACE_MAP` becomes one named table at the top of the module. Import `failReasonCounts`, `blockedReasonCounts` and `attemptOutcomeCounts` from `harness/events.js`; do not recompute them.
 Validate: AC#1 — folds imported not copied; AC#2 — output equals golden.
 
@@ -151,7 +154,7 @@ Validate: AC#2, AC#3.
 #### Task 3.3: Replace the 4g snippet in the skill and regenerate
 File: .rad/skills/rad-insights/SKILL.md:797-934
 What: Replace the snippet with a run-and-read instruction; the routing judgment prose stays in the skill. Regenerate.
-Validate: AC#4, AC#5 — skill source is 1260 lines or fewer.
+Validate: AC#4, AC#5 — skill source is 1340 lines or fewer.
 
 ### Wave 4 — sequential
 Depends on: Wave 3 complete. Verification and live-log parity.
@@ -184,6 +187,6 @@ None for agents. Paths `harness/`, `.rad/` and `.agents/skills/` are self-protec
 
 ## Risks
 - Behavior drift: output must match the old snippets exactly; the golden-before-delete rule and the live-log parity check guard this.
-- The skill reaches ~1180-1260 lines, not 400-500; the target needs the follow-up plans listed in Non-Goals.
+- The skill reaches ~1330 lines, not 400-500; the target needs the follow-up plans listed in Non-Goals.
 - Step 4g is coupled to 4c and 4d outputs; importing the folds from `events.js` (not copying) keeps the three consistent while 4d stays inline.
 - The Files in Scope line total is large because the generated outputs repeat the skill's changed regions; the linter warns above 800 lines but does not block.
