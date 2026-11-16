@@ -670,3 +670,187 @@
   },
   "perFeature": {}
 }
+=== 4e:enriched ===
+{
+  "mappedTitles": 3,
+  "reportedFiles": 0,
+  "files": {},
+  "belowFloor": 3,
+  "minFeatures": 2,
+  "deficits": {
+    "files": {},
+    "unattributable": 0,
+    "unenriched": 0,
+    "belowFloor": 2,
+    "minFeatures": 2
+  }
+}
+=== 4e:legacy ===
+{
+  "mappedTitles": 3,
+  "reportedFiles": 0,
+  "files": {},
+  "belowFloor": 0,
+  "minFeatures": 2,
+  "deficits": {
+    "files": {},
+    "unattributable": 0,
+    "unenriched": 4,
+    "belowFloor": 0,
+    "minFeatures": 2
+  }
+}
+=== 4e:mixed ===
+{
+  "mappedTitles": 3,
+  "reportedFiles": 0,
+  "files": {},
+  "belowFloor": 2,
+  "minFeatures": 2,
+  "deficits": {
+    "files": {},
+    "unattributable": 0,
+    "unenriched": 3,
+    "belowFloor": 2,
+    "minFeatures": 2
+  }
+}
+=== 4e:provider ===
+{
+  "mappedTitles": 3,
+  "reportedFiles": 0,
+  "files": {},
+  "belowFloor": 0,
+  "minFeatures": 2,
+  "deficits": {
+    "files": {},
+    "unattributable": 0,
+    "unenriched": 8,
+    "belowFloor": 0,
+    "minFeatures": 2
+  }
+}
+=== 4e:tiered ===
+{
+  "mappedTitles": 3,
+  "reportedFiles": 0,
+  "files": {},
+  "belowFloor": 0,
+  "minFeatures": 2,
+  "deficits": {
+    "files": {},
+    "unattributable": 0,
+    "unenriched": 10,
+    "belowFloor": 0,
+    "minFeatures": 2
+  }
+}
+=== 4e:all ===
+{
+  "mappedTitles": 3,
+  "reportedFiles": 2,
+  "files": {
+    "harness/events.js": {
+      "failures": 4,
+      "features": [
+        "enriched",
+        "mixed"
+      ]
+    },
+    "harness/test/events.test.js": {
+      "failures": 3,
+      "features": [
+        "enriched",
+        "mixed"
+      ]
+    }
+  },
+  "belowFloor": 1,
+  "minFeatures": 2,
+  "deficits": {
+    "files": {
+      "harness/events.js": {
+        "opaqueAbstraction": {
+          "features": [
+            "enriched",
+            "mixed"
+          ],
+          "waves": [
+            "enriched#2",
+            "mixed#3"
+          ],
+          "attempts": 2
+        },
+        "insufficientTesting": {
+          "features": [
+            "enriched",
+            "mixed"
+          ],
+          "waves": [
+            "enriched#2",
+            "mixed#3"
+          ],
+          "attempts": 2
+        }
+      },
+      "harness/test/events.test.js": {
+        "opaqueAbstraction": {
+          "features": [
+            "enriched",
+            "mixed"
+          ],
+          "waves": [
+            "enriched#2",
+            "mixed#3"
+          ],
+          "attempts": 2
+        },
+        "insufficientTesting": {
+          "features": [
+            "enriched",
+            "mixed"
+          ],
+          "waves": [
+            "enriched#2",
+            "mixed#3"
+          ],
+          "attempts": 2
+        }
+      }
+    },
+    "unattributable": 0,
+    "unenriched": 25,
+    "belowFloor": 0,
+    "minFeatures": 2
+  }
+}
+=== 4e:all-noplans ===
+{
+  "mappedTitles": 0,
+  "reportedFiles": 0,
+  "files": {},
+  "belowFloor": 0,
+  "minFeatures": 2,
+  "deficits": {
+    "files": {},
+    "unattributable": 3,
+    "unenriched": 25,
+    "belowFloor": 0,
+    "minFeatures": 2
+  }
+}
+=== 4e:empty ===
+{
+  "mappedTitles": 3,
+  "reportedFiles": 0,
+  "files": {},
+  "belowFloor": 0,
+  "minFeatures": 2,
+  "deficits": {
+    "files": {},
+    "unattributable": 0,
+    "unenriched": 0,
+    "belowFloor": 0,
+    "minFeatures": 2
+  }
+}
