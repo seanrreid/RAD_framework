@@ -328,39 +328,16 @@ Reading the output:
 Blocked-reason metrics read the OPTIONAL per-task records (`data.tasks`, see
 `docs/rad-wave-contract.md`) that newer `wave-attempt` events carry. As in Step
 4c, the counting lives in `harness/events.js` (`blockedReasonCounts`) — import
-it, never re-implement it in jq. Same invocation convention: run from the repo
-root; `RAD_STATE_DIR` (default `.agents/state`) exists only for fixture testing.
-This step only reads; it writes nothing.
+it, never re-implement it in jq; `harness/insights-blocked-reasons.js`
+aggregates it across features. Same invocation convention: run from the repo
+root and read its JSON output; `RAD_STATE_DIR` (default `.agents/state`) exists
+only for fixture testing. This step only reads; it writes nothing.
 
 ```bash
-node --input-type=module -e '
-import { readFileSync, readdirSync, existsSync } from "node:fs";
-import { join } from "node:path";
-const { blockedReasonCounts } = await import("./harness/events.js");
-
-const stateDir = process.env.RAD_STATE_DIR || ".agents/state";
-const features = existsSync(stateDir)
-  ? readdirSync(stateDir, { withFileTypes: true })
-      .filter((d) => d.isDirectory())
-      .map((d) => d.name)
-      .filter((f) => existsSync(join(stateDir, f, "events.jsonl")))
-      .sort()
-  : [];
-
-const aggregate = blockedReasonCounts([]);
-const perFeature = {};
-for (const feature of features) {
-  const history = readFileSync(join(stateDir, feature, "events.jsonl"), "utf8")
-    .split("\n").filter(Boolean).map((l) => JSON.parse(l));
-  const counts = blockedReasonCounts(history);
-  perFeature[feature] = counts;
-  for (const k of Object.keys(aggregate)) aggregate[k] += counts[k];
-}
-
-const noEnrichedData = aggregate.enrichedAttempts === 0;
-console.log(JSON.stringify({ noEnrichedData, aggregate, perFeature }, null, 2));
-'
+node harness/insights-blocked-reasons.js
 ```
+
+The output is `{ noEnrichedData, aggregate, perFeature }`.
 
 Reading the output:
 
