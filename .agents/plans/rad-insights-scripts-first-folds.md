@@ -1,9 +1,9 @@
 # Plan: rad-insights scripts-first folds (4c, 4e, 4g)
 Created: 2026-11-16
 Author: architect
-Status: in-progress
+Status: approved
 Approved-By: sean@torchcodelab.com
-Approved-At: 2026-11-16T15:49:32.988Z
+Approved-At: 2026-11-16T16:12:38.846Z
 Recorded-By: sean@torchcodelab.com
 Branch: rad/rad-insights-scripts-first-folds
 Source-Author: none (no source issue)
@@ -58,6 +58,7 @@ plan touches; the plan runs under an architect author because it edits self-prot
 | harness/test/insights-blocked-files.test.js | 1-60 | New: unit, parity and edge-case tests |
 | harness/test/insights-prompt-surfaces.test.js | 1-60 | New: unit, parity and edge-case tests |
 | harness/test/fixtures/insights-parity/golden.txt | 1-60 | New: golden outputs captured from the old inline snippets |
+| harness/test/fixtures/insights-parity/plans/blocked-files.md | 1-14 | New: sample plan the 4e fold parses through plan-tasks.js in its tests |
 
 ## Program Design
 Key signatures (each module; all functions kept under ~40 lines):
@@ -120,7 +121,7 @@ Validate: AC#4 — pinned strings and Step 5 template unchanged; `node --test ha
 Depends on: Wave 1 complete. Step 4e: blocked-task file attribution.
 
 #### Task 2.1: Capture golden output and write the 4e module
-File: harness/insights-blocked-files.js:1-60, harness/test/fixtures/insights-parity/golden.txt:20-40
+File: harness/insights-blocked-files.js:1-60, harness/test/fixtures/insights-parity/golden.txt:20-40, harness/test/fixtures/insights-parity/plans/blocked-files.md:1-14
 What: Same procedure as Task 1.1 for the 4e snippet; import `harness/plan-tasks.js` instead of re-implementing the parser, and reuse `findingsByFile` from `harness/findings.js` only if it matches the old output exactly.
 Validate: AC#1 — imports plan-tasks.js and events.js, no copies; AC#2 — output equals golden.
 
