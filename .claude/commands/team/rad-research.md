@@ -111,7 +111,7 @@ A few things the spec won't tell me:
    If there's no designated architect, say so — one person can fill both roles.
 
 2. **Platform:** Where does your git repo live?
-   github | gitlab | bitbucket | forgejo | manual (I'll print instructions instead of running CLI)
+   github | gitlab | bitbucket | forgejo | manual (I'll list the steps for you instead of running the CLI)
 
 3. **Domain sensitivity:** Based on the domains above — [list extracted domains] —
    which should be architect-only vs. open to all developers?

@@ -1,11 +1,9 @@
 ---
 name: rad-plan
 description: >
-  Plan a feature or bug fix within your role's agent boundaries. Delegates
-  codebase research to a research sub-agent (or inline research) that returns bounded summaries.
-  Main context receives only the research summary, then generates a
-  wave-structured plan file, cuts a rad/ work branch, and commits the plan to it.
-  No PR is opened — execution is blocked until the architect runs rad-approve.
+  Plans a feature or bug fix: researches the codebase within the role's agent
+  scope, writes a wave-structured plan, and commits it to a rad/ work branch.
+  Use before rad-approve; opens no PR and blocks execution until approved.
 targets:
   claude: command:team/rad-plan
   codex: skill
