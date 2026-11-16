@@ -1,0 +1,672 @@
+=== enriched ===
+{
+  "noWaveData": false,
+  "aggregate": {
+    "outcomes": {
+      "success": 2,
+      "fail-tests": 0,
+      "fail-scope": 0,
+      "fail-protocol": 0,
+      "fail-timeout": 0,
+      "no-changes": 0,
+      "abort-user": 1,
+      "unknown": 0,
+      "total": 3
+    },
+    "failReasons": {
+      "total": 2,
+      "reasons": {
+        "budget-exhausted": 1,
+        "abort-user": 1
+      }
+    },
+    "retries": {
+      "total": 5,
+      "retriedWaves": 1
+    },
+    "hookVetoes": {
+      "vetoes": 1,
+      "vetoedAttempts": 1
+    },
+    "usage": {
+      "input": 420,
+      "output": 105,
+      "total": 525
+    }
+  },
+  "perFeature": {
+    "enriched": {
+      "outcomes": {
+        "success": 2,
+        "fail-tests": 0,
+        "fail-scope": 0,
+        "fail-protocol": 0,
+        "fail-timeout": 0,
+        "no-changes": 0,
+        "abort-user": 1,
+        "unknown": 0,
+        "total": 3
+      },
+      "failReasons": {
+        "total": 2,
+        "reasons": {
+          "budget-exhausted": 1,
+          "abort-user": 1
+        }
+      },
+      "retries": {
+        "total": 5,
+        "retriedWaves": 1,
+        "perWave": {
+          "1": 1,
+          "2": 3,
+          "3": 1
+        }
+      },
+      "hookVetoes": {
+        "vetoes": 1,
+        "vetoedAttempts": 1
+      },
+      "usage": {
+        "input": 420,
+        "output": 105,
+        "total": 525
+      },
+      "spendPerWave": {
+        "1": 250,
+        "2": 225,
+        "3": 50
+      }
+    }
+  }
+}
+=== legacy ===
+{
+  "noWaveData": false,
+  "aggregate": {
+    "outcomes": {
+      "success": 2,
+      "fail-tests": 0,
+      "fail-scope": 0,
+      "fail-protocol": 0,
+      "fail-timeout": 1,
+      "no-changes": 0,
+      "abort-user": 0,
+      "unknown": 0,
+      "total": 3
+    },
+    "failReasons": {
+      "total": 1,
+      "reasons": {
+        "unknown": 1
+      }
+    },
+    "retries": {
+      "total": 4,
+      "retriedWaves": 1
+    },
+    "hookVetoes": {
+      "vetoes": 0,
+      "vetoedAttempts": 0
+    },
+    "usage": {
+      "input": 180,
+      "output": 60,
+      "total": 240
+    }
+  },
+  "perFeature": {
+    "legacy": {
+      "outcomes": {
+        "success": 2,
+        "fail-tests": 0,
+        "fail-scope": 0,
+        "fail-protocol": 0,
+        "fail-timeout": 1,
+        "no-changes": 0,
+        "abort-user": 0,
+        "unknown": 0,
+        "total": 3
+      },
+      "failReasons": {
+        "total": 1,
+        "reasons": {
+          "unknown": 1
+        }
+      },
+      "retries": {
+        "total": 4,
+        "retriedWaves": 1,
+        "perWave": {
+          "1": 1,
+          "2": 2,
+          "3": 1
+        }
+      },
+      "hookVetoes": {
+        "vetoes": 0,
+        "vetoedAttempts": 0
+      },
+      "usage": {
+        "input": 180,
+        "output": 60,
+        "total": 240
+      },
+      "spendPerWave": {
+        "1": 140,
+        "2": 100,
+        "3": 0
+      }
+    }
+  }
+}
+=== mixed ===
+{
+  "noWaveData": false,
+  "aggregate": {
+    "outcomes": {
+      "success": 1,
+      "fail-tests": 1,
+      "fail-scope": 0,
+      "fail-protocol": 0,
+      "fail-timeout": 0,
+      "no-changes": 1,
+      "abort-user": 0,
+      "unknown": 0,
+      "total": 3
+    },
+    "failReasons": {
+      "total": 2,
+      "reasons": {
+        "doom-loop": 1,
+        "unknown": 1
+      }
+    },
+    "retries": {
+      "total": 5,
+      "retriedWaves": 2
+    },
+    "hookVetoes": {
+      "vetoes": 1,
+      "vetoedAttempts": 0
+    },
+    "usage": {
+      "input": 150,
+      "output": 35,
+      "total": 225
+    }
+  },
+  "perFeature": {
+    "mixed": {
+      "outcomes": {
+        "success": 1,
+        "fail-tests": 1,
+        "fail-scope": 0,
+        "fail-protocol": 0,
+        "fail-timeout": 0,
+        "no-changes": 1,
+        "abort-user": 0,
+        "unknown": 0,
+        "total": 3
+      },
+      "failReasons": {
+        "total": 2,
+        "reasons": {
+          "doom-loop": 1,
+          "unknown": 1
+        }
+      },
+      "retries": {
+        "total": 5,
+        "retriedWaves": 2,
+        "perWave": {
+          "1": 2,
+          "2": 1,
+          "3": 2
+        }
+      },
+      "hookVetoes": {
+        "vetoes": 1,
+        "vetoedAttempts": 0
+      },
+      "usage": {
+        "input": 150,
+        "output": 35,
+        "total": 225
+      },
+      "spendPerWave": {
+        "1": 150,
+        "2": 0,
+        "3": 75
+      }
+    }
+  }
+}
+=== provider ===
+{
+  "noWaveData": false,
+  "aggregate": {
+    "outcomes": {
+      "success": 6,
+      "fail-tests": 0,
+      "fail-scope": 0,
+      "fail-protocol": 0,
+      "fail-timeout": 0,
+      "no-changes": 0,
+      "abort-user": 0,
+      "unknown": 0,
+      "total": 6
+    },
+    "failReasons": {
+      "total": 0,
+      "reasons": {}
+    },
+    "retries": {
+      "total": 9,
+      "retriedWaves": 2
+    },
+    "hookVetoes": {
+      "vetoes": 0,
+      "vetoedAttempts": 0
+    },
+    "usage": {
+      "input": 840,
+      "output": 305,
+      "total": 1145
+    }
+  },
+  "perFeature": {
+    "provider": {
+      "outcomes": {
+        "success": 6,
+        "fail-tests": 0,
+        "fail-scope": 0,
+        "fail-protocol": 0,
+        "fail-timeout": 0,
+        "no-changes": 0,
+        "abort-user": 0,
+        "unknown": 0,
+        "total": 6
+      },
+      "failReasons": {
+        "total": 0,
+        "reasons": {}
+      },
+      "retries": {
+        "total": 9,
+        "retriedWaves": 2,
+        "perWave": {
+          "1": 5,
+          "2": 3
+        }
+      },
+      "hookVetoes": {
+        "vetoes": 0,
+        "vetoedAttempts": 0
+      },
+      "usage": {
+        "input": 840,
+        "output": 305,
+        "total": 1145
+      },
+      "spendPerWave": {
+        "1": 345,
+        "2": 800
+      }
+    }
+  }
+}
+=== tiered ===
+{
+  "noWaveData": false,
+  "aggregate": {
+    "outcomes": {
+      "success": 8,
+      "fail-tests": 0,
+      "fail-scope": 0,
+      "fail-protocol": 0,
+      "fail-timeout": 0,
+      "no-changes": 0,
+      "abort-user": 0,
+      "unknown": 0,
+      "total": 8
+    },
+    "failReasons": {
+      "total": 0,
+      "reasons": {}
+    },
+    "retries": {
+      "total": 10,
+      "retriedWaves": 2
+    },
+    "hookVetoes": {
+      "vetoes": 0,
+      "vetoedAttempts": 0
+    },
+    "usage": {
+      "input": 1120,
+      "output": 285,
+      "total": 1405
+    }
+  },
+  "perFeature": {
+    "tiered": {
+      "outcomes": {
+        "success": 8,
+        "fail-tests": 0,
+        "fail-scope": 0,
+        "fail-protocol": 0,
+        "fail-timeout": 0,
+        "no-changes": 0,
+        "abort-user": 0,
+        "unknown": 0,
+        "total": 8
+      },
+      "failReasons": {
+        "total": 0,
+        "reasons": {}
+      },
+      "retries": {
+        "total": 10,
+        "retriedWaves": 2,
+        "perWave": {
+          "1": 6,
+          "2": 4
+        }
+      },
+      "hookVetoes": {
+        "vetoes": 0,
+        "vetoedAttempts": 0
+      },
+      "usage": {
+        "input": 1120,
+        "output": 285,
+        "total": 1405
+      },
+      "spendPerWave": {
+        "1": 640,
+        "2": 765
+      }
+    }
+  }
+}
+=== all ===
+{
+  "noWaveData": false,
+  "aggregate": {
+    "outcomes": {
+      "success": 19,
+      "fail-tests": 1,
+      "fail-scope": 0,
+      "fail-protocol": 0,
+      "fail-timeout": 1,
+      "no-changes": 1,
+      "abort-user": 1,
+      "unknown": 0,
+      "total": 23
+    },
+    "failReasons": {
+      "total": 5,
+      "reasons": {
+        "budget-exhausted": 1,
+        "abort-user": 1,
+        "unknown": 2,
+        "doom-loop": 1
+      }
+    },
+    "retries": {
+      "total": 33,
+      "retriedWaves": 8
+    },
+    "hookVetoes": {
+      "vetoes": 2,
+      "vetoedAttempts": 1
+    },
+    "usage": {
+      "input": 2710,
+      "output": 790,
+      "total": 3540
+    }
+  },
+  "perFeature": {
+    "enriched": {
+      "outcomes": {
+        "success": 2,
+        "fail-tests": 0,
+        "fail-scope": 0,
+        "fail-protocol": 0,
+        "fail-timeout": 0,
+        "no-changes": 0,
+        "abort-user": 1,
+        "unknown": 0,
+        "total": 3
+      },
+      "failReasons": {
+        "total": 2,
+        "reasons": {
+          "budget-exhausted": 1,
+          "abort-user": 1
+        }
+      },
+      "retries": {
+        "total": 5,
+        "retriedWaves": 1,
+        "perWave": {
+          "1": 1,
+          "2": 3,
+          "3": 1
+        }
+      },
+      "hookVetoes": {
+        "vetoes": 1,
+        "vetoedAttempts": 1
+      },
+      "usage": {
+        "input": 420,
+        "output": 105,
+        "total": 525
+      },
+      "spendPerWave": {
+        "1": 250,
+        "2": 225,
+        "3": 50
+      }
+    },
+    "legacy": {
+      "outcomes": {
+        "success": 2,
+        "fail-tests": 0,
+        "fail-scope": 0,
+        "fail-protocol": 0,
+        "fail-timeout": 1,
+        "no-changes": 0,
+        "abort-user": 0,
+        "unknown": 0,
+        "total": 3
+      },
+      "failReasons": {
+        "total": 1,
+        "reasons": {
+          "unknown": 1
+        }
+      },
+      "retries": {
+        "total": 4,
+        "retriedWaves": 1,
+        "perWave": {
+          "1": 1,
+          "2": 2,
+          "3": 1
+        }
+      },
+      "hookVetoes": {
+        "vetoes": 0,
+        "vetoedAttempts": 0
+      },
+      "usage": {
+        "input": 180,
+        "output": 60,
+        "total": 240
+      },
+      "spendPerWave": {
+        "1": 140,
+        "2": 100,
+        "3": 0
+      }
+    },
+    "mixed": {
+      "outcomes": {
+        "success": 1,
+        "fail-tests": 1,
+        "fail-scope": 0,
+        "fail-protocol": 0,
+        "fail-timeout": 0,
+        "no-changes": 1,
+        "abort-user": 0,
+        "unknown": 0,
+        "total": 3
+      },
+      "failReasons": {
+        "total": 2,
+        "reasons": {
+          "doom-loop": 1,
+          "unknown": 1
+        }
+      },
+      "retries": {
+        "total": 5,
+        "retriedWaves": 2,
+        "perWave": {
+          "1": 2,
+          "2": 1,
+          "3": 2
+        }
+      },
+      "hookVetoes": {
+        "vetoes": 1,
+        "vetoedAttempts": 0
+      },
+      "usage": {
+        "input": 150,
+        "output": 35,
+        "total": 225
+      },
+      "spendPerWave": {
+        "1": 150,
+        "2": 0,
+        "3": 75
+      }
+    },
+    "provider": {
+      "outcomes": {
+        "success": 6,
+        "fail-tests": 0,
+        "fail-scope": 0,
+        "fail-protocol": 0,
+        "fail-timeout": 0,
+        "no-changes": 0,
+        "abort-user": 0,
+        "unknown": 0,
+        "total": 6
+      },
+      "failReasons": {
+        "total": 0,
+        "reasons": {}
+      },
+      "retries": {
+        "total": 9,
+        "retriedWaves": 2,
+        "perWave": {
+          "1": 5,
+          "2": 3
+        }
+      },
+      "hookVetoes": {
+        "vetoes": 0,
+        "vetoedAttempts": 0
+      },
+      "usage": {
+        "input": 840,
+        "output": 305,
+        "total": 1145
+      },
+      "spendPerWave": {
+        "1": 345,
+        "2": 800
+      }
+    },
+    "tiered": {
+      "outcomes": {
+        "success": 8,
+        "fail-tests": 0,
+        "fail-scope": 0,
+        "fail-protocol": 0,
+        "fail-timeout": 0,
+        "no-changes": 0,
+        "abort-user": 0,
+        "unknown": 0,
+        "total": 8
+      },
+      "failReasons": {
+        "total": 0,
+        "reasons": {}
+      },
+      "retries": {
+        "total": 10,
+        "retriedWaves": 2,
+        "perWave": {
+          "1": 6,
+          "2": 4
+        }
+      },
+      "hookVetoes": {
+        "vetoes": 0,
+        "vetoedAttempts": 0
+      },
+      "usage": {
+        "input": 1120,
+        "output": 285,
+        "total": 1405
+      },
+      "spendPerWave": {
+        "1": 640,
+        "2": 765
+      }
+    }
+  }
+}
+=== empty ===
+{
+  "noWaveData": true,
+  "aggregate": {
+    "outcomes": {
+      "success": 0,
+      "fail-tests": 0,
+      "fail-scope": 0,
+      "fail-protocol": 0,
+      "fail-timeout": 0,
+      "no-changes": 0,
+      "abort-user": 0,
+      "unknown": 0,
+      "total": 0
+    },
+    "failReasons": {
+      "total": 0,
+      "reasons": {}
+    },
+    "retries": {
+      "total": 0,
+      "retriedWaves": 0
+    },
+    "hookVetoes": {
+      "vetoes": 0,
+      "vetoedAttempts": 0
+    },
+    "usage": {
+      "input": 0,
+      "output": 0,
+      "total": 0
+    }
+  },
+  "perFeature": {}
+}
