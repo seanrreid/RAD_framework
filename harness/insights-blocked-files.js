@@ -11,9 +11,8 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { fileFailureCounts, fileDeficitSignals } from './events.js';
 import { taskFilesFromPlanText, mergeTaskFiles } from './plan-tasks.js';
-import { listFeatures, readHistory } from './insights-reliability.js';
+import { DEFAULT_STATE_DIR, listFeatures, readHistory } from './insights-state.js';
 
-const DEFAULT_STATE_DIR = join('.agents', 'state');
 const DEFAULT_PLANS_DIR = join('.agents', 'plans');
 const PLAN_EXTENSION = '.md';
 const JSON_INDENT = 2;

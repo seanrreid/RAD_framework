@@ -7,12 +7,10 @@
  * it prints the section as JSON, honoring `RAD_STATE_DIR` (default `.agents/state`).
  */
 import { realpathSync } from 'node:fs';
-import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { attemptOutcomeCounts, failReasonCounts, blockedReasonCounts } from './events.js';
-import { listFeatures, readHistory } from './insights-reliability.js';
+import { DEFAULT_STATE_DIR, listFeatures, readHistory } from './insights-state.js';
 
-const DEFAULT_STATE_DIR = join('.agents', 'state');
 const JSON_INDENT = 2;
 
 // Minimum aggregate count before a signal renders a proposal. Below it, a

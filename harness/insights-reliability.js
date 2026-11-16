@@ -6,34 +6,14 @@
  * it prints the section as JSON, honoring `RAD_STATE_DIR` (default
  * `.agents/state`).
  */
-import { readFileSync, readdirSync, existsSync, realpathSync } from 'node:fs';
-import { join } from 'node:path';
+import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { outcomeCounts, failReasonCounts, retryCounts, hookVetoCounts, totalUsage } from './events.js';
+import { DEFAULT_STATE_DIR, UNKNOWN_WAVE, WAVE_ATTEMPT, listFeatures, readHistory } from './insights-state.js';
 
-const DEFAULT_STATE_DIR = join('.agents', 'state');
-const EVENT_LOG = 'events.jsonl';
-const WAVE_ATTEMPT = 'wave-attempt';
-const UNKNOWN_WAVE = '?';
 const JSON_INDENT = 2;
 
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
-
-/** Sorted names of the feature dirs under `stateDir` that hold an events.jsonl. */
-export function listFeatures(stateDir) {
-  if (!existsSync(stateDir)) return [];
-  return readdirSync(stateDir, { withFileTypes: true })
-    .filter((d) => d.isDirectory())
-    .map((d) => d.name)
-    .filter((f) => existsSync(join(stateDir, f, EVENT_LOG)))
-    .sort();
-}
-
-/** Parse one feature's events.jsonl; a malformed line throws (fail-closed). */
-export function readHistory(stateDir, feature) {
-  return readFileSync(join(stateDir, feature, EVENT_LOG), 'utf8')
-    .split('\n').filter(Boolean).map((l) => JSON.parse(l));
-}
 
 /** Token spend of one wave-attempt usage block; missing or malformed -> 0. */
 function attemptSpend(usage) {
@@ -41,7 +21,12 @@ function attemptSpend(usage) {
   return Number.isFinite(usage.total) ? usage.total : num(usage.input) + num(usage.output);
 }
 
-/** Per-wave token spend from wave-attempt `data.usage` (missing usage -> 0). */
+/**
+ * Per-wave token spend from wave-attempt `data.usage` (missing usage -> 0). Unlike
+ * the Step 4b `perWaveTotals` (explicit `usage.total` only, jq parity), this infers
+ * input + output when `total` is absent and buckets a non-numeric wave as unknown,
+ * so the two can differ on legacy events.
+ */
 export function spendPerWave(history) {
   const spend = {};
   for (const e of history) {
@@ -64,6 +49,11 @@ function featureReliability(history) {
   };
 }
 
+/**
+ * Zero aggregate. `perWave` (spendPerWave) is deliberately omitted: wave numbers
+ * restart per feature, so per-wave spend is only meaningful per feature and is
+ * never summed across features.
+ */
 function emptyAggregate() {
   return {
     outcomes: outcomeCounts([]),

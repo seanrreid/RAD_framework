@@ -980,3 +980,201 @@
     }
   ]
 }
+=== 4d:enriched ===
+{
+  "noEnrichedData": false,
+  "aggregate": {
+    "enrichedAttempts": 5,
+    "blocked_code": 1,
+    "blocked_spec": 1,
+    "blocked_intent": 1
+  },
+  "perFeature": {
+    "enriched": {
+      "enrichedAttempts": 5,
+      "blocked_code": 1,
+      "blocked_spec": 1,
+      "blocked_intent": 1
+    }
+  }
+}
+=== 4d:legacy ===
+{
+  "noEnrichedData": true,
+  "aggregate": {
+    "enrichedAttempts": 0,
+    "blocked_code": 0,
+    "blocked_spec": 0,
+    "blocked_intent": 0
+  },
+  "perFeature": {
+    "legacy": {
+      "enrichedAttempts": 0,
+      "blocked_code": 0,
+      "blocked_spec": 0,
+      "blocked_intent": 0
+    }
+  }
+}
+=== 4d:mixed ===
+{
+  "noEnrichedData": false,
+  "aggregate": {
+    "enrichedAttempts": 2,
+    "blocked_code": 1,
+    "blocked_spec": 0,
+    "blocked_intent": 0
+  },
+  "perFeature": {
+    "mixed": {
+      "enrichedAttempts": 2,
+      "blocked_code": 1,
+      "blocked_spec": 0,
+      "blocked_intent": 0
+    }
+  }
+}
+=== 4d:provider ===
+{
+  "noEnrichedData": true,
+  "aggregate": {
+    "enrichedAttempts": 0,
+    "blocked_code": 0,
+    "blocked_spec": 0,
+    "blocked_intent": 0
+  },
+  "perFeature": {
+    "provider": {
+      "enrichedAttempts": 0,
+      "blocked_code": 0,
+      "blocked_spec": 0,
+      "blocked_intent": 0
+    }
+  }
+}
+=== 4d:tiered ===
+{
+  "noEnrichedData": true,
+  "aggregate": {
+    "enrichedAttempts": 0,
+    "blocked_code": 0,
+    "blocked_spec": 0,
+    "blocked_intent": 0
+  },
+  "perFeature": {
+    "tiered": {
+      "enrichedAttempts": 0,
+      "blocked_code": 0,
+      "blocked_spec": 0,
+      "blocked_intent": 0
+    }
+  }
+}
+=== 4d:all ===
+{
+  "noEnrichedData": false,
+  "aggregate": {
+    "enrichedAttempts": 7,
+    "blocked_code": 2,
+    "blocked_spec": 1,
+    "blocked_intent": 1
+  },
+  "perFeature": {
+    "enriched": {
+      "enrichedAttempts": 5,
+      "blocked_code": 1,
+      "blocked_spec": 1,
+      "blocked_intent": 1
+    },
+    "legacy": {
+      "enrichedAttempts": 0,
+      "blocked_code": 0,
+      "blocked_spec": 0,
+      "blocked_intent": 0
+    },
+    "mixed": {
+      "enrichedAttempts": 2,
+      "blocked_code": 1,
+      "blocked_spec": 0,
+      "blocked_intent": 0
+    },
+    "provider": {
+      "enrichedAttempts": 0,
+      "blocked_code": 0,
+      "blocked_spec": 0,
+      "blocked_intent": 0
+    },
+    "tiered": {
+      "enrichedAttempts": 0,
+      "blocked_code": 0,
+      "blocked_spec": 0,
+      "blocked_intent": 0
+    }
+  }
+}
+=== 4d:empty ===
+{
+  "noEnrichedData": true,
+  "aggregate": {
+    "enrichedAttempts": 0,
+    "blocked_code": 0,
+    "blocked_spec": 0,
+    "blocked_intent": 0
+  },
+  "perFeature": {}
+}
+=== 4b:enriched ===
+enriched	525
+# waves enriched
+1	250
+2	225
+3	50
+=== 4b:legacy ===
+legacy	140
+# waves legacy
+1	140
+2	0
+3	0
+=== 4b:mixed ===
+mixed	190
+# waves mixed
+1	150
+2	0
+3	40
+=== 4b:provider ===
+provider	1145
+# waves provider
+?	0
+1	345
+2	800
+=== 4b:tiered ===
+tiered	1405
+# waves tiered
+1	640
+2	765
+=== 4b:all ===
+enriched	525
+legacy	140
+mixed	190
+provider	1145
+tiered	1405
+# waves enriched
+1	250
+2	225
+3	50
+# waves legacy
+1	140
+2	0
+3	0
+# waves mixed
+1	150
+2	0
+3	40
+# waves provider
+?	0
+1	345
+2	800
+# waves tiered
+1	640
+2	765
+=== 4b:empty ===
