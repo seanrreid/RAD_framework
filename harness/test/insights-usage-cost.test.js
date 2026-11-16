@@ -94,7 +94,9 @@ test('parity: an empty state dir equals the old (empty) jq output', () => {
 });
 
 test('edge: missing state dir -> noData, no features, exit 0', () => {
-  assert.deepStrictEqual(run(join(tmpdir(), 'insights-usage-no-state')), { noData: true, perFeature: {} });
+  withTmp(makeTmp(), (dir) => {
+    assert.deepStrictEqual(run(join(dir, 'absent')), { noData: true, perFeature: {} });
+  });
 });
 
 test('edge: empty events.jsonl lists the feature with zero cost and unknown usage', () => {

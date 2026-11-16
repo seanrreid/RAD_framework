@@ -9,10 +9,8 @@
 import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { outcomeCounts, failReasonCounts, retryCounts, hookVetoCounts, totalUsage } from './events.js';
-import { DEFAULT_STATE_DIR, listFeatures, readHistory } from './insights-state.js';
+import { DEFAULT_STATE_DIR, UNKNOWN_WAVE, WAVE_ATTEMPT, listFeatures, readHistory } from './insights-state.js';
 
-const WAVE_ATTEMPT = 'wave-attempt';
-const UNKNOWN_WAVE = '?';
 const JSON_INDENT = 2;
 
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
@@ -23,7 +21,12 @@ function attemptSpend(usage) {
   return Number.isFinite(usage.total) ? usage.total : num(usage.input) + num(usage.output);
 }
 
-/** Per-wave token spend from wave-attempt `data.usage` (missing usage -> 0). */
+/**
+ * Per-wave token spend from wave-attempt `data.usage` (missing usage -> 0). Unlike
+ * the Step 4b `perWaveTotals` (explicit `usage.total` only, jq parity), this infers
+ * input + output when `total` is absent and buckets a non-numeric wave as unknown,
+ * so the two can differ on legacy events.
+ */
 export function spendPerWave(history) {
   const spend = {};
   for (const e of history) {

@@ -68,8 +68,10 @@ test('parity: an empty state dir matches the golden', () => {
 });
 
 test('edge: missing state dir -> noEnrichedData with zero counts, exit 0', () => {
-  const out = JSON.parse(run(join(tmpdir(), 'insights-reasons-no-state')));
-  assert.deepStrictEqual(out, { noEnrichedData: true, aggregate: ZERO_COUNTS, perFeature: {} });
+  withTmp(makeTmp(), (dir) => {
+    const out = JSON.parse(run(join(dir, 'absent')));
+    assert.deepStrictEqual(out, { noEnrichedData: true, aggregate: ZERO_COUNTS, perFeature: {} });
+  });
 });
 
 test('edge: empty events.jsonl lists the feature with zero counts and noEnrichedData', () => {

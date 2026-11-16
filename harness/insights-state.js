@@ -8,6 +8,10 @@ import { join } from 'node:path';
 
 export const DEFAULT_STATE_DIR = join('.agents', 'state');
 export const EVENT_LOG = 'events.jsonl';
+// Shared by the wave-attempt folds (4b usage cost, 4c reliability) so the event name
+// and the unknown-wave bucket cannot drift between them.
+export const WAVE_ATTEMPT = 'wave-attempt';
+export const UNKNOWN_WAVE = '?';
 
 /** Sorted names of the feature dirs under `stateDir` that hold an events.jsonl. */
 export function listFeatures(stateDir) {
