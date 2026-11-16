@@ -281,80 +281,19 @@ If no `.agents/state/*/events.jsonl` files exist, omit the cost section entirely
 
 ### Step 4c: Fold wave reliability from the event logs
 
-Reliability metrics come from the same per-feature audit logs as Step 4b, but the
+Reliability metrics come from the same per-feature audit logs as Step 4b. The
 counting logic is NOT re-implemented here — it lives in the pure read helpers
 exported by `harness/events.js` (`outcomeCounts`, `failReasonCounts`,
-`retryCounts`, `hookVetoCounts`, `totalUsage`). That module is the single source
-of truth for these folds; import it, never rewrite the counts in jq.
-
-`harness/events.js` is ESM, so use `node --input-type=module -e` (top-level
-`await import` works there and relative specifiers resolve against the cwd —
-run this from the repo root). `RAD_STATE_DIR` (default `.agents/state`) exists
-only so the same script is testable against a fixture dir:
+`retryCounts`, `hookVetoCounts`, `totalUsage`), and `harness/insights-reliability.js`
+aggregates them across features. Run it from the repo root and read its JSON
+output; do not rewrite the counts in jq. `RAD_STATE_DIR` (default
+`.agents/state`) exists only so the same module is testable against a fixture dir:
 
 ```bash
-node --input-type=module -e '
-import { readFileSync, readdirSync, existsSync } from "node:fs";
-import { join } from "node:path";
-const { outcomeCounts, failReasonCounts, retryCounts, hookVetoCounts, totalUsage } =
-  await import("./harness/events.js");
-
-const stateDir = process.env.RAD_STATE_DIR || ".agents/state";
-const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
-
-const features = existsSync(stateDir)
-  ? readdirSync(stateDir, { withFileTypes: true })
-      .filter((d) => d.isDirectory())
-      .map((d) => d.name)
-      .filter((f) => existsSync(join(stateDir, f, "events.jsonl")))
-      .sort()
-  : [];
-
-const agg = {
-  outcomes: outcomeCounts([]),
-  failReasons: failReasonCounts([]),
-  retries: { total: 0, retriedWaves: 0 },
-  hookVetoes: hookVetoCounts([]),
-  usage: totalUsage([]),
-};
-const perFeature = {};
-
-for (const feature of features) {
-  const history = readFileSync(join(stateDir, feature, "events.jsonl"), "utf8")
-    .split("\n").filter(Boolean).map((l) => JSON.parse(l));
-  const outcomes = outcomeCounts(history);
-  const failReasons = failReasonCounts(history);
-  const retries = retryCounts(history);
-  const vetoes = hookVetoCounts(history);
-  const usage = totalUsage(history);
-  // Per-wave token spend from wave-attempt data.usage (missing usage -> 0),
-  // mirroring the totalUsage total-vs-input+output preference per event.
-  const spendPerWave = {};
-  for (const e of history) {
-    if (!e || e.type !== "wave-attempt" || !e.data) continue;
-    const w = typeof e.data.wave === "number" && Number.isFinite(e.data.wave) ? String(e.data.wave) : "?";
-    const u = e.data.usage && typeof e.data.usage === "object" ? e.data.usage : null;
-    const t = u ? (Number.isFinite(u.total) ? u.total : num(u.input) + num(u.output)) : 0;
-    spendPerWave[w] = (spendPerWave[w] || 0) + t;
-  }
-  perFeature[feature] = { outcomes, failReasons, retries, hookVetoes: vetoes, usage, spendPerWave };
-
-  for (const k of Object.keys(agg.outcomes)) agg.outcomes[k] += outcomes[k];
-  agg.failReasons.total += failReasons.total;
-  for (const [r, n] of Object.entries(failReasons.reasons))
-    agg.failReasons.reasons[r] = (agg.failReasons.reasons[r] || 0) + n;
-  agg.retries.total += retries.total;
-  agg.retries.retriedWaves += retries.retriedWaves;
-  agg.hookVetoes.vetoes += vetoes.vetoes;
-  agg.hookVetoes.vetoedAttempts += vetoes.vetoedAttempts;
-  agg.usage.input += usage.input; agg.usage.output += usage.output; agg.usage.total += usage.total;
-}
-
-const noWaveData = agg.outcomes.total === 0 && agg.retries.total === 0 &&
-  agg.failReasons.total === 0 && agg.hookVetoes.vetoes === 0 && agg.hookVetoes.vetoedAttempts === 0;
-console.log(JSON.stringify({ noWaveData, aggregate: agg, perFeature }, null, 2));
-'
+node harness/insights-reliability.js
 ```
+
+The output is `{ noWaveData, aggregate, perFeature }`.
 
 Reading the output:
 
