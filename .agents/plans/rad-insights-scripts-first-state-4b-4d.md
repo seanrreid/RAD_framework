@@ -1,7 +1,7 @@
 # Plan: rad-insights scripts-first, part A (shared state helpers, 4b, 4d)
 Created: 2026-11-16
 Author: architect
-Status: approved
+Status: in-progress
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-11-16T19:28:59.131Z
 Recorded-By: sean@torchcodelab.com
