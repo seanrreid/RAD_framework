@@ -1,0 +1,5 @@
+{"feature":"routed-a","type":"wave-attempt","actor":"harness","ts":"2026-03-01T00:00:00Z","data":{"wave":1,"outcome":"fail-protocol"}}
+{"feature":"routed-a","type":"wave-attempt","actor":"harness","ts":"2026-03-01T00:00:00Z","data":{"wave":2,"outcome":"fail-protocol"}}
+{"feature":"routed-a","type":"wave-attempt","actor":"harness","ts":"2026-03-01T00:00:00Z","data":{"wave":3,"outcome":"fail-scope"}}
+{"feature":"routed-a","type":"wave-attempt","actor":"harness","ts":"2026-03-01T00:00:00Z","data":{"wave":4,"outcome":"fail-tests","tasks":[{"title":"T1","status":"blocked_spec"},{"title":"T2","status":"blocked_spec"},{"title":"T3","status":"blocked_intent"}]}}
+{"feature":"routed-a","type":"wave-failed","actor":"harness","ts":"2026-03-01T00:00:00Z","data":{"wave":4,"reason":"doom-loop"}}

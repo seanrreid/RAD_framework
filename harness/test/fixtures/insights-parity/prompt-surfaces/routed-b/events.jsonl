@@ -1,0 +1,6 @@
+{"feature":"routed-b","type":"wave-attempt","actor":"harness","ts":"2026-03-01T00:00:00Z","data":{"wave":1,"outcome":"fail-protocol"}}
+{"feature":"routed-b","type":"wave-attempt","actor":"harness","ts":"2026-03-01T00:00:00Z","data":{"wave":2,"outcome":"fail-scope"}}
+{"feature":"routed-b","type":"wave-attempt","actor":"harness","ts":"2026-03-01T00:00:00Z","data":{"wave":3,"outcome":"fail-scope"}}
+{"feature":"routed-b","type":"wave-attempt","actor":"harness","ts":"2026-03-01T00:00:00Z","data":{"wave":4,"outcome":"fail-tests","tasks":[{"title":"T4","status":"blocked_spec"},{"title":"T5","status":"blocked_code"},{"title":"T6","status":"blocked_code"},{"title":"T7","status":"blocked_code"}]}}
+{"feature":"routed-b","type":"wave-failed","actor":"harness","ts":"2026-03-01T00:00:00Z","data":{"wave":4,"reason":"doom-loop"}}
+{"feature":"routed-b","type":"wave-failed","actor":"harness","ts":"2026-03-01T00:00:00Z","data":{"wave":5,"reason":"doom-loop"}}

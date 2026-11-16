@@ -854,3 +854,129 @@
     "minFeatures": 2
   }
 }
+=== 4g:enriched ===
+{
+  "threshold": 3,
+  "noWaveData": false,
+  "noEnrichedData": false,
+  "proposals": [],
+  "unmapped": []
+}
+=== 4g:legacy ===
+{
+  "threshold": 3,
+  "noWaveData": false,
+  "noEnrichedData": true,
+  "proposals": [],
+  "unmapped": []
+}
+=== 4g:mixed ===
+{
+  "threshold": 3,
+  "noWaveData": false,
+  "noEnrichedData": false,
+  "proposals": [],
+  "unmapped": []
+}
+=== 4g:provider ===
+{
+  "threshold": 3,
+  "noWaveData": false,
+  "noEnrichedData": true,
+  "proposals": [],
+  "unmapped": []
+}
+=== 4g:tiered ===
+{
+  "threshold": 3,
+  "noWaveData": false,
+  "noEnrichedData": true,
+  "proposals": [],
+  "unmapped": []
+}
+=== 4g:all ===
+{
+  "threshold": 3,
+  "noWaveData": false,
+  "noEnrichedData": false,
+  "proposals": [],
+  "unmapped": [
+    {
+      "signal": "outcome:fail-tests",
+      "count": 7,
+      "features": {
+        "enriched": 1,
+        "legacy": 1,
+        "mixed": 2,
+        "alpha": 1,
+        "tiered": 2
+      }
+    }
+  ]
+}
+=== 4g:empty ===
+{
+  "threshold": 3,
+  "noWaveData": true,
+  "noEnrichedData": true,
+  "proposals": [],
+  "unmapped": []
+}
+=== 4g:routed ===
+{
+  "threshold": 3,
+  "noWaveData": false,
+  "noEnrichedData": false,
+  "proposals": [
+    {
+      "signal": "blocked:blocked_spec",
+      "count": 3,
+      "features": {
+        "routed-a": 2,
+        "routed-b": 1
+      },
+      "target": ".claude/commands/team/rad-plan.md",
+      "section": "Step 3 task template (What:/Validate:) and \"Wave rules\"",
+      "note": null
+    },
+    {
+      "signal": "outcome:fail-protocol",
+      "count": 3,
+      "features": {
+        "routed-a": 2,
+        "routed-b": 1
+      },
+      "target": "harness/adapters/agent/contract.js",
+      "section": "buildWavePrompt \"## Return format\" block (prose mirror: .claude/commands/team/rad-deliver.md \"## Return format\")",
+      "note": "Preserve the #112 prefix-ordering constraint: order the template so a retry extends a prefix instead of rewriting one."
+    },
+    {
+      "signal": "outcome:fail-scope",
+      "count": 3,
+      "features": {
+        "routed-a": 1,
+        "routed-b": 2
+      },
+      "target": ".claude/commands/team/rad-plan.md",
+      "section": "Step 3 plan template, \"## Files in Scope\" guidance comment",
+      "note": null
+    }
+  ],
+  "unmapped": [
+    {
+      "signal": "blocked:blocked_code",
+      "count": 3,
+      "features": {
+        "routed-b": 3
+      }
+    },
+    {
+      "signal": "wave-failed:doom-loop",
+      "count": 3,
+      "features": {
+        "routed-a": 1,
+        "routed-b": 2
+      }
+    }
+  ]
+}
