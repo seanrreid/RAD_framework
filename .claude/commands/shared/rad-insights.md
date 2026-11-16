@@ -386,50 +386,16 @@ merged across plan docs with `mergeTaskFiles`) — shared with the plan-time
 `rad forecast` verb, so never re-implement it inline. This step passes the
 mapping to `fileFailureCounts` and `fileDeficitSignals` in `harness/events.js`
 — the folds themselves never touch the filesystem, and the counting must never
-be re-implemented in jq. Same invocation convention as Steps 4c/4d: run from
-the repo root; `RAD_STATE_DIR` (default `.agents/state`) and `RAD_PLANS_DIR`
-(default `.agents/plans`) exist only for fixture testing. This step only reads;
-it writes nothing.
+be re-implemented in jq. `harness/insights-blocked-files.js` joins them and prints the result. Same
+invocation convention as Steps 4c/4d: run from the repo root; `RAD_STATE_DIR`
+(default `.agents/state`) and `RAD_PLANS_DIR` (default `.agents/plans`) exist
+only for fixture testing. This step only reads; it writes nothing.
 
 ```bash
-node --input-type=module -e '
-import { readFileSync, readdirSync, existsSync } from "node:fs";
-import { join } from "node:path";
-const { fileFailureCounts, fileDeficitSignals } = await import("./harness/events.js");
-const { taskFilesFromPlanText, mergeTaskFiles } = await import("./harness/plan-tasks.js");
-
-const stateDir = process.env.RAD_STATE_DIR || ".agents/state";
-const plansDir = process.env.RAD_PLANS_DIR || ".agents/plans";
-
-const taskFiles = {};
-const planFiles = existsSync(plansDir)
-  ? readdirSync(plansDir).filter((f) => f.endsWith(".md")).sort() : [];
-for (const plan of planFiles) {
-  mergeTaskFiles(taskFiles, taskFilesFromPlanText(readFileSync(join(plansDir, plan), "utf8")));
-}
-
-const features = existsSync(stateDir)
-  ? readdirSync(stateDir, { withFileTypes: true })
-      .filter((d) => d.isDirectory())
-      .map((d) => d.name)
-      .filter((f) => existsSync(join(stateDir, f, "events.jsonl")))
-      .sort()
-  : [];
-// One history across all features; the feature name is stamped from the dir
-// only where an event omits it, so cross-feature counting always has a key.
-const history = features.flatMap((feature) =>
-  readFileSync(join(stateDir, feature, "events.jsonl"), "utf8")
-    .split("\n").filter(Boolean)
-    .map((l) => JSON.parse(l))
-    .map((e) => ({ ...e, feature: e.feature || feature })));
-
-const result = fileFailureCounts(history, taskFiles);
-const deficits = fileDeficitSignals(history, taskFiles);
-const mappedTitles = Object.keys(taskFiles).length;
-const reportedFiles = Object.keys(result.files).length;
-console.log(JSON.stringify({ mappedTitles, reportedFiles, ...result, deficits }, null, 2));
-'
+node harness/insights-blocked-files.js
 ```
+
+The output is `{ mappedTitles, reportedFiles, files, belowFloor, minFeatures, deficits }`.
 
 Reading the output:
 
