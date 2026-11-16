@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { listFeatures, readHistory, DEFAULT_STATE_DIR, EVENT_LOG } from '../insights-state.js';
+import { listFeatures, readHistory, readAllHistory, DEFAULT_STATE_DIR, EVENT_LOG } from '../insights-state.js';
 
 const makeTmp = () => mkdtempSync(join(tmpdir(), 'insights-state-'));
 
@@ -66,4 +66,24 @@ test('readHistory: number, array and string lines also throw', () => {
 
 test('readHistory: malformed JSON still throws', () => {
   assert.throws(() => readHistory(stateDirWithLog('{oops\n'), 'f'), SyntaxError);
+});
+
+test('readAllHistory: missing state dir -> []', () => {
+  assert.deepEqual(readAllHistory(join(makeTmp(), 'nope')), []);
+});
+
+test('readAllHistory: empty events.jsonl contributes nothing', () => {
+  assert.deepEqual(readAllHistory(stateDirWithLog('')), []);
+});
+
+test('readAllHistory: concatenates in sorted-feature order', () => {
+  const dir = stateDirWithLog('{"n":"b1"}\n{"n":"b2"}\n', 'b-feat');
+  mkdirSync(join(dir, 'a-feat'));
+  writeFileSync(join(dir, 'a-feat', EVENT_LOG), '{"n":"a1"}\n');
+  assert.deepEqual(readAllHistory(dir).map((e) => e.n), ['a1', 'b1', 'b2']);
+});
+
+test('readAllHistory: valid-JSON null line throws the named error', () => {
+  const dir = stateDirWithLog('{"type":"a"}\nnull\n');
+  assert.throws(() => readAllHistory(dir), /events\.jsonl:2: event is not a JSON object/);
 });
