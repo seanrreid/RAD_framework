@@ -980,3 +980,146 @@
     }
   ]
 }
+=== 4d:enriched ===
+{
+  "noEnrichedData": false,
+  "aggregate": {
+    "enrichedAttempts": 5,
+    "blocked_code": 1,
+    "blocked_spec": 1,
+    "blocked_intent": 1
+  },
+  "perFeature": {
+    "enriched": {
+      "enrichedAttempts": 5,
+      "blocked_code": 1,
+      "blocked_spec": 1,
+      "blocked_intent": 1
+    }
+  }
+}
+=== 4d:legacy ===
+{
+  "noEnrichedData": true,
+  "aggregate": {
+    "enrichedAttempts": 0,
+    "blocked_code": 0,
+    "blocked_spec": 0,
+    "blocked_intent": 0
+  },
+  "perFeature": {
+    "legacy": {
+      "enrichedAttempts": 0,
+      "blocked_code": 0,
+      "blocked_spec": 0,
+      "blocked_intent": 0
+    }
+  }
+}
+=== 4d:mixed ===
+{
+  "noEnrichedData": false,
+  "aggregate": {
+    "enrichedAttempts": 2,
+    "blocked_code": 1,
+    "blocked_spec": 0,
+    "blocked_intent": 0
+  },
+  "perFeature": {
+    "mixed": {
+      "enrichedAttempts": 2,
+      "blocked_code": 1,
+      "blocked_spec": 0,
+      "blocked_intent": 0
+    }
+  }
+}
+=== 4d:provider ===
+{
+  "noEnrichedData": true,
+  "aggregate": {
+    "enrichedAttempts": 0,
+    "blocked_code": 0,
+    "blocked_spec": 0,
+    "blocked_intent": 0
+  },
+  "perFeature": {
+    "provider": {
+      "enrichedAttempts": 0,
+      "blocked_code": 0,
+      "blocked_spec": 0,
+      "blocked_intent": 0
+    }
+  }
+}
+=== 4d:tiered ===
+{
+  "noEnrichedData": true,
+  "aggregate": {
+    "enrichedAttempts": 0,
+    "blocked_code": 0,
+    "blocked_spec": 0,
+    "blocked_intent": 0
+  },
+  "perFeature": {
+    "tiered": {
+      "enrichedAttempts": 0,
+      "blocked_code": 0,
+      "blocked_spec": 0,
+      "blocked_intent": 0
+    }
+  }
+}
+=== 4d:all ===
+{
+  "noEnrichedData": false,
+  "aggregate": {
+    "enrichedAttempts": 7,
+    "blocked_code": 2,
+    "blocked_spec": 1,
+    "blocked_intent": 1
+  },
+  "perFeature": {
+    "enriched": {
+      "enrichedAttempts": 5,
+      "blocked_code": 1,
+      "blocked_spec": 1,
+      "blocked_intent": 1
+    },
+    "legacy": {
+      "enrichedAttempts": 0,
+      "blocked_code": 0,
+      "blocked_spec": 0,
+      "blocked_intent": 0
+    },
+    "mixed": {
+      "enrichedAttempts": 2,
+      "blocked_code": 1,
+      "blocked_spec": 0,
+      "blocked_intent": 0
+    },
+    "provider": {
+      "enrichedAttempts": 0,
+      "blocked_code": 0,
+      "blocked_spec": 0,
+      "blocked_intent": 0
+    },
+    "tiered": {
+      "enrichedAttempts": 0,
+      "blocked_code": 0,
+      "blocked_spec": 0,
+      "blocked_intent": 0
+    }
+  }
+}
+=== 4d:empty ===
+{
+  "noEnrichedData": true,
+  "aggregate": {
+    "enrichedAttempts": 0,
+    "blocked_code": 0,
+    "blocked_spec": 0,
+    "blocked_intent": 0
+  },
+  "perFeature": {}
+}
