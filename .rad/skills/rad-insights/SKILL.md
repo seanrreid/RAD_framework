@@ -397,51 +397,18 @@ Reading the output:
 Per-Wave `Model:` tiering (see `docs/configuration.md` "Cost & Frugality") is only worth
 suggesting where history shows a wave position is reliably first-try or reliably
 retried. The counting lives in `harness/events.js` (`waveReliability`) — import
-it, never re-implement it. Same invocation convention as Steps 4c–4e: run from
-the repo root; `RAD_STATE_DIR` (default `.agents/state`) exists only for fixture
-testing. The fold carries sample sizes and applies NO floor; the floor below is
-a presentation decision owned by this skill. This step only reads; it writes
-nothing.
+it, never re-implement it; `harness/insights-wave-tiering.js` aggregates it across
+features. Same invocation convention as Steps 4c–4e: run from the repo root and
+read its JSON output; `RAD_STATE_DIR` (default `.agents/state`) exists only for
+fixture testing. The fold carries sample sizes and applies NO floor; the floor
+(`TIERING_MIN_FEATURES`, exported by the module) is a presentation decision owned
+by this skill. This step only reads; it writes nothing.
 
 ```bash
-node --input-type=module -e '
-import { readFileSync, readdirSync, existsSync } from "node:fs";
-import { join } from "node:path";
-const { waveReliability } = await import("./harness/events.js");
-
-// Minimum DISTINCT features with wave history before any tiering advisory
-// renders. Below it, a rate describes one or two plans, not a wave position.
-const TIERING_MIN_FEATURES = 3;
-
-const stateDir = process.env.RAD_STATE_DIR || ".agents/state";
-const features = existsSync(stateDir)
-  ? readdirSync(stateDir, { withFileTypes: true })
-      .filter((d) => d.isDirectory())
-      .map((d) => d.name)
-      .filter((f) => existsSync(join(stateDir, f, "events.jsonl")))
-      .sort()
-  : [];
-
-// Pairs are keyed by (feature, wave), so one concatenated history is safe.
-const history = features.flatMap((feature) =>
-  readFileSync(join(stateDir, feature, "events.jsonl"), "utf8")
-    .split("\n").filter(Boolean).map((l) => JSON.parse(l)));
-const result = waveReliability(history);
-
-const pct = (n, d) => (d === 0 ? 0 : Math.round((100 * n) / d));
-const positions = Object.entries(result.perPosition).map(([wave, s]) => ({
-  wave: Number(wave),
-  n: s.samples,
-  attempts: s.attempts,
-  firstAttemptSuccessPct: pct(s.firstAttemptSuccess, s.samples),
-  retryPct: pct(s.retried, s.samples),
-}));
-const noWaveData = result.features === 0;
-const advisory = result.features >= TIERING_MIN_FEATURES;
-console.log(JSON.stringify({ noWaveData, advisory, minFeatures: TIERING_MIN_FEATURES,
-  features: result.features, positions }, null, 2));
-'
+node harness/insights-wave-tiering.js
 ```
+
+The output is `{ noWaveData, advisory, minFeatures, features, positions }`.
 
 Reading the output:
 
