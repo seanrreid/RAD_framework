@@ -429,51 +429,18 @@ Wave attempts MAY carry the optional `usage.cacheRead` field (cache tokens read,
 see `docs/rad-wave-contract.md`, `usage`). A retry whose cache-hit ratio collapses
 to 0 after a positive first attempt re-paid for the whole prompt — worth seeing.
 The counting lives in `harness/events.js` (`cacheUsage`) — import it, never
-re-implement it. Same invocation convention as Steps 4c–4f: run from the repo
-root; `RAD_STATE_DIR` (default `.agents/state`) exists only for fixture testing.
+re-implement it; `harness/insights-cache-hit.js` aggregates it across features.
+Same invocation convention as Steps 4c–4f: run from the repo root and read its
+output; `RAD_STATE_DIR` (default `.agents/state`) exists only for fixture testing.
 This step only reads; it writes nothing.
 
 ```bash
-node --input-type=module -e '
-import { readFileSync, readdirSync, existsSync } from "node:fs";
-import { join } from "node:path";
-const { cacheUsage } = await import("./harness/events.js");
-
-const NO_CACHE_LINE = "no cache data reported";
-const stateDir = process.env.RAD_STATE_DIR || ".agents/state";
-const features = existsSync(stateDir)
-  ? readdirSync(stateDir, { withFileTypes: true })
-      .filter((d) => d.isDirectory())
-      .map((d) => d.name)
-      .filter((f) => existsSync(join(stateDir, f, "events.jsonl")))
-      .sort()
-  : [];
-
-// Attempts are ordered and keyed by (feature, wave), so one concatenated history is safe.
-const history = features.flatMap((feature) =>
-  readFileSync(join(stateDir, feature, "events.jsonl"), "utf8")
-    .split("\n").filter(Boolean).map((l) => JSON.parse(l)));
-const result = cacheUsage(history);
-
-const pct = (r) => (r === null ? null : Math.round(100 * r));
-// Flag a retry whose ratio is 0 after an EARLIER positive attempt in the same (feature, wave).
-const peak = new Map();
-const droppedToZero = [];
-for (const a of result.attempts) {
-  const key = JSON.stringify([a.feature, a.wave]);
-  if (a.ratio === 0 && (peak.get(key) || 0) > 0) droppedToZero.push({ ...a, earlierPeakPct: pct(peak.get(key)) });
-  if (a.ratio !== null && a.ratio > (peak.get(key) || 0)) peak.set(key, a.ratio);
-}
-const denominator = result.totals.input + result.totals.cacheRead;
-const noCacheData = result.attempts.length === 0;
-if (noCacheData) console.log(NO_CACHE_LINE);
-console.log(JSON.stringify({ noCacheData, withoutCache: result.withoutCache,
-  overallRatioPct: denominator === 0 ? null : pct(result.totals.cacheRead / denominator),
-  totals: result.totals,
-  attempts: result.attempts.map((a) => ({ ...a, ratioPct: pct(a.ratio) })),
-  droppedToZero }, null, 2));
-'
+node harness/insights-cache-hit.js
 ```
+
+The output is one JSON object `{ noCacheData, withoutCache, overallRatioPct,
+totals, attempts, droppedToZero }`, preceded by the plain-text line
+`no cache data reported` only when `noCacheData` is true.
 
 Reading the output:
 
