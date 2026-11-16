@@ -240,44 +240,27 @@ jq -r 'select(.type=="cycle") | [.date, .feature, (.high|tostring)] | join("\t")
 
 ### Step 4b: Aggregate token cost from wave-attempt usage
 
-Token cost lives in the per-feature audit log, not the findings log. Each feature
-has its own `.agents/state/<feature>/events.jsonl`, and each `wave-attempt` event
-carries token usage under `data.usage` as `{ input, output, total }`.
-
-Usage is **optional**: older deliveries (and any wave that ran before this layer
-existed) emit `wave-attempt` events with no `data.usage`. Treat a missing or null
-`usage` as `0` (unknown) — never let it break the aggregation.
+Token cost lives in the per-feature audit log, not the findings log. Each
+`wave-attempt` event in `.agents/state/<feature>/events.jsonl` carries token
+usage under `data.usage` as `{ input, output, total }`. Usage is **optional**:
+older deliveries emit `wave-attempt` events with no `data.usage`; a missing or
+null `usage` counts as `0` (unknown) and never breaks the aggregation. Run the
+module from the repo root and read its JSON output; do not rewrite the sums in
+jq (`RAD_STATE_DIR`, default `.agents/state`, is for fixture testing only):
 
 ```bash
-# Discover every per-feature audit log
-for log in .agents/state/*/events.jsonl; do
-  [ -f "$log" ] || continue
-  feature=$(basename "$(dirname "$log")")
-
-  # Cost per feature: sum of wave-attempt total tokens, missing usage -> 0
-  total=$(jq -s '[.[]
-    | select(.type=="wave-attempt")
-    | (.data.usage.total // 0)] | add // 0' "$log")
-  echo "$feature	$total"
-done
-
-# Cost per wave (per wave number) for a single feature, missing usage -> 0
-jq -r 'select(.type=="wave-attempt")
-  | [(.data.wave // .wave // "?" | tostring), (.data.usage.total // 0 | tostring)]
-  | join("\t")' .agents/state/[FEATURE]/events.jsonl \
-  | awk -F'\t' '{sum[$1]+=$2} END {for (w in sum) print w"\t"sum[w]}' \
-  | sort -n
+node harness/insights-usage-cost.js
 ```
 
-Carry two aggregates into the report:
-
-- **Cost per feature** — the summed `total` tokens across all `wave-attempt`
-  events in that feature's log. A feature whose every event lacks usage reports
-  `0 (unknown)`.
-- **Cost per wave** — `total` tokens grouped by wave number within a feature, so
-  expensive waves stand out. Waves without recorded usage contribute `0`.
-
-If no `.agents/state/*/events.jsonl` files exist, omit the cost section entirely.
+Output: `{ noData, perFeature }`; each feature carries `total`, `inferredTotal`,
+`attempts`, `usageRecorded`, `usageUnknown`, `perWave`.
+- **Cost per feature** — `total`, the summed explicit `usage.total` across the
+  feature's `wave-attempt` events; `usageUnknown: true` reports `0 (unknown)`.
+  Report `total`, never `inferredTotal` (it also infers input + output).
+- **Cost per wave** — `perWave`, `{ wave, total }` in ascending wave order (an
+  attempt without a wave number buckets as `"?"`, listed first). Waves without
+  recorded usage contribute `0`.
+- **`noData: true`** — no `.agents/state/*/events.jsonl`: omit the cost section.
 
 ### Step 4c: Fold wave reliability from the event logs
 
