@@ -11,3 +11,5 @@
 | 3.1 | Wave 3 | Capture golden output and write the 4g module | ✓ complete | ffd38d1 | 11:39 |
 | 3.2 | Wave 3 | Test the 4g module | ✓ complete | 8d7c8b7 | 11:39 |
 | 3.3 | Wave 3 | Replace the 4g snippet in the skill and regenerate | ✓ complete | d0dfdde | 11:39 |
+| 4.1 | Wave 4 | Live-log parity check | ✓ complete | 5e76471 | 12:00 |
+| 4.2 | Wave 4 | Full verification | ✓ complete | 5e76471 | 12:00 |
