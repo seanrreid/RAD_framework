@@ -1,7 +1,8 @@
 # Plan: rad-insights scripts-first folds (4c, 4e, 4g)
 Created: 2026-11-16
 Author: architect
-Status: in-progress
+Status: complete
+Completed-At: 2026-11-16T17:07:56.689Z
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-11-16T16:28:41.090Z
 Recorded-By: sean@torchcodelab.com
