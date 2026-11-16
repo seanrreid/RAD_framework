@@ -1,7 +1,7 @@
 # Plan: rad-insights scripts-first, part B (4f wave tiering, 4f2 cache hit)
 Created: 2026-11-16
 Author: architect
-Status: approved
+Status: in-progress
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-11-16T21:46:41.909Z
 Recorded-By: sean@torchcodelab.com
