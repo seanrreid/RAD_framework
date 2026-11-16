@@ -1,0 +1,7 @@
+# SkillEvaluator policy overlay for RAD skills (use: skillevaluator tier1 <skill> --policy .skillevaluator/policy.yaml).
+# RAD skills are generated from .rad/skills by `rad generate`, whose frontmatter allows only
+# name/description/targets, so schema metadata (author/version/tags) cannot be added to them.
+profile: default
+
+severity_overrides:
+  SCHEMA.author_missing: low
