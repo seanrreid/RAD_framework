@@ -1,7 +1,8 @@
 # Plan: rad-insights scripts-first, last snippet (Step 3c reviewer calibration)
 Created: 2026-11-17
 Author: developer
-Status: in-progress
+Status: complete
+Completed-At: 2026-11-17T21:42:52.949Z
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-11-17T21:10:38.223Z
 Recorded-By: sean@torchcodelab.com
