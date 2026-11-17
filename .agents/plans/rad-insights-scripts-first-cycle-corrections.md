@@ -1,7 +1,7 @@
 # Plan: rad-insights scripts-first, part D (4h cycle metrics, 4j human corrections)
 Created: 2026-11-17
 Author: architect
-Status: approved
+Status: in-progress
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-11-17T14:51:19.225Z
 Recorded-By: sean@torchcodelab.com
