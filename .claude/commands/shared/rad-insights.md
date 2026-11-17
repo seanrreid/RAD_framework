@@ -524,12 +524,11 @@ surfaces as a feedback-loop target").
 
 The routing is ONE table — `PROMPT_SURFACE_MAP` at the top of `harness/insights-prompt-surfaces.js`. It is data:
 to route a new signal, add a row; never add a special case elsewhere. Counts come
-from folds in `harness/events.js` — `attemptOutcomeCounts`, `failReasonCounts`
-(Step 4c) and `blockedReasonCounts` (Step 4d); the module only compares them with
-the threshold and looks up the table, then prints the result. `outcome:*` rows read `attemptOutcomeCounts`,
-NOT `outcomeCounts`: the spine records the outcome only on `wave-attempt` events
-(`wave-complete` carries `{ wave }` alone), so wave-complete outcomes never show
-a failure on a real log.
+from `attemptOutcomeCounts`, `failReasonCounts` (Step 4c) and `blockedReasonCounts`
+(Step 4d) in `harness/events.js`; the module compares them with the threshold and
+looks up the table. `outcome:*` rows read `attemptOutcomeCounts`, NOT
+`outcomeCounts`: the spine records the outcome only on `wave-attempt` events, so
+wave-complete outcomes never show a failure on a real log.
 
 ```bash
 node harness/insights-prompt-surfaces.js
@@ -539,10 +538,9 @@ The output is `{ threshold, noWaveData, noEnrichedData, proposals, unmapped }`.
 
 Reading the output:
 
-- **Signal names** — `outcome:<outcome>` (from `attemptOutcomeCounts`, i.e.
-  `wave-attempt` outcomes, one per attempt), `wave-failed:<reason>` (from `failReasonCounts`),
-  `blocked:<status>` (from `blockedReasonCounts`). `count` is the aggregate
-  across features; `features` names each affected feature with its own count.
+- **Signal names** — `outcome:<outcome>`, `wave-failed:<reason>`, `blocked:<status>`
+  (sources above). `count` is the aggregate across features; `features` names each
+  affected feature with its own count.
 - **`proposals`** — signals at or above `threshold`
   (`PROMPT_SIGNAL_THRESHOLD`) that have a row in `PROMPT_SURFACE_MAP`; each
   carries the `target` file, the `section` within it, and any `note`.
@@ -558,10 +556,9 @@ Reading the output:
 ### Step 4h: Cycle time, human touches and tokens per delivered feature
 
 Per-feature cycle time, human touches and tokens per delivered feature come from
-the pure folds in `harness/cycle-metrics.js` (`stageDurations`, `humanTouches`,
-`tokensPerDeliveredFeature`). Import them; never re-implement them in jq or shell.
-What counts as a touch is a policy decision documented in that module's header.
-`harness/insights-cycle-time.js` reads the logs and calls those folds.
+the folds in `harness/cycle-metrics.js` (`stageDurations`, `humanTouches`,
+`tokensPerDeliveredFeature`), called by `harness/insights-cycle-time.js`. What
+counts as a touch is a policy decision documented in that module's header.
 
 ```bash
 node harness/insights-cycle-time.js
@@ -592,11 +589,10 @@ reads them to block, warn or gate a command.
 ### Step 4i: Post-merge rework and Gate-2 verification load
 
 Post-merge rework rate and Gate-2 verification load per delivered feature come from
-plain git history on the default branch (`readDeliveryHistory` in
-`harness/delivery-history.js`) and the pure folds in `harness/delivery-metrics.js`
-(`verificationLoad`, `reworkRate`, `trend`, `resolveWindowDays`).
-`harness/insights-rework-load.js` reads the event logs and calls them; never
-re-implement them in jq or shell. What counts as rework is a policy decision
+git history on the default branch (`readDeliveryHistory` in
+`harness/delivery-history.js`) and the folds in `harness/delivery-metrics.js`
+(`verificationLoad`, `reworkRate`, `trend`, `resolveWindowDays`), called by
+`harness/insights-rework-load.js`. What counts as rework is a policy decision
 documented in that module's header. The reader uses the **local** default branch,
 so update it first (`git fetch` and fast-forward it) for current numbers.
 
@@ -638,7 +634,7 @@ confirmed review findings and fix commits after the deliver PR opened. The rows,
 counts and text come from `harness/human-corrections.js` (`parseEventLog`,
 `postDeliverFixRows`, `buildCorrections`, `formatCorrections`);
 `harness/insights-human-corrections.js` reads the logs and the findings file and
-calls those folds. Never re-implement them in jq or shell. Unlike Steps 4c–4i, this
+calls those folds. Unlike Steps 4c–4i, this
 step applies `--since` itself, on row dates (a row exactly on the boundary is
 kept). Set `SINCE` to the `--since` value, or leave it empty. `RAD_FINDINGS_FILE`
 exists only for fixture testing.
