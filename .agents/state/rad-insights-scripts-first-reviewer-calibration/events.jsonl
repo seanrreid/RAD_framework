@@ -10,3 +10,4 @@
 {"feature":"rad-insights-scripts-first-reviewer-calibration","type":"wave-started","actor":"harness","ts":"2026-11-17T21:30:59.353Z","data":{"wave":3,"attempt":1}}
 {"feature":"rad-insights-scripts-first-reviewer-calibration","type":"wave-attempt","actor":"harness","ts":"2026-11-17T21:42:52.771Z","data":{"wave":3,"attempt":1,"outcome":"success","usage":{"input":4,"output":135,"total":69188,"cacheRead":67478,"cacheWrite":1571,"cost":0.394222},"tasks":[{"title":"Regenerate and prove live parity","status":"complete","commit":"—","concern":"—","error":"—"}],"verify":{"command":"exec bash scripts/verify-all.sh","status":0,"passed":true},"agent":{"adapter":"command"}}}
 {"feature":"rad-insights-scripts-first-reviewer-calibration","type":"wave-complete","actor":"harness","ts":"2026-11-17T21:42:52.771Z","data":{"wave":3}}
+{"feature":"rad-insights-scripts-first-reviewer-calibration","type":"pr-opened","actor":"harness","ts":"2026-11-17T21:43:03.634Z"}
