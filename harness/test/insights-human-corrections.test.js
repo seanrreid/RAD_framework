@@ -87,7 +87,7 @@ test('edge: events missing type, ts or data are tolerated and count nothing', ()
   const log = logOf({ type: 'approved' }, { ts: '2026-01-01T00:00:00Z' }, { type: 'run-resumed', ts: 'x' });
   withTmp(stateDirWithLogs({ f: log }), (dir) => {
     assert.equal(formatHumanCorrections(buildHumanCorrections({
-      stateDir: dir, findingsFile: join(dir, NO_FINDINGS),
+      stateDir: dir, findingsFile: join(dir, NO_FINDINGS), root: REPO_ROOT,
     })).split('\n')[0], EMPTY_LINE);
   });
 });

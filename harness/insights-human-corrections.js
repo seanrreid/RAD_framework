@@ -12,10 +12,9 @@ import { existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseEventLog, postDeliverFixRows, buildCorrections, formatCorrections } from './human-corrections.js';
+import { DEFAULT_STATE_DIR, EVENT_LOG } from './insights-state.js';
 
-const DEFAULT_STATE_DIR = join('.agents', 'state');
 const DEFAULT_FINDINGS_FILE = join('.agents', 'findings.jsonl');
-const EVENT_LOG = 'events.jsonl';
 
 /** Feature -> events for every feature dir holding an events.jsonl; throws on a bad line. */
 function readHistories(stateDir) {
