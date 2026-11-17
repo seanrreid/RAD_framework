@@ -2106,3 +2106,125 @@ Unavailable: 5 feature(s) whose post-deliver fixes could not be counted
 - no pr-opened event: 5
 === 4j:empty ===
 No human corrections recorded.
+=== 4i:populated ===
+{
+  "noMerges": false,
+  "windowDays": 14,
+  "unresolved": 0,
+  "load": [
+    {
+      "feature": "alpha",
+      "pr": 10,
+      "merged": true,
+      "files": 3,
+      "linesChanged": 10,
+      "openedToMergeMs": 86400000
+    },
+    {
+      "feature": "beta",
+      "pr": 11,
+      "merged": true,
+      "files": 3,
+      "linesChanged": 9,
+      "openedToMergeMs": 86400000
+    },
+    {
+      "feature": "gamma",
+      "pr": 12,
+      "merged": true,
+      "files": 2,
+      "linesChanged": 7,
+      "openedToMergeMs": 43200000
+    },
+    {
+      "feature": "delta",
+      "pr": 13,
+      "merged": true,
+      "files": 1,
+      "linesChanged": 6,
+      "openedToMergeMs": null
+    },
+    {
+      "feature": "epsilon",
+      "pr": null,
+      "merged": false,
+      "files": null,
+      "linesChanged": null,
+      "openedToMergeMs": null
+    }
+  ],
+  "rework": [
+    {
+      "feature": "alpha",
+      "files": 2,
+      "reworkedFiles": 1,
+      "rate": 0.5,
+      "reworkCommits": 1,
+      "weightedRework": 0.4285714285714286,
+      "windowComplete": true
+    },
+    {
+      "feature": "beta",
+      "files": 2,
+      "reworkedFiles": 1,
+      "rate": 0.5,
+      "reworkCommits": 1,
+      "weightedRework": 0.3214285714285714,
+      "windowComplete": true
+    },
+    {
+      "feature": "gamma",
+      "files": 1,
+      "reworkedFiles": 1,
+      "rate": 1,
+      "reworkCommits": 1,
+      "weightedRework": 0.8571428571428572,
+      "windowComplete": false
+    },
+    {
+      "feature": "delta",
+      "files": 0,
+      "reworkedFiles": 0,
+      "rate": null,
+      "reworkCommits": 0,
+      "weightedRework": null,
+      "windowComplete": false
+    }
+  ],
+  "trends": {
+    "reworkRate": {
+      "arrow": "→",
+      "n": 2
+    },
+    "prSize": {
+      "arrow": "↓",
+      "n": 4
+    },
+    "reviewLatency": {
+      "arrow": "↓",
+      "n": 3
+    }
+  }
+}
+=== 4i:empty ===
+{
+  "noMerges": true,
+  "windowDays": 14,
+  "unresolved": 0,
+  "load": [],
+  "rework": [],
+  "trends": {
+    "reworkRate": {
+      "arrow": "→",
+      "n": 0
+    },
+    "prSize": {
+      "arrow": "→",
+      "n": 0
+    },
+    "reviewLatency": {
+      "arrow": "→",
+      "n": 0
+    }
+  }
+}
