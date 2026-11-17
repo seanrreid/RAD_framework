@@ -594,39 +594,19 @@ Per-feature cycle time, human touches and tokens per delivered feature come from
 the pure folds in `harness/cycle-metrics.js` (`stageDurations`, `humanTouches`,
 `tokensPerDeliveredFeature`). Import them; never re-implement them in jq or shell.
 What counts as a touch is a policy decision documented in that module's header.
-Run from the repo root; `RAD_STATE_DIR` (default `.agents/state`) exists only so the
-script is testable against a fixture dir:
+`harness/insights-cycle-time.js` reads the logs and calls those folds. Same
+invocation convention as Steps 4c–4f2: run from the repo root and read its output;
+`RAD_STATE_DIR` (default `.agents/state`) exists only for fixture testing. This
+step only reads; it writes nothing.
 
 ```bash
-node --input-type=module -e '
-import { readFileSync, readdirSync, existsSync } from "node:fs";
-import { join } from "node:path";
-const { stageDurations, humanTouches, tokensPerDeliveredFeature } =
-  await import("./harness/cycle-metrics.js");
-
-const stateDir = process.env.RAD_STATE_DIR || ".agents/state";
-const features = existsSync(stateDir)
-  ? readdirSync(stateDir, { withFileTypes: true })
-      .filter((d) => d.isDirectory())
-      .map((d) => d.name)
-      .filter((f) => existsSync(join(stateDir, f, "events.jsonl")))
-      .sort()
-  : [];
-
-const histories = {};
-const perFeature = {};
-for (const feature of features) {
-  histories[feature] = readFileSync(join(stateDir, feature, "events.jsonl"), "utf8")
-    .split("\n").filter(Boolean).map((l) => JSON.parse(l));
-  perFeature[feature] = {
-    durations: stageDurations(histories[feature]),
-    touches: humanTouches(histories[feature]),
-  };
-}
-const tokens = tokensPerDeliveredFeature(histories);
-console.log(JSON.stringify({ noEventLogs: features.length === 0, perFeature, tokens }, null, 2));
-'
+node harness/insights-cycle-time.js
 ```
+
+The output is one JSON object `{ noEventLogs, perFeature, tokens }`; each
+`perFeature` entry is `{ durations, touches }`. A malformed events log, or a line
+that is not a JSON object, exits non-zero naming the log; report its stderr and
+omit the section.
 
 Reading the output:
 
