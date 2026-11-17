@@ -1,7 +1,7 @@
 # Plan: rad-insights skill trim (Plan F: shrink SKILL.md without changing report behavior)
 Created: 2026-11-17
 Author: developer
-Status: approved
+Status: in-progress
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-11-17T20:01:34.035Z
 Recorded-By: sean@torchcodelab.com
