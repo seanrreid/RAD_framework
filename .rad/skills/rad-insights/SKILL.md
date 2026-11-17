@@ -245,15 +245,18 @@ jq -r 'select(.type=="cycle") | [.date, .feature, (.high|tostring)] | join("\t")
   .agents/findings.jsonl | sort
 ```
 
+**Invocation convention for Steps 4b–4j.** Each module below is run from the repo
+root and its JSON output is read as-is; never re-implement a fold's counting in
+jq or inline. `RAD_STATE_DIR` (default `.agents/state`) exists only so a module
+can be tested against a fixture dir. These steps only read; they write nothing.
+
 ### Step 4b: Aggregate token cost from wave-attempt usage
 
 Token cost lives in the per-feature audit log, not the findings log. Each
 `wave-attempt` event in `.agents/state/<feature>/events.jsonl` carries token
 usage under `data.usage` as `{ input, output, total }`. Usage is **optional**:
 older deliveries emit `wave-attempt` events with no `data.usage`; a missing or
-null `usage` counts as `0` (unknown) and never breaks the aggregation. Run the
-module from the repo root and read its JSON output; do not rewrite the sums in
-jq (`RAD_STATE_DIR`, default `.agents/state`, is for fixture testing only):
+null `usage` counts as `0` (unknown) and never breaks the aggregation.
 
 ```bash
 node harness/insights-usage-cost.js
@@ -261,23 +264,19 @@ node harness/insights-usage-cost.js
 
 Output: `{ noData, perFeature }`; each feature carries `total`, `inferredTotal`,
 `attempts`, `usageRecorded`, `usageUnknown`, `perWave`.
-- **Cost per feature** — `total`, the summed explicit `usage.total` across the
-  feature's `wave-attempt` events; `usageUnknown: true` reports `0 (unknown)`.
-  Report `total`, never `inferredTotal` (it also infers input + output).
+- **Cost per feature** — `total`, the summed explicit `usage.total`;
+  `usageUnknown: true` reports `0 (unknown)`. Report `total`, never
+  `inferredTotal` (it also infers input + output).
 - **Cost per wave** — `perWave`, `{ wave, total }` in ascending wave order (an
-  attempt without a wave number buckets as `"?"`, listed first). Waves without
-  recorded usage contribute `0`.
+  attempt without a wave number buckets as `"?"`, listed first).
 - **`noData: true`** — no `.agents/state/*/events.jsonl`: omit the cost section.
 
 ### Step 4c: Fold wave reliability from the event logs
 
 Reliability metrics come from the same per-feature audit logs as Step 4b. The
-counting logic is NOT re-implemented here — it lives in the pure read helpers
-exported by `harness/events.js` (`outcomeCounts`, `failReasonCounts`,
-`retryCounts`, `hookVetoCounts`, `totalUsage`), and `harness/insights-reliability.js`
-aggregates them across features. Run it from the repo root and read its JSON
-output; do not rewrite the counts in jq. `RAD_STATE_DIR` (default
-`.agents/state`) exists only so the same module is testable against a fixture dir:
+counting lives in the pure read helpers exported by `harness/events.js`
+(`outcomeCounts`, `failReasonCounts`, `retryCounts`, `hookVetoCounts`,
+`totalUsage`); `harness/insights-reliability.js` aggregates them across features.
 
 ```bash
 node harness/insights-reliability.js
@@ -303,8 +302,7 @@ Reading the output:
 - **`aggregate.hookVetoes`** — `hook-veto` events (`vetoes`) and hook-provenance
   attempts (`vetoedAttempts`) — kept separate, never summed (a post-wave veto
   emits both; adding them would double-count).
-- **`perFeature[*].spendPerWave`** — per-wave token spend within each feature;
-  waves without recorded usage contribute `0`.
+- **`perFeature[*].spendPerWave`** — per-wave token spend within each feature.
 - **`noWaveData: true`** — no wave events exist anywhere: no placeable
   (feature, wave) pair (`outcomes.total === 0`) AND no wave-attempt, wave-failed
   or hook-veto event at all. An attempt that lacks a feature or wave number cannot
@@ -316,12 +314,9 @@ Reading the output:
 ### Step 4d: Fold per-task blocked reasons from the event logs
 
 Blocked-reason metrics read the OPTIONAL per-task records (`data.tasks`, see
-`docs/rad-wave-contract.md`) that newer `wave-attempt` events carry. As in Step
-4c, the counting lives in `harness/events.js` (`blockedReasonCounts`) — import
-it, never re-implement it in jq; `harness/insights-blocked-reasons.js`
-aggregates it across features. Same invocation convention: run from the repo
-root and read its JSON output; `RAD_STATE_DIR` (default `.agents/state`) exists
-only for fixture testing. This step only reads; it writes nothing.
+`docs/rad-wave-contract.md`) that newer `wave-attempt` events carry. The counting
+lives in `harness/events.js` (`blockedReasonCounts`);
+`harness/insights-blocked-reasons.js` aggregates it across features.
 
 ```bash
 node harness/insights-blocked-reasons.js
@@ -350,13 +345,10 @@ task-title → paths association: every task in `.agents/plans/*.md` is a
 `,` or `;`, sometimes with `:lines` / `:+N` suffixes or a parenthetical note).
 The plan-doc parsing lives in `harness/plan-tasks.js` (`taskFilesFromPlanText`,
 merged across plan docs with `mergeTaskFiles`) — shared with the plan-time
-`rad forecast` verb, so never re-implement it inline. This step passes the
-mapping to `fileFailureCounts` and `fileDeficitSignals` in `harness/events.js`
-— the folds themselves never touch the filesystem, and the counting must never
-be re-implemented in jq. `harness/insights-blocked-files.js` joins them and prints the result. Same
-invocation convention as Steps 4c/4d: run from the repo root; `RAD_STATE_DIR`
-(default `.agents/state`) and `RAD_PLANS_DIR` (default `.agents/plans`) exist
-only for fixture testing. This step only reads; it writes nothing.
+`rad forecast` verb. This step passes the mapping to `fileFailureCounts` and
+`fileDeficitSignals` in `harness/events.js` — the folds never touch the
+filesystem. `harness/insights-blocked-files.js` joins them and prints the result.
+`RAD_PLANS_DIR` (default `.agents/plans`) is likewise fixture-only.
 
 ```bash
 node harness/insights-blocked-files.js
@@ -396,13 +388,10 @@ Reading the output:
 
 Per-Wave `Model:` tiering (see `docs/configuration.md` "Cost & Frugality") is only worth
 suggesting where history shows a wave position is reliably first-try or reliably
-retried. The counting lives in `harness/events.js` (`waveReliability`) — import
-it, never re-implement it; `harness/insights-wave-tiering.js` aggregates it across
-features. Same invocation convention as Steps 4c–4e: run from the repo root and
-read its JSON output; `RAD_STATE_DIR` (default `.agents/state`) exists only for
-fixture testing. The fold carries sample sizes and applies NO floor; the floor
-(`TIERING_MIN_FEATURES`, exported by the module) is a presentation decision owned
-by this skill. This step only reads; it writes nothing.
+retried. The counting lives in `harness/events.js` (`waveReliability`);
+`harness/insights-wave-tiering.js` aggregates it across features. The fold
+carries sample sizes and applies NO floor; the floor (`TIERING_MIN_FEATURES`,
+exported by the module) is a presentation decision owned by this skill.
 
 ```bash
 node harness/insights-wave-tiering.js
@@ -434,11 +423,8 @@ Reading the output:
 Wave attempts MAY carry the optional `usage.cacheRead` field (cache tokens read,
 see `docs/rad-wave-contract.md`, `usage`). A retry whose cache-hit ratio collapses
 to 0 after a positive first attempt re-paid for the whole prompt — worth seeing.
-The counting lives in `harness/events.js` (`cacheUsage`) — import it, never
-re-implement it; `harness/insights-cache-hit.js` aggregates it across features.
-Same invocation convention as Steps 4c–4f: run from the repo root and read its
-output; `RAD_STATE_DIR` (default `.agents/state`) exists only for fixture testing.
-This step only reads; it writes nothing.
+The counting lives in `harness/events.js` (`cacheUsage`);
+`harness/insights-cache-hit.js` aggregates it across features.
 
 ```bash
 node harness/insights-cache-hit.js
@@ -471,12 +457,9 @@ Reading the output:
 Since #119 every wave records a `wave-started` event, which carries `data.model`
 when the plan declared a `Model:` line. Joining those with `wave-attempt` usage
 gives per-MODEL spend and reliability. The counting lives in `harness/events.js`
-(`modelTierSpend`, `modelTierAdvisories`) — import them, never re-implement them;
-`harness/insights-model-spend.js` aggregates them across features.
-Same invocation convention as Steps 4c–4f2: run from the repo root and read its
-output; `RAD_STATE_DIR` (default `.agents/state`) exists only for fixture testing. The
-advisory floor is the same `TIERING_MIN_FEATURES` as Step 4f, applied per model
-group. This step only reads; it writes nothing.
+(`modelTierSpend`, `modelTierAdvisories`); `harness/insights-model-spend.js`
+aggregates them across features. The advisory floor is the same
+`TIERING_MIN_FEATURES` as Step 4f, applied per model group.
 
 ```bash
 node harness/insights-model-spend.js
@@ -514,11 +497,8 @@ Reading the output:
 Every `wave-attempt` that `rad deliver` appends carries `data.agent` — the selected
 adapter kind and, when one applied, the model. Grouping attempts by
 `adapter/model` gives per-PROVIDER spend and reliability. The counting lives in
-`harness/events.js` (`providerSpend`) — import it, never re-implement it;
-`harness/insights-provider-spend.js` aggregates it across features. Same
-invocation convention as Steps 4c–4f3: run from the repo root and read its
-output; `RAD_STATE_DIR` (default `.agents/state`) exists only for fixture testing.
-This step only reads; it writes nothing.
+`harness/events.js` (`providerSpend`); `harness/insights-provider-spend.js`
+aggregates it across features.
 
 ```bash
 node harness/insights-provider-spend.js
@@ -551,15 +531,12 @@ surfaces as a feedback-loop target").
 
 The routing is ONE table — `PROMPT_SURFACE_MAP` at the top of `harness/insights-prompt-surfaces.js`. It is data:
 to route a new signal, add a row; never add a special case elsewhere. Counts come
-from folds in `harness/events.js` — `attemptOutcomeCounts`, `failReasonCounts`
-(Step 4c) and `blockedReasonCounts` (Step 4d); the module only compares them with
-the threshold and looks up the table, then prints the result. `outcome:*` rows read `attemptOutcomeCounts`,
-NOT `outcomeCounts`: the spine records the outcome only on `wave-attempt` events
-(`wave-complete` carries `{ wave }` alone), so wave-complete outcomes never show
-a failure on a real log. Same invocation
-convention as Steps 4c–4f: run from the repo root; `RAD_STATE_DIR` (default
-`.agents/state`) exists only for fixture testing. This step only reads; it writes
-nothing.
+from `attemptOutcomeCounts`, `failReasonCounts` (Step 4c) and `blockedReasonCounts`
+(Step 4d) in `harness/events.js`; the module compares them with the threshold and
+looks up the table. `outcome:*` rows read `attemptOutcomeCounts`, NOT
+`outcomeCounts`: the spine records the outcome only on `wave-attempt` events, so
+wave-complete outcomes never show a failure on a real log. `count` is per attempt:
+a wave retried twice on `fail-protocol` contributes 2.
 
 ```bash
 node harness/insights-prompt-surfaces.js
@@ -569,10 +546,9 @@ The output is `{ threshold, noWaveData, noEnrichedData, proposals, unmapped }`.
 
 Reading the output:
 
-- **Signal names** — `outcome:<outcome>` (from `attemptOutcomeCounts`, i.e.
-  `wave-attempt` outcomes, one per attempt), `wave-failed:<reason>` (from `failReasonCounts`),
-  `blocked:<status>` (from `blockedReasonCounts`). `count` is the aggregate
-  across features; `features` names each affected feature with its own count.
+- **Signal names** — `outcome:<outcome>`, `wave-failed:<reason>`, `blocked:<status>`
+  (sources above). `count` is the aggregate across features; `features` names each
+  affected feature with its own count.
 - **`proposals`** — signals at or above `threshold`
   (`PROMPT_SIGNAL_THRESHOLD`) that have a row in `PROMPT_SURFACE_MAP`; each
   carries the `target` file, the `section` within it, and any `note`.
@@ -584,20 +560,13 @@ Reading the output:
 - **`noWaveData: true`** — no `wave-attempt` / `wave-failed` event anywhere;
   **`noEnrichedData: true`** — no per-task data, so `blocked:*` signals cannot
   be measured. Both are degradation states, not a clean record.
-- `outcome:*` signals count `wave-attempt` outcomes (the `attemptOutcomeCounts`
-  contract) — every attempt, so a wave retried twice on `fail-protocol` counts 2.
-  `wave-complete` events are never counted: the spine writes no outcome on them.
 
 ### Step 4h: Cycle time, human touches and tokens per delivered feature
 
 Per-feature cycle time, human touches and tokens per delivered feature come from
-the pure folds in `harness/cycle-metrics.js` (`stageDurations`, `humanTouches`,
-`tokensPerDeliveredFeature`). Import them; never re-implement them in jq or shell.
-What counts as a touch is a policy decision documented in that module's header.
-`harness/insights-cycle-time.js` reads the logs and calls those folds. Same
-invocation convention as Steps 4c–4f2: run from the repo root and read its output;
-`RAD_STATE_DIR` (default `.agents/state`) exists only for fixture testing. This
-step only reads; it writes nothing.
+the folds in `harness/cycle-metrics.js` (`stageDurations`, `humanTouches`,
+`tokensPerDeliveredFeature`), called by `harness/insights-cycle-time.js`. What
+counts as a touch is a policy decision documented in that module's header.
 
 ```bash
 node harness/insights-cycle-time.js
@@ -628,15 +597,12 @@ reads them to block, warn or gate a command.
 ### Step 4i: Post-merge rework and Gate-2 verification load
 
 Post-merge rework rate and Gate-2 verification load per delivered feature come from
-plain git history on the default branch (`readDeliveryHistory` in
-`harness/delivery-history.js`) and the pure folds in `harness/delivery-metrics.js`
-(`verificationLoad`, `reworkRate`, `trend`, `resolveWindowDays`).
-`harness/insights-rework-load.js` reads the event logs and calls them; never
-re-implement them in jq or shell. What counts as rework is a policy decision
+git history on the default branch (`readDeliveryHistory` in
+`harness/delivery-history.js`) and the folds in `harness/delivery-metrics.js`
+(`verificationLoad`, `reworkRate`, `trend`, `resolveWindowDays`), called by
+`harness/insights-rework-load.js`. What counts as rework is a policy decision
 documented in that module's header. The reader uses the **local** default branch,
-so update it first (`git fetch` and fast-forward it) for current numbers. Run from
-the repo root and read its output (JSON); `RAD_STATE_DIR` exists only for fixture
-testing. This step only reads; it writes nothing.
+so update it first (`git fetch` and fast-forward it) for current numbers.
 
 ```bash
 DEFAULT_BRANCH=$(node harness/cli.js config get default_branch) || { echo "rework/load: cannot resolve default_branch" >&2; exit 1; }
@@ -676,11 +642,10 @@ confirmed review findings and fix commits after the deliver PR opened. The rows,
 counts and text come from `harness/human-corrections.js` (`parseEventLog`,
 `postDeliverFixRows`, `buildCorrections`, `formatCorrections`);
 `harness/insights-human-corrections.js` reads the logs and the findings file and
-calls those folds. Never re-implement them in jq or shell. Unlike Steps 4c–4i, this
+calls those folds. Unlike Steps 4c–4i, this
 step applies `--since` itself, on row dates (a row exactly on the boundary is
-kept). Run from the repo root and read its output; set `SINCE` to the `--since`
-value, or leave it empty. `RAD_STATE_DIR` and `RAD_FINDINGS_FILE` exist only for
-fixture testing. This step only reads; it writes nothing.
+kept). Set `SINCE` to the `--since` value, or leave it empty. `RAD_FINDINGS_FILE`
+exists only for fixture testing.
 
 ```bash
 SINCE="" node harness/insights-human-corrections.js
@@ -781,9 +746,8 @@ Cost per wave [for the most recent / most expensive feature]:
 
 ### Reliability
 [From Step 4c. Omit this section entirely if no per-feature events.jsonl exists.]
-[If the fold reports noWaveData: true, render EXACTLY this zeros path and nothing else
- in the section — this is the normal state on a fresh clone, since committed event
- logs contain only approved events:]
+[If the fold reports noWaveData: true, render EXACTLY this and nothing else in the
+ section (the normal state on a fresh clone):]
 No wave data yet — the committed event logs contain only approval events.
 Reliability metrics will populate after the first /rad-deliver run records
 wave-attempt / wave-complete / wave-failed events.
@@ -807,8 +771,8 @@ Token spend per wave [for features with recorded usage; 0 = usage not recorded]:
 
 ### Blocked Reasons
 [From Step 4d. Omit this section entirely if no per-feature events.jsonl exists.]
-[If the fold reports noEnrichedData: true, render EXACTLY this line and nothing
- else in the section — zeros here would be unmeasured, not a clean record:]
+[If the fold reports noEnrichedData: true, render EXACTLY this and nothing else in
+ the section (zeros would be unmeasured, not a clean record):]
 No enriched (per-task) wave events exist yet — blocked-reason metrics will
 populate once /rad-deliver records wave-attempt events carrying per-task data.
 
@@ -817,17 +781,15 @@ Blocked tasks across [enrichedAttempts] enriched wave attempt(s):
 - blocked_code: [N]  blocked_spec: [N]  blocked_intent: [N]
 [Name the features contributing blocked tasks from perFeature. If all three are
  0: "No blocked tasks in [enrichedAttempts] enriched attempt(s)."]
-[Suggestion only — never edit files. A blocked_spec or blocked_intent majority
- suggests plans need sharper Validate fields or intent; a blocked_code majority
- points at implementation difficulty rather than plan quality.]
+[Suggestion only — never edit files. A blocked_spec/blocked_intent majority
+ suggests sharper Validate fields or intent; blocked_code points at implementation difficulty.]
 
 ### Code Legibility Signals
 [From Step 4e. Omit this section entirely if no per-feature events.jsonl exists.]
-[Pick EXACTLY ONE degradation line when it applies — silence would read as a clean
- record. After the noEnrichedData or mappedTitles-0 line render only the
- unattributable/unenriched line below (when non-zero); after the reportedFiles-0
- line still render the deficit breakdown and that line, skipping the blocked-task
- list:]
+[Pick EXACTLY ONE degradation line when it applies. After the noEnrichedData or
+ mappedTitles-0 line render only the unattributable/unenriched line below (when
+ non-zero); after the reportedFiles-0 line still render the deficit breakdown and
+ that line, skipping the blocked-task list:]
 [If Step 4d reported noEnrichedData: true:]
 No enriched (per-task) wave events exist yet — code-legibility signals need
 per-task data to attribute blocked tasks to files.
@@ -869,13 +831,12 @@ Deficit proxies per file (floor: [deficits.minFeatures] features per deficit):
 [Whenever deficits.unattributable or deficits.unenriched is non-zero, render —
  never omit silently:]
 [unattributable] failing task record(s) could not be attributed to a file (no plan-doc File: mapping); [unenriched] attempt(s) predate per-task data.
-[Suggestion only — name the files; never edit them and never propose an automatic
- change. A reader may choose to add a comment, a README, or a refactor task.]
+[Suggestion only — name the files; never edit them or propose an automatic change.]
 
 ### Model Tiering Advisory
 [From Step 4f. Omit this section entirely if no per-feature events.jsonl exists.]
-[Pick EXACTLY ONE degradation line when it applies, and render nothing else in
- the section except the spend note — silence would read as "no tiering needed":]
+[Pick EXACTLY ONE degradation line when it applies; render nothing else in the
+ section except the spend note:]
 [If noWaveData: true:]
 No wave data yet — per-wave-position reliability will populate after the first
 /rad-deliver run records wave-attempt events.
@@ -889,10 +850,9 @@ Based on [features] features (floor: [minFeatures]):
 - Wave [wave] — first-attempt success [firstAttemptSuccessPct]% (n=[n]),
   retry rate [retryPct]% (n=[n]), [attempts] attempt(s)
 ...
-[Suggestion only — never edit plans. A position with high first-attempt success
- and a low retry rate MAY be a candidate for a cheaper `Model:` line; a position
- with a high retry rate may warrant a stronger one. Always quote the n; a
- position with small n is weak evidence even above the feature floor.]
+[Suggestion only — never edit plans. High first-attempt success with a low retry
+ rate MAY suit a cheaper `Model:` line; a high retry rate may warrant a stronger
+ one. Always quote the n; small n is weak evidence.]
 
 [Render this note verbatim in every state, including the degradation states:]
 The per-position rates above are outcome-only — they carry no spend. Spend-derived
@@ -902,9 +862,9 @@ token totals vary with cache-hit rate and scheduling — see the Cache-Hit Reado
 below (`cacheRead` / `cacheWrite` / `cost`, #121).
 
 #### Spend by model
-[From Step 4f3. Render in every state of the section above, including its
- degradation states — this subsection has its own floor. If `groups` is empty,
- render the table header with no rows, then the insufficient-history line.]
+[From Step 4f3. Render in every state of the section above — this subsection has
+ its own floor. If `groups` is empty, render the table header with no rows, then
+ the insufficient-history line.]
 | Model | Features | Waves | First-attempt % | Retried % | Mean tokens / known-usage wave | Unknown-usage waves |
 |-------|----------|-------|-----------------|-----------|--------------------------------|---------------------|
 | `[model]` | [features] | [waves] | [firstAttemptSuccessPct]% (n=[waves]) | [retriedPct]% (n=[waves]) | [meanTokens] (n=[waves − unknownUsage])   [meanTokens null: "unknown"] | [unknownUsage] |
@@ -931,8 +891,7 @@ downgrade or upgrade threshold.
 one fixed model. `unrecorded` waves (pre-#119 logs, no `wave-started`) are shown
 for completeness but never advised on. Unknown-usage waves are excluded from mean
 tokens, never counted as 0.
-[Suggestion only — never edit plans, never block. Always quote the n; a group
- with small n is weak evidence even above the feature floor.]
+[Suggestion only — never edit plans, never block. Always quote the n.]
 
 #### Spend by provider
 [From Step 4f4. Omit this subsection if Step 4f4 exited non-zero — the rest of
@@ -952,8 +911,7 @@ applied no model. Unknown-usage attempts add nothing to tokens, never counted as
 
 ### Cache-Hit Readout
 [From Step 4f2. Omit this section entirely if no per-feature events.jsonl exists.]
-[If noCacheData: true, render EXACTLY this line and nothing else in the section —
- silence would read as a perfect cache, a 0% ratio as a measured miss:]
+[If noCacheData: true, render EXACTLY this line and nothing else in the section:]
 no cache data reported — no wave attempt carried `usage.cacheRead`
 ([withoutCache] attempt(s) without cache fields).
 
@@ -968,9 +926,8 @@ Per attempt (cacheRead / (input + cacheRead)):
 ⚠ [feature] / Wave [wave] / attempt [attempt] — cache-hit ratio dropped to 0%
 after [earlierPeakPct]% on an earlier attempt; the retry re-sent its whole prompt
 uncached.
-[Suggestion only — never edit plans or prompts. A retry that drops to 0% may
- point at a changed prompt prefix between attempts or a cache TTL lapse; a
- reader may choose to investigate the retry prompt's prefix ordering.]
+[Suggestion only — never edit plans or prompts. A drop to 0% may point at a
+ changed prompt prefix or a cache TTL lapse.]
 
 ### Prompt-Surface Proposals
 [From Step 4g. Omit this section entirely if no per-feature events.jsonl exists.]
@@ -1013,9 +970,9 @@ Reporting only — no target or threshold applies to these values.
 [From Step 4i. Omit this section entirely if noMerges is true or Step 4i exited
  non-zero (then say why in one line).]
 Rework window: [windowDays] days (RAD_REWORK_WINDOW_DAYS, default 14)
-[Table of the most recent 10 deliver merges, newest first; render null as "n/a".
- Join `load` and `rework` rows on `feature`; Rework rate and Reworked / files come
- from `rework` (product files only), Files / lines from `load` (every file in the merge).]
+[Most recent 10 deliver merges, newest first; null renders "n/a". Join `load` and
+ `rework` on `feature`: rework columns (product files only) from `rework`, Files /
+ lines (every file) from `load`.]
 | Feature | PR | Rework rate | Reworked / files | Weighted | Window complete | Files / lines | Opened→merged |
 |---------|----|-------------|------------------|----------|-----------------|---------------|---------------|
 | [feature] | [#load.pr, or "n/a" when null] | [rework.rate as %] | [rework.reworkedFiles]/[rework.files] | [rework.weightedRework, 2 dp] | [rework.windowComplete: yes/no] | [load.files] / [load.linesChanged] | [load.openedToMergeMs as duration] |
