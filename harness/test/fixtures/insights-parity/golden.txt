@@ -1869,3 +1869,240 @@ no cache data reported
   "groups": {},
   "features": 0
 }
+=== 4h:enriched ===
+{
+  "noEventLogs": false,
+  "perFeature": {
+    "enriched": {
+      "durations": {
+        "approvedToStartMs": 3600000,
+        "runMs": null,
+        "totalMs": null
+      },
+      "touches": {
+        "approvals": 1,
+        "reApprovals": 0,
+        "needsDecisionStops": 0,
+        "resumes": 0,
+        "total": 1
+      }
+    }
+  },
+  "tokens": {
+    "perFeature": {},
+    "mean": null
+  }
+}
+=== 4h:legacy ===
+{
+  "noEventLogs": false,
+  "perFeature": {
+    "legacy": {
+      "durations": {
+        "approvedToStartMs": 3600000,
+        "runMs": null,
+        "totalMs": null
+      },
+      "touches": {
+        "approvals": 1,
+        "reApprovals": 0,
+        "needsDecisionStops": 0,
+        "resumes": 0,
+        "total": 1
+      }
+    }
+  },
+  "tokens": {
+    "perFeature": {},
+    "mean": null
+  }
+}
+=== 4h:mixed ===
+{
+  "noEventLogs": false,
+  "perFeature": {
+    "mixed": {
+      "durations": {
+        "approvedToStartMs": 3600000,
+        "runMs": null,
+        "totalMs": null
+      },
+      "touches": {
+        "approvals": 1,
+        "reApprovals": 0,
+        "needsDecisionStops": 0,
+        "resumes": 0,
+        "total": 1
+      }
+    }
+  },
+  "tokens": {
+    "perFeature": {},
+    "mean": null
+  }
+}
+=== 4h:provider ===
+{
+  "noEventLogs": false,
+  "perFeature": {
+    "provider": {
+      "durations": {
+        "approvedToStartMs": null,
+        "runMs": null,
+        "totalMs": null
+      },
+      "touches": {
+        "approvals": 0,
+        "reApprovals": 0,
+        "needsDecisionStops": 0,
+        "resumes": 0,
+        "total": 0
+      }
+    }
+  },
+  "tokens": {
+    "perFeature": {},
+    "mean": null
+  }
+}
+=== 4h:tiered ===
+{
+  "noEventLogs": false,
+  "perFeature": {
+    "tiered": {
+      "durations": {
+        "approvedToStartMs": 3600000,
+        "runMs": null,
+        "totalMs": null
+      },
+      "touches": {
+        "approvals": 2,
+        "reApprovals": 1,
+        "needsDecisionStops": 0,
+        "resumes": 0,
+        "total": 2
+      }
+    }
+  },
+  "tokens": {
+    "perFeature": {},
+    "mean": null
+  }
+}
+=== 4h:all ===
+{
+  "noEventLogs": false,
+  "perFeature": {
+    "enriched": {
+      "durations": {
+        "approvedToStartMs": 3600000,
+        "runMs": null,
+        "totalMs": null
+      },
+      "touches": {
+        "approvals": 1,
+        "reApprovals": 0,
+        "needsDecisionStops": 0,
+        "resumes": 0,
+        "total": 1
+      }
+    },
+    "legacy": {
+      "durations": {
+        "approvedToStartMs": 3600000,
+        "runMs": null,
+        "totalMs": null
+      },
+      "touches": {
+        "approvals": 1,
+        "reApprovals": 0,
+        "needsDecisionStops": 0,
+        "resumes": 0,
+        "total": 1
+      }
+    },
+    "mixed": {
+      "durations": {
+        "approvedToStartMs": 3600000,
+        "runMs": null,
+        "totalMs": null
+      },
+      "touches": {
+        "approvals": 1,
+        "reApprovals": 0,
+        "needsDecisionStops": 0,
+        "resumes": 0,
+        "total": 1
+      }
+    },
+    "provider": {
+      "durations": {
+        "approvedToStartMs": null,
+        "runMs": null,
+        "totalMs": null
+      },
+      "touches": {
+        "approvals": 0,
+        "reApprovals": 0,
+        "needsDecisionStops": 0,
+        "resumes": 0,
+        "total": 0
+      }
+    },
+    "tiered": {
+      "durations": {
+        "approvedToStartMs": 3600000,
+        "runMs": null,
+        "totalMs": null
+      },
+      "touches": {
+        "approvals": 2,
+        "reApprovals": 1,
+        "needsDecisionStops": 0,
+        "resumes": 0,
+        "total": 2
+      }
+    }
+  },
+  "tokens": {
+    "perFeature": {},
+    "mean": null
+  }
+}
+=== 4h:empty ===
+{
+  "noEventLogs": true,
+  "perFeature": {},
+  "tokens": {
+    "perFeature": {},
+    "mean": null
+  }
+}
+=== 4j:enriched ===
+No human corrections recorded.
+=== 4j:legacy ===
+No human corrections recorded.
+=== 4j:mixed ===
+No human corrections recorded.
+=== 4j:provider ===
+No human corrections recorded.
+=== 4j:tiered ===
+Total corrections: 1
+By category:
+- reapproval: 1
+Top features:
+- tiered: 1
+  - 2026-03-02 reapproval — approved event #2
+Unavailable: 1 feature(s) whose post-deliver fixes could not be counted
+- no pr-opened event: 1
+=== 4j:all ===
+Total corrections: 1
+By category:
+- reapproval: 1
+Top features:
+- tiered: 1
+  - 2026-03-02 reapproval — approved event #2
+Unavailable: 5 feature(s) whose post-deliver fixes could not be counted
+- no pr-opened event: 5
+=== 4j:empty ===
+No human corrections recorded.

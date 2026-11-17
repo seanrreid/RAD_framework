@@ -588,39 +588,19 @@ Per-feature cycle time, human touches and tokens per delivered feature come from
 the pure folds in `harness/cycle-metrics.js` (`stageDurations`, `humanTouches`,
 `tokensPerDeliveredFeature`). Import them; never re-implement them in jq or shell.
 What counts as a touch is a policy decision documented in that module's header.
-Run from the repo root; `RAD_STATE_DIR` (default `.agents/state`) exists only so the
-script is testable against a fixture dir:
+`harness/insights-cycle-time.js` reads the logs and calls those folds. Same
+invocation convention as Steps 4c–4f2: run from the repo root and read its output;
+`RAD_STATE_DIR` (default `.agents/state`) exists only for fixture testing. This
+step only reads; it writes nothing.
 
 ```bash
-node --input-type=module -e '
-import { readFileSync, readdirSync, existsSync } from "node:fs";
-import { join } from "node:path";
-const { stageDurations, humanTouches, tokensPerDeliveredFeature } =
-  await import("./harness/cycle-metrics.js");
-
-const stateDir = process.env.RAD_STATE_DIR || ".agents/state";
-const features = existsSync(stateDir)
-  ? readdirSync(stateDir, { withFileTypes: true })
-      .filter((d) => d.isDirectory())
-      .map((d) => d.name)
-      .filter((f) => existsSync(join(stateDir, f, "events.jsonl")))
-      .sort()
-  : [];
-
-const histories = {};
-const perFeature = {};
-for (const feature of features) {
-  histories[feature] = readFileSync(join(stateDir, feature, "events.jsonl"), "utf8")
-    .split("\n").filter(Boolean).map((l) => JSON.parse(l));
-  perFeature[feature] = {
-    durations: stageDurations(histories[feature]),
-    touches: humanTouches(histories[feature]),
-  };
-}
-const tokens = tokensPerDeliveredFeature(histories);
-console.log(JSON.stringify({ noEventLogs: features.length === 0, perFeature, tokens }, null, 2));
-'
+node harness/insights-cycle-time.js
 ```
+
+The output is one JSON object `{ noEventLogs, perFeature, tokens }`; each
+`perFeature` entry is `{ durations, touches }`. A malformed events log, or a line
+that is not a JSON object, exits non-zero naming the log; report its stderr and
+omit the section.
 
 Reading the output:
 
@@ -717,44 +697,21 @@ reads them to block, warn or gate a command.
 Where a human had to step in after the agent's work: re-approvals, resume answers,
 confirmed review findings and fix commits after the deliver PR opened. The rows,
 counts and text come from `harness/human-corrections.js` (`parseEventLog`,
-`postDeliverFixRows`, `buildCorrections`, `formatCorrections`); import them, never
-re-implement them in jq or shell. Unlike Steps 4c–4i, this step applies `--since`
-itself, on row dates (a row exactly on the boundary is kept). Run from the repo
-root; set `SINCE` to the `--since` value, or leave it empty:
+`postDeliverFixRows`, `buildCorrections`, `formatCorrections`);
+`harness/insights-human-corrections.js` reads the logs and the findings file and
+calls those folds. Never re-implement them in jq or shell. Unlike Steps 4c–4i, this
+step applies `--since` itself, on row dates (a row exactly on the boundary is
+kept). Run from the repo root and read its output; set `SINCE` to the `--since`
+value, or leave it empty. `RAD_STATE_DIR` and `RAD_FINDINGS_FILE` exist only for
+fixture testing. This step only reads; it writes nothing.
 
 ```bash
-SINCE="" node --input-type=module -e '
-import { readFileSync, readdirSync, existsSync } from "node:fs";
-import { join } from "node:path";
-const { parseEventLog, postDeliverFixRows, buildCorrections, formatCorrections } =
-  await import("./harness/human-corrections.js");
-
-const stateDir = process.env.RAD_STATE_DIR || ".agents/state";
-const histories = {};
-if (existsSync(stateDir)) {
-  for (const d of readdirSync(stateDir, { withFileTypes: true })) {
-    const log = join(stateDir, d.name, "events.jsonl");
-    if (!d.isDirectory() || !existsSync(log)) continue;
-    histories[d.name] = parseEventLog(readFileSync(log, "utf8"), log); // throws on a bad line
-  }
-}
-const findingsFile = process.env.RAD_FINDINGS_FILE || ".agents/findings.jsonl";
-const findings = [];
-if (existsSync(findingsFile)) {
-  readFileSync(findingsFile, "utf8").split("\n").forEach((line, i) => {
-    if (!line.trim()) return;
-    try { findings.push(JSON.parse(line)); }
-    catch (err) { console.error(`skipping malformed JSON at ${findingsFile}:${i + 1}: ${err.message}`); }
-  });
-}
-const postDeliver = {};
-for (const [feature, events] of Object.entries(histories)) {
-  postDeliver[feature] = postDeliverFixRows(feature, events, { root: process.cwd() });
-}
-const since = process.env.SINCE || undefined;
-console.log(formatCorrections(buildCorrections({ histories, findings, postDeliver, since })));
-'
+SINCE="" node harness/insights-human-corrections.js
 ```
+
+The output is the formatted text, printed as-is (not JSON). A malformed line in
+`findings.jsonl` is skipped with a `skipping malformed JSON at <file>:<line>`
+message on stderr and does not fail the step.
 
 A non-zero exit (a malformed events log names the log and line; a bad `--since`;
 a failed `git log`) is reported with its stderr and the section is omitted. It
