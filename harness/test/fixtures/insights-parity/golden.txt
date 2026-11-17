@@ -1533,3 +1533,339 @@ no cache data reported
   "attempts": [],
   "droppedToZero": []
 }
+=== 4f3:enriched ===
+{
+  "groups": {
+    "unrecorded": {
+      "waves": 3,
+      "features": 1,
+      "firstAttemptSuccess": 1,
+      "retried": 1,
+      "tokens": 300,
+      "unknownUsage": 1,
+      "firstAttemptSuccessPct": 33,
+      "retriedPct": 33,
+      "meanTokens": 150
+    }
+  },
+  "features": 1,
+  "advisories": [],
+  "minFeatures": 3
+}
+=== 4f3:legacy ===
+{
+  "groups": {
+    "unrecorded": {
+      "waves": 3,
+      "features": 1,
+      "firstAttemptSuccess": 1,
+      "retried": 1,
+      "tokens": 140,
+      "unknownUsage": 2,
+      "firstAttemptSuccessPct": 33,
+      "retriedPct": 33,
+      "meanTokens": 140
+    }
+  },
+  "features": 1,
+  "advisories": [],
+  "minFeatures": 3
+}
+=== 4f3:mixed ===
+{
+  "groups": {
+    "unrecorded": {
+      "waves": 3,
+      "features": 1,
+      "firstAttemptSuccess": 0,
+      "retried": 2,
+      "tokens": 185,
+      "unknownUsage": 1,
+      "firstAttemptSuccessPct": 0,
+      "retriedPct": 67,
+      "meanTokens": 93
+    }
+  },
+  "features": 1,
+  "advisories": [],
+  "minFeatures": 3
+}
+=== 4f3:provider ===
+{
+  "groups": {
+    "unrecorded": {
+      "waves": 6,
+      "features": 4,
+      "firstAttemptSuccess": 4,
+      "retried": 2,
+      "tokens": 1495,
+      "unknownUsage": 1,
+      "firstAttemptSuccessPct": 67,
+      "retriedPct": 33,
+      "meanTokens": 299
+    }
+  },
+  "features": 4,
+  "advisories": [],
+  "minFeatures": 3
+}
+=== 4f3:tiered ===
+{
+  "groups": {
+    "claude-haiku-4-5": {
+      "waves": 2,
+      "features": 2,
+      "firstAttemptSuccess": 1,
+      "retried": 1,
+      "tokens": 990,
+      "unknownUsage": 0,
+      "firstAttemptSuccessPct": 50,
+      "retriedPct": 50,
+      "meanTokens": 495
+    },
+    "claude-opus-4-8": {
+      "waves": 1,
+      "features": 1,
+      "firstAttemptSuccess": 1,
+      "retried": 0,
+      "tokens": 800,
+      "unknownUsage": 0,
+      "firstAttemptSuccessPct": 100,
+      "retriedPct": 0,
+      "meanTokens": 800
+    },
+    "default": {
+      "waves": 3,
+      "features": 2,
+      "firstAttemptSuccess": 3,
+      "retried": 0,
+      "tokens": 500,
+      "unknownUsage": 0,
+      "firstAttemptSuccessPct": 100,
+      "retriedPct": 0,
+      "meanTokens": 167
+    },
+    "unrecorded": {
+      "waves": 2,
+      "features": 1,
+      "firstAttemptSuccess": 1,
+      "retried": 1,
+      "tokens": 50,
+      "unknownUsage": 1,
+      "firstAttemptSuccessPct": 50,
+      "retriedPct": 50,
+      "meanTokens": 50
+    }
+  },
+  "features": 4,
+  "advisories": [],
+  "minFeatures": 3
+}
+=== 4f3:all ===
+{
+  "groups": {
+    "unrecorded": {
+      "waves": 11,
+      "features": 4,
+      "firstAttemptSuccess": 4,
+      "retried": 5,
+      "tokens": 675,
+      "unknownUsage": 5,
+      "firstAttemptSuccessPct": 36,
+      "retriedPct": 45,
+      "meanTokens": 113
+    },
+    "claude-haiku-4-5": {
+      "waves": 2,
+      "features": 2,
+      "firstAttemptSuccess": 2,
+      "retried": 2,
+      "tokens": 1120,
+      "unknownUsage": 1,
+      "firstAttemptSuccessPct": 100,
+      "retriedPct": 100,
+      "meanTokens": 1120
+    },
+    "claude-opus-4-8": {
+      "waves": 1,
+      "features": 1,
+      "firstAttemptSuccess": 0,
+      "retried": 1,
+      "tokens": 1950,
+      "unknownUsage": 0,
+      "firstAttemptSuccessPct": 0,
+      "retriedPct": 100,
+      "meanTokens": 1950
+    },
+    "default": {
+      "waves": 3,
+      "features": 2,
+      "firstAttemptSuccess": 2,
+      "retried": 2,
+      "tokens": 595,
+      "unknownUsage": 0,
+      "firstAttemptSuccessPct": 67,
+      "retriedPct": 67,
+      "meanTokens": 198
+    }
+  },
+  "features": 7,
+  "advisories": [],
+  "minFeatures": 3
+}
+=== 4f3:empty ===
+{
+  "groups": {},
+  "features": 0,
+  "advisories": [],
+  "minFeatures": 3
+}
+=== 4f4:enriched ===
+{
+  "groups": {
+    "unknown": {
+      "attempts": 5,
+      "passed": 2,
+      "retries": 0,
+      "tokens": 525,
+      "unknownUsage": 1,
+      "features": 1,
+      "passPct": 40
+    }
+  },
+  "features": 1
+}
+=== 4f4:legacy ===
+{
+  "groups": {
+    "unknown": {
+      "attempts": 4,
+      "passed": 2,
+      "retries": 0,
+      "tokens": 240,
+      "unknownUsage": 2,
+      "features": 1,
+      "passPct": 50
+    }
+  },
+  "features": 1
+}
+=== 4f4:mixed ===
+{
+  "groups": {
+    "unknown": {
+      "attempts": 5,
+      "passed": 1,
+      "retries": 0,
+      "tokens": 185,
+      "unknownUsage": 1,
+      "features": 1,
+      "passPct": 20
+    }
+  },
+  "features": 1
+}
+=== 4f4:provider ===
+{
+  "groups": {
+    "command/claude-sonnet-4-6": {
+      "attempts": 2,
+      "passed": 1,
+      "retries": 0,
+      "tokens": 750,
+      "unknownUsage": 0,
+      "features": 1,
+      "passPct": 50
+    },
+    "sdk/claude-opus-4-8": {
+      "attempts": 3,
+      "passed": 2,
+      "retries": 2,
+      "tokens": 595,
+      "unknownUsage": 0,
+      "features": 2,
+      "passPct": 67
+    },
+    "acp/none": {
+      "attempts": 1,
+      "passed": 1,
+      "retries": 0,
+      "tokens": 100,
+      "unknownUsage": 0,
+      "features": 1,
+      "passPct": 100
+    },
+    "unknown": {
+      "attempts": 2,
+      "passed": 2,
+      "retries": 0,
+      "tokens": 50,
+      "unknownUsage": 1,
+      "features": 1,
+      "passPct": 100
+    }
+  },
+  "features": 4
+}
+=== 4f4:tiered ===
+{
+  "groups": {
+    "unknown": {
+      "attempts": 10,
+      "passed": 8,
+      "retries": 1,
+      "tokens": 2460,
+      "unknownUsage": 1,
+      "features": 4,
+      "passPct": 80
+    }
+  },
+  "features": 4
+}
+=== 4f4:all ===
+{
+  "groups": {
+    "unknown": {
+      "attempts": 26,
+      "passed": 15,
+      "retries": 1,
+      "tokens": 3460,
+      "unknownUsage": 6,
+      "features": 7,
+      "passPct": 58
+    },
+    "command/claude-sonnet-4-6": {
+      "attempts": 2,
+      "passed": 1,
+      "retries": 0,
+      "tokens": 750,
+      "unknownUsage": 0,
+      "features": 1,
+      "passPct": 50
+    },
+    "sdk/claude-opus-4-8": {
+      "attempts": 3,
+      "passed": 2,
+      "retries": 2,
+      "tokens": 595,
+      "unknownUsage": 0,
+      "features": 2,
+      "passPct": 67
+    },
+    "acp/none": {
+      "attempts": 1,
+      "passed": 1,
+      "retries": 0,
+      "tokens": 100,
+      "unknownUsage": 0,
+      "features": 1,
+      "passPct": 100
+    }
+  },
+  "features": 7
+}
+=== 4f4:empty ===
+{
+  "groups": {},
+  "features": 0
+}
