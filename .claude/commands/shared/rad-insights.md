@@ -529,10 +529,7 @@ from folds in `harness/events.js` — `attemptOutcomeCounts`, `failReasonCounts`
 the threshold and looks up the table, then prints the result. `outcome:*` rows read `attemptOutcomeCounts`,
 NOT `outcomeCounts`: the spine records the outcome only on `wave-attempt` events
 (`wave-complete` carries `{ wave }` alone), so wave-complete outcomes never show
-a failure on a real log. Same invocation
-convention as Steps 4c–4f: run from the repo root; `RAD_STATE_DIR` (default
-`.agents/state`) exists only for fixture testing. This step only reads; it writes
-nothing.
+a failure on a real log.
 
 ```bash
 node harness/insights-prompt-surfaces.js
@@ -557,9 +554,6 @@ Reading the output:
 - **`noWaveData: true`** — no `wave-attempt` / `wave-failed` event anywhere;
   **`noEnrichedData: true`** — no per-task data, so `blocked:*` signals cannot
   be measured. Both are degradation states, not a clean record.
-- `outcome:*` signals count `wave-attempt` outcomes (the `attemptOutcomeCounts`
-  contract) — every attempt, so a wave retried twice on `fail-protocol` counts 2.
-  `wave-complete` events are never counted: the spine writes no outcome on them.
 
 ### Step 4h: Cycle time, human touches and tokens per delivered feature
 
@@ -567,10 +561,7 @@ Per-feature cycle time, human touches and tokens per delivered feature come from
 the pure folds in `harness/cycle-metrics.js` (`stageDurations`, `humanTouches`,
 `tokensPerDeliveredFeature`). Import them; never re-implement them in jq or shell.
 What counts as a touch is a policy decision documented in that module's header.
-`harness/insights-cycle-time.js` reads the logs and calls those folds. Same
-invocation convention as Steps 4c–4f2: run from the repo root and read its output;
-`RAD_STATE_DIR` (default `.agents/state`) exists only for fixture testing. This
-step only reads; it writes nothing.
+`harness/insights-cycle-time.js` reads the logs and calls those folds.
 
 ```bash
 node harness/insights-cycle-time.js
@@ -607,9 +598,7 @@ plain git history on the default branch (`readDeliveryHistory` in
 `harness/insights-rework-load.js` reads the event logs and calls them; never
 re-implement them in jq or shell. What counts as rework is a policy decision
 documented in that module's header. The reader uses the **local** default branch,
-so update it first (`git fetch` and fast-forward it) for current numbers. Run from
-the repo root and read its output (JSON); `RAD_STATE_DIR` exists only for fixture
-testing. This step only reads; it writes nothing.
+so update it first (`git fetch` and fast-forward it) for current numbers.
 
 ```bash
 DEFAULT_BRANCH=$(node harness/cli.js config get default_branch) || { echo "rework/load: cannot resolve default_branch" >&2; exit 1; }
@@ -651,9 +640,8 @@ counts and text come from `harness/human-corrections.js` (`parseEventLog`,
 `harness/insights-human-corrections.js` reads the logs and the findings file and
 calls those folds. Never re-implement them in jq or shell. Unlike Steps 4c–4i, this
 step applies `--since` itself, on row dates (a row exactly on the boundary is
-kept). Run from the repo root and read its output; set `SINCE` to the `--since`
-value, or leave it empty. `RAD_STATE_DIR` and `RAD_FINDINGS_FILE` exist only for
-fixture testing. This step only reads; it writes nothing.
+kept). Set `SINCE` to the `--since` value, or leave it empty. `RAD_FINDINGS_FILE`
+exists only for fixture testing.
 
 ```bash
 SINCE="" node harness/insights-human-corrections.js
@@ -790,17 +778,15 @@ Blocked tasks across [enrichedAttempts] enriched wave attempt(s):
 - blocked_code: [N]  blocked_spec: [N]  blocked_intent: [N]
 [Name the features contributing blocked tasks from perFeature. If all three are
  0: "No blocked tasks in [enrichedAttempts] enriched attempt(s)."]
-[Suggestion only — never edit files. A blocked_spec or blocked_intent majority
- suggests plans need sharper Validate fields or intent; a blocked_code majority
- points at implementation difficulty rather than plan quality.]
+[Suggestion only — never edit files. A blocked_spec/blocked_intent majority
+ suggests sharper Validate fields or intent; blocked_code points at implementation difficulty.]
 
 ### Code Legibility Signals
 [From Step 4e. Omit this section entirely if no per-feature events.jsonl exists.]
-[Pick EXACTLY ONE degradation line when it applies — silence would read as a clean
- record. After the noEnrichedData or mappedTitles-0 line render only the
- unattributable/unenriched line below (when non-zero); after the reportedFiles-0
- line still render the deficit breakdown and that line, skipping the blocked-task
- list:]
+[Pick EXACTLY ONE degradation line when it applies. After the noEnrichedData or
+ mappedTitles-0 line render only the unattributable/unenriched line below (when
+ non-zero); after the reportedFiles-0 line still render the deficit breakdown and
+ that line, skipping the blocked-task list:]
 [If Step 4d reported noEnrichedData: true:]
 No enriched (per-task) wave events exist yet — code-legibility signals need
 per-task data to attribute blocked tasks to files.
@@ -842,13 +828,12 @@ Deficit proxies per file (floor: [deficits.minFeatures] features per deficit):
 [Whenever deficits.unattributable or deficits.unenriched is non-zero, render —
  never omit silently:]
 [unattributable] failing task record(s) could not be attributed to a file (no plan-doc File: mapping); [unenriched] attempt(s) predate per-task data.
-[Suggestion only — name the files; never edit them and never propose an automatic
- change. A reader may choose to add a comment, a README, or a refactor task.]
+[Suggestion only — name the files; never edit them or propose an automatic change.]
 
 ### Model Tiering Advisory
 [From Step 4f. Omit this section entirely if no per-feature events.jsonl exists.]
-[Pick EXACTLY ONE degradation line when it applies, and render nothing else in
- the section except the spend note — silence would read as "no tiering needed":]
+[Pick EXACTLY ONE degradation line when it applies; render nothing else in the
+ section except the spend note:]
 [If noWaveData: true:]
 No wave data yet — per-wave-position reliability will populate after the first
 /rad-deliver run records wave-attempt events.
@@ -862,10 +847,9 @@ Based on [features] features (floor: [minFeatures]):
 - Wave [wave] — first-attempt success [firstAttemptSuccessPct]% (n=[n]),
   retry rate [retryPct]% (n=[n]), [attempts] attempt(s)
 ...
-[Suggestion only — never edit plans. A position with high first-attempt success
- and a low retry rate MAY be a candidate for a cheaper `Model:` line; a position
- with a high retry rate may warrant a stronger one. Always quote the n; a
- position with small n is weak evidence even above the feature floor.]
+[Suggestion only — never edit plans. High first-attempt success with a low retry
+ rate MAY suit a cheaper `Model:` line; a high retry rate may warrant a stronger
+ one. Always quote the n; small n is weak evidence.]
 
 [Render this note verbatim in every state, including the degradation states:]
 The per-position rates above are outcome-only — they carry no spend. Spend-derived
@@ -875,9 +859,9 @@ token totals vary with cache-hit rate and scheduling — see the Cache-Hit Reado
 below (`cacheRead` / `cacheWrite` / `cost`, #121).
 
 #### Spend by model
-[From Step 4f3. Render in every state of the section above, including its
- degradation states — this subsection has its own floor. If `groups` is empty,
- render the table header with no rows, then the insufficient-history line.]
+[From Step 4f3. Render in every state of the section above — this subsection has
+ its own floor. If `groups` is empty, render the table header with no rows, then
+ the insufficient-history line.]
 | Model | Features | Waves | First-attempt % | Retried % | Mean tokens / known-usage wave | Unknown-usage waves |
 |-------|----------|-------|-----------------|-----------|--------------------------------|---------------------|
 | `[model]` | [features] | [waves] | [firstAttemptSuccessPct]% (n=[waves]) | [retriedPct]% (n=[waves]) | [meanTokens] (n=[waves − unknownUsage])   [meanTokens null: "unknown"] | [unknownUsage] |
@@ -904,8 +888,7 @@ downgrade or upgrade threshold.
 one fixed model. `unrecorded` waves (pre-#119 logs, no `wave-started`) are shown
 for completeness but never advised on. Unknown-usage waves are excluded from mean
 tokens, never counted as 0.
-[Suggestion only — never edit plans, never block. Always quote the n; a group
- with small n is weak evidence even above the feature floor.]
+[Suggestion only — never edit plans, never block. Always quote the n.]
 
 #### Spend by provider
 [From Step 4f4. Omit this subsection if Step 4f4 exited non-zero — the rest of
@@ -925,8 +908,7 @@ applied no model. Unknown-usage attempts add nothing to tokens, never counted as
 
 ### Cache-Hit Readout
 [From Step 4f2. Omit this section entirely if no per-feature events.jsonl exists.]
-[If noCacheData: true, render EXACTLY this line and nothing else in the section —
- silence would read as a perfect cache, a 0% ratio as a measured miss:]
+[If noCacheData: true, render EXACTLY this line and nothing else in the section:]
 no cache data reported — no wave attempt carried `usage.cacheRead`
 ([withoutCache] attempt(s) without cache fields).
 
@@ -941,9 +923,8 @@ Per attempt (cacheRead / (input + cacheRead)):
 ⚠ [feature] / Wave [wave] / attempt [attempt] — cache-hit ratio dropped to 0%
 after [earlierPeakPct]% on an earlier attempt; the retry re-sent its whole prompt
 uncached.
-[Suggestion only — never edit plans or prompts. A retry that drops to 0% may
- point at a changed prompt prefix between attempts or a cache TTL lapse; a
- reader may choose to investigate the retry prompt's prefix ordering.]
+[Suggestion only — never edit plans or prompts. A drop to 0% may point at a
+ changed prompt prefix or a cache TTL lapse.]
 
 ### Prompt-Surface Proposals
 [From Step 4g. Omit this section entirely if no per-feature events.jsonl exists.]
@@ -986,9 +967,9 @@ Reporting only — no target or threshold applies to these values.
 [From Step 4i. Omit this section entirely if noMerges is true or Step 4i exited
  non-zero (then say why in one line).]
 Rework window: [windowDays] days (RAD_REWORK_WINDOW_DAYS, default 14)
-[Table of the most recent 10 deliver merges, newest first; render null as "n/a".
- Join `load` and `rework` rows on `feature`; Rework rate and Reworked / files come
- from `rework` (product files only), Files / lines from `load` (every file in the merge).]
+[Most recent 10 deliver merges, newest first; null renders "n/a". Join `load` and
+ `rework` on `feature`: rework columns (product files only) from `rework`, Files /
+ lines (every file) from `load`.]
 | Feature | PR | Rework rate | Reworked / files | Weighted | Window complete | Files / lines | Opened→merged |
 |---------|----|-------------|------------------|----------|-----------------|---------------|---------------|
 | [feature] | [#load.pr, or "n/a" when null] | [rework.rate as %] | [rework.reworkedFiles]/[rework.files] | [rework.weightedRework, 2 dp] | [rework.windowComplete: yes/no] | [load.files] / [load.linesChanged] | [load.openedToMergeMs as duration] |
