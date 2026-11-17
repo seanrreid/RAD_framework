@@ -2228,3 +2228,77 @@ No human corrections recorded.
     }
   }
 }
+=== 3c:absent ===
+{
+  "findingsLog": false
+}
+=== 3c:empty ===
+{
+  "findingsLog": true,
+  "reviewers": {},
+  "minLabeled": 5
+}
+=== 3c:blank ===
+{
+  "findingsLog": true,
+  "reviewers": {},
+  "minLabeled": 5
+}
+=== 3c:populated ===
+{
+  "findingsLog": true,
+  "reviewers": {
+    "quality-reviewer": {
+      "confirmed": 3,
+      "falseAlarm": 2,
+      "unlabeled": 0,
+      "labeled": 5,
+      "precision": 0.6,
+      "falseAlarmRate": 0.4
+    },
+    "ui-reviewer": {
+      "confirmed": 3,
+      "falseAlarm": 1,
+      "unlabeled": 1,
+      "labeled": 4,
+      "precision": null,
+      "falseAlarmRate": null
+    },
+    "(unknown)": {
+      "confirmed": 0,
+      "falseAlarm": 0,
+      "unlabeled": 1,
+      "labeled": 0,
+      "precision": null,
+      "falseAlarmRate": null
+    }
+  },
+  "minLabeled": 5
+}
+=== 3c:cycle ===
+{
+  "findingsLog": true,
+  "reviewers": {},
+  "minLabeled": 5
+}
+=== 3c:non-object ===
+{
+  "findingsLog": true,
+  "reviewers": {},
+  "minLabeled": 5
+}
+=== 3c:malformed ===
+{
+  "findingsLog": true,
+  "reviewers": {
+    "quality-reviewer": {
+      "confirmed": 2,
+      "falseAlarm": 0,
+      "unlabeled": 0,
+      "labeled": 2,
+      "precision": null,
+      "falseAlarmRate": null
+    }
+  },
+  "minLabeled": 5
+}
