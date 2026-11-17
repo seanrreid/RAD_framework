@@ -20,3 +20,4 @@
 {"feature":"rad-insights-scripts-first-skill-trim","type":"wave-started","actor":"harness","ts":"2026-11-17T20:12:31.016Z","data":{"wave":4,"attempt":1}}
 {"feature":"rad-insights-scripts-first-skill-trim","type":"wave-attempt","actor":"harness","ts":"2026-11-17T20:24:56.415Z","data":{"wave":4,"attempt":1,"outcome":"success","usage":{"input":8,"output":887,"total":230416,"cacheRead":184587,"cacheWrite":44934,"cost":0.20708069999999998},"tasks":[{"title":"Regenerate, measure and record","status":"complete","commit":"df81666","concern":"—","error":"—"}],"verify":{"command":"exec bash scripts/verify-all.sh","status":0,"passed":true},"agent":{"adapter":"command"}}}
 {"feature":"rad-insights-scripts-first-skill-trim","type":"wave-complete","actor":"harness","ts":"2026-11-17T20:24:56.416Z","data":{"wave":4}}
+{"feature":"rad-insights-scripts-first-skill-trim","type":"pr-opened","actor":"harness","ts":"2026-11-17T20:25:03.971Z"}
