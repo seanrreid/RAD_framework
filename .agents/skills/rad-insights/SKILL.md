@@ -465,50 +465,18 @@ Reading the output:
 Since #119 every wave records a `wave-started` event, which carries `data.model`
 when the plan declared a `Model:` line. Joining those with `wave-attempt` usage
 gives per-MODEL spend and reliability. The counting lives in `harness/events.js`
-(`modelTierSpend`, `modelTierAdvisories`) — import them, never re-implement them.
-Same invocation convention as Steps 4c–4f2: run from the repo root;
-`RAD_STATE_DIR` (default `.agents/state`) exists only for fixture testing. The
+(`modelTierSpend`, `modelTierAdvisories`) — import them, never re-implement them;
+`harness/insights-model-spend.js` aggregates them across features.
+Same invocation convention as Steps 4c–4f2: run from the repo root and read its
+output; `RAD_STATE_DIR` (default `.agents/state`) exists only for fixture testing. The
 advisory floor is the same `TIERING_MIN_FEATURES` as Step 4f, applied per model
 group. This step only reads; it writes nothing.
 
 ```bash
-node --input-type=module -e '
-import { readFileSync, readdirSync, existsSync } from "node:fs";
-import { join } from "node:path";
-const { modelTierSpend, modelTierAdvisories } = await import("./harness/events.js");
-
-// Minimum DISTINCT features with wave history before any tiering advisory
-// renders. Below it, a rate describes one or two plans, not a model tier.
-const TIERING_MIN_FEATURES = 3;
-
-const stateDir = process.env.RAD_STATE_DIR || ".agents/state";
-const features = existsSync(stateDir)
-  ? readdirSync(stateDir, { withFileTypes: true })
-      .filter((d) => d.isDirectory())
-      .map((d) => d.name)
-      .filter((f) => existsSync(join(stateDir, f, "events.jsonl")))
-      .sort()
-  : [];
-
-// Waves are joined on (feature, wave), so one concatenated history is safe.
-const history = features.flatMap((feature) =>
-  readFileSync(join(stateDir, feature, "events.jsonl"), "utf8")
-    .split("\n").filter(Boolean).map((l) => JSON.parse(l)));
-const stats = modelTierSpend(history);
-const advisories = modelTierAdvisories(stats, { minFeatures: TIERING_MIN_FEATURES });
-
-const pct = (n, d) => (d === 0 ? 0 : Math.round((100 * n) / d));
-// meanTokens is over known-usage waves only; null (render `unknown`) when none.
-const groups = Object.fromEntries(Object.entries(stats.groups).map(([model, g]) => {
-  const known = g.waves - g.unknownUsage;
-  return [model, { ...g, firstAttemptSuccessPct: pct(g.firstAttemptSuccess, g.waves),
-    retriedPct: pct(g.retried, g.waves),
-    meanTokens: known > 0 ? Math.round(g.tokens / known) : null }];
-}));
-console.log(JSON.stringify({ groups, features: stats.features, advisories,
-  minFeatures: TIERING_MIN_FEATURES }, null, 2));
-'
+node harness/insights-model-spend.js
 ```
+
+The output is one JSON object `{ groups, features, advisories, minFeatures }`.
 
 Reading the output:
 
@@ -540,39 +508,17 @@ Reading the output:
 Every `wave-attempt` that `rad deliver` appends carries `data.agent` — the selected
 adapter kind and, when one applied, the model. Grouping attempts by
 `adapter/model` gives per-PROVIDER spend and reliability. The counting lives in
-`harness/events.js` (`providerSpend`) — import it, never re-implement it. Same
-invocation convention as Steps 4c–4f3: run from the repo root; `RAD_STATE_DIR`
-(default `.agents/state`) exists only for fixture testing. This step only reads;
-it writes nothing.
+`harness/events.js` (`providerSpend`) — import it, never re-implement it;
+`harness/insights-provider-spend.js` aggregates it across features. Same
+invocation convention as Steps 4c–4f3: run from the repo root and read its
+output; `RAD_STATE_DIR` (default `.agents/state`) exists only for fixture testing.
+This step only reads; it writes nothing.
 
 ```bash
-node --input-type=module -e '
-import { readFileSync, readdirSync, existsSync } from "node:fs";
-import { join } from "node:path";
-const { providerSpend } = await import("./harness/events.js");
-
-const stateDir = process.env.RAD_STATE_DIR || ".agents/state";
-const features = existsSync(stateDir)
-  ? readdirSync(stateDir, { withFileTypes: true })
-      .filter((d) => d.isDirectory())
-      .map((d) => d.name)
-      .filter((f) => existsSync(join(stateDir, f, "events.jsonl")))
-      .sort()
-  : [];
-
-// Groups key on the attempt tag, not on (feature, wave), so one concatenated
-// history is safe.
-const history = features.flatMap((feature) =>
-  readFileSync(join(stateDir, feature, "events.jsonl"), "utf8")
-    .split("\n").filter(Boolean).map((l) => JSON.parse(l)));
-const stats = providerSpend(history);
-
-const pct = (n, d) => (d === 0 ? 0 : Math.round((100 * n) / d));
-const groups = Object.fromEntries(Object.entries(stats.groups).map(([key, g]) =>
-  [key, { ...g, passPct: pct(g.passed, g.attempts) }]));
-console.log(JSON.stringify({ groups, features: stats.features }, null, 2));
-'
+node harness/insights-provider-spend.js
 ```
+
+The output is one JSON object `{ groups, features }`.
 
 Reading the output:
 
