@@ -172,29 +172,11 @@ optional `verdict` field (`confirmed` | `false-alarm`, written by `/rad-review` 
 7); older findings without it fall back to the module's documented keyword rules
 (`category: "false-alarm"` or "verified false"/"false alarm" in `issue` →
 false-alarm; "verified real" or an uppercase `FIXED` in `issue` → confirmed;
-anything else → unlabeled). Same invocation convention as Step 4c: run from the
-repo root; `RAD_FINDINGS_FILE` (default `.agents/findings.jsonl`) exists only for
-fixture testing. This step only reads; it writes nothing.
+anything else → unlabeled). Run from the repo root; `RAD_FINDINGS_FILE` (default
+`.agents/findings.jsonl`) exists only for fixture testing. Read-only.
 
 ```bash
-node --input-type=module -e '
-import { readFileSync, existsSync } from "node:fs";
-const { reviewerCalibration } = await import("./harness/findings.js");
-
-const findingsFile = process.env.RAD_FINDINGS_FILE || ".agents/findings.jsonl";
-if (!existsSync(findingsFile)) {
-  console.log(JSON.stringify({ findingsLog: false }, null, 2));
-  process.exit(0);
-}
-// A malformed line is reported with its line number, then skipped — never silently.
-const records = [];
-readFileSync(findingsFile, "utf8").split("\n").forEach((line, i) => {
-  if (!line.trim()) return;
-  try { records.push(JSON.parse(line)); }
-  catch (err) { console.error(`skipping malformed JSON at ${findingsFile}:${i + 1}: ${err.message}`); }
-});
-console.log(JSON.stringify({ findingsLog: true, ...reviewerCalibration(records) }, null, 2));
-'
+node harness/insights-reviewer-calibration.js
 ```
 
 Reading the output:
