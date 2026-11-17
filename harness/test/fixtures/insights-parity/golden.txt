@@ -2078,3 +2078,31 @@ no cache data reported
     "mean": null
   }
 }
+=== 4j:enriched ===
+No human corrections recorded.
+=== 4j:legacy ===
+No human corrections recorded.
+=== 4j:mixed ===
+No human corrections recorded.
+=== 4j:provider ===
+No human corrections recorded.
+=== 4j:tiered ===
+Total corrections: 1
+By category:
+- reapproval: 1
+Top features:
+- tiered: 1
+  - 2026-03-02 reapproval — approved event #2
+Unavailable: 1 feature(s) whose post-deliver fixes could not be counted
+- no pr-opened event: 1
+=== 4j:all ===
+Total corrections: 1
+By category:
+- reapproval: 1
+Top features:
+- tiered: 1
+  - 2026-03-02 reapproval — approved event #2
+Unavailable: 5 feature(s) whose post-deliver fixes could not be counted
+- no pr-opened event: 5
+=== 4j:empty ===
+No human corrections recorded.
