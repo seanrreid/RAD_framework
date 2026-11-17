@@ -738,9 +738,8 @@ Cost per wave [for the most recent / most expensive feature]:
 
 ### Reliability
 [From Step 4c. Omit this section entirely if no per-feature events.jsonl exists.]
-[If the fold reports noWaveData: true, render EXACTLY this zeros path and nothing else
- in the section — this is the normal state on a fresh clone, since committed event
- logs contain only approved events:]
+[If the fold reports noWaveData: true, render EXACTLY this and nothing else in the
+ section (the normal state on a fresh clone):]
 No wave data yet — the committed event logs contain only approval events.
 Reliability metrics will populate after the first /rad-deliver run records
 wave-attempt / wave-complete / wave-failed events.
@@ -764,8 +763,8 @@ Token spend per wave [for features with recorded usage; 0 = usage not recorded]:
 
 ### Blocked Reasons
 [From Step 4d. Omit this section entirely if no per-feature events.jsonl exists.]
-[If the fold reports noEnrichedData: true, render EXACTLY this line and nothing
- else in the section — zeros here would be unmeasured, not a clean record:]
+[If the fold reports noEnrichedData: true, render EXACTLY this and nothing else in
+ the section (zeros would be unmeasured, not a clean record):]
 No enriched (per-task) wave events exist yet — blocked-reason metrics will
 populate once /rad-deliver records wave-attempt events carrying per-task data.
 
