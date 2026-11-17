@@ -624,50 +624,21 @@ reads them to block, warn or gate a command.
 Post-merge rework rate and Gate-2 verification load per delivered feature come from
 plain git history on the default branch (`readDeliveryHistory` in
 `harness/delivery-history.js`) and the pure folds in `harness/delivery-metrics.js`
-(`verificationLoad`, `reworkRate`, `trend`, `resolveWindowDays`). Import them; never
+(`verificationLoad`, `reworkRate`, `trend`, `resolveWindowDays`).
+`harness/insights-rework-load.js` reads the event logs and calls them; never
 re-implement them in jq or shell. What counts as rework is a policy decision
 documented in that module's header. The reader uses the **local** default branch,
 so update it first (`git fetch` and fast-forward it) for current numbers. Run from
-the repo root:
+the repo root and read its output (JSON); `RAD_STATE_DIR` exists only for fixture
+testing. This step only reads; it writes nothing.
 
 ```bash
 DEFAULT_BRANCH=$(node harness/cli.js config get default_branch) || { echo "rework/load: cannot resolve default_branch" >&2; exit 1; }
-DEFAULT_BRANCH="$DEFAULT_BRANCH" node --input-type=module -e '
-import { readFileSync, readdirSync, existsSync } from "node:fs";
-import { join } from "node:path";
-const { readDeliveryHistory } = await import("./harness/delivery-history.js");
-const { verificationLoad, reworkRate, trend, resolveWindowDays } =
-  await import("./harness/delivery-metrics.js");
-
-const stateDir = process.env.RAD_STATE_DIR || ".agents/state";
-const histories = {};
-if (existsSync(stateDir)) {
-  for (const d of readdirSync(stateDir, { withFileTypes: true })) {
-    const log = join(stateDir, d.name, "events.jsonl");
-    if (!d.isDirectory() || !existsSync(log)) continue;
-    histories[d.name] = readFileSync(log, "utf8")
-      .split("\n").filter(Boolean).map((l) => JSON.parse(l));
-  }
-}
-
-const { merges, commits, unresolved } =
-  readDeliveryHistory({ root: process.cwd(), defaultBranch: process.env.DEFAULT_BRANCH });
-const windowDays = resolveWindowDays(process.env);
-const load = verificationLoad(merges, histories);
-const rework = reworkRate(merges, commits, { windowDays, now: Date.now() });
-const merged = load.filter((r) => r.merged);
-const trends = {
-  reworkRate: trend(rework.filter((r) => r.windowComplete).map((r) => r.rate)),
-  prSize: trend(merged.map((r) => r.linesChanged)),
-  reviewLatency: trend(merged.map((r) => r.openedToMergeMs)),
-};
-console.log(JSON.stringify({ noMerges: merges.length === 0, windowDays, unresolved,
-  load, rework, trends }, null, 2));
-'
+DEFAULT_BRANCH="$DEFAULT_BRANCH" node harness/insights-rework-load.js
 ```
 
-A non-zero exit (git or `plan_scope_paths` failed) is reported with its stderr and
-the section is omitted. It never stops the rest of the report.
+A non-zero exit (git or `plan_scope_paths` failed, or a malformed events log) is
+reported with its stderr and the section is omitted. It never stops the rest of the report.
 
 Reading the output:
 
