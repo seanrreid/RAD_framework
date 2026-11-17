@@ -175,3 +175,114 @@ for (const skill of PLAYBOOK_SKILLS) {
     }
   });
 }
+
+// ---- rad-insights pins -----------------------------------------------------
+// Strings copied byte-for-byte from the skill before the Plan F trim. The trim
+// may reorganise prose but must keep every command and every rendered string.
+const INSIGHTS_SKILL = 'rad-insights';
+
+// The 12 Step 4b-4j module invocations, including prefixed forms.
+const INSIGHTS_PINNED_COMMANDS = [
+  'node harness/insights-usage-cost.js',
+  'node harness/insights-reliability.js',
+  'node harness/insights-blocked-reasons.js',
+  'node harness/insights-blocked-files.js',
+  'node harness/insights-wave-tiering.js',
+  'node harness/insights-cache-hit.js',
+  'node harness/insights-model-spend.js',
+  'node harness/insights-provider-spend.js',
+  'node harness/insights-prompt-surfaces.js',
+  'node harness/insights-cycle-time.js',
+  'DEFAULT_BRANCH="$DEFAULT_BRANCH" node harness/insights-rework-load.js',
+  'SINCE="" node harness/insights-human-corrections.js',
+];
+
+// Step 5 strings rendered to the reader (multi-line strings keep source wrapping).
+const INSIGHTS_PINNED_REPORT_STRINGS = [
+  // Code Legibility degradation lines
+  [
+    'No enriched (per-task) wave events exist yet — code-legibility signals need',
+    'per-task data to attribute blocked tasks to files.',
+  ].join('\n'),
+  [
+    'No plan-doc task mappings found (no "#### Task" header + "File:" line under the',
+    'plans directory) — blocked tasks cannot be attributed to files.',
+  ].join('\n'),
+  [
+    'Insufficient history for code-legibility signals — no file has accumulated',
+    'blocked tasks across at least [minFeatures] distinct features yet',
+    '([belowFloor] file(s) below the floor).',
+  ].join('\n'),
+  // Code Legibility framing sentence
+  [
+    'These counts are a code-legibility signal about the named region of the codebase —',
+    'repeated trouble there across unrelated features suggests the code is hard to',
+    'understand or change safely — not a verdict on agent or developer performance.',
+  ].join('\n'),
+  // Deficit-proxy disclaimer
+  [
+    'These deficit labels are proxies inferred from wave',
+    ' outcomes and task statuses, not a diagnosis of the code.',
+  ].join('\n'),
+  // Model Tiering degradation lines
+  [
+    'No wave data yet — per-wave-position reliability will populate after the first',
+    '/rad-deliver run records wave-attempt events.',
+  ].join('\n'),
+  [
+    'Insufficient history for a model-tiering advisory — [features] feature(s) have',
+    'wave history; at least [minFeatures] are needed before per-position rates mean',
+    'anything beyond individual plans.',
+  ].join('\n'),
+  // Model Tiering spend note
+  [
+    'The per-position rates above are outcome-only — they carry no spend. Spend-derived',
+    'tiering advice lives in the Spend by model subsection below (Step 4f3), grouped by',
+    'the recorded wave model. Recorded `input_tokens` is the uncached remainder, so',
+    'token totals vary with cache-hit rate and scheduling — see the Cache-Hit Readout',
+    'below (`cacheRead` / `cacheWrite` / `cost`, #121).',
+  ].join('\n'),
+  // Cache-hit degradation line
+  [
+    'no cache data reported — no wave attempt carried `usage.cacheRead`',
+    '([withoutCache] attempt(s) without cache fields).',
+  ].join('\n'),
+  // Calibration malformed-JSON surfacing rule
+  [
+    'Any `skipping malformed JSON at <file>:<line>` stderr line MUST be surfaced in',
+    '  the report under the section — the skip is never silent.',
+  ].join('\n'),
+];
+
+// Returns the pinned entries a body lacks, reported by string (not by section).
+function missingPins(body, pins) {
+  return pins.filter((pin) => !body.includes(pin));
+}
+
+const insightsBodies = () => [
+  ['source', readSource(INSIGHTS_SKILL)],
+  [codexBodyPath(INSIGHTS_SKILL), readGenerated(codexBodyPath(INSIGHTS_SKILL))],
+  [claudeCommandPath(INSIGHTS_SKILL), readGenerated(claudeCommandPath(INSIGHTS_SKILL))],
+];
+
+test('rad-insights: source and both generated bodies keep every pinned command and report string', () => {
+  assert.equal(INSIGHTS_PINNED_COMMANDS.length, 12);
+  for (const [label, body] of insightsBodies()) {
+    assert.deepEqual(missingPins(body, INSIGHTS_PINNED_COMMANDS), [], `${label} lost a pinned command`);
+    assert.deepEqual(missingPins(body, INSIGHTS_PINNED_REPORT_STRINGS), [], `${label} lost a pinned report string`);
+  }
+});
+
+test('missingPins is not vacuous: a body missing a pinned string fails and names it', () => {
+  const all = [...INSIGHTS_PINNED_COMMANDS, ...INSIGHTS_PINNED_REPORT_STRINGS];
+  const full = all.join('\n\n');
+  assert.deepEqual(missingPins(full, all), []);
+  for (const pin of all) {
+    const body = full.replace(pin, '');
+    assert.deepEqual(missingPins(body, all), [pin], 'removing one pin must report exactly that pin');
+  }
+  assert.deepEqual(missingPins('', all), all, 'an empty body misses every pin');
+  // A string present only under a different heading still counts as present (reports by string).
+  const elsewhere = `### Unrelated\n${all[0]}\n`;
+  assert.ok(!missingPins(elsewhere, all).includes(all[0]));
+});
