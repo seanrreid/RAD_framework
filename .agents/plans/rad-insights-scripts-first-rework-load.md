@@ -1,7 +1,7 @@
 # Plan: rad-insights scripts-first, part E (4i post-merge rework and Gate-2 verification load)
 Created: 2026-11-17
 Author: architect
-Status: approved
+Status: in-progress
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-11-17T15:53:43.009Z
 Recorded-By: sean@torchcodelab.com
