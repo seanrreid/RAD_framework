@@ -245,15 +245,18 @@ jq -r 'select(.type=="cycle") | [.date, .feature, (.high|tostring)] | join("\t")
   .agents/findings.jsonl | sort
 ```
 
+**Invocation convention for Steps 4b–4j.** Each module below is run from the repo
+root and its JSON output is read as-is; never re-implement a fold's counting in
+jq or inline. `RAD_STATE_DIR` (default `.agents/state`) exists only so a module
+can be tested against a fixture dir. These steps only read; they write nothing.
+
 ### Step 4b: Aggregate token cost from wave-attempt usage
 
 Token cost lives in the per-feature audit log, not the findings log. Each
 `wave-attempt` event in `.agents/state/<feature>/events.jsonl` carries token
 usage under `data.usage` as `{ input, output, total }`. Usage is **optional**:
 older deliveries emit `wave-attempt` events with no `data.usage`; a missing or
-null `usage` counts as `0` (unknown) and never breaks the aggregation. Run the
-module from the repo root and read its JSON output; do not rewrite the sums in
-jq (`RAD_STATE_DIR`, default `.agents/state`, is for fixture testing only):
+null `usage` counts as `0` (unknown) and never breaks the aggregation.
 
 ```bash
 node harness/insights-usage-cost.js
@@ -261,23 +264,19 @@ node harness/insights-usage-cost.js
 
 Output: `{ noData, perFeature }`; each feature carries `total`, `inferredTotal`,
 `attempts`, `usageRecorded`, `usageUnknown`, `perWave`.
-- **Cost per feature** — `total`, the summed explicit `usage.total` across the
-  feature's `wave-attempt` events; `usageUnknown: true` reports `0 (unknown)`.
-  Report `total`, never `inferredTotal` (it also infers input + output).
+- **Cost per feature** — `total`, the summed explicit `usage.total`;
+  `usageUnknown: true` reports `0 (unknown)`. Report `total`, never
+  `inferredTotal` (it also infers input + output).
 - **Cost per wave** — `perWave`, `{ wave, total }` in ascending wave order (an
-  attempt without a wave number buckets as `"?"`, listed first). Waves without
-  recorded usage contribute `0`.
+  attempt without a wave number buckets as `"?"`, listed first).
 - **`noData: true`** — no `.agents/state/*/events.jsonl`: omit the cost section.
 
 ### Step 4c: Fold wave reliability from the event logs
 
 Reliability metrics come from the same per-feature audit logs as Step 4b. The
-counting logic is NOT re-implemented here — it lives in the pure read helpers
-exported by `harness/events.js` (`outcomeCounts`, `failReasonCounts`,
-`retryCounts`, `hookVetoCounts`, `totalUsage`), and `harness/insights-reliability.js`
-aggregates them across features. Run it from the repo root and read its JSON
-output; do not rewrite the counts in jq. `RAD_STATE_DIR` (default
-`.agents/state`) exists only so the same module is testable against a fixture dir:
+counting lives in the pure read helpers exported by `harness/events.js`
+(`outcomeCounts`, `failReasonCounts`, `retryCounts`, `hookVetoCounts`,
+`totalUsage`); `harness/insights-reliability.js` aggregates them across features.
 
 ```bash
 node harness/insights-reliability.js
@@ -303,8 +302,7 @@ Reading the output:
 - **`aggregate.hookVetoes`** — `hook-veto` events (`vetoes`) and hook-provenance
   attempts (`vetoedAttempts`) — kept separate, never summed (a post-wave veto
   emits both; adding them would double-count).
-- **`perFeature[*].spendPerWave`** — per-wave token spend within each feature;
-  waves without recorded usage contribute `0`.
+- **`perFeature[*].spendPerWave`** — per-wave token spend within each feature.
 - **`noWaveData: true`** — no wave events exist anywhere: no placeable
   (feature, wave) pair (`outcomes.total === 0`) AND no wave-attempt, wave-failed
   or hook-veto event at all. An attempt that lacks a feature or wave number cannot
@@ -316,12 +314,9 @@ Reading the output:
 ### Step 4d: Fold per-task blocked reasons from the event logs
 
 Blocked-reason metrics read the OPTIONAL per-task records (`data.tasks`, see
-`docs/rad-wave-contract.md`) that newer `wave-attempt` events carry. As in Step
-4c, the counting lives in `harness/events.js` (`blockedReasonCounts`) — import
-it, never re-implement it in jq; `harness/insights-blocked-reasons.js`
-aggregates it across features. Same invocation convention: run from the repo
-root and read its JSON output; `RAD_STATE_DIR` (default `.agents/state`) exists
-only for fixture testing. This step only reads; it writes nothing.
+`docs/rad-wave-contract.md`) that newer `wave-attempt` events carry. The counting
+lives in `harness/events.js` (`blockedReasonCounts`);
+`harness/insights-blocked-reasons.js` aggregates it across features.
 
 ```bash
 node harness/insights-blocked-reasons.js
@@ -350,13 +345,10 @@ task-title → paths association: every task in `.agents/plans/*.md` is a
 `,` or `;`, sometimes with `:lines` / `:+N` suffixes or a parenthetical note).
 The plan-doc parsing lives in `harness/plan-tasks.js` (`taskFilesFromPlanText`,
 merged across plan docs with `mergeTaskFiles`) — shared with the plan-time
-`rad forecast` verb, so never re-implement it inline. This step passes the
-mapping to `fileFailureCounts` and `fileDeficitSignals` in `harness/events.js`
-— the folds themselves never touch the filesystem, and the counting must never
-be re-implemented in jq. `harness/insights-blocked-files.js` joins them and prints the result. Same
-invocation convention as Steps 4c/4d: run from the repo root; `RAD_STATE_DIR`
-(default `.agents/state`) and `RAD_PLANS_DIR` (default `.agents/plans`) exist
-only for fixture testing. This step only reads; it writes nothing.
+`rad forecast` verb. This step passes the mapping to `fileFailureCounts` and
+`fileDeficitSignals` in `harness/events.js` — the folds never touch the
+filesystem. `harness/insights-blocked-files.js` joins them and prints the result.
+`RAD_PLANS_DIR` (default `.agents/plans`) is likewise fixture-only.
 
 ```bash
 node harness/insights-blocked-files.js
@@ -396,13 +388,10 @@ Reading the output:
 
 Per-Wave `Model:` tiering (see `docs/configuration.md` "Cost & Frugality") is only worth
 suggesting where history shows a wave position is reliably first-try or reliably
-retried. The counting lives in `harness/events.js` (`waveReliability`) — import
-it, never re-implement it; `harness/insights-wave-tiering.js` aggregates it across
-features. Same invocation convention as Steps 4c–4e: run from the repo root and
-read its JSON output; `RAD_STATE_DIR` (default `.agents/state`) exists only for
-fixture testing. The fold carries sample sizes and applies NO floor; the floor
-(`TIERING_MIN_FEATURES`, exported by the module) is a presentation decision owned
-by this skill. This step only reads; it writes nothing.
+retried. The counting lives in `harness/events.js` (`waveReliability`);
+`harness/insights-wave-tiering.js` aggregates it across features. The fold
+carries sample sizes and applies NO floor; the floor (`TIERING_MIN_FEATURES`,
+exported by the module) is a presentation decision owned by this skill.
 
 ```bash
 node harness/insights-wave-tiering.js
@@ -434,11 +423,8 @@ Reading the output:
 Wave attempts MAY carry the optional `usage.cacheRead` field (cache tokens read,
 see `docs/rad-wave-contract.md`, `usage`). A retry whose cache-hit ratio collapses
 to 0 after a positive first attempt re-paid for the whole prompt — worth seeing.
-The counting lives in `harness/events.js` (`cacheUsage`) — import it, never
-re-implement it; `harness/insights-cache-hit.js` aggregates it across features.
-Same invocation convention as Steps 4c–4f: run from the repo root and read its
-output; `RAD_STATE_DIR` (default `.agents/state`) exists only for fixture testing.
-This step only reads; it writes nothing.
+The counting lives in `harness/events.js` (`cacheUsage`);
+`harness/insights-cache-hit.js` aggregates it across features.
 
 ```bash
 node harness/insights-cache-hit.js
@@ -471,12 +457,9 @@ Reading the output:
 Since #119 every wave records a `wave-started` event, which carries `data.model`
 when the plan declared a `Model:` line. Joining those with `wave-attempt` usage
 gives per-MODEL spend and reliability. The counting lives in `harness/events.js`
-(`modelTierSpend`, `modelTierAdvisories`) — import them, never re-implement them;
-`harness/insights-model-spend.js` aggregates them across features.
-Same invocation convention as Steps 4c–4f2: run from the repo root and read its
-output; `RAD_STATE_DIR` (default `.agents/state`) exists only for fixture testing. The
-advisory floor is the same `TIERING_MIN_FEATURES` as Step 4f, applied per model
-group. This step only reads; it writes nothing.
+(`modelTierSpend`, `modelTierAdvisories`); `harness/insights-model-spend.js`
+aggregates them across features. The advisory floor is the same
+`TIERING_MIN_FEATURES` as Step 4f, applied per model group.
 
 ```bash
 node harness/insights-model-spend.js
@@ -514,11 +497,8 @@ Reading the output:
 Every `wave-attempt` that `rad deliver` appends carries `data.agent` — the selected
 adapter kind and, when one applied, the model. Grouping attempts by
 `adapter/model` gives per-PROVIDER spend and reliability. The counting lives in
-`harness/events.js` (`providerSpend`) — import it, never re-implement it;
-`harness/insights-provider-spend.js` aggregates it across features. Same
-invocation convention as Steps 4c–4f3: run from the repo root and read its
-output; `RAD_STATE_DIR` (default `.agents/state`) exists only for fixture testing.
-This step only reads; it writes nothing.
+`harness/events.js` (`providerSpend`); `harness/insights-provider-spend.js`
+aggregates it across features.
 
 ```bash
 node harness/insights-provider-spend.js
