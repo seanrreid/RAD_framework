@@ -49,6 +49,7 @@ function stateDirWithLogs(logs) {
 
 function goldenSection(name) {
   const m = GOLDEN.split(`=== 4f3:${name} ===\n`)[1];
+  assert.ok(m !== undefined, `golden section not found: 4f3:${name}`);
   return m.split(/^=== .* ===\n/m)[0];
 }
 
