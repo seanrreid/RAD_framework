@@ -535,7 +535,8 @@ from `attemptOutcomeCounts`, `failReasonCounts` (Step 4c) and `blockedReasonCoun
 (Step 4d) in `harness/events.js`; the module compares them with the threshold and
 looks up the table. `outcome:*` rows read `attemptOutcomeCounts`, NOT
 `outcomeCounts`: the spine records the outcome only on `wave-attempt` events, so
-wave-complete outcomes never show a failure on a real log.
+wave-complete outcomes never show a failure on a real log. `count` is per attempt:
+a wave retried twice on `fail-protocol` contributes 2.
 
 ```bash
 node harness/insights-prompt-surfaces.js

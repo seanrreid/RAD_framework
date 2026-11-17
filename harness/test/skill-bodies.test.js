@@ -247,6 +247,22 @@ const INSIGHTS_PINNED_REPORT_STRINGS = [
     'no cache data reported — no wave attempt carried `usage.cacheRead`',
     '([withoutCache] attempt(s) without cache fields).',
   ].join('\n'),
+  // Reliability, Blocked Reasons and Prompt-Surface noData lines
+  [
+    'No wave data yet — the committed event logs contain only approval events.',
+    'Reliability metrics will populate after the first /rad-deliver run records',
+    'wave-attempt / wave-complete / wave-failed events.',
+  ].join('\n'),
+  [
+    'No enriched (per-task) wave events exist yet — blocked-reason metrics will',
+    'populate once /rad-deliver records wave-attempt events carrying per-task data.',
+  ].join('\n'),
+  [
+    'No wave data yet — prompt-surface proposals will populate after /rad-deliver runs',
+    'record wave-attempt / wave-failed events and per-task wave-attempt data.',
+  ].join('\n'),
+  // Per-attempt counting of outcome:* signals
+  '`count` is per attempt:\na wave retried twice on `fail-protocol` contributes 2.',
   // Calibration malformed-JSON surfacing rule
   [
     'Any `skipping malformed JSON at <file>:<line>` stderr line MUST be surfaced in',
