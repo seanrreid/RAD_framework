@@ -1,7 +1,10 @@
 # Plan: rad-insights scripts-first, part C (4f3 spend by model, 4f4 spend by provider)
 Created: 2026-11-16
 Author: architect
-Status: pending-review
+Status: approved
+Approved-By: sean@torchcodelab.com
+Approved-At: 2026-11-17T13:53:32.571Z
+Recorded-By: sean@torchcodelab.com
 Branch: rad/rad-insights-scripts-first-spend-folds
 Source-Author: none (no source issue)
 Source-Comments: none
