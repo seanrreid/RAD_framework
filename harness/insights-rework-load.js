@@ -11,16 +11,10 @@ import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { readDeliveryHistory } from './delivery-history.js';
 import { verificationLoad, reworkRate, trend, resolveWindowDays } from './delivery-metrics.js';
-import { DEFAULT_STATE_DIR, listFeatures, readHistory } from './insights-state.js';
+import { DEFAULT_STATE_DIR, readHistories } from './insights-state.js';
 
 const JSON_INDENT = 2;
 const DEFAULT_BRANCH_ENV = 'DEFAULT_BRANCH';
-
-function readHistories(stateDir) {
-  const histories = {};
-  for (const feature of listFeatures(stateDir)) histories[feature] = readHistory(stateDir, feature);
-  return histories;
-}
 
 function buildTrends(load, rework) {
   const merged = load.filter((r) => r.merged);

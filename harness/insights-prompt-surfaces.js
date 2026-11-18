@@ -9,7 +9,7 @@
 import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { attemptOutcomeCounts, failReasonCounts, blockedReasonCounts } from './events.js';
-import { DEFAULT_STATE_DIR, listFeatures, readHistory } from './insights-state.js';
+import { DEFAULT_STATE_DIR, readHistories } from './insights-state.js';
 
 const JSON_INDENT = 2;
 
@@ -97,11 +97,6 @@ export function buildPromptSurfaces(histories) {
     proposals,
     unmapped,
   };
-}
-
-/** Read every feature's history under `stateDir` (sorted by feature; a malformed line throws). */
-export function readHistories(stateDir) {
-  return Object.fromEntries(listFeatures(stateDir).map((f) => [f, readHistory(stateDir, f)]));
 }
 
 /** The section text: pretty-printed JSON, exactly as the inline snippet printed it. */
