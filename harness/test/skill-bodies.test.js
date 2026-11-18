@@ -198,6 +198,8 @@ const INSIGHTS_PINNED_COMMANDS = [
   'node harness/insights-reviewer-calibration.js',
 ];
 
+const INSIGHTS_PINNED_COMMAND_COUNT = 13;
+
 // Step 5 strings rendered to the reader (multi-line strings keep source wrapping).
 const INSIGHTS_PINNED_REPORT_STRINGS = [
   // Code Legibility degradation lines
@@ -283,7 +285,7 @@ const insightsBodies = () => [
 ];
 
 test('rad-insights: source and both generated bodies keep every pinned command and report string', () => {
-  assert.equal(INSIGHTS_PINNED_COMMANDS.length, 13);
+  assert.equal(INSIGHTS_PINNED_COMMANDS.length, INSIGHTS_PINNED_COMMAND_COUNT);
   for (const [label, body] of insightsBodies()) {
     assert.deepEqual(missingPins(body, INSIGHTS_PINNED_COMMANDS), [], `${label} lost a pinned command`);
     assert.deepEqual(missingPins(body, INSIGHTS_PINNED_REPORT_STRINGS), [], `${label} lost a pinned report string`);

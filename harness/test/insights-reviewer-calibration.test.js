@@ -6,18 +6,19 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildReviewerCalibration, formatReviewerCalibration } from '../insights-reviewer-calibration.js';
+import { CALIBRATION_MIN_LABELED as MIN_LABELED } from '../findings.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const MODULE = join(HERE, '..', 'insights-reviewer-calibration.js');
 const GOLDEN = readFileSync(join(HERE, 'fixtures', 'insights-parity', 'golden.txt'), 'utf8');
 const SCENARIOS = ['absent', 'empty', 'blank', 'populated', 'cycle', 'non-object', 'malformed'];
-const MIN_LABELED = 5;
 
 const makeTmp = () => mkdtempSync(join(tmpdir(), 'insights-reviewer-calibration-'));
 const withTmp = (fn) => { const dir = makeTmp(); try { return fn(dir); } finally { rmSync(dir, { recursive: true, force: true }); } };
 
 function goldenSection(name) {
   const m = GOLDEN.split(`=== 3c:${name} ===\n`)[1];
+  assert.ok(m !== undefined, `golden section missing for scenario: ${name}`);
   return m.split(/^=== .* ===\n/m)[0];
 }
 
