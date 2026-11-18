@@ -16,7 +16,13 @@ import { DEFAULT_STATE_DIR, EVENT_LOG } from './insights-state.js';
 
 const DEFAULT_FINDINGS_FILE = join('.agents', 'findings.jsonl');
 
-/** Feature -> events for every feature dir holding an events.jsonl; throws on a bad line. */
+/**
+ * Feature -> events for every feature dir holding an events.jsonl; throws on a bad line.
+ * Deliberately NOT the shared `readHistories` in insights-state.js: this reader parses with
+ * `parseEventLog`, whose `<log>: line N: malformed JSON (...)` error text and skipping of
+ * whitespace-only lines differ from `readHistory`. The error text is asserted in
+ * harness/test/insights-human-corrections.test.js.
+ */
 function readHistories(stateDir) {
   const histories = {};
   if (!existsSync(stateDir)) return histories;
