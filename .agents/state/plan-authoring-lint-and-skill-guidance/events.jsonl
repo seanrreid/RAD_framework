@@ -13,3 +13,4 @@
 {"feature":"plan-authoring-lint-and-skill-guidance","type":"wave-started","actor":"harness","ts":"2026-11-18T16:07:32.714Z","data":{"wave":4,"attempt":1}}
 {"feature":"plan-authoring-lint-and-skill-guidance","type":"wave-attempt","actor":"harness","ts":"2026-11-18T16:21:23.511Z","data":{"wave":4,"attempt":1,"outcome":"success","usage":{"input":8,"output":989,"total":237236,"cacheRead":189861,"cacheWrite":46378,"cost":0.2144041},"tasks":[{"title":"Dogfood the lint and run the full verify","status":"complete","commit":"—","concern":"—","error":"—"}],"verify":{"command":"exec bash scripts/verify-all.sh","status":0,"passed":true},"agent":{"adapter":"command"}}}
 {"feature":"plan-authoring-lint-and-skill-guidance","type":"wave-complete","actor":"harness","ts":"2026-11-18T16:21:23.513Z","data":{"wave":4}}
+{"feature":"plan-authoring-lint-and-skill-guidance","type":"pr-opened","actor":"harness","ts":"2026-11-18T16:21:31.228Z"}
