@@ -117,7 +117,7 @@ This will:
 4. Commit the plan to the `rad/[feature]` branch
 5. Lint the plan — checks structure, wave limits, and context budget
 
-No PR is opened. Then wait. Do not run `/team:rad-deliver` until the architect runs
+No PR is opened, but `rad plan-open` pushes the `rad/<feature>` branch to origin; there is no local-only mode. Then wait. Do not run `/team:rad-deliver` until the architect runs
 `/architect:rad-approve`, which records approval on the branch tip.
 
 **Disposition check.** When a research artifact exists for the feature,
