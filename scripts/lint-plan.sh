@@ -435,6 +435,52 @@ while IFS= read -r path; do
   fi
 done <<< "$GEN_SCOPE_PATHS"
 
+# ── Fixture-copied script advisory (#314) ─────────────────────────────────────
+# Several scripts/test-*.sh build a temp repo and `cp "$HERE/<script>"` into it.
+# If a declared script gains a dependency, those fixtures need the new file too,
+# so warn (never error) naming each copying test the plan does not also declare.
+# Pure shell/awk over the sibling test files: no new script is called, because
+# fixtures cp lint-plan.sh alone. No scripts/test-*.sh present => no warning.
+# awk joins backslash-continued lines and keeps `cp` lines naming "$HERE/<rel>".
+fixture_copying_tests() {
+  local rel="$1" t
+  for t in "$SCRIPT_DIR"/test-*.sh; do
+    [[ -f "$t" ]] || continue
+    if NEEDLE="\$HERE/$rel" LC_ALL=C awk '
+      function check(l,   i, c, needle) {
+        needle = ENVIRON["NEEDLE"]
+        if (l !~ /(^|[^A-Za-z0-9_-])cp[ \t]/) return 0
+        i = index(l, needle)
+        while (i > 0) {
+          c = substr(l, i + length(needle), 1)
+          if (c == "" || c ~ /[ \t"\047;|&)]/) return 1
+          l = substr(l, i + length(needle)); i = index(l, needle)
+        }
+        return 0
+      }
+      { line = $0
+        while (line ~ /\\[ \t]*$/ && (getline nxt) > 0) { sub(/\\[ \t]*$/, " ", line); line = line nxt }
+        if (check(line)) { found = 1; exit }
+      }
+      END { exit !found }' "$t"; then
+      basename "$t"
+    fi
+  done | sort
+}
+
+while IFS= read -r path; do
+  [[ "$path" == scripts/*.sh && "$path" != scripts/test-*.sh ]] || continue
+  fixture_tests=""
+  while IFS= read -r tname; do
+    [[ -z "$tname" ]] && continue
+    printf '%s\n' "$GEN_SCOPE_PATHS" | grep -qxF -- "scripts/$tname" && continue
+    fixture_tests+="${fixture_tests:+, }$tname"
+  done < <(fixture_copying_tests "${path#scripts/}")
+  if [[ -n "$fixture_tests" ]]; then
+    WARNINGS+=("$path is cp-ed into temp-repo fixtures by $fixture_tests; if it gains a dependency those fixtures need the new file too (#314)")
+  fi
+done <<< "$GEN_SCOPE_PATHS"
+
 # ── Last-wave Verify advisory (#236) ──────────────────────────────────────────
 # Any plan whose last wave declares no `Verify:` (state `no`) or a bare
 # `Verify: none` (state `bare`) will be BLOCKED at approval (missing-verify, see

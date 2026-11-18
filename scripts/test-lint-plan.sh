@@ -304,6 +304,51 @@ t_generated_copy_module_not_run() {
   echo "✓ generated-copy: module not run when no .rad/ source is declared"
 }
 
+t_fixture_copied_script_advisory() {
+  local plan="$TMP/fixture-copy.md" d="$TMP/fx-repo" n
+  # Real repo: lint-plan.sh is cp-ed by three tests; declaring one of them.
+  write_plan "$plan" "| scripts/lint-plan.sh | 1-2 | x |
+| scripts/test-lint-plan.sh | 1-2 | x |" ""
+  run_lint "$plan"
+  printf '%s\n' "$LINT_OUT" | grep -q "scripts/lint-plan.sh is cp-ed into temp-repo fixtures by test-draft-insights-plan.sh, test-lint-plan-preflight.sh;" \
+    || fail "fixture-copy: expected both undeclared copying tests named (sorted), declared one omitted"
+  printf '%s\n' "$LINT_OUT" | grep -q "fixtures by test-lint-plan.sh" && fail "fixture-copy: declared test named"
+  [[ "$LINT_CODE" -eq 0 ]] || fail "fixture-copy: advisory changed exit to $LINT_CODE"
+
+  # All copying tests declared: no warning.
+  write_plan "$plan" "| scripts/lint-plan.sh | 1-2 | x |
+| scripts/test-lint-plan.sh | 1-2 | x |
+| scripts/test-draft-insights-plan.sh | 1-2 | x |
+| scripts/test-lint-plan-preflight.sh | 1-2 | x |" ""
+  run_lint "$plan"
+  printf '%s\n' "$LINT_OUT" | grep -q "cp-ed into temp-repo fixtures" && fail "fixture-copy: warned with all tests declared"
+
+  # Synthetic scripts dir: multi-line cp, lib path, no-cp invoke, uncopied script.
+  rm -rf "$d"; mkdir -p "$d/scripts/lib"
+  cp "$HERE/lint-plan.sh" "$HERE/get-default-branch.sh" "$HERE/check-sensitive-content.sh" "$d/scripts/"
+  cp "$HERE"/lib/*.sh "$d/scripts/lib/"
+  mkdir -p "$d/harness" "$d/.rad"; cp "$HERE/../harness"/*.js "$d/harness/"; cp "$HERE/../.rad/config.yml" "$d/.rad/" 2>/dev/null || true
+  : > "$d/scripts/a.sh"; : > "$d/scripts/lib/l.sh"; : > "$d/scripts/none.sh"; : > "$d/scripts/inv.sh"
+  printf 'cp "$HERE/a.sh" \\\n   "$HERE/lib/l.sh" "$R/"\n' > "$d/scripts/test-one.sh"
+  printf 'cp "$HERE/a.sh" "$R/"\n' > "$d/scripts/test-two.sh"
+  printf 'bash "$HERE/inv.sh"\n' > "$d/scripts/test-three.sh"
+  write_plan "$plan" "| scripts/a.sh | 1-2 | x |
+| scripts/lib/l.sh | 1-2 | x |
+| scripts/none.sh | 1-2 | x |
+| scripts/inv.sh | 1-2 | x |" ""
+  set +e; LINT_OUT=$(bash "$d/scripts/lint-plan.sh" "$plan" 2>&1); set -e
+  printf '%s\n' "$LINT_OUT" | grep -q "scripts/a.sh is cp-ed into temp-repo fixtures by test-one.sh, test-two.sh;" || fail "fixture-copy: two copiers not both named"
+  printf '%s\n' "$LINT_OUT" | grep -q "scripts/lib/l.sh is cp-ed into temp-repo fixtures by test-one.sh;" || fail "fixture-copy: multi-line/lib cp not matched"
+  printf '%s\n' "$LINT_OUT" | grep -q "scripts/none.sh is cp-ed" && fail "fixture-copy: uncopied script warned"
+  printf '%s\n' "$LINT_OUT" | grep -q "scripts/inv.sh is cp-ed" && fail "fixture-copy: invoke-only test matched"
+
+  # No scripts/test-*.sh at all (fixture repo): silent.
+  rm -f "$d"/scripts/test-*.sh
+  set +e; LINT_OUT=$(bash "$d/scripts/lint-plan.sh" "$plan" 2>&1); set -e
+  printf '%s\n' "$LINT_OUT" | grep -q "cp-ed into temp-repo fixtures" && fail "fixture-copy: warned without any test files"
+  echo "✓ fixture-copy: copying tests named, declared/uncopied/invoke-only silent, exit unchanged"
+}
+
 t_generated_copy_module_failure() {
   # Module failure: reason on stderr, both behaviors skipped, exit unchanged.
   local plan="$TMP/gen-fail.md" stub="$TMP/stub-fail"
@@ -1679,4 +1724,5 @@ t_generated_output_advisory
 t_generated_copy_advisories
 t_generated_copy_module_not_run
 t_generated_copy_module_failure
+t_fixture_copied_script_advisory
 echo "ALL PASS"
