@@ -1,31 +1,19 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, renameSync, unlinkSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, renameSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { readDeliveryHistory } from '../delivery-history.js';
+import { planFor, squashBody, write } from './delivery-fixtures.js';
 
 const BASE = 'main';
 const IDENTITY = [['user.email', 'dev@example.com'], ['user.name', 'Dev']];
-
-const planFor = (title, paths) => `# Plan: ${title}
-
-## Files in Scope
-| File | Lines | Change |
-|------|-------|--------|
-${paths.map((p) => `| ${p} | 1-10 | edit |`).join('\n')}
-`;
 
 function git(cwd, args) {
   const res = spawnSync('git', args, { cwd, encoding: 'utf8' });
   assert.equal(res.status, 0, `git ${args.join(' ')}: ${res.stderr}`);
   return (res.stdout ?? '').trim();
-}
-
-function write(root, rel, content) {
-  mkdirSync(dirname(join(root, rel)), { recursive: true });
-  writeFileSync(join(root, rel), content);
 }
 
 /** Stage everything and commit with a (possibly multi-paragraph) message. */
@@ -52,7 +40,6 @@ function withRepo(fn, { seed = true } = {}) {
 }
 
 const read = (root) => readDeliveryHistory({ root, defaultBranch: BASE });
-const squashBody = (slug) => `* plan: x\n\n* approve: ${slug}\n\nPlan: .agents/plans/${slug}.md\n\n* deliver(${slug}): begin execution`;
 
 /** A squash-style deliver merge of `slug` touching `files` with its plan scoping `scope`. */
 function squashDeliver(root, slug, pr, files, scope = Object.keys(files)) {
