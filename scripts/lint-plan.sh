@@ -388,15 +388,52 @@ while IFS= read -r path; do
 done < <(plan_scope_paths "$PLAN_FILE")
 
 # ── Generated-output advisory ─────────────────────────────────────────────────
-# Over the same path union, warn (never error) for any path under .claude/:
-# that directory is generated from .rad/ sources, and the headless claude
-# preset cannot write it even under acceptEdits. WARNING only; exit unaffected.
+# .claude/ (and the other generated roots) are generated from .rad/ sources, and
+# the headless claude preset cannot write .claude/ even under acceptEdits.
+# When the plan declares a .rad/skills/** or .rad/agents*/** source, ask
+# harness/generated-outputs.js (the generator's own mapping) for its outputs:
+#   - an output the plan does not also declare -> warn once per missing copy
+#     (rad generate rewrites it, and check-scope fails the wave without it);
+#   - an output the plan declares alongside its source is expected, so the
+#     "edits generated output directly" warning is skipped for it.
+# If the module fails its reason is printed on stderr and both new behaviors
+# are skipped (never silent, never an error). WARNING only; exit unaffected.
+# A failure here keeps its stderr (visible) and degrades to "no declared paths",
+# matching the process-substitution loops above that never aborted the lint.
+GEN_SCOPE_PATHS=$(plan_scope_paths "$PLAN_FILE") || GEN_SCOPE_PATHS=""
+GEN_SOURCES=()
 while IFS= read -r path; do
   [[ -z "$path" ]] && continue
-  if [[ "$path" == .claude/* ]]; then
+  if [[ "$path" == .rad/skills/* || "$path" == .rad/agents*/* ]]; then
+    GEN_SOURCES+=("$path")
+  fi
+done <<< "$GEN_SCOPE_PATHS"
+
+GEN_EXPECTED=""   # newline-separated "<generated path>\t<source>" lines
+GEN_MODULE="$RAD_PLAN_PATHS_ROOT/harness/generated-outputs.js"
+if [[ ${#GEN_SOURCES[@]} -gt 0 ]]; then
+  if ! command -v node >/dev/null 2>&1 || [[ ! -f "$GEN_MODULE" ]]; then
+    echo "lint-plan: generated-copy check skipped: node or $GEN_MODULE unavailable" >&2
+  elif GEN_OUT=$(cd "$RAD_PLAN_PATHS_ROOT" && node "$GEN_MODULE" "${GEN_SOURCES[@]}"); then
+    GEN_EXPECTED="$GEN_OUT"
+  else
+    echo "lint-plan: generated-copy check skipped (see reason above)" >&2
+  fi
+fi
+
+while IFS=$'\t' read -r gen_path gen_source; do
+  [[ -z "$gen_path" ]] && continue
+  if ! printf '%s\n' "$GEN_SCOPE_PATHS" | grep -qxF -- "$gen_path"; then
+    WARNINGS+=("Plan declares $gen_source but not its generated copy $gen_path; rad generate rewrites it and check-scope fails the wave")
+  fi
+done <<< "$GEN_EXPECTED"
+
+while IFS= read -r path; do
+  [[ -z "$path" ]] && continue
+  if [[ "$path" == .claude/* ]] && ! printf '%s\n' "$GEN_EXPECTED" | cut -f1 | grep -qxF -- "$path"; then
     WARNINGS+=("Plan edits generated output directly: $path — edit the source under .rad/ and run rad generate (the headless claude preset cannot write .claude/ even under acceptEdits)")
   fi
-done < <(plan_scope_paths "$PLAN_FILE")
+done <<< "$GEN_SCOPE_PATHS"
 
 # ── Last-wave Verify advisory (#236) ──────────────────────────────────────────
 # Any plan whose last wave declares no `Verify:` (state `no`) or a bare

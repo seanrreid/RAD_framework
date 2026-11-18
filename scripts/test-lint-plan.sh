@@ -239,6 +239,85 @@ t_generated_output_advisory() {
   echo "✓ AC#4: .claude/ path warns (exit unchanged); scripts/ rows do not"
 }
 
+# ── Generated-copy advisories (module-backed) ──────────────────────────────────
+GEN_SKILL=".rad/skills/rad-plan/SKILL.md"
+GEN_COPY_A=".agents/skills/rad-plan/SKILL.md"
+GEN_COPY_B=".claude/commands/team/rad-plan.md"
+
+t_generated_copy_advisories() {
+  local plan="$TMP/gen-copies.md" n
+
+  # Source + every copy declared: no missing-copy warning, no direct-edit warning.
+  write_plan "$plan" "| $GEN_SKILL | 1-2 | x |
+| $GEN_COPY_A | 1-2 | regen |
+| $GEN_COPY_B | 1-2 | regen |" ""
+  run_lint "$plan"
+  printf '%s\n' "$LINT_OUT" | grep -q "but not its generated copy" && fail "gen-copy: complete plan warned of a missing copy"
+  printf '%s\n' "$LINT_OUT" | grep -q "Plan edits generated output directly" && fail "gen-copy: declared source's copy warned as direct edit"
+  [[ "$LINT_CODE" -eq 0 ]] || fail "gen-copy: complete plan exited $LINT_CODE"
+
+  # One copy missing: exactly one warning naming it; exit unchanged.
+  write_plan "$plan" "| $GEN_SKILL | 1-2 | x |
+| $GEN_COPY_A | 1-2 | regen |" ""
+  run_lint "$plan"
+  n=$(printf '%s\n' "$LINT_OUT" | grep -c "but not its generated copy" || true)
+  [[ "$n" -eq 1 ]] || fail "gen-copy: expected 1 missing-copy warning, got $n"
+  printf '%s\n' "$LINT_OUT" | grep -q "declares $GEN_SKILL but not its generated copy $GEN_COPY_B" \
+    || fail "gen-copy: warning did not name the missing copy"
+  [[ "$LINT_CODE" -eq 0 ]] || fail "gen-copy: advisory changed exit to $LINT_CODE"
+
+  # A .claude/ copy with no declared source keeps the original warning.
+  write_plan "$plan" "| $GEN_COPY_B | 1-2 | x |" ""
+  run_lint "$plan"
+  printf '%s\n' "$LINT_OUT" | grep -q "Plan edits generated output directly: $GEN_COPY_B — edit the source under .rad/" \
+    || fail "gen-copy: undeclared-source copy lost the direct-edit warning"
+
+  # A .rad/ path that is not a generator input: no missing-copy warning.
+  write_plan "$plan" "| .rad/skills/not-a-skill/notes.md | 1-2 | x |" ""
+  run_lint "$plan"
+  printf '%s\n' "$LINT_OUT" | grep -q "but not its generated copy" && fail "gen-copy: non-input source warned"
+
+  # An agent source maps to both .claude/agents and .codex/agents.
+  write_plan "$plan" "| .rad/agents/quality-reviewer.md | 1-2 | x |
+| .claude/agents/quality-reviewer.md | 1-2 | regen |" ""
+  run_lint "$plan"
+  printf '%s\n' "$LINT_OUT" | grep -q "but not its generated copy .codex/agents/quality-reviewer.toml" \
+    || fail "gen-copy: agent source did not name the .codex copy"
+  printf '%s\n' "$LINT_OUT" | grep -q "but not its generated copy .claude/agents/quality-reviewer.md" \
+    && fail "gen-copy: declared .claude agent copy flagged missing"
+  printf '%s\n' "$LINT_OUT" | grep -q "Plan edits generated output directly" \
+    && fail "gen-copy: declared agent copy warned as direct edit"
+  echo "✓ generated-copy: missing copies warn once each; declared copies are expected; others unchanged"
+}
+
+t_generated_copy_module_not_run() {
+  # A plan declaring no .rad/ source must never invoke the module.
+  local plan="$TMP/gen-none.md" stub="$TMP/stub-bin" real_node log="$TMP/node-calls.log"
+  real_node="$(command -v node)"
+  mkdir -p "$stub"
+  printf '#!/bin/sh\necho "$@" >> "%s"\nexec "%s" "$@"\n' "$log" "$real_node" > "$stub/node"
+  chmod +x "$stub/node"
+  : > "$log"
+  write_plan "$plan" "| docs/rad-cli.md | 1-2 | x |" "docs/rad-cli.md:1-10"
+  set +e; LINT_OUT=$(PATH="$stub:$PATH" bash "$HERE/lint-plan.sh" "$plan" 2>&1); LINT_CODE=$?; set -e
+  grep -q "generated-outputs" "$log" && fail "gen-copy: module ran for a plan with no .rad/ source"
+  echo "✓ generated-copy: module not run when no .rad/ source is declared"
+}
+
+t_generated_copy_module_failure() {
+  # Module failure: reason on stderr, both behaviors skipped, exit unchanged.
+  local plan="$TMP/gen-fail.md" stub="$TMP/stub-fail"
+  mkdir -p "$stub"
+  printf '#!/bin/sh\ncase "$*" in *generated-outputs*) echo "generated-outputs: boom" >&2; exit 1;; esac\nexec "%s" "$@"\n' "$(command -v node)" > "$stub/node"
+  chmod +x "$stub/node"
+  write_plan "$plan" "| $GEN_SKILL | 1-2 | x |" ""
+  set +e; LINT_OUT=$(PATH="$stub:$PATH" bash "$HERE/lint-plan.sh" "$plan" 2>&1); LINT_CODE=$?; set -e
+  printf '%s\n' "$LINT_OUT" | grep -q "generated-outputs: boom" || fail "gen-copy: module failure reason not surfaced"
+  printf '%s\n' "$LINT_OUT" | grep -q "but not its generated copy" && fail "gen-copy: warned despite module failure"
+  [[ "$LINT_CODE" -eq 0 ]] || fail "gen-copy: module failure changed exit to $LINT_CODE"
+  echo "✓ generated-copy: module failure is surfaced and skips the check"
+}
+
 t_self_protected_advisory() {
   # harness/gates.js is real, on-disk, matches no high-risk default token, and
   # sits squarely in the self-protected set.
@@ -1597,4 +1676,7 @@ t_capability_advisory
 t_issue_header
 t_last_wave_verify_advisory
 t_generated_output_advisory
+t_generated_copy_advisories
+t_generated_copy_module_not_run
+t_generated_copy_module_failure
 echo "ALL PASS"
