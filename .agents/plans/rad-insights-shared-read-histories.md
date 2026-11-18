@@ -1,7 +1,8 @@
 # Plan: rad-insights shared readHistories (Plan I: consolidate the feature->events reader, #330)
 Created: 2026-11-18
 Author: developer
-Status: in-progress
+Status: complete
+Completed-At: 2026-11-18T17:17:29.026Z
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-11-18T16:59:58.942Z
 Recorded-By: sean@torchcodelab.com
