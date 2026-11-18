@@ -1,7 +1,7 @@
 # Plan: plan-authoring friction fixes (Plan H: #311 push wording, #312 generated copies, #314 fixture copies)
 Created: 2026-11-18
 Author: developer
-Status: approved
+Status: in-progress
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-11-18T15:52:56.094Z
 Recorded-By: sean@torchcodelab.com
