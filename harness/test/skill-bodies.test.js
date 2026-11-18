@@ -305,3 +305,37 @@ test('missingPins is not vacuous: a body missing a pinned string fails and names
   const elsewhere = `### Unrelated\n${all[0]}\n`;
   assert.ok(!missingPins(elsewhere, all).includes(all[0]));
 });
+
+// ---- plan-authoring guidance pins ------------------------------------------
+// The push-to-origin statement and the two plan-template comment sentences must
+// reach the source and both generated bodies of both planning skills.
+const PLAN_AUTHORING_PINS = [
+  '`rad plan-open` pushes the `rad/<feature>` branch to origin; there is no local-only mode.',
+  'Generated copies of a declared `.rad/` source belong in Files in Scope, not here.',
+  'Tests that `cp` a script into a temp repo must be declared when that script gains a dependency.',
+];
+
+for (const skill of PLAYBOOK_SKILLS) {
+  test(`${skill}: source and both generated bodies keep the plan-authoring guidance`, () => {
+    const bodies = [
+      [sourcePath(skill), readSource(skill)],
+      [codexBodyPath(skill), readGenerated(codexBodyPath(skill))],
+      [claudeCommandPath(skill), readGenerated(claudeCommandPath(skill))],
+    ];
+    for (const [label, body] of bodies) {
+      assert.deepEqual(missingPins(body, PLAN_AUTHORING_PINS), [], `${label} lost a plan-authoring pin`);
+    }
+  });
+}
+
+test('plan-authoring pins are not vacuous: a body missing one pin, or a copy lacking it, fails', () => {
+  const full = PLAN_AUTHORING_PINS.join('\n');
+  assert.deepEqual(missingPins(full, PLAN_AUTHORING_PINS), []);
+  for (const pin of PLAN_AUTHORING_PINS) {
+    assert.deepEqual(missingPins(full.replace(pin, ''), PLAN_AUTHORING_PINS), [pin]);
+  }
+  // Present in the source but absent from a copy: the copy must be reported.
+  const stale = PLAN_AUTHORING_PINS.slice(1).join('\n');
+  assert.deepEqual(missingPins(stale, PLAN_AUTHORING_PINS), [PLAN_AUTHORING_PINS[0]]);
+  assert.deepEqual(missingPins('', PLAN_AUTHORING_PINS), PLAN_AUTHORING_PINS);
+});

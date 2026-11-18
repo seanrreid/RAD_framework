@@ -4,6 +4,7 @@ description: >
   Plans a feature or bug fix: researches the codebase within the role's agent
   scope, writes a wave-structured plan, and commits it to a rad/ work branch.
   Use before rad-approve; opens no PR and blocks execution until approved.
+  Pushes the rad/<feature> branch to origin; there is no local-only mode.
 targets:
   claude: command:team/rad-plan
   codex: skill
@@ -17,6 +18,8 @@ branch here. The architect approves with `rad-approve` (`/architect:rad-approve`
 Claude Code) — there is no plan PR. The
 plan and its code reach the default branch later, together, via the single
 deliver PR.
+
+`rad plan-open` pushes the `rad/<feature>` branch to origin; there is no local-only mode.
 
 ## Input
 
@@ -272,7 +275,8 @@ Playbook: [<kind>/<slug>@<version> — omit unless --playbook was given]
 
 ### Do Not Touch
 <!-- Files that must not be modified during execution.
-     Add shared infrastructure, auth modules, anything that would break other in-flight work. -->
+     Add shared infrastructure, auth modules, anything that would break other in-flight work.
+     Generated copies of a declared `.rad/` source belong in Files in Scope, not here. -->
 - None
 
 ### Key Files
@@ -281,7 +285,8 @@ Playbook: [<kind>/<slug>@<version> — omit unless --playbook was given]
 - [file path] — [why it matters]
 
 ### Reminders
-<!-- Execution-time cautions: ordering constraints, side effects, environment requirements. -->
+<!-- Execution-time cautions: ordering constraints, side effects, environment requirements.
+     Tests that `cp` a script into a temp repo must be declared when that script gains a dependency. -->
 - None
 
 ## Wave Plan

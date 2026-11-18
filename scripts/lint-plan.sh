@@ -388,15 +388,102 @@ while IFS= read -r path; do
 done < <(plan_scope_paths "$PLAN_FILE")
 
 # ── Generated-output advisory ─────────────────────────────────────────────────
-# Over the same path union, warn (never error) for any path under .claude/:
-# that directory is generated from .rad/ sources, and the headless claude
-# preset cannot write it even under acceptEdits. WARNING only; exit unaffected.
+# .claude/ (and the other generated roots) are generated from .rad/ sources, and
+# the headless claude preset cannot write .claude/ even under acceptEdits.
+# When the plan declares a .rad/skills/** or .rad/agents*/** source, ask
+# harness/generated-outputs.js (the generator's own mapping) for its outputs:
+#   - an output the plan does not also declare -> warn once per missing copy
+#     (rad generate rewrites it, and check-scope fails the wave without it);
+#   - an output the plan declares alongside its source is expected, so the
+#     "edits generated output directly" warning is skipped for it.
+# If the module fails its reason is printed on stderr and both new behaviors
+# are skipped (never silent, never an error). WARNING only; exit unaffected.
+# A failure here keeps its stderr (visible) and degrades to "no declared paths",
+# matching the process-substitution loops above that never aborted the lint.
+GEN_SCOPE_PATHS=$(plan_scope_paths "$PLAN_FILE") || GEN_SCOPE_PATHS=""
+GEN_SOURCES=()
 while IFS= read -r path; do
   [[ -z "$path" ]] && continue
-  if [[ "$path" == .claude/* ]]; then
+  if [[ "$path" == .rad/skills/* || "$path" == .rad/agents*/* ]]; then
+    GEN_SOURCES+=("$path")
+  fi
+done <<< "$GEN_SCOPE_PATHS"
+
+GEN_EXPECTED=""   # newline-separated "<generated path>\t<source>" lines
+GEN_CHECK_SKIPPED=false   # true when sources were declared but the module could not map them
+GEN_MODULE="$RAD_PLAN_PATHS_ROOT/harness/generated-outputs.js"
+if [[ ${#GEN_SOURCES[@]} -gt 0 ]]; then
+  if ! command -v node >/dev/null 2>&1 || [[ ! -f "$GEN_MODULE" ]]; then
+    echo "lint-plan: generated-copy check skipped: node or $GEN_MODULE unavailable" >&2
+    GEN_CHECK_SKIPPED=true
+  elif GEN_OUT=$(cd "$RAD_PLAN_PATHS_ROOT" && node "$GEN_MODULE" "${GEN_SOURCES[@]}"); then
+    GEN_EXPECTED="$GEN_OUT"
+  else
+    echo "lint-plan: generated-copy check skipped (see reason above)" >&2
+    GEN_CHECK_SKIPPED=true
+  fi
+fi
+
+while IFS=$'\t' read -r gen_path gen_source; do
+  [[ -z "$gen_path" ]] && continue
+  if ! printf '%s\n' "$GEN_SCOPE_PATHS" | grep -qxF -- "$gen_path"; then
+    WARNINGS+=("Plan declares $gen_source but not its generated copy $gen_path; rad generate rewrites it and check-scope fails the wave")
+  fi
+done <<< "$GEN_EXPECTED"
+
+while IFS= read -r path; do
+  [[ -z "$path" ]] && continue
+  $GEN_CHECK_SKIPPED && continue   # the source's copies are unknown: say nothing, as documented above
+  if [[ "$path" == .claude/* ]] && ! printf '%s\n' "$GEN_EXPECTED" | cut -f1 | grep -qxF -- "$path"; then
     WARNINGS+=("Plan edits generated output directly: $path — edit the source under .rad/ and run rad generate (the headless claude preset cannot write .claude/ even under acceptEdits)")
   fi
-done < <(plan_scope_paths "$PLAN_FILE")
+done <<< "$GEN_SCOPE_PATHS"
+
+# ── Fixture-copied script advisory (#314) ─────────────────────────────────────
+# Several scripts/test-*.sh build a temp repo and `cp "$HERE/<script>"` into it.
+# If a declared script gains a dependency, those fixtures need the new file too,
+# so warn (never error) naming each copying test the plan does not also declare.
+# Pure shell/awk over the sibling test files: no new script is called, because
+# fixtures cp lint-plan.sh alone. No scripts/test-*.sh present => no warning.
+# awk joins backslash-continued lines and keeps `cp` lines naming "$HERE/<rel>".
+fixture_copying_tests() {
+  local rel="$1" t
+  for t in "$SCRIPT_DIR"/test-*.sh; do
+    [[ -f "$t" ]] || continue
+    if NEEDLE="\$HERE/$rel" LC_ALL=C awk '
+      function check(l,   i, c, needle) {
+        needle = ENVIRON["NEEDLE"]
+        if (l !~ /(^|[^A-Za-z0-9_-])cp[ \t]/) return 0
+        i = index(l, needle)
+        while (i > 0) {
+          c = substr(l, i + length(needle), 1)
+          if (c == "" || c ~ /[ \t"\047;|&)]/) return 1
+          l = substr(l, i + length(needle)); i = index(l, needle)
+        }
+        return 0
+      }
+      { line = $0
+        while (line ~ /\\[ \t]*$/ && (getline nxt) > 0) { sub(/\\[ \t]*$/, " ", line); line = line nxt }
+        if (check(line)) { found = 1; exit }
+      }
+      END { exit !found }' "$t"; then
+      basename "$t"
+    fi
+  done | sort
+}
+
+while IFS= read -r path; do
+  [[ "$path" == scripts/*.sh && "$path" != scripts/test-*.sh ]] || continue
+  fixture_tests=""
+  while IFS= read -r tname; do
+    [[ -z "$tname" ]] && continue
+    printf '%s\n' "$GEN_SCOPE_PATHS" | grep -qxF -- "scripts/$tname" && continue
+    fixture_tests+="${fixture_tests:+, }$tname"
+  done < <(fixture_copying_tests "${path#scripts/}")
+  if [[ -n "$fixture_tests" ]]; then
+    WARNINGS+=("$path is cp-ed into temp-repo fixtures by $fixture_tests; if it gains a dependency those fixtures need the new file too (#314)")
+  fi
+done <<< "$GEN_SCOPE_PATHS"
 
 # ── Last-wave Verify advisory (#236) ──────────────────────────────────────────
 # Any plan whose last wave declares no `Verify:` (state `no`) or a bare

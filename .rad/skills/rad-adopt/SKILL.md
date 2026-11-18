@@ -15,6 +15,8 @@ targets:
 Convert a pre-existing issue into a RAD plan. Use this for work that existed
 before the RAD framework was introduced.
 
+`rad plan-open` pushes the `rad/<feature>` branch to origin; there is no local-only mode.
+
 ## Input
 
 The input ({{args}}) can be:
@@ -202,7 +204,8 @@ Issue-Title: [original issue title, if fetched]
 
 ### Do Not Touch
 <!-- Files that must not be modified during execution.
-     Add shared infrastructure, auth modules, anything that would break other in-flight work. -->
+     Add shared infrastructure, auth modules, anything that would break other in-flight work.
+     Generated copies of a declared `.rad/` source belong in Files in Scope, not here. -->
 - None
 
 ### Key Files
@@ -211,7 +214,8 @@ Issue-Title: [original issue title, if fetched]
 - [file path] — [why it matters]
 
 ### Reminders
-<!-- Execution-time cautions: ordering constraints, side effects, environment requirements. -->
+<!-- Execution-time cautions: ordering constraints, side effects, environment requirements.
+     Tests that `cp` a script into a temp repo must be declared when that script gains a dependency. -->
 - None
 
 ## Wave Plan
