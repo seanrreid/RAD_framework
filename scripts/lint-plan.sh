@@ -410,14 +410,17 @@ while IFS= read -r path; do
 done <<< "$GEN_SCOPE_PATHS"
 
 GEN_EXPECTED=""   # newline-separated "<generated path>\t<source>" lines
+GEN_CHECK_SKIPPED=false   # true when sources were declared but the module could not map them
 GEN_MODULE="$RAD_PLAN_PATHS_ROOT/harness/generated-outputs.js"
 if [[ ${#GEN_SOURCES[@]} -gt 0 ]]; then
   if ! command -v node >/dev/null 2>&1 || [[ ! -f "$GEN_MODULE" ]]; then
     echo "lint-plan: generated-copy check skipped: node or $GEN_MODULE unavailable" >&2
+    GEN_CHECK_SKIPPED=true
   elif GEN_OUT=$(cd "$RAD_PLAN_PATHS_ROOT" && node "$GEN_MODULE" "${GEN_SOURCES[@]}"); then
     GEN_EXPECTED="$GEN_OUT"
   else
     echo "lint-plan: generated-copy check skipped (see reason above)" >&2
+    GEN_CHECK_SKIPPED=true
   fi
 fi
 
@@ -430,6 +433,7 @@ done <<< "$GEN_EXPECTED"
 
 while IFS= read -r path; do
   [[ -z "$path" ]] && continue
+  $GEN_CHECK_SKIPPED && continue   # the source's copies are unknown: say nothing, as documented above
   if [[ "$path" == .claude/* ]] && ! printf '%s\n' "$GEN_EXPECTED" | cut -f1 | grep -qxF -- "$path"; then
     WARNINGS+=("Plan edits generated output directly: $path — edit the source under .rad/ and run rad generate (the headless claude preset cannot write .claude/ even under acceptEdits)")
   fi

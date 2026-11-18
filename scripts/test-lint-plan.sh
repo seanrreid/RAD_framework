@@ -360,6 +360,12 @@ t_generated_copy_module_failure() {
   printf '%s\n' "$LINT_OUT" | grep -q "generated-outputs: boom" || fail "gen-copy: module failure reason not surfaced"
   printf '%s\n' "$LINT_OUT" | grep -q "but not its generated copy" && fail "gen-copy: warned despite module failure"
   [[ "$LINT_CODE" -eq 0 ]] || fail "gen-copy: module failure changed exit to $LINT_CODE"
+  # Source AND its copy declared: the direct-edit warning must stay quiet too (it cannot tell which copies are generated).
+  write_plan "$plan" "| $GEN_SKILL | 1-2 | x |
+| $GEN_COPY_B | 1-2 | regen |" ""
+  set +e; LINT_OUT=$(PATH="$stub:$PATH" bash "$HERE/lint-plan.sh" "$plan" 2>&1); LINT_CODE=$?; set -e
+  printf '%s\n' "$LINT_OUT" | grep -q "Plan edits generated output directly" && fail "gen-copy: direct-edit warning fired despite module failure with source declared"
+  [[ "$LINT_CODE" -eq 0 ]] || fail "gen-copy: module failure with copy declared changed exit to $LINT_CODE"
   echo "✓ generated-copy: module failure is surfaced and skips the check"
 }
 

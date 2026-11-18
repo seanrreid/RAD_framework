@@ -24,7 +24,8 @@ export async function generatedOutputsFor(root, sources) {
   const wanted = new Set(sources);
   const outputs = rendered.outputs
     .filter((o) => wanted.has(o.source))
-    .map(({ path, source }) => ({ path, source }));
+    .map(({ path, source }) => ({ path, source }))
+    .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   return { ok: true, outputs };
 }
 
