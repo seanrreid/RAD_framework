@@ -181,7 +181,7 @@ for (const skill of PLAYBOOK_SKILLS) {
 // may reorganise prose but must keep every command and every rendered string.
 const INSIGHTS_SKILL = 'rad-insights';
 
-// The 12 Step 4b-4j module invocations, including prefixed forms.
+// The 13 Step 3c and 4b-4j module invocations, including prefixed forms.
 const INSIGHTS_PINNED_COMMANDS = [
   'node harness/insights-usage-cost.js',
   'node harness/insights-reliability.js',
@@ -195,7 +195,10 @@ const INSIGHTS_PINNED_COMMANDS = [
   'node harness/insights-cycle-time.js',
   'DEFAULT_BRANCH="$DEFAULT_BRANCH" node harness/insights-rework-load.js',
   'SINCE="" node harness/insights-human-corrections.js',
+  'node harness/insights-reviewer-calibration.js',
 ];
+
+const INSIGHTS_PINNED_COMMAND_COUNT = 13;
 
 // Step 5 strings rendered to the reader (multi-line strings keep source wrapping).
 const INSIGHTS_PINNED_REPORT_STRINGS = [
@@ -282,7 +285,7 @@ const insightsBodies = () => [
 ];
 
 test('rad-insights: source and both generated bodies keep every pinned command and report string', () => {
-  assert.equal(INSIGHTS_PINNED_COMMANDS.length, 12);
+  assert.equal(INSIGHTS_PINNED_COMMANDS.length, INSIGHTS_PINNED_COMMAND_COUNT);
   for (const [label, body] of insightsBodies()) {
     assert.deepEqual(missingPins(body, INSIGHTS_PINNED_COMMANDS), [], `${label} lost a pinned command`);
     assert.deepEqual(missingPins(body, INSIGHTS_PINNED_REPORT_STRINGS), [], `${label} lost a pinned report string`);
