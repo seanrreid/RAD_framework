@@ -1,11 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildReworkLoad, formatReworkLoad } from '../insights-rework-load.js';
+import { planFor, squashBody, write } from './delivery-fixtures.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const MODULE = join(HERE, '..', 'insights-rework-load.js');
@@ -14,26 +15,12 @@ const GOLDEN = readFileSync(join(HERE, 'fixtures', 'insights-parity', 'golden.tx
 const FROZEN_NOW = Date.parse('2026-11-17T12:00:00Z');
 const BASE = 'main';
 
-const planFor = (title, paths) => `# Plan: ${title}
-
-## Files in Scope
-| File | Lines | Change |
-|------|-------|--------|
-${paths.map((p) => `| ${p} | 1-10 | edit |`).join('\n')}
-`;
-const squashBody = (slug) => `* plan: x\n\n* approve: ${slug}\n\nPlan: .agents/plans/${slug}.md\n\n* deliver(${slug}): begin execution`;
-
 function git(cwd, args, date) {
   const env = { ...process.env, GIT_AUTHOR_NAME: 'Dev', GIT_AUTHOR_EMAIL: 'dev@example.com',
     GIT_COMMITTER_NAME: 'Dev', GIT_COMMITTER_EMAIL: 'dev@example.com' };
   if (date) { env.GIT_AUTHOR_DATE = date; env.GIT_COMMITTER_DATE = date; }
   const res = spawnSync('git', args, { cwd, env, encoding: 'utf8' });
   if (res.status !== 0) throw new Error(`git ${args.join(' ')}: ${res.stderr}`);
-}
-
-function write(root, rel, content) {
-  mkdirSync(dirname(join(root, rel)), { recursive: true });
-  writeFileSync(join(root, rel), content);
 }
 
 function commit(root, date, message, files) {
