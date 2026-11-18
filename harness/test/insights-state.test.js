@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { listFeatures, readHistory, readAllHistory, DEFAULT_STATE_DIR, EVENT_LOG } from '../insights-state.js';
+import { listFeatures, readHistory, readAllHistory, readHistories, DEFAULT_STATE_DIR, EVENT_LOG } from '../insights-state.js';
 
 const makeTmp = () => mkdtempSync(join(tmpdir(), 'insights-state-'));
 
@@ -86,4 +86,40 @@ test('readAllHistory: concatenates in sorted-feature order', () => {
 test('readAllHistory: valid-JSON null line throws the named error', () => {
   const dir = stateDirWithLog('{"type":"a"}\nnull\n');
   assert.throws(() => readAllHistory(dir), /events\.jsonl:2: event is not a JSON object/);
+});
+
+test('readHistories: missing state dir -> {}', () => {
+  assert.deepEqual(readHistories(join(makeTmp(), 'nope')), {});
+});
+
+test('readHistories: empty log -> feature present with []', () => {
+  assert.deepEqual(readHistories(stateDirWithLog('')), { f: [] });
+});
+
+test('readHistories: dir without a log is skipped', () => {
+  const dir = stateDirWithLog('{"n":1}\n');
+  mkdirSync(join(dir, 'no-log'));
+  assert.deepEqual(readHistories(dir), { f: [{ n: 1 }] });
+});
+
+test('readHistories: keys sorted regardless of creation order', () => {
+  const dir = stateDirWithLog('{"n":"b"}\n', 'b-feat');
+  mkdirSync(join(dir, 'a-feat'));
+  writeFileSync(join(dir, 'a-feat', EVENT_LOG), '{"n":"a"}\n');
+  const out = readHistories(dir);
+  assert.deepEqual(Object.keys(out), ['a-feat', 'b-feat']);
+  assert.deepEqual(out['a-feat'], [{ n: 'a' }]);
+});
+
+test('readHistories: malformed line throws', () => {
+  assert.throws(() => readHistories(stateDirWithLog('{oops\n')), SyntaxError);
+});
+
+test('readHistories: JSON null line throws naming file and line 1', () => {
+  assert.throws(() => readHistories(stateDirWithLog('null\n')), /events\.jsonl:1: event is not a JSON object/);
+});
+
+test('readHistories: mixed valid and non-object lines throw at the first bad line', () => {
+  const dir = stateDirWithLog('{"n":1}\n[2]\nnull\n');
+  assert.throws(() => readHistories(dir), /events\.jsonl:2: event is not a JSON object/);
 });

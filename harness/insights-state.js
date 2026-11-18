@@ -47,3 +47,8 @@ export function readHistory(stateDir, feature) {
 export function readAllHistory(stateDir) {
   return listFeatures(stateDir).flatMap((feature) => readHistory(stateDir, feature));
 }
+
+/** `{ <feature>: events[] }` in sorted-feature order, each parsed fail-closed by `readHistory`. */
+export function readHistories(stateDir) {
+  return Object.fromEntries(listFeatures(stateDir).map((f) => [f, readHistory(stateDir, f)]));
+}
