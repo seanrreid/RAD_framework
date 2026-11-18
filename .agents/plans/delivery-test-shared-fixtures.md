@@ -1,7 +1,7 @@
 # Plan: delivery test shared fixtures (Plan J: share planFor, squashBody and write between two tests, #331)
 Created: 2026-11-18
 Author: developer
-Status: approved
+Status: in-progress
 Approved-By: sean@torchcodelab.com
 Approved-At: 2026-11-18T20:13:31.376Z
 Recorded-By: sean@torchcodelab.com
