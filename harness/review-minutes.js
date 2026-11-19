@@ -12,7 +12,7 @@
  * ledger path. Read-only except for the one appended row; never touches other logs.
  */
 import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 
@@ -21,6 +21,7 @@ export const ARMS = ['rad', 'unmanaged'];
 export const MIN_PER_ARM = 5;
 const DEFAULT_LEDGER = join('.agents', 'review-minutes.jsonl');
 const LINES_PER_UNIT = 100;
+const ENCODING = 'utf8';
 const EXIT_USAGE = 2;
 const CAVEAT = 'Self-timed, small n, tickets differ in size — a signal, not proof.';
 
@@ -67,7 +68,7 @@ function rowProblem(row) {
 export function readLedger(file, onSkip) {
   if (!existsSync(file)) return [];
   const rows = [];
-  readFileSync(file, 'utf8').split('\n').forEach((line, i) => {
+  readFileSync(file, ENCODING).split('\n').forEach((line, i) => {
     if (!line.trim()) return;
     try {
       const row = JSON.parse(line);
@@ -88,7 +89,8 @@ export function median(values) {
   return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
-const mean = (values) => values.reduce((sum, v) => sum + v, 0) / values.length;
+/** Arithmetic mean; null for an empty list, matching `median`. */
+export const mean = (values) => (values.length === 0 ? null : values.reduce((sum, v) => sum + v, 0) / values.length);
 
 /** Per-arm stats; every statistic is null until the arm has MIN_PER_ARM tickets. */
 export function summarizeArm(rows) {
@@ -159,8 +161,22 @@ export function main(argv, file) {
   throw new Error('usage: review-minutes.js log --ref <id> --arm rad|unmanaged --minutes <n> [--lines n] [--rounds n] [--note t] | report');
 }
 
-const invokedDirectly = process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url);
-if (invokedDirectly) {
+/**
+ * True when `scriptPath` is this module. Resolves symlinks; when the path cannot be
+ * resolved (dangling link) it falls back to a plain path comparison instead of throwing
+ * at import time.
+ */
+export function isInvokedDirectly(scriptPath, moduleUrl = import.meta.url) {
+  if (!scriptPath) return false;
+  const self = fileURLToPath(moduleUrl);
+  try {
+    return realpathSync(scriptPath) === self;
+  } catch {
+    return resolve(scriptPath) === self;
+  }
+}
+
+if (isInvokedDirectly(process.argv[1])) {
   try {
     console.log(main(process.argv.slice(2), process.env.RAD_REVIEW_MINUTES_FILE || DEFAULT_LEDGER));
   } catch (err) {

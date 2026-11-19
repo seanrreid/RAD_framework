@@ -1,11 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { MIN_PER_ARM, buildEntry, buildReport, formatReport, median, readLedger } from '../review-minutes.js';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { MIN_PER_ARM, buildEntry, buildReport, formatReport, isInvokedDirectly, mean, median, readLedger } from '../review-minutes.js';
 
 const MODULE = join(dirname(fileURLToPath(import.meta.url)), '..', 'review-minutes.js');
 const DATE = '2026-11-18';
@@ -24,7 +24,29 @@ test('buildEntry: valid input keeps optional fields only when given', () => {
   const entry = buildEntry({ ref: ' PR-12 ', arm: 'rad', minutes: '18.5', lines: '240', rounds: '2', note: ' ok ' }, DATE);
   assert.deepEqual(entry, { date: DATE, ref: 'PR-12', arm: 'rad', minutes: 18.5, lines: 240, rounds: 2, note: 'ok' });
   assert.deepEqual(buildEntry({ ref: 'x', arm: 'unmanaged', minutes: 5 }, DATE), { date: DATE, ref: 'x', arm: 'unmanaged', minutes: 5 });
+  for (const blank of ['   ', '', '\t\n']) {
+    assert.ok(!Object.hasOwn(buildEntry({ ref: 'x', arm: 'rad', minutes: 1, note: blank }, DATE), 'note'), JSON.stringify(blank));
+  }
 });
+
+test('mean: empty list is null, not NaN', () => {
+  assert.equal(mean([]), null);
+  assert.equal(mean([4]), 4);
+  assert.equal(mean([1, 2, 6]), 3);
+});
+
+test('isInvokedDirectly: this module, a symlink to it, a dangling path and no path', () => withTmp((dir) => {
+  const url = pathToFileURL(MODULE).href;
+  assert.equal(isInvokedDirectly(MODULE, url), true);
+  const link = join(dir, 'link.js');
+  symlinkSync(MODULE, link);
+  assert.equal(isInvokedDirectly(link, url), true);
+  const dangling = join(dir, 'dangling.js');
+  symlinkSync(join(dir, 'gone.js'), dangling);
+  assert.equal(isInvokedDirectly(dangling, url), false);
+  assert.equal(isInvokedDirectly(undefined, url), false);
+  assert.equal(isInvokedDirectly('', url), false);
+}));
 
 test('buildEntry: rejects missing or blank ref, unknown arm, and non-positive or non-numeric minutes', () => {
   assert.throws(() => buildEntry({ arm: 'rad', minutes: 5 }, DATE), /--ref is required/);
